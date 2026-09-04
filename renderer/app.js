@@ -291,7 +291,16 @@ async function sendFrom(elId) {
   const text = el.value.trim();
   if (!text) return;
   if (busy) { window.sagitari.stopChat(); return; }
-  el.value = '';
+  el.value = ''; el.style.height = '';
+  // si el dictado estaba activo, detenerlo y limpiar su estado visual
+  if (listening) {
+    listening = false;
+    voiceBuffer = ''; lastPartial = '';
+    $$('.cbtn').forEach(b => b.classList.remove('on'));
+    el.classList.remove('rec');
+    window.sagitari.glow('off');
+    await window.sagitari.voiceStop();
+  }
   // Inicio = SIEMPRE una conversación nueva, sin enlazar con la actual
   if (elId === '#heroInput') await newConversation();
   else { goto('chat'); dayStamp(); }
@@ -364,6 +373,27 @@ document.querySelectorAll('.fcard[data-fill]').forEach(c => c.addEventListener('
 document.querySelector('.fcard[data-goto]').addEventListener('click', () => goto('agents'));
 
 // ============ voice ============
+// Auto-ajuste de altura de los composers (también al escribir a mano)
+function autoGrow(el) {
+  el.style.height = 'auto';
+  el.style.height = Math.min(el.scrollHeight, 140) + 'px';
+}
+$('#heroInput').addEventListener('input', () => autoGrow($('#heroInput')));
+$('#chatInput').addEventListener('input', () => autoGrow($('#chatInput')));
+
+// Dictado continuo y acumulativo: los finales se CONCATENAN en el input, no lo
+// sobrescriben. El micrófono sigue activo hasta que lo apagas o envías — nunca
+// se envía solo a mitad de frase.
+let voiceBuffer = '';      // texto ya confirmado (de finales anteriores)
+let lastPartial = '';      // hipótesis en curso (para reemplazar en el input)
+function paintVoice(partial) {
+  const inChat = $('#view-chat').classList.contains('on');
+  const el = inChat ? $('#chatInput') : $('#heroInput');
+  const text = (voiceBuffer + (partial || '')).trimStart();
+  if (el.value !== text) { el.value = text; }
+  el.classList.toggle('rec', true);
+  autoGrow(el);
+}
 function wireMic(btnId) {
   const btn = $(btnId);
   btn.addEventListener('click', async () => {
@@ -373,6 +403,7 @@ function wireMic(btnId) {
       await window.sagitari.voiceStop();
     } else {
       listening = true; btn.classList.add('on');
+      voiceBuffer = ''; lastPartial = '';
       window.sagitari.glow('listen', 'voice');
       await window.sagitari.voiceStart();
     }
@@ -381,26 +412,23 @@ function wireMic(btnId) {
 wireMic('#heroMic');
 wireMic('#chatMic');
 
-window.sagitari.onVoiceReady((k, lang) => showToast('Dictado activo (' + lang + '). Habla ahora.'));
-window.sagitari.onVoice((k, text) => {
-  const el = $('#view-chat').classList.contains('on') ? $('#chatInput') : $('#heroInput');
-  el.value = text; el.classList.add('rec');
+window.sagitari.onVoiceReady((k, lang) => showToast('Dictado activo (' + lang + '). Habla ahora; pulsa el micro o envía para terminar.'));
+// motor clásico = precisión inferior: avisar que con el reconocimiento online mejora mucho
+window.sagitari.onVoiceMode((k, mode) => {
+  if (mode === 'sapi') showToast('Motor de voz clásico activo. Activa "Reconocimiento de voz en línea" en Windows (Privacidad > Voz) para máxima precisión.');
 });
+window.sagitari.onVoiceHint((k, m) => showToast('Dictado: ' + m));
+window.sagitari.onVoice((k, text) => { lastPartial = text ? text + ' ' : ''; paintVoice(lastPartial); });
 window.sagitari.onVoiceFinal((k, text) => {
-  const el = $('#view-chat').classList.contains('on') ? $('#chatInput') : $('#heroInput');
-  el.value = text; el.classList.remove('rec');
-  setTimeout(async () => {
-    if (el.value.trim()) sendFrom(el.id === '#chatInput' ? '#chatInput' : '#heroInput');
-    listening = false;
-    $$('.cbtn').forEach(b => b.classList.remove('on'));
-    window.sagitari.glow('off');
-    await window.sagitari.voiceStop();
-  }, 300);
+  if (text && text.trim()) voiceBuffer += text.trim() + ' ';
+  lastPartial = '';
+  paintVoice('');
 });
 window.sagitari.onVoiceError((k, m) => {
   showToast('Dictado: ' + m);
   listening = false;
   $$('.cbtn').forEach(b => b.classList.remove('on'));
+  const rec = document.querySelector('.rec'); if (rec) rec.classList.remove('rec');
 });
 
 // ============ window buttons ============

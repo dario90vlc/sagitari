@@ -313,21 +313,27 @@ ipcMain.handle('chat:clear', () => { agent && (agent.history = []); return { ok:
 
 ipcMain.on('glow:set', (e, { mode, color }) => glow(mode, color));
 
-// ---- voice (Windows dictation via System.Speech) ----
+// ---- voice (Windows dictation: WinRT engine + SAPI fallback, UTF-8 protocol) ----
 ipcMain.handle('voice:start', async () => {
   if (whisper) return { ok: true, note: 'Ya estaba escuchando' };
   whisperBuf = '';
   const lang = config.settings.voiceLang || 'es-ES';
   whisper = spawn('powershell.exe', ['-NoProfile', '-ExecutionPolicy', 'Bypass', '-File', path.join(__dirname, 'voice.ps1'), '-Lang', lang], { windowsHide: true });
   whisper.stdout.on('data', (d) => {
-    whisperBuf += d.toString();
+    whisperBuf += d.toString('utf8');
     let idx;
     while ((idx = whisperBuf.indexOf('\n')) >= 0) {
-      const line = whisperBuf.slice(0, idx).trim(); whisperBuf = whisperBuf.slice(idx + 1);
+      const line = whisperBuf.slice(0, idx).replace(/\r$/, '').trim(); whisperBuf = whisperBuf.slice(idx + 1);
       if (!line) continue;
       if (line.startsWith('PART::') && win && !win.isDestroyed()) win.webContents.send('voice:partial', line.slice(6));
       else if (line.startsWith('FINAL::') && win && !win.isDestroyed()) win.webContents.send('voice:final', line.slice(6));
+      else if (line.startsWith('MODE::') && win && !win.isDestroyed()) win.webContents.send('voice:mode', line.slice(5));
+      else if (line.startsWith('HINT::') && win && !win.isDestroyed()) win.webContents.send('voice:hint', line.slice(6));
       else if (line.startsWith('READY::') && win && !win.isDestroyed()) win.webContents.send('voice:ready', line.slice(6));
+      else if (line.startsWith('STOPPED::')) {
+        try { whisper.kill(); } catch {}
+        whisper = null;
+      }
       else if (line.startsWith('ERROR::')) {
         if (win && !win.isDestroyed()) win.webContents.send('voice:error', line.slice(7));
         try { whisper.kill(); } catch {}
