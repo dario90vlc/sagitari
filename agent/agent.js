@@ -1,0 +1,267 @@
+'use strict';
+
+const os = require('os');
+const fs = require('fs');
+const path = require('path');
+const { toolDefs } = require('./tools');
+const { executeTool } = require('./executors');
+const skills = require('./skills');
+
+const MAX_STEPS = 15;
+
+function loadMemory() {
+  try {
+    const p = path.join(process.env.APPDATA || os.homedir(), 'SagitariAI', 'memory.json');
+    return JSON.parse(fs.readFileSync(p, 'utf8'));
+  } catch { return []; }
+}
+
+function systemPrompt() {
+  const home = os.homedir();
+  return `Eres SAGITARI, un agente de IA con control total del PC con Windows del usuario. Estás integrado en un panel de control holográfico en la pantalla del usuario.
+
+IDENTIDAD
+- Personalidad: capaz, eficiente y con carisma sutil (como un mayordomo de élite). Respuestas breves y claras; nada de relleno.
+- Idioma: responde SIEMPRE en el idioma del usuario (por defecto español).
+
+CAPACIDADES
+- Controlas el PC: terminal, archivos, aplicaciones, navegador real (Chrome/Edge vía DevTools), portapapeles, multimedia, notificaciones y capturas de pantalla.
+- Home del usuario: ${home}. Escritorio: ${home}\\Desktop.
+- No pidas permiso para cosas triviales; actúa. Para acciones potencialmente destructivas (borrar datos, cerrar sesión, compras), confirma antes.
+
+REGLAS DE HERRAMIENTAS
+- Usa las herramientas libremente y en cadena hasta completar la petición. Tras usar una, evalúa el resultado y decide el siguiente paso.
+- Para navegar/controlar webs usa browser_control: primero "launch" con la url, luego navigate/click/type/content/screenshot.
+- Con run_command usa sintaxis de cmd.exe de Windows. No uses comandos interactivos.
+
+SKILLS DISPONIBLES (instrucciones especializadas cargables)
+Antes de tareas donde una skill aplique, llama a use_skill con su nombre: te devolverá instrucciones expertas que debes seguir. No la cites al usuario; aplícala.
+${skills.promptIndexSync()}
+- MEMORIA PERSISTENTE del usuario (usala si es relevante, no la cites completa):
+${(loadMemory() || []).slice(0, 30).map(m => '- ' + m.text).join('\n') || '(vacía)'}
+- Cuando termines una tarea con pasos, resume en 1-3 líneas lo que hiciste y el resultado.
+- Si la petición es conversacional (saludo, pregunta), responde directamente sin herramientas.
+
+FORMATO
+- Tus respuestas se muestran en un chat con soporte markdown ligero (negrita, listas, código). Sé visual y ordenado.`;
+}
+
+const MODE_PROFILES = {
+  think: { temperature: 0.7, maxSteps: 20, planFirst: false, note: 'Piensas antes de actuar: razona paso a paso en tu respuesta final, explora alternativas, sé meticuloso.' },
+  plan:  { temperature: 0.35, maxSteps: 20, planFirst: true,  note: 'PRIMERO presenta un PLAN numerado breve (3-6 pasos) y luego ejecútalo con herramientas, paso a paso.' },
+  act:   { temperature: 0.25, maxSteps: 12, planFirst: false, note: 'Actúa directo y eficiente: minimiza explicaciones, ejecuta y reporta el resultado.' }
+};
+
+class Agent {
+  constructor(opts) {
+    this.fetchFn = opts.fetchFn || fetch;
+    this.emit = opts.emit;               // (event) => void  (to renderer)
+    this.screenshotFn = opts.screenshotFn;
+    this.browser = opts.browser;
+    this.history = [];                   // [{role, content, tool_calls?, tool_call_id?, name?, images?}]
+    this.busy = false;
+    this.abort = null;
+    this.toolsFired = new Map();         // name -> {count, lastAt}
+  }
+
+  isBusy() { return this.busy; }
+  getToolsFired() {
+    return [...this.toolsFired.entries()].map(([name, v]) => ({ name, count: v.count, lastAt: v.lastAt }));
+  }
+
+  activeConfig(settings) {
+    return settings.active;
+  }
+
+  async chat(userText, settings, imageDataUrl) {
+    if (this.busy) { this.emit({ type: 'error', message: 'SAGITARI está ocupado terminando la tarea anterior.' }); return; }
+    this.busy = true;
+    const controller = new AbortController();
+    this.abort = controller;
+    try {
+      await this._run(userText, settings, imageDataUrl, controller.signal);
+    } catch (e) {
+      this.emit({ type: 'error', message: 'Error: ' + e.message });
+    } finally {
+      this.busy = false;
+      this.abort = null;
+      this.emit({ type: 'busy', busy: false });
+    }
+  }
+
+  stop() { if (this.abort) this.abort.abort(); }
+
+  async _run(userText, settings, imageDataUrl, signal) {
+    const cfg = this.activeConfig(settings);
+    if (!cfg || !cfg.baseUrl || !cfg.model) {
+      this.emit({ type: 'error', message: 'Configura un proveedor y modelo en Ajustes antes de hablar con Sagitari.' });
+      return;
+    }
+    const mode = MODE_PROFILES[settings.settings?.mode] || MODE_PROFILES.act;
+    this._mode = mode;
+
+    const content = imageDataUrl
+      ? [{ type: 'text', text: userText || 'Analiza esta imagen' }, { type: 'image_url', image_url: { url: imageDataUrl } }]
+      : userText;
+    this.history.push({ role: 'user', content });
+    if (this.history.length > 40) this.history = this.history.slice(-40);
+
+    const ws = (settings.settings && settings.settings.workspace) || path.join(os.homedir(), 'Desktop', 'Sagitari');
+    const sys = systemPrompt()
+      + `\n\nESPACIO DE TRABAJO: ${ws}`
+      + '\n- Es la carpeta por defecto para crear/modificar archivos; las rutas relativas resuelven aquí.'
+      + '\n- Solo toques otras ubicaciones si el usuario lo pide explícitamente (ruta absoluta).'
+      + `\n\nMODO ACTUAL (${settings.settings?.mode || 'act'}): ${mode.note}`
+      + (mode.planFirst ? '\nFormato del plan: una línea por paso, empieza tu respuesta con "PLAN:" y numera los pasos.' : '');
+    const messages = [{ role: 'system', content: sys }, ...this.history.map(h => ({ role: h.role, content: h.content, ...(h.tool_calls ? { tool_calls: h.tool_calls } : {}), ...(h.tool_call_id ? { tool_call_id: h.tool_call_id } : {}), ...(h.name ? { name: h.name } : {}) }))];
+
+    this.emit({ type: 'busy', busy: true });
+    let steps = 0;
+    let assistantSaidSomething = false;
+
+    while (steps++ < mode.maxSteps) {
+      const res = await this._streamOnce(cfg, messages, signal);
+      if (res.aborted) { this._pushAssistant(assistantSaidSomething ? { role: 'assistant', content: res.text || '(interrumpido)' } : null); return; }
+
+      if (res.toolCalls && res.toolCalls.length) {
+        const msg = { role: 'assistant', content: res.text || '', tool_calls: res.toolCalls };
+        if (!res.text) delete msg.content;
+        messages.push(msg);
+        this.history.push(JSON.parse(JSON.stringify(msg)));
+
+        for (const tc of res.toolCalls) {
+          let args = {};
+          try { args = JSON.parse(tc.function.arguments || '{}'); } catch {}
+          this.emit({ type: 'tool', name: tc.function.name, args });
+          this.emit({ type: 'status', text: statusFor(tc.function.name, args) });
+          const tf = this.toolsFired.get(tc.function.name) || { count: 0, lastAt: 0 };
+          this.toolsFired.set(tc.function.name, { count: tf.count + 1, lastAt: Date.now() });
+          let result;
+          try {
+            result = await executeTool(tc.function.name, args, {
+              emit: (e) => this.emit(e),
+              screenshotFn: this.screenshotFn,
+              browser: this.browser,
+              settings,
+              home: os.homedir(),
+              workspace: (settings.settings && settings.settings.workspace) || path.join(os.homedir(), 'Desktop', 'Sagitari')
+            });
+          } catch (e) { result = 'Error: ' + e.message; }
+
+          const images = result && typeof result === 'object' ? result.images : undefined;
+          const text = result && typeof result === 'object' ? result.text : String(result);
+          // Feed vision inputs (screenshots) back to the model when supported
+          const toolContent = images && cfg.vision !== false
+            ? [{ type: 'text', text }, ...images.map(u => ({ type: 'image_url', image_url: { url: u } }))]
+            : text;
+          messages.push({ role: 'tool', tool_call_id: tc.id, name: tc.function.name, content: toolContent });
+          this.history.push({ role: 'tool', tool_call_id: tc.id, name: tc.function.name, content: text });
+          this.emit({ type: 'tool_result', name: tc.function.name, result: String(text).slice(0, 400) });
+          assistantSaidSomething = true;
+        }
+        continue; // next loop: model reacts to tool results
+      }
+
+      // Final text answer
+      this.history.push({ role: 'assistant', content: res.text });
+      this.emit({ type: 'assistant_done', text: res.text });
+      return;
+    }
+    this.emit({ type: 'error', message: 'Límite de pasos del modo alcanzado. Divide la petición o cambia a modo Think.' });
+  }
+
+  _pushAssistant(msg) { if (msg) { this.history.push(msg); this.emit({ type: 'assistant_done', text: msg.content }); } }
+
+  async _streamOnce(cfg, messages, signal) {
+    const body = {
+      model: cfg.model,
+      messages,
+      stream: true,
+      temperature: cfg.temperature ?? (this._mode ? this._mode.temperature : 0.4),
+      tools: toolDefs,
+      tool_choice: 'auto'
+    };
+    if (cfg.maxTokens) body.max_tokens = cfg.maxTokens;
+
+    const url = cfg.baseUrl.replace(/\/+$/, '') + '/chat/completions';
+    const resp = await this.fetchFn(url, {
+      method: 'POST',
+      signal,
+      headers: {
+        'Content-Type': 'application/json',
+        ...(cfg.apiKey ? { Authorization: 'Bearer ' + cfg.apiKey } : {})
+      },
+      body: JSON.stringify(body)
+    });
+
+    if (!resp.ok) {
+      const t = await resp.text().catch(() => '');
+      throw new Error(`HTTP ${resp.status} de ${cfg.name || cfg.baseUrl}: ${t.slice(0, 300)}`);
+    }
+
+    let text = '';
+    let aborted = false;
+    const toolCalls = [];
+    const reader = resp.body.getReader();
+    const decoder = new TextDecoder();
+    let buf = '';
+    let first = true;
+
+    while (true) {
+      const { done, value } = await reader.read();
+      if (done) break;
+      if (signal.aborted) { aborted = true; try { reader.cancel(); } catch {} break; }
+      buf += decoder.decode(value, { stream: true });
+      const lines = buf.split('\n');
+      buf = lines.pop();
+      for (const line of lines) {
+        const s = line.trim();
+        if (!s.startsWith('data:')) continue;
+        const payload = s.slice(5).trim();
+        if (payload === '[DONE]') continue;
+        let json;
+        try { json = JSON.parse(payload); } catch { continue; }
+        const delta = json.choices?.[0]?.delta;
+        if (!delta) continue;
+        if (delta.content) {
+          if (first && /^\s*$/.test(delta.content)) continue;
+          first = false;
+          text += delta.content;
+          this.emit({ type: 'delta', text: delta.content });
+        }
+        if (delta.tool_calls) {
+          for (const tc of delta.tool_calls) {
+            const i = tc.index ?? 0;
+            if (!toolCalls[i]) toolCalls[i] = { id: tc.id || 'call_' + i, type: 'function', function: { name: '', arguments: '' } };
+            if (tc.id) toolCalls[i].id = tc.id;
+            if (tc.function?.name) toolCalls[i].function.name += tc.function.name;
+            if (tc.function?.arguments) toolCalls[i].function.arguments += tc.function.arguments;
+          }
+        }
+      }
+    }
+    return { text: text.trim(), toolCalls: toolCalls.filter(Boolean).filter(t => t.function.name), aborted };
+  }
+}
+
+function statusFor(name, args) {
+  switch (name) {
+    case 'run_command': return 'Terminal — ' + (args.command || '').slice(0, 90);
+    case 'read_file': return 'Leyendo ' + args.path;
+    case 'write_file': return 'Escribiendo ' + args.path;
+    case 'list_dir': return 'Explorando ' + args.path;
+    case 'search_files': return 'Buscando «' + args.pattern + '»';
+    case 'open_app': return 'Abriendo ' + args.name;
+    case 'open_url': return 'Abriendo ' + args.url;
+    case 'browser_control': return 'Navegador · ' + (args.action || '') + (args.url ? ' → ' + args.url : '');
+    case 'screenshot': return 'Capturando pantalla';
+    case 'clipboard': return 'Portapapeles · ' + args.action;
+    case 'notify': return 'Enviando notificación';
+    case 'media_control': return 'Multimedia · ' + args.action;
+    case 'window_manage': return 'Ventanas · ' + args.action;
+    case 'system_info': return 'Leyendo información del sistema';
+    default: return name;
+  }
+}
+
+module.exports = { Agent, systemPrompt };

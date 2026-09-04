@@ -1,0 +1,266 @@
+<!DOCTYPE html>
+<html lang="es">
+<head>
+<meta charset="UTF-8" />
+<meta http-equiv="Content-Security-Policy" content="default-src 'self' data:; style-src 'self' 'unsafe-inline' https://fonts.googleapis.com; font-src https://fonts.gstatic.com; script-src 'self'" />
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link href="https://fonts.googleapis.com/css2?family=Sora:wght@300;400;600;700&family=Space+Grotesk:wght@400;500;600&display=swap" rel="stylesheet">
+<link rel="stylesheet" href="styles.css" />
+<title>SAGITARI</title>
+</head>
+<body>
+<div class="shell" id="shell">
+
+  <!-- Titlebar: franja de arrastre a todo el ancho. Los botones son DESCENDIENTES
+       del área drag, por lo que su no-drag sí anula la región (regla Electron). -->
+  <div class="titlebar">
+    <div class="winstrip">
+      <button class="wb" id="btnMin" title="Minimizar"><i data-i="minimize"></i></button>
+      <button class="wb" id="btnMax" title="Maximizar"><i data-i="maximize"></i></button>
+      <button class="wb wb-close" id="btnClose" title="Cerrar Sagitari"><i data-i="close"></i></button>
+    </div>
+  </div>
+
+  <div class="app" id="app">
+
+    <!-- ===== Sidebar ===== -->
+    <aside class="side">
+      <div class="brand drag">
+        <div class="brandmark"><img src="assets/sagitari-mark.png" alt="" draggable="false" /></div>
+        <div class="brandcol">
+          <div class="brandwm"><img src="assets/sagitari-wordmark.png" alt="SAGITARI" draggable="false" /></div>
+          <div class="brandsub">YOUR AGENTIC ASSISTANT</div>
+        </div>
+      </div>
+
+      <nav class="nav">
+        <button class="navitem on" data-view="home"><span class="ni"><i data-i="home"></i></span> Inicio</button>
+        <button class="navitem" data-view="chat"><span class="ni"><i data-i="chat"></i></span> Chat</button>
+        <button class="navitem" data-view="agents"><span class="ni"><i data-i="agents"></i></span> Agentes</button>
+        <button class="navitem" data-view="projects"><span class="ni"><i data-i="projects"></i></span> Proyectos</button>
+        <button class="navitem" data-view="tools"><span class="ni"><i data-i="tools"></i></span> Herramientas</button>
+        <button class="navitem" data-view="memory"><span class="ni"><i data-i="memory"></i></span> Memoria</button>
+        <button class="navitem" data-view="skills"><span class="ni"><i data-i="zap"></i></span> Skills</button>
+        <button class="navitem" data-view="history"><span class="ni"><i data-i="history"></i></span> Historial</button>
+        <button class="navitem" data-view="settings"><span class="ni"><i data-i="settings"></i></span> Ajustes</button>
+      </nav>
+
+      <div class="statusbar">
+        <span class="dot ok"></span> <span id="stConn">Desconectado</span>
+        <span class="dot pur" style="margin-left:14px"></span> <span id="stModel">sin modelo</span>
+      </div>
+    </aside>
+
+    <!-- ===== Main ===== -->
+    <main class="main">
+      <!-- HOME -->
+      <section class="view on" id="view-home">
+        <div class="hero-top">
+          <div class="datechip" id="dateChip">—</div>
+          <button class="chip pur" id="modePill" title="Cambiar modo"><span class="dot ok"></span> ACT</button>
+        </div>
+        <h1 class="hero">Buenos días, <span class="grad">Darío</span></h1>
+        <div class="hero-sub">¿En qué puedo ayudarte hoy?</div>
+
+        <div class="composer big">
+          <div class="comp-left"><div class="spark"><i data-i="spark"></i></div></div>
+          <textarea id="heroInput" rows="2" placeholder="Escribe tu petición, idea o tarea…"></textarea>
+          <div class="comp-actions">
+            <button class="cbtn" id="heroMic" title="Dictado por voz"><i data-i="mic"></i></button>
+            <button class="cbtn send" id="heroSend" title="Enviar"><i data-i="send"></i></button>
+          </div>
+        </div>
+
+        <div class="cards4">
+          <div class="fcard" data-fill="Investiga en internet y resúmeme: ">
+            <div class="fic f-y"><i data-i="search"></i></div><div><b>Investigar</b><small>Analiza y encuentra información</small></div>
+          </div>
+          <div class="fcard" data-fill="Crea un archivo ">
+            <div class="fic f-b"><i data-i="doc"></i></div><div><b>Crear</b><small>Textos, imágenes, código y más</small></div>
+          </div>
+          <div class="fcard" data-fill="Automatiza esta tarea: ">
+            <div class="fic f-c"><i data-i="zap"></i></div><div><b>Automatizar</b><small>Ejecuta tareas por mí</small></div>
+          </div>
+          <div class="fcard" data-goto="agents">
+            <div class="fic f-p"><i data-i="agents"></i></div><div><b>Agentes</b><small>Especialistas listos para trabajar</small></div>
+          </div>
+        </div>
+      </section>
+
+      <!-- CHAT -->
+      <section class="view" id="view-chat">
+        <div class="viewhead">
+          <h2 id="chatTitle">Nueva conversación</h2>
+          <div class="vh-actions">
+            <button class="btn" id="btnClear">Nueva conversación</button>
+            <button class="btn ghost" id="btnGoHistory">Historial</button>
+          </div>
+        </div>
+        <div id="chatWrap">
+          <div id="messages"></div>
+          <footer class="chatfoot">
+            <div id="skillMenu" class="skillmenu" hidden></div>
+            <div class="composer slim">
+              <textarea id="chatInput" rows="1" placeholder="Escribe a Sagitari… (/ para usar una skill)"></textarea>
+              <button class="cbtn" id="chatMic" title="Dictado por voz"><i data-i="mic"></i></button>
+              <button class="cbtn send" id="chatSend" title="Enviar"><i data-i="send"></i></button>
+            </div>
+            <div class="hintbar"><span id="modeLabel">Modo Act</span><span id="chatModelLabel"></span></div>
+          </footer>
+        </div>
+      </section>
+
+      <!-- HISTORY -->
+      <section class="view" id="view-history">
+        <div class="viewhead">
+          <h2>Historial</h2>
+          <div class="vh-actions"><button class="btn" id="histNew">Nueva conversación</button></div>
+        </div>
+        <div id="histList" class="histlist"></div>
+      </section>
+
+      <!-- AGENTS -->
+      <section class="view" id="view-agents">
+        <div class="viewhead"><h2>Agentes</h2></div>
+        <div class="agents-grid">
+          <div class="acard" id="agentCard-researcher"><div class="aic a-b"><i data-i="search"></i></div><div><b>Investigador</b><small>Busca, lee y sintetiza información</small></div><span class="adot"></span></div>
+          <div class="acard" id="agentCard-coder"><div class="aic a-p"><i data-i="code"></i></div><div><b>Programador</b><small>Escribe y ejecuta código</small></div><span class="adot"></span></div>
+          <div class="acard" id="agentCard-analyst"><div class="aic a-b2"><i data-i="chart"></i></div><div><b>Analista</b><small>Procesa datos y capturas</small></div><span class="adot"></span></div>
+          <div class="acard" id="agentCard-navigator"><div class="aic a-c"><i data-i="compass"></i></div><div><b>Navegador</b><small>Controla Chrome y Edge por ti</small></div><span class="adot"></span></div>
+          <div class="acard" id="agentCard-file"><div class="aic a-y"><i data-i="folder"></i></div><div><b>Archivador</b><small>Gestiona archivos y carpetas</small></div><span class="adot"></span></div>
+          <div class="acard" id="agentCard-ops"><div class="aic a-p2"><i data-i="terminal"></i></div><div><b>Operador</b><small>Comandos, apps y multimedia</small></div><span class="adot"></span></div>
+        </div>
+        <div class="tooltray">
+          <div class="tt-head">ACTIVIDAD DE HERRAMIENTAS · SESIÓN ACTUAL</div>
+          <div id="toolTrayList" class="tt-list"></div>
+        </div>
+      </section>
+
+      <!-- PROJECTS -->
+      <section class="view" id="view-projects">
+        <div class="viewhead"><h2>Proyectos</h2></div>
+        <div class="projwrap">
+          <div class="field"><label>ESPACIO DE TRABAJO ACTIVO</label>
+            <input type="text" id="projPath" placeholder="C:\Users\dario\Desktop\mi-proyecto" />
+          </div>
+          <button class="btn" id="projOpen"><span class="bi"><i data-i="external"></i></span> Abrir y trabajar aquí</button>
+          <button class="btn ghost" id="projPick">Elegir carpeta…</button>
+          <div class="saving" id="projMsg"></div>
+          <div class="subnote">Esta es la carpeta donde Sagitari crea y modifica archivos, y donde ejecuta comandos por defecto. Pídele cosas como «crea un script» sin rutas absolutas: aterrizarán aquí. Elegir o abrir una carpeta la convierte en el espacio activo.</div>
+        </div>
+      </section>
+
+      <!-- TOOLS -->
+      <section class="view" id="view-tools">
+        <div class="viewhead"><h2>Herramientas</h2></div>
+        <div class="toolsgrid" id="toolsGrid"></div>
+      </section>
+
+      <!-- MEMORY -->
+      <section class="view" id="view-memory">
+        <div class="viewhead">
+          <h2>Memoria</h2>
+          <div class="vh-actions">
+            <input type="text" id="memInput" placeholder="Añade algo que Sagitari debe recordar…" />
+            <button class="btn" id="memAdd"><span class="bi"><i data-i="plus"></i></span> Añadir</button>
+          </div>
+        </div>
+        <div id="memList" class="memlist"></div>
+      </section>
+
+      <!-- SKILLS -->
+      <section class="view" id="view-skills">
+        <div class="viewhead">
+          <h2>Skills</h2>
+          <div class="vh-actions">
+            <input type="text" id="skillImportInput" placeholder="owner/repo de GitHub con SKILL.md…" />
+            <button class="btn" id="skillImportBtn"><span class="bi"><i data-i="download"></i></span> Importar</button>
+            <button class="btn ghost" id="skillsFolderBtn"><span class="bi"><i data-i="folder"></i></span> Carpeta</button>
+          </div>
+        </div>
+        <p class="subnote" style="margin-top:-6px;margin-bottom:14px">Las skills son instrucciones especializadas (SKILL.md) que Sagitari carga solo cuando la tarea lo necesita: sin coste en tokens hasta que aplican. Importa packs desde GitHub (owner/repo), crea las tuyas o edita la carpeta directamente.</p>
+        <div id="skillsList" class="memlist"></div>
+        <div class="tooltray" style="margin-top:18px;max-width:860px">
+          <div class="tt-head">CREAR SKILL</div>
+          <div class="btnrow">
+            <input type="text" id="skillNewName" placeholder="nombre-ejemplo" style="flex:1;min-width:160px" />
+            <input type="text" id="skillNewDesc" placeholder="Qué hace y cuándo usarla" style="flex:2;min-width:240px" />
+          </div>
+          <textarea id="skillNewBody" rows="5" placeholder="Instrucciones que seguirá Sagitari… (markdown)"></textarea>
+          <div class="btnrow" style="margin-top:8px">
+            <button class="btn primary" id="skillCreateBtn"><span class="bi"><i data-i="plus"></i></span> Crear skill</button>
+            <span class="saving" id="skillMsg"></span>
+          </div>
+        </div>
+      </section>
+
+      <!-- SETTINGS -->
+      <section class="view" id="view-settings">
+        <div class="viewhead"><h2>Ajustes</h2></div>
+        <div class="setwrap">
+          <div class="setcol">
+            <div class="field"><label>PRESET</label><select id="presetSel"></select></div>
+            <div class="field"><label>NOMBRE</label><input type="text" id="pName" /></div>
+            <div class="field"><label>BASE URL</label><input type="text" id="pUrl" placeholder="https://…/v1" /></div>
+            <div class="field"><label>API KEY</label><input type="password" id="pKey" placeholder="sk-… (vacío para Ollama o LM Studio)" /></div>
+            <div class="btnrow">
+              <button class="btn" id="btnDetect"><span class="bi"><i data-i="search"></i></span> Detectar modelos</button>
+              <button class="btn" id="btnSaveProv"><span class="bi"><i data-i="save"></i></span> Guardar proveedor</button>
+            </div>
+            <div class="field"><label>MODELO</label><select id="modelSel"><option value="">— detecta modelos primero —</option></select></div>
+            <div class="btnrow"><button class="btn primary" id="btnActivate">Activar este modelo</button></div>
+            <div class="saving" id="saveMsg"></div>
+            <div class="provlist">
+              <div class="sub2">PROVEEDORES GUARDADOS</div>
+              <div id="provList"></div>
+            </div>
+          </div>
+
+          <div class="setcol">
+            <div class="sub2">PREFERENCIAS</div>
+            <div class="togglerow"><span>Nombre del usuario</span><input type="text" id="setUserName" style="width:140px" /></div>
+            <div class="togglerow"><span>Glow ambiental en bordes</span><div class="sw on" id="swGlow"></div></div>
+            <div class="togglerow"><span>Voz de Sagitari (TTS)</span><div class="sw on" id="swTts"></div></div>
+            <div class="field"><label>ESPACIO DE TRABAJO</label>
+              <div class="btnrow" style="margin:0">
+                <input type="text" id="wsPath" readonly style="flex:1;min-width:180px" />
+                <button class="btn" id="wsPick"><span class="bi"><i data-i="folder"></i></span> Elegir…</button>
+              </div>
+              <div class="subnote">Carpeta por defecto donde Sagitari crea y modifica archivos, y donde se ejecutan comandos. Los archivos relativos ("informe.md") aterrizan aquí.</div>
+            </div>
+            <div class="field"><label>IDIOMA DE VOZ</label>
+              <select id="voiceLang">
+                <option value="es-ES">Español (España)</option>
+                <option value="es-MX">Español (México)</option>
+                <option value="en-US">English (US)</option>
+              </select>
+            </div>
+            <div class="sub2">ATAJOS</div>
+            <div class="subnote">Alt + Espacio · mostrar u ocultar<br>Ctrl + Shift + G · pulso de glow</div>
+          </div>
+        </div>
+      </section>
+    </main>
+
+    <!-- ===== Right rail ===== -->
+    <aside class="rail">
+      <div class="rcard">
+        <div class="rc-top"><span class="live"><span class="dot ok"></span> Live</span><div class="bigring" id="bigRing"></div></div>
+        <div class="rc-title">Agentes activos</div>
+        <div class="rc-count"><span id="agentCount">0</span><span class="mini-dots"><span class="dot ok"></span><span class="dot pur"></span><span class="dot blu"></span></span></div>
+        <div id="railAgents" class="rail-agents"></div>
+      </div>
+
+      <div class="rcard">
+        <div class="rc-top"><span class="live2">Actividad en tiempo real</span></div>
+        <div id="activityFeed" class="feed"></div>
+      </div>
+
+    </aside>
+  </div>
+</div>
+<script src="icons.js"></script>
+<script src="marked.min.js"></script>
+<script src="app.js"></script>
+</body>
+</html>

@@ -1,0 +1,54 @@
+{
+  "name": "sagitari",
+  "productName": "SAGITARI",
+  "version": "1.0.0",
+  "description": "SAGITARI — agente de IA con control total del PC: chat, voz, navegador y automatización del sistema",
+  "main": "main/main.js",
+  "scripts": {
+    "start": "electron .",
+    "smoke": "electron . --smoke",
+    "dist": "electron-builder --win nsis portable",
+    "dist:installer": "electron-builder --win nsis",
+    "dist:portable": "electron-builder --win portable"
+  },
+  "author": "Dario",
+  "license": "MIT",
+  "dependencies": {
+    "ws": "^8.18.0"
+  },
+  "devDependencies": {
+    "electron": "^44.2.0",
+    "electron-builder": "^25.1.8"
+  },
+  "build": {
+    "appId": "com.sagitari.app",
+    "productName": "SAGITARI",
+    "copyright": "Copyright © 2026 Dario",
+    "directories": {
+      "output": "dist",
+      "buildResources": "build"
+    },
+    "files": [
+      "main/**/*",
+      "agent/**/*",
+      "renderer/**/*",
+      "skills-starter/**/*",
+      "package.json"
+    ],
+    "win": {
+      "icon": "renderer/assets/sagitari.ico",
+      "artifactName": "SAGITARI-Setup-${version}.${ext}"
+    },
+    "nsis": {
+      "oneClick": false,
+      "allowToChangeInstallationDirectory": true,
+      "createDesktopShortcut": true,
+      "createStartMenuShortcut": true,
+      "shortcutName": "SAGITARI",
+      "artifactName": "SAGITARI-Setup-${version}.${ext}"
+    },
+    "portable": {
+      "artifactName": "SAGITARI-Portable-${version}.${ext}"
+    }
+  }
+}

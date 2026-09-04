@@ -1,0 +1,20 @@
+# Node / Electron
+node_modules/
+dist/
+release/
+
+# Logs
+*.log
+npm-debug.log*
+
+# OS
+Thumbs.db
+.DS_Store
+
+# Editor
+.vscode/
+.idea/
+
+# Local test debris
+_*.js
+_*.png
