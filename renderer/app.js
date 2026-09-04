@@ -609,19 +609,40 @@ $('#btnClear').onclick = newConversation;
 $('#histNew').onclick = newConversation;
 $('#btnGoHistory').onclick = () => goto('history');
 
-// ============ mode switcher ============
-const MODE_META = { act: { dot: 'ok', label: 'ACT', desc: 'Ejecución directa' }, plan: { dot: 'pur', label: 'PLAN', desc: 'Planifica y ejecuta' }, think: { dot: 'blu', label: 'THINK', desc: 'Razonamiento profundo' } };
+// ============ mode switcher: segmented en chat + pill en inicio + Alt+M ============
+const MODE_META = {
+  act:   { dot: 'ok',  label: 'ACT',   desc: 'Ejecución directa' },
+  plan:  { dot: 'pur', label: 'PLAN',  desc: 'Planifica y ejecuta' },
+  think: { dot: 'blu', label: 'THINK', desc: 'Razonamiento profundo' }
+};
+const MODE_ORDER = ['act', 'plan', 'think'];
+async function setMode(m) {
+  if (m === mode) return;
+  mode = await window.sagitari.setMode(m);
+  updateModeUI();
+  showToast('Modo ' + (MODE_META[mode] || MODE_META.act).label);
+}
+function renderModeSeg() {
+  const seg = $('#modeSeg');
+  if (!seg) return;
+  seg.innerHTML = MODE_ORDER.map(k =>
+    `<button data-m="${k}" class="${k === mode ? 'on ' + k : ''}" title="${MODE_META[k].desc}">${MODE_META[k].label}</button>`).join('');
+  seg.querySelectorAll('button').forEach(b => b.onclick = () => setMode(b.dataset.m));
+}
 function updateModeUI() {
   const m = MODE_META[mode] || MODE_META.act;
   const pill = $('#modePill');
-  pill.innerHTML = `<span class="dot ${m.dot}"></span> ${m.label}`;
+  if (pill) pill.innerHTML = `<span class="dot ${m.dot}"></span> ${m.label}`;
   $('#modeLabel').innerHTML = `Modo <b>${m.label}</b> — ${m.desc}`;
+  renderModeSeg();
 }
-$('#modePill').onclick = async () => {
-  mode = await window.sagitari.setMode(mode === 'act' ? 'plan' : mode === 'plan' ? 'think' : 'act');
-  updateModeUI();
-  showToast('Modo ' + (MODE_META[mode] || MODE_META.act).label);
-};
+$('#modePill').onclick = () => goto('chat');
+window.addEventListener('keydown', (e) => {
+  if (e.altKey && !e.ctrlKey && !e.shiftKey && (e.key === 'm' || e.key === 'M')) {
+    e.preventDefault();
+    setMode(MODE_ORDER[(MODE_ORDER.indexOf(mode) + 1) % MODE_ORDER.length]);
+  }
+});
 
 // ============ memory view ============
 async function renderMemory() {
