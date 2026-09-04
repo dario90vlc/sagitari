@@ -4,56 +4,95 @@
 
 # SAGITARI
 
-**Open-source agentic AI assistant that lives on your desktop**
+**An agentic AI assistant that lives on your desktop — and actually executes.**
 
-Full control of your Windows PC from a holographic interface — chat, voice, browser and real system automation.
+Full control of your Windows PC from a holographic interface: chat, voice, browser and real system automation.
 
-`Windows 10/11` · `Electron` · `Multi-provider` · `MIT License`
+![Platform](https://img.shields.io/badge/platform-Windows_10%2F11-0078D6?style=flat-square&logo=windows11&logoColor=white)
+![Release](https://img.shields.io/github/v/release/dario90vlc/sagitari?style=flat-square&label=release&color=00E5FF)
+![Downloads](https://img.shields.io/github/downloads/dario90vlc/sagitari/total?style=flat-square&label=downloads&color=37F5A8)
+![License](https://img.shields.io/badge/license-MIT-7C3AED?style=flat-square)
+![Electron](https://img.shields.io/badge/Electron-44-47848F?style=flat-square&logo=electron&logoColor=white)
 
 **English** · [Español](./README.es.md)
-
-[Download](#installation) · [Quick start](#quick-start) · [Skills](#skills) · [Build](#build-from-source)
 
 </div>
 
 ---
 
-SAGITARI is a Jarvis-style assistant that **actually executes**: it doesn't just chat — it uses the
-terminal, reads and writes files, opens apps, controls Chrome/Edge, handles media and automates
-tasks — all from a holographic control panel with an energy glow that reacts when it thinks and acts.
+<div align="center">
+<img src="docs/shot-chat.png" alt="SAGITARI chat view" width="86%">
+</div>
+
+> Type a request — or say it out loud. SAGITARI plans, uses the terminal, reads and writes files,
+> drives Chrome/Edge and reports back, with an energy glow that lights up the frame while it works.
+
+## Screenshots
+
+<table>
+  <tr>
+    <td width="50%"><img src="docs/shot-home.png" alt="Home"></td>
+    <td width="50%"><img src="docs/shot-agents.png" alt="Agents"></td>
+  </tr>
+  <tr>
+    <td align="center"><sub><b>Home</b> — launch pad with your workspace</sub></td>
+    <td align="center"><sub><b>Agents</b> — live telemetry of every run</sub></td>
+  </tr>
+  <tr>
+    <td width="50%"><img src="docs/shot-tools.png" alt="Tools"></td>
+    <td width="50%"><img src="docs/shot-skills.png" alt="Skills"></td>
+  </tr>
+  <tr>
+    <td align="center"><sub><b>Tools</b> — everything the agent can touch</sub></td>
+    <td align="center"><sub><b>Skills</b> — importable SKILL.md packs</sub></td>
+  </tr>
+</table>
+
+## Why SAGITARI
+
+Most desktop AI assistants stop at the chat bubble. SAGITARI is built as an **agent with hands**:
+
+- **It executes, not just suggests** — terminal commands, file operations, app launching,
+  browser automation and system tasks run for real, with every step visible in the UI.
+- **Bring your own model** — any OpenAI-compatible endpoint: cloud (OpenRouter, Groq, OpenAI…)
+  or fully local (Ollama, LM Studio). Your keys never leave your machine.
+- **It costs what it must, no more** — skills load on demand, and the *Ponytail* pack keeps
+  answers compact and engineering-focused.
+- **It looks like it works** — a hand-crafted holographic UI, no frameworks, no bloat:
+  Electron + vanilla JS and a single runtime dependency.
 
 ## Features
 
+**Intelligence**
+
 - **Multi-provider (OpenAI-compatible):** OpenCode Go, OpenRouter, Ollama, LM Studio, Groq,
   OpenAI or any custom endpoint. Paste your API key — it's stored locally and models are
-  detected automatically.
-- **Think / Plan / Act modes** — reasoned, planned or direct.
-- **Chat + voice:** type or speak (Windows speech engines) and SAGITARI answers out loud (TTS).
-- **Agent glow:** the frame's energy lights up when it responds (violet ↔ turquoise blend) —
-  thinking, working and speaking with its own light.
-- **Full PC control:** terminal, files, open apps/URLs, clipboard, notifications, screenshots
-  the model can "see", media and windows.
-- **Real browser:** controls Chrome/Edge via DevTools Protocol (navigate, click, type, read
-  content, capture tabs) — no Puppeteer, raw WebSocket.
-- **Workspace:** a fixed working folder (configurable in Settings or from Projects); relative
-  paths, new files and terminal commands resolve there by default.
-- **Conversation history** with separate threads and persistent memory injected into context.
-- **Views:** Home, Chat, Agents (live), Projects, Tools, Memory, Skills and Settings.
+  detected automatically. With Ollama you don't even need a key (runs locally).
+- **Think / Plan / Act modes** — deep reasoning, plan-then-execute, or direct action.
+  Switch in one click from the chat composer (or `Alt+M`).
+- **Skills engine (SKILL.md format):** specialized instruction packs the agent loads on demand —
+  the prompt only carries the index, so token cost stays minimal. Import any GitHub repo with
+  a `SKILL.md` (e.g. `anthropics/skills` → 20 verified skills) and force one from chat by
+  typing `/`.
+- **Persistent memory** injected into context across conversations.
 
-## Skills
+**Control**
 
-Specialized instructions in **SKILL.md** style (GitHub's agent skills format) that the agent
-loads on its own when the task needs them — the prompt only carries the index (name +
-description), so token cost is minimal.
+- **Full PC access:** terminal, files, open apps and URLs, clipboard, notifications,
+  multimedia and window management.
+- **Real browser automation:** controls Chrome/Edge over the DevTools Protocol (raw WebSocket,
+  no Puppeteer) — navigate, click by visible text, type, read content, capture screenshots,
+  manage tabs. One window, persistent profile, your logins survive.
+- **Screenshots the model can actually see** for visual tasks.
 
-- Ships with 5 built in: `codigo` (coding), `investigacion` (research), `diseno` (design),
-  `automatizacion` (automation) and the **Ponytail** pack (lazy-senior development, review,
-  audit and *caveman* compressed-answer mode).
-- **Import from GitHub:** in the Skills view, paste `owner/repo` (or `owner/repo/folder`) from
-  any repo with a SKILL.md — e.g. `anthropics/skills` (imports 20 verified skills).
-- Create/edit/enable/disable from the UI or by editing `%APPDATA%\SagitariAI\skills\`.
-- The agent applies them automatically when relevant, or you can force them from chat by typing
-  `/` (skill palette with filtering) — e.g. `/investigacion compare RTX 5080 vs 4090`.
+**Interface**
+
+- **Holographic UI** hand-built in vanilla HTML/CSS — no UI frameworks.
+- **Reactive glow:** the frame lights up (violet ↔ turquoise blend) while the agent
+  thinks, works or speaks.
+- **Voice both ways:** dictate with Windows speech engines, hear answers out loud (TTS).
+- **Conversation history** with separate threads, and a live Agents view showing every
+  run's steps as they happen.
 
 ## Installation
 
@@ -74,13 +113,13 @@ Download your preferred artifact from the [releases page](../../releases):
 2. Paste your API key → **Detect models** → choose one → **Activate**.
 3. Type or dictate your first request. With Ollama you don't even need an API key (local).
 
-Shortcuts: **Alt+Space** show/hide the panel · **Alt+Shift+S** bring to front ·
-**Ctrl+Shift+G** glow pulse.
+**Shortcuts:** `Alt+Space` show/hide panel · `Alt+Shift+S` bring to front ·
+`Ctrl+Shift+G` glow pulse · `Alt+M` cycle agent mode · `/` in the input opens the skill palette.
 
 ## Build from source
 
 ```bash
-git clone https://github.com/YOUR_USER/sagitari.git
+git clone https://github.com/dario90vlc/sagitari.git
 cd sagitari
 npm install
 
@@ -92,7 +131,7 @@ npm run dist:portable  # portable only
 
 Requirements: Node.js 18+ and Windows 10/11.
 
-## Structure
+## Project structure
 
 ```
 sagitari/
@@ -102,7 +141,7 @@ sagitari/
 │   ├── providers.js
 │   └── voice.ps1   # offline dictation (Windows speech engines)
 ├── agent/          # the agent's brain
-│   ├── agent.js    # streaming loop + tool calling
+│   ├── agent.js    # streaming loop + tool calling, no step limits
 │   ├── tools.js    # tool definitions
 │   ├── executors.js
 │   ├── skills.js   # SKILL.md engine
@@ -111,16 +150,18 @@ sagitari/
 │   ├── index.html / app.js / styles.css
 │   └── assets/     # logo, icons
 ├── skills-starter/ # bundled skills
+├── scripts/        # diagnostics & capture utilities
 └── docs/           # README assets
 ```
 
-## Notes
+## Privacy & security
 
 - Config and API keys are stored in `%APPDATA%\SagitariAI\` — **local only**, they never leave
-  your machine.
-- Dictation uses Windows' built-in speech recognizers; for best results enable online speech
-  recognition (Settings → Privacy & security → Speech) and pick a good default microphone.
-- Community skills unlocked: any repo with folders containing a `SKILL.md` works.
+  your machine. Keys go directly from your settings to your chosen provider.
+- Dictation uses Windows' built-in speech recognizers; enable online speech recognition
+  (Settings → Privacy & security → Speech) and pick a good default microphone for best results.
+- The browser agent uses its own persistent profile; close it or disable the tool to go dark.
+- Renderer runs with `contextIsolation` on and `nodeIntegration` off.
 
 ## License
 
