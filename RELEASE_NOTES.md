@@ -40,7 +40,8 @@ Second public release: the agent's browser engine is fully rebuilt, voice dictat
 ## Verificación / Verify (SHA-256)
 
 ```
-SHA256_PLACEHOLDER
+4fb8f9344410c951fdb7ad8878020c83c4abd3f5428657dd693b1def44432855  SAGITARI-Setup-1.0.1.exe
+406d8f84b80bea5be0f49cae9ac2f502cee51107d5bd104f5d747274cb6596c1  SAGITARI-Portable-1.0.1.exe
 ```
 
 ## Requisitos / Requirements
