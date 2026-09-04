@@ -257,6 +257,13 @@ window.sagitari.onAgentEvent((ev) => {
       setSendMode();
       if (busy) feed('Sagitari está trabajando', 'blu');
       break;
+    case 'stopped':
+      finishAssistant('');
+      busy = false;
+      setSendMode();
+      glowOffSoon();
+      feed('Detenido por el usuario', 'err');
+      break;
     case 'toast':
       showToast(ev.title + ': ' + ev.message);
       break;

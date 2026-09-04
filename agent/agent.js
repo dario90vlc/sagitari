@@ -58,10 +58,11 @@ class Agent {
     this.emit = opts.emit;               // (event) => void  (to renderer)
     this.screenshotFn = opts.screenshotFn;
     this.browser = opts.browser;
-    this.history = [];                   // [{role, content, tool_calls?, tool_call_id?, name?, images?}]
-    this.busy = false;
+    this.history = [];                   // [{role, content, tool_calls?, tool_call_id?, name?, images?}]    this.busy = false;
     this.abort = null;
-    this.toolsFired = new Map();         // name -> {count, lastAt}
+    this.stopRequested = false;       // el usuario pulsó Detener en esta conversación
+    this.runningTool = null;          // { stop() } de la herramienta en ejecución
+    this.toolsFired = new Map();      // name -> {count, lastAt}
   }
 
   isBusy() { return this.busy; }
@@ -76,20 +77,36 @@ class Agent {
   async chat(userText, settings, imageDataUrl) {
     if (this.busy) { this.emit({ type: 'error', message: 'SAGITARI está ocupado terminando la tarea anterior.' }); return; }
     this.busy = true;
+    this.stopRequested = false;
     const controller = new AbortController();
     this.abort = controller;
     try {
       await this._run(userText, settings, imageDataUrl, controller.signal);
     } catch (e) {
-      this.emit({ type: 'error', message: 'Error: ' + e.message });
+      if (this.stopRequested || e.name === 'AbortError') {
+        // parada solicitada: no es un error, la UI ya muestra lo generado
+        this.emit({ type: 'stopped' });
+      } else {
+        this.emit({ type: 'error', message: 'Error: ' + e.message });
+      }
     } finally {
       this.busy = false;
       this.abort = null;
+      this.stopRequested = false;
       this.emit({ type: 'busy', busy: false });
     }
   }
 
-  stop() { if (this.abort) this.abort.abort(); }
+  // Detener de verdad: aborta el fetch del modelo Y mata el comando/herramienta
+  // en ejecución (terminal, navegador, etc.). Sin esto el botón solo tomba efecto
+  // cuando la herramienta actual terminara sola.
+  stop() {
+    this.stopRequested = true;
+    if (this.abort) this.abort.abort();
+    if (this.runningTool && typeof this.runningTool.stop === 'function') {
+      try { this.runningTool.stop(); } catch {}
+    }
+  }
 
   async _run(userText, settings, imageDataUrl, signal) {
     const cfg = this.activeConfig(settings);
@@ -120,8 +137,13 @@ class Agent {
     let assistantSaidSomething = false;
 
     while (steps++ < mode.maxSteps) {
+      if (signal.aborted) {
+        this._pushAssistant(assistantSaidSomething ? { role: 'assistant', content: '(detenido por el usuario)' } : null);
+        this.emit({ type: 'stopped' });
+        return;
+      }
       const res = await this._streamOnce(cfg, messages, signal);
-      if (res.aborted) { this._pushAssistant(assistantSaidSomething ? { role: 'assistant', content: res.text || '(interrumpido)' } : null); return; }
+      if (res.aborted) { this._pushAssistant(assistantSaidSomething ? { role: 'assistant', content: res.text || '(interrumpido)' } : null); this.emit({ type: 'stopped' }); return; }
 
       if (res.toolCalls && res.toolCalls.length) {
         const msg = { role: 'assistant', content: res.text || '', tool_calls: res.toolCalls };
@@ -130,6 +152,7 @@ class Agent {
         this.history.push(JSON.parse(JSON.stringify(msg)));
 
         for (const tc of res.toolCalls) {
+          if (signal.aborted) break;
           let args = {};
           try { args = JSON.parse(tc.function.arguments || '{}'); } catch {}
           this.emit({ type: 'tool', name: tc.function.name, args });
@@ -144,9 +167,11 @@ class Agent {
               browser: this.browser,
               settings,
               home: os.homedir(),
-              workspace: (settings.settings && settings.settings.workspace) || path.join(os.homedir(), 'Desktop', 'Sagitari')
+              workspace: (settings.settings && settings.settings.workspace) || path.join(os.homedir(), 'Desktop', 'Sagitari'),
+              registerKillable: (k) => { this.runningTool = k; }   // para poder matar el comando al Detener
             });
           } catch (e) { result = 'Error: ' + e.message; }
+          this.runningTool = null;
 
           const images = result && typeof result === 'object' ? result.images : undefined;
           const text = result && typeof result === 'object' ? result.text : String(result);

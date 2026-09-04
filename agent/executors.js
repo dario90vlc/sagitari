@@ -9,9 +9,11 @@ const skills = require('./skills');
 
 function run(cmd, opts = {}) {
   return new Promise((resolve) => {
-    exec(cmd, { windowsHide: true, timeout: opts.timeout || 60000, maxBuffer: 4 * 1024 * 1024, cwd: opts.cwd, encoding: 'utf8' }, (err, stdout, stderr) => {
+    const child = exec(cmd, { windowsHide: true, timeout: opts.timeout || 60000, maxBuffer: 4 * 1024 * 1024, cwd: opts.cwd, encoding: 'utf8' }, (err, stdout, stderr) => {
       resolve({ code: err ? (err.code ?? 1) : 0, stdout: (stdout || '').toString(), stderr: (stderr || (err && err.message) || '').toString() });
     });
+    // el agente puede matar el comando al pulsar Detener
+    if (opts.registerKillable) opts.registerKillable({ stop: () => { try { child.kill(); } catch {} } });
   });
 }
 
@@ -97,7 +99,7 @@ async function executeTool(name, args, ctx) {
     }
     case 'run_command': {
       const timeout = Math.min(Math.max(args.timeout_seconds || 60, 5), 300) * 1000;
-      const r = await run(args.command, { cwd: args.cwd ? inWs(args.cwd) : workspace, timeout });
+      const r = await run(args.command, { cwd: args.cwd ? inWs(args.cwd) : workspace, timeout, registerKillable: ctx.registerKillable });
       return `exit=${r.code}\nSTDOUT:\n${clip(r.stdout)}\nSTDERR:\n${clip(r.stderr, 3000)}`;
     }
     case 'read_file': {
