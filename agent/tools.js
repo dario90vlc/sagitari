@@ -99,19 +99,25 @@ const defs = [
     type: 'function',
     function: {
       name: 'browser_control',
-      description: 'Controla un navegador Chrome/Edge real mediante DevTools Protocol: navegar, leer, hacer clic, escribir, capturar. Acciones: launch, navigate, click, type, press, scroll, content, eval, screenshot, tabs, close.',
+      description: 'Controla un navegador Chrome/Edge real mediante DevTools Protocol. UNA SOLA ventana con múltiples pestañas gestionables. Acciones: launch (abrir/reutilizar), navigate, new_tab, select_tab, close_tab, tabs (listar), click (por texto visible o selector), type (con clear/submit), press, scroll, wait, content (leer), eval, screenshot (con fullPage), close.',
       parameters: {
         type: 'object',
         properties: {
-          action: { type: 'string', enum: ['launch', 'navigate', 'click', 'type', 'press', 'scroll', 'content', 'eval', 'screenshot', 'tabs', 'close'] },
-          url: { type: 'string', description: 'Para launch/navigate' },
-          selector: { type: 'string', description: 'Selector CSS para click/type' },
-          text: { type: 'string', description: 'Texto para type, o texto visible a buscar para click' },
-          key: { type: 'string', description: 'Tecla para press: Enter, Tab, Escape, ArrowDown, ArrowUp, Backspace' },
-          direction: { type: 'string', description: 'up|down para scroll' },
+          action: { type: 'string', enum: ['launch', 'navigate', 'new_tab', 'select_tab', 'close_tab', 'tabs', 'click', 'type', 'press', 'scroll', 'wait', 'content', 'eval', 'screenshot', 'close'] },
+          url: { type: 'string', description: 'URL para launch/navigate/new_tab. Dominio simple vale (ej: "wikipedia.org")' },
+          selector: { type: 'string', description: 'Selector CSS para click/type. Si no lo sabes, usa click con text' },
+          text: { type: 'string', description: 'click: texto visible del botón/enlace. type: texto a escribir' },
+          tab: { type: ['string', 'number'], description: 'select_tab/close_tab: número (de action=tabs) o texto del título/URL' },
+          clear: { type: 'boolean', description: 'type: vaciar el campo antes de escribir (default true)' },
+          submit: { type: 'boolean', description: 'type: pulsar Enter después de escribir (búsquedas)' },
+          key: { type: 'string', description: 'press: Enter, Tab, Escape, ArrowDown, ArrowUp, ArrowLeft, ArrowRight, Backspace, Delete, PageDown, PageUp, Home, End, Space' },
+          direction: { type: 'string', description: 'scroll: up|down' },
           amount: { type: 'number', description: 'Píxeles de scroll' },
-          expression: { type: 'string', description: 'JS para eval' },
-          query: { type: 'string', description: 'Selector opcional para content/screenshot' }
+          ms: { type: 'number', description: 'wait: milisegundos (max 10000)' },
+          expression: { type: 'string', description: 'eval: JS a ejecutar en la página' },
+          query: { type: 'string', description: 'content: selector opcional para leer solo una parte' },
+          fullPage: { type: 'boolean', description: 'screenshot: capturar toda la página (scroll incluido)' },
+          browser: { type: 'string', description: 'launch: chrome|edge' }
         },
         required: ['action']
       }

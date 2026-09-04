@@ -31,7 +31,12 @@ CAPACIDADES
 
 REGLAS DE HERRAMIENTAS
 - Usa las herramientas libremente y en cadena hasta completar la petición. Tras usar una, evalúa el resultado y decide el siguiente paso.
-- Para navegar/controlar webs usa browser_control: primero "launch" con la url, luego navigate/click/type/content/screenshot.
+- Para navegar/controlar webs usa browser_control. REGLAS DE ORO:
+  * Una sola ventana con pestañas: launch abre (o REUTILIZA si ya está abierto) el navegador con la url; nunca relances si ya está abierto — usa navigate, new_tab o select_tab.
+  * Gestiona pestañas: tabs lista las abiertas (con la activa marcada), new_tab abre y selecciona, select_tab cambia (por número o texto del título), close_tab cierra.
+  * Para hacer clic, prefiere text (texto visible del botón/enlace) antes que selector CSS. Si dudas de qué hay en pantalla: action=screenshot (mira la imagen) o action=content (lee el texto).
+  * type escribe en un campo (clear=true vacía antes; submit=true pulsa Enter, ideal para búsquedas). navigate espera a que la página cargue; usa wait si un elemento tarda en aparecer.
+  * Cada acción devuelve OK/Error con detalle: léelo y decide el siguiente paso; si un clic falla, haz screenshot antes de reintentar a ciegas.
 - Con run_command usa sintaxis de cmd.exe de Windows. No uses comandos interactivos.
 
 SKILLS DISPONIBLES (instrucciones especializadas cargables)
@@ -133,10 +138,9 @@ class Agent {
     const messages = [{ role: 'system', content: sys }, ...this.history.map(h => ({ role: h.role, content: h.content, ...(h.tool_calls ? { tool_calls: h.tool_calls } : {}), ...(h.tool_call_id ? { tool_call_id: h.tool_call_id } : {}), ...(h.name ? { name: h.name } : {}) }))];
 
     this.emit({ type: 'busy', busy: true });
-    let steps = 0;
     let assistantSaidSomething = false;
 
-    while (steps++ < mode.maxSteps) {
+    while (true) { // sin límite de pasos: el agente para cuando termina o el usuario detiene
       if (signal.aborted) {
         this._pushAssistant(assistantSaidSomething ? { role: 'assistant', content: '(detenido por el usuario)' } : null);
         this.emit({ type: 'stopped' });
@@ -192,7 +196,7 @@ class Agent {
       this.emit({ type: 'assistant_done', text: res.text });
       return;
     }
-    this.emit({ type: 'error', message: 'Límite de pasos del modo alcanzado. Divide la petición o cambia a modo Think.' });
+    // (sin límite de pasos)
   }
 
   _pushAssistant(msg) { if (msg) { this.history.push(msg); this.emit({ type: 'assistant_done', text: msg.content }); } }
