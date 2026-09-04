@@ -269,6 +269,13 @@ ipcMain.handle('conv:new', () => {
   saveConvs();
   return { ok: true, id: c.id };
 });
+// reasignar el chat en curso tras la primera respuesta (evita chats fantasma)
+// se invoca desde el renderer cuando cambia el título del chat
+ipcMain.handle('conv:rename', (e, title) => {
+  const c = currentConv();
+  if (c && c.title === 'Nueva conversación' && title) { c.title = String(title).slice(0, 60); c.updatedAt = Date.now(); saveConvs(); }
+  return { ok: true };
+});
 ipcMain.handle('conv:open', (e, id) => {
   const c = convs.find(x => x.id === id);
   if (!c) return { ok: false, error: 'Conversación no encontrada' };
@@ -318,7 +325,7 @@ ipcMain.handle('voice:start', async () => {
   if (whisper) return { ok: true, note: 'Ya estaba escuchando' };
   whisperBuf = '';
   const lang = config.settings.voiceLang || 'es-ES';
-  whisper = spawn('powershell.exe', ['-NoProfile', '-ExecutionPolicy', 'Bypass', '-File', path.join(__dirname, 'voice.ps1'), '-Lang', lang], { windowsHide: true });
+  whisper = spawn('powershell.exe', ['-NoProfile', '-ExecutionPolicy', 'Bypass', '-File', path.join(__dirname, 'voice.ps1'), '-Lang', lang, '-Nowinrt'], { windowsHide: true });
   whisper.stdout.on('data', (d) => {
     whisperBuf += d.toString('utf8');
     let idx;

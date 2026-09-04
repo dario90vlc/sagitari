@@ -46,6 +46,7 @@ contextBridge.exposeInMainWorld('sagitari', {
   convList: () => ipcRenderer.invoke('conv:list'),
   convNew: () => ipcRenderer.invoke('conv:new'),
   convOpen: (id) => ipcRenderer.invoke('conv:open', id),
+  convRename: (title) => ipcRenderer.invoke('conv:rename', title),
   convDel: (id) => ipcRenderer.invoke('conv:del', id),
   setMode: (m) => ipcRenderer.invoke('mode:set', m),
   getAgentsLive: () => ipcRenderer.invoke('agents:live')

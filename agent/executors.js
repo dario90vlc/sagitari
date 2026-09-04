@@ -53,14 +53,15 @@ async function walk(root, depth, maxDepth, out, budget) {
 }
 
 async function searchIn(dir, regex, searchContent, out, budget) {
-  if (out.length >= budget.count) return;
+  if (out.length >= budget.count || budget.files >= 20000) return;
   let entries;
   try { entries = await fsp.readdir(dir, { withFileTypes: true }); } catch { return; }
   for (const e of entries) {
-    if (out.length >= budget.count) return;
+    if (out.length >= budget.count || budget.files >= 20000) return;
     if (['node_modules', '.git', 'AppData'].includes(e.name)) continue;
     const full = path.join(dir, e.name);
     if (e.isDirectory()) { await searchIn(full, regex, searchContent, out, budget); continue; }
+    budget.files++;
     if (regex.test(e.name)) out.push(`NOMBRE: ${full}`);
     if (!searchContent || out.length >= budget.count) continue;
     try {
@@ -123,9 +124,11 @@ async function executeTool(name, args, ctx) {
     }
     case 'search_files': {
       const root = inWs(args.path);
-      const regex = new RegExp(args.pattern, 'i');
+      let regex;
+      try { regex = new RegExp(args.pattern, 'i'); }
+      catch { return 'Error: patrón de búsqueda inválido (no es una expresión regular válida). Simplifícalo: "informe", "config.*json", "function\\s+nombre"…'; }
       const out = [];
-      const budget = { count: 60 };
+      const budget = { count: 60, files: 0 };
       await searchIn(root, regex, args.search_content !== false, out, budget);
       return out.length ? out.join('\n') : 'Sin resultados.';
     }

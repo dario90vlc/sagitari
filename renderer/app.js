@@ -553,7 +553,12 @@ $('#setUserName').onchange = (e) => { window.sagitari.setSettings({ userName: e.
 
 // ============ conversation history ============
 let convTitle = 'Nueva conversación';
-function setChatTitle(t) { convTitle = t || 'Nueva conversación'; $('#chatTitle').textContent = convTitle; }
+function setChatTitle(t) {
+  convTitle = t || 'Nueva conversación';
+  $('#chatTitle').textContent = convTitle;
+  // sincroniza el título con la conversación real en el historial
+  if (t) window.sagitari.convRename && window.sagitari.convRename(t);
+}
 
 async function renderHistory() {
   const list = await window.sagitari.convList();
