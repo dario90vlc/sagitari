@@ -75,8 +75,8 @@ SHA-256 de los ejecutables (calculados por el workflow de CI) / SHA-256 of the e
 (computed by the CI workflow):
 
 ```
-SAGITARI-Setup-1.1.0.exe    4a0848fd30f9c1e99df6cf9df35876aa779a039dc33a18558a10fdef28d85e4a
-SAGITARI-Portable-1.1.0.exe 2d81e0913c3160cbdb3914430a33098dc12fd30e57f0c9d6ab3d863e8160bbe7
+SAGITARI-Setup-1.1.0.exe    c5d65e3ec793f5eded49d87b7b9f5093a31dfdfc3bbe060c98981ea3a3f79462
+SAGITARI-Portable-1.1.0.exe 5a22574fbb7878cf61dd09ee80cdb93953dbb2e554c4fab0fbf3913c6ce454a4
 ```
 
 ## Requisitos / Requirements
