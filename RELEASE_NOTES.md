@@ -1,50 +1,83 @@
-# SAGITARI 1.0.1 / v1.0.1
+# SAGITARI 1.1.0
 
-Segunda versión pública: el navegador del agente se reescribe por completo, el dictado por voz funciona de verdad y se elimina el límite de pasos.
-Second public release: the agent's browser engine is fully rebuilt, voice dictation actually works, and the step limit is gone.
+Tercera versión pública: **seguridad del agente**. Permisos por herramienta con confirmación
+visible, guardarraíles configurables con detección de bucles, tracking de tokens, logs
+estructurados, tests y CI/CD automático.
+
+Third public release: **agent safety**. Per-tool permissions with visible confirmation,
+configurable guardrails with loop detection, token tracking, structured logs, tests and
+automatic CI/CD.
 
 ## Descargas / Downloads
 
 | Archivo / File | Descripción / Description |
 |---|---|
-| `SAGITARI-Setup-1.0.1.exe` | **Instalador / Installer** (NSIS): accesos directos y desinstalador / shortcuts and uninstaller |
-| `SAGITARI-Portable-1.0.1.exe` | **Portable**: un solo ejecutable, sin instalación / single executable, no install |
-| `Source code (zip / tar.gz)` | Código fuente / Source code |
+| `SAGITARI-Setup-1.1.0.exe` | **Instalador / Installer** (NSIS): accesos directos, desinstalador / shortcuts, uninstaller |
+| `SAGITARI-Portable-1.1.0.exe` | **Portable**: un solo ejecutable, sin instalación / single executable, no install |
+| `Source code (zip/tar.gz)` | Código fuente / Source code |
 
-> Windows SmartScreen puede avisar en la primera ejecución (binario sin firmar) / may warn on first run (unsigned binary): *Más información → Ejecutar de todas formas / More info → Run anyway*.
+> Binario sin firmar: Windows SmartScreen puede avisar en la primera ejecución (*Más información → Ejecutar de todas formas*). / Unsigned binary: SmartScreen may warn on first run (*More info → Run anyway*).
 
 ## Novedades / What's new
 
-### 🌐 Navegador reescrito / Browser engine rebuilt
-- **Una sola ventana, cero duplicados / One window, zero duplicates:** `launch` reutiliza la sesión activa o reconecta a una instancia viva; solo abre un navegador nuevo si no existe ninguno / `launch` reuses the live session or reconnects; a new browser only spawns when none exists.
-- **Gestión real de pestañas / Real tab management:** `tabs`, `new_tab`, `select_tab` (por número o texto), `close_tab`, con pestaña activa que puede inspeccionarse con `screenshot` o `content` / with an active tab you can inspect via `screenshot` or `content`.
-- **Interacción precisa / Precise interaction:** clic por texto visible con coincidencia exacta → prefijo → contiene / click by visible text (exact → prefix → contains); `type` limpia el campo y puede enviar con Enter / clears the field and can submit with Enter; `navigate` espera a que la página cargue / waits for page load; nueva acción `wait` / new `wait` action; capturas de página completa / full-page screenshots.
-- **Perfil persistente / Persistent profile:** los inicios de sesión sobreviven al reinicio (perfil dedicado en `%APPDATA%\SagitariAI\browser-profile`) / logins survive restarts.
+### Seguridad / Safety
 
-### 🎙️ Dictado funcional / Working voice dictation
-- Motor moderno de Windows (WinRT) con detección de privacidad y respaldo clásico / modern Windows engine (WinRT) with privacy detection and classic fallback.
-- UTF-8 forzado: los acentos ya no se corrompen / forced UTF-8: accents no longer corrupt.
-- Tiempos ajustados: no corta el inicio de las frases; los fragmentos se acumulan, nunca se autoenvían / tuned timeouts: sentence starts are never cut; segments accumulate, never auto-send.
-- Avisos útiles: si el motor clásico está activo o el micrófono no recibe audio / helpful toasts: classic-engine notice and no-audio detection.
+- **Sistema de permisos / Permission system** — Cada herramienta tiene nivel de riesgo:
+  *Seguro* (se ejecuta sola), *Confirmar* (tarjeta con la acción exacta y botones
+  Permitir/Denegar) o *Bloqueado*. / Every tool has a risk level: *Safe* (auto-run),
+  *Confirm* (a card shows the exact action with Allow/Deny) or *Blocked*. Terminal,
+  escritura de archivos, navegador, abrir apps y gestión de ventanas piden confirmación por
+  defecto / ask for confirmation by default.
+- **Guardarraíles / Guardrails** — Límites configurables de pasos, llamadas a herramientas,
+  duración y tokens (0 = sin límite). / Configurable limits for steps, tool calls, duration
+  and tokens (0 = unlimited).
+- **Detección de bucles / Loop detection** — Si el agente repite la misma acción sin avanzar,
+  se detiene solo con un mensaje explicativo. / If the agent repeats the same action without
+  progressing, it stops itself with an explanatory message.
+- **Paro real / Real stop** — El botón Detener mata el comando en marcha, no solo el texto. / The Stop button kills the in-flight command, not just the text stream.
 
-### ♾️ Sin límite de pasos / No more step limit
-- El agente trabaja hasta completar la tarea o hasta que pulses Detener (que ahora mata también los comandos en ejecución) / the agent works until the task is done or you press Stop (which now also kills running tools).
+### Transparencia / Transparency
 
-### ⚡ Mejoras / Improvements
-- **Selector de modo en el chat:** ACT / PLAN / THINK con un clic en el compositor + atajo `Alt+M` / one-click mode switcher in the chat composer + `Alt+M` shortcut.
-- Skills: importación deduplicada desde GitHub y activación con `/` en el chat / deduplicated GitHub import and `/` activation in chat.
-- Búsqueda de archivos endurecida: regex inválidas ya no rompen la herramienta; límite de 20.000 archivos por escaneo / hardened file search: invalid regexes no longer crash it; 20k-file scan cap.
-- Sin chats fantasma en el historial / no more ghost "Nueva conversación" entries.
-- Documentación bilingüe (README en español e inglés) / bilingual docs (Spanish & English READMEs).
+- **Modo desarrollador / Developer mode** — Métricas en vivo bajo el chat: modelo, tokens
+  in/out, llamadas, latencia y límites activos. / Live metrics under the chat: model, tokens
+  in/out, calls, latency and active limits.
+- **Logs estructurados / Structured logs** — Cada sesión escribe un JSONL local en
+  `%APPDATA%\SagitariAI\logs\` con cada herramienta, duración, éxito/error y tokens. / Each
+  session writes a local JSONL under `%APPDATA%\SagitariAI\logs\` with every tool call,
+  duration, success/error and tokens.
 
-## Verificación / Verify (SHA-256)
+### Proyecto / Project
 
-```
-4fb8f9344410c951fdb7ad8878020c83c4abd3f5428657dd693b1def44432855  SAGITARI-Setup-1.0.1.exe
-406d8f84b80bea5be0f49cae9ac2f502cee51107d5bd104f5d747274cb6596c1  SAGITARI-Portable-1.0.1.exe
-```
+- **Tests unitarios / Unit tests** — `npm test`: 19 tests sobre permisos, límites, detección
+  de bucles y parseo de skills. / 19 tests over permissions, limits, loop detection and
+  skills parsing.
+- **CI/CD en GitHub Actions** — Tests en cada push; al publicar un tag `v*` se compilan
+  instalador y portable, se calculan los SHA-256 y se publica la release automáticamente. /
+  Tests on every push; pushing a `v*` tag builds installer + portable, computes SHA-256 and
+  publishes the release automatically.
+- **Skills con metadatos / Skill metadata** — `version`, `author` y lista de herramientas
+  autorizadas en el front-matter, visibles en la vista Skills. / `version`, `author` and an
+  authorized-tools list in the front-matter, shown in the Skills view.
+
+### También / Also
+
+- Navegador reescrito: una sola ventana, gestión de pestañas, clic por texto visible, perfil
+  persistente. / Browser engine rebuilt: one window, tab management, click by visible text,
+  persistent profile.
+- Dictado por voz funcional (motor WinRT de Windows + UTF-8). / Working voice dictation
+  (Windows WinRT engine + UTF-8).
+- Selector de modo ACT/PLAN/THINK dentro del chat (Alt+M). / ACT/PLAN/THINK mode switcher
+  inside the chat (Alt+M).
+
+## Verificación / Verification
+
+Los hashes SHA-256 de ambos ejecutables están en el cuerpo de la release (calculados por el
+workflow de CI). / SHA-256 hashes for both executables are in the release body (computed by
+the CI workflow).
 
 ## Requisitos / Requirements
 
-- Windows 10/11 (x64)
-- Para dictado por voz: micrófono configurado como predeterminado; para máxima precisión activa el reconocimiento de voz en línea (Configuración → Privacidad → Voz) / for dictation: a default microphone; for best accuracy enable online speech recognition (Settings → Privacy → Speech).
+- Windows 10/11 · Proveedor de IA compatible con OpenAI (OpenRouter, Groq, OpenAI, Ollama
+  local, LM Studio…) · Node.js 18+ solo para compilar desde fuente.
+- Windows 10/11 · Any OpenAI-compatible AI provider (OpenRouter, Groq, OpenAI, local Ollama,
+  LM Studio…) · Node.js 18+ only to build from source.

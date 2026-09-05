@@ -85,6 +85,17 @@ Most desktop AI assistants stop at the chat bubble. SAGITARI is built as an **ag
   manage tabs. One window, persistent profile, your logins survive.
 - **Screenshots the model can actually see** for visual tasks.
 
+**Safety**
+
+- **Permission system:** every tool has a risk level — safe tools run automatically, sensitive
+  ones (terminal, file writes, browser control…) ask first with a card showing exactly what the
+  agent is about to do. You can change each tool's level in Settings, or block it entirely.
+- **Guardrails:** configurable limits for steps, tool calls, duration and tokens — plus loop
+  detection that stops the agent when it repeats the same action without progressing.
+- **Stop anytime** kills the in-flight command, not just the text stream.
+- **Structured run logs** (JSONL, local) and an optional **developer mode** with live
+  token/latency metrics under the chat.
+
 **Interface**
 
 - **Holographic UI** hand-built in vanilla HTML/CSS — no UI frameworks.
@@ -100,8 +111,8 @@ Download your preferred artifact from the [releases page](../../releases):
 
 | Artifact | What it is |
 |---|---|
-| `SAGITARI-Setup-1.0.1.exe` | Windows installer (NSIS): shortcuts, uninstaller |
-| `SAGITARI-Portable-1.0.1.exe` | Portable: single executable, no install |
+| `SAGITARI-Setup-1.1.0.exe` | Windows installer (NSIS): shortcuts, uninstaller |
+| `SAGITARI-Portable-1.1.0.exe` | Portable: single executable, no install |
 | `Source code (zip)` | Source code |
 
 > Windows SmartScreen may warn on first run (unsigned binary). Click
@@ -124,12 +135,16 @@ cd sagitari
 npm install
 
 npm start              # development mode
+npm test               # unit tests (guardrails, skills parsing)
 npm run dist           # NSIS installer + portable in dist/
 npm run dist:installer # installer only
 npm run dist:portable  # portable only
 ```
 
 Requirements: Node.js 18+ and Windows 10/11.
+
+Pushing a `v*` tag triggers the GitHub Actions release workflow: tests, build of installer +
+portable, SHA-256 computation and automatic release publication.
 
 ## Project structure
 

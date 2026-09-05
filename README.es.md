@@ -87,6 +87,19 @@ construido como un **agente con manos**:
   capturar pantallas, gestionar pestañas. Una ventana, perfil persistente, tus logins se conservan.
 - **Capturas de pantalla que el modelo ve de verdad** para tareas visuales.
 
+**Seguridad**
+
+- **Sistema de permisos:** cada herramienta tiene su nivel de riesgo — las seguras se ejecutan
+  solas, las sensibles (terminal, escritura de archivos, control del navegador…) piden
+  confirmación con una tarjeta que muestra exactamente qué va a hacer el agente. Puedes cambiar
+  el nivel de cada herramienta en Ajustes, o bloquearla por completo.
+- **Guardarraíles:** límites configurables de pasos, llamadas a herramientas, duración y
+  tokens — más detección de bucles que detiene al agente cuando repite la misma acción sin
+  avanzar.
+- **Botón de paro real** que mata el comando en marcha, no solo el stream de texto.
+- **Logs de ejecución estructurados** (JSONL, locales) y un **modo desarrollador** opcional con
+  métricas de tokens/latencia bajo el chat.
+
 **Interfaz**
 
 - **UI holográfica** hecha a mano en HTML/CSS vanilla — sin frameworks de interfaz.
@@ -103,8 +116,8 @@ Descarga el artefacto que prefieras de la [página de releases](../../releases):
 
 | Artefacto | Qué es |
 |---|---|
-| `SAGITARI-Setup-1.0.1.exe` | Instalador Windows (NSIS): accesos directos, desinstalador |
-| `SAGITARI-Portable-1.0.1.exe` | Portable: un solo ejecutable, sin instalación |
+| `SAGITARI-Setup-1.1.0.exe` | Instalador Windows (NSIS): accesos directos, desinstalador |
+| `SAGITARI-Portable-1.1.0.exe` | Portable: un solo ejecutable, sin instalación |
 | `Source code (zip)` | Código fuente |
 
 > Windows SmartScreen puede avisar en la primera ejecución (binario sin firma). Pulsa
@@ -127,12 +140,16 @@ cd sagitari
 npm install
 
 npm start              # modo desarrollo
+npm test               # tests unitarios (guardarraíles, parseo de skills)
 npm run dist           # instalador NSIS + portable en dist/
 npm run dist:installer # solo instalador
 npm run dist:portable  # solo portable
 ```
 
 Requisitos: Node.js 18+ y Windows 10/11.
+
+Al empujar un tag `v*` se dispara el workflow de release en GitHub Actions: tests, compilación
+de instalador + portable, cálculo de SHA-256 y publicación automática de la release.
 
 ## Estructura del proyecto
 
