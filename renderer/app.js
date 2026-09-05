@@ -264,6 +264,7 @@ window.sagitari.onAgentEvent((ev) => {
       busy = ev.busy;
       setSendMode();
       if (busy) feed('Sagitari está trabajando', 'blu');
+      else hideConfirm();   // la ejecución terminó: ninguna tarjeta debe sobrevivir
       break;
     case 'stopped':
       finishAssistant('');

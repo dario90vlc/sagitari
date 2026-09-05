@@ -124,6 +124,13 @@ class Agent {
   // cuando la herramienta actual terminara sola.
   stop() {
     this.stopRequested = true;
+    // si el agente estaba esperando una confirmación del usuario, libérala:
+    // si no, la ejecución se quedaría colgada en el await para siempre
+    if (this.pendingConfirm) {
+      const pc = this.pendingConfirm;
+      this.pendingConfirm = null;
+      try { pc.resolve(false); } catch {}
+    }
     if (this.abort) this.abort.abort();
     if (this.runningTool && typeof this.runningTool.stop === 'function') {
       try { this.runningTool.stop(); } catch {}

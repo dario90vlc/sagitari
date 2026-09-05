@@ -523,6 +523,8 @@ i[data-i] { display: inline-flex; line-height: 0; }
 /* textarea rec state */
 #heroInput.rec, #chatInput.rec { color: var(--warn); }
 /* ===== v1.1: confirmation bar, dev metrics, security panel ===== */
+/* el atributo hidden debe ganar siempre: display:flex lo pisaría */
+.confirmbar[hidden] { display: none !important; }
 .confirmbar {
   display: flex; align-items: center; gap: 12px;
   margin: 0 18px 8px; padding: 10px 14px;
@@ -548,6 +550,13 @@ i[data-i] { display: inline-flex; line-height: 0; }
   padding: 2px 18px 6px; text-align: center;
   letter-spacing: .2px;
 }
+
+/* contenedor de chips de herramientas: columna ordenada, cada pill en su línea */
+.chip-run {
+  display: flex; flex-direction: column; align-items: flex-start;
+  gap: 4px; margin: 2px 0 7px;
+}
+.chip-run .toolchip { line-height: 1.35; max-width: 100%; }
 
 .grid { display: grid; grid-template-columns: 1fr 1fr; gap: 8px 12px; }
 .permrow {
