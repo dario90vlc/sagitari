@@ -7,6 +7,7 @@
   "scripts": {
     "start": "electron .",
     "smoke": "electron . --smoke",
+    "test": "node test/run.js",
     "dist": "electron-builder --win nsis portable",
     "dist:installer": "electron-builder --win nsis",
     "dist:portable": "electron-builder --win portable"

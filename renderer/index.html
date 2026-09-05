@@ -96,6 +96,17 @@
             <button class="btn ghost" id="btnGoHistory">Historial</button>
           </div>
         </div>
+        <div id="confirmBar" class="confirmbar" hidden>
+          <span class="cb-dot"></span>
+          <div class="cb-txt">
+            <b id="confirmTitle">Confirmación requerida</b>
+            <small id="confirmDetail"></small>
+          </div>
+          <div class="btnrow" style="margin:0">
+            <button class="btn primary" id="confirmOk">Permitir</button>
+            <button class="btn ghost" id="confirmNo">Denegar</button>
+          </div>
+        </div>
         <div id="chatWrap">
           <div id="messages"></div>
           <footer class="chatfoot">
@@ -106,6 +117,7 @@
               <button class="cbtn" id="chatMic" title="Dictado por voz"><i data-i="mic"></i></button>
               <button class="cbtn send" id="chatSend" title="Enviar"><i data-i="send"></i></button>
             </div>
+            <div id="devMeta" class="devmeta" hidden></div>
             <div class="hintbar"><span id="modeLabel">Modo Act</span><span id="chatModelLabel"></span></div>
           </footer>
         </div>
@@ -236,6 +248,18 @@
                 <option value="en-US">English (US)</option>
               </select>
             </div>
+            <div class="sub2">SEGURIDAD DEL AGENTE</div>
+            <div id="permList"></div>
+            <div class="subnote">«Por defecto» usa el nivel de riesgo recomendado de cada herramienta. «Seguro» se ejecuta sin preguntar; «Confirmar» pide permiso antes de actuar; «Bloqueado» impide usarla.</div>
+            <div class="grid">
+              <div class="field"><label>PASOS MÁX. (0 = ∞)</label><input type="number" id="grSteps" min="0" /></div>
+              <div class="field"><label>HERRAMIENTAS MÁX. (0 = ∞)</label><input type="number" id="grToolCalls" min="0" /></div>
+              <div class="field"><label>MINUTOS MÁX. (0 = ∞)</label><input type="number" id="grMinutes" min="0" /></div>
+              <div class="field"><label>TOKENS MÁX. (0 = ∞)</label><input type="number" id="grTokens" min="0" /></div>
+              <div class="field"><label>REPETICIONES = BUCLE</label><input type="number" id="grLoop" min="2" /></div>
+            </div>
+            <div class="subnote">Si el agente repite la misma acción sin avanzar, SAGITARI detiene la ejecución automáticamente para proteger el sistema.</div>
+            <div class="togglerow"><span>Modo desarrollador (métricas en el chat)</span><div class="sw" id="devModeSw"></div></div>
             <div class="sub2">ATAJOS</div>
             <div class="subnote">Alt + Espacio · mostrar u ocultar<br>Ctrl + Shift + G · pulso de glow</div>
           </div>

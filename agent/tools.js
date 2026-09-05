@@ -1,5 +1,28 @@
 'use strict';
 
+/* Every tool declares its risk level (shown in the agent prompt, used by the
+   permission engine in guardrails.js; user overrides in Settings win):
+     safe       → runs automatically
+     confirm    → asks the user before running
+     restricted → blocked unless explicitly allowed */
+const RISK = {
+  run_command: 'confirm',
+  write_file: 'confirm',
+  open_app: 'confirm',
+  open_url: 'safe',
+  read_file: 'safe',
+  list_dir: 'safe',
+  search_files: 'safe',
+  browser_control: 'confirm',
+  screenshot: 'safe',
+  clipboard: 'safe',
+  notify: 'safe',
+  media_control: 'safe',
+  window_manage: 'confirm',
+  system_info: 'safe',
+  use_skill: 'safe',
+};
+
 const defs = [
   {
     type: 'function',
@@ -204,4 +227,4 @@ const defs = [
   }
 ];
 
-module.exports = { toolDefs: defs };
+module.exports = { toolDefs: defs, RISK };

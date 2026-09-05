@@ -49,5 +49,10 @@ contextBridge.exposeInMainWorld('sagitari', {
   convRename: (title) => ipcRenderer.invoke('conv:rename', title),
   convDel: (id) => ipcRenderer.invoke('conv:del', id),
   setMode: (m) => ipcRenderer.invoke('mode:set', m),
-  getAgentsLive: () => ipcRenderer.invoke('agents:live')
+  getAgentsLive: () => ipcRenderer.invoke('agents:live'),
+  secResolve: (id, approved) => ipcRenderer.invoke('sec:resolve', { id, approved }),
+  secSetToolPerm: (tool, level) => ipcRenderer.invoke('sec:setToolPerm', { tool, level }),
+  secSetGuardrail: (patch) => ipcRenderer.invoke('sec:setGuardrail', patch),
+  metaGet: () => ipcRenderer.invoke('meta:get'),
+  logsRecent: (n) => ipcRenderer.invoke('logs:recent', n)
 });

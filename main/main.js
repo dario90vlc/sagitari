@@ -37,18 +37,37 @@ let config = {
   active: null,                  // {providerId, name, baseUrl, apiKey, model, temperature, vision}
   settings: { theme: 'violet', ttsEnabled: true, voiceLang: 'es-ES', glowEnabled: true, userName: 'Darío', mode: 'act' }
 };
+
+/* ---- v1.1 seguridad: permisos por herramienta + guardarraíles (configurables) ---- */
+const securityDefaults = {
+  permissions: {},               // { toolName: 'safe'|'confirm'|'restricted' } — vacío = defaults
+  guardrails: {
+    maxSteps: 60,                // 0 = sin límite
+    maxToolCalls: 80,            // 0 = sin límite
+    maxDurationMs: 15 * 60 * 1000, // 0 = sin límite
+    maxTokens: 0,                // 0 = sin límite
+    loopThreshold: 3,            // llamadas idénticas seguidas antes de parar
+  },
+};
 let providersChanged = false;
 
 function loadConfig() {
   try {
     const raw = JSON.parse(fs.readFileSync(CONFIG_FILE, 'utf8'));
     config = { ...config, ...raw, settings: { ...config.settings, ...(raw.settings || {}) } };
+    config.security = {
+      permissions: { ...(raw.security && raw.security.permissions || {}) },
+      guardrails: { ...securityDefaults.guardrails, ...(raw.security && raw.security.guardrails || {}) },
+    };
   } catch {
     try {
       const legacy = JSON.parse(fs.readFileSync(LEGACY_CONFIG, 'utf8'));
       config = { ...config, ...legacy, settings: { ...config.settings, ...(legacy.settings || {}) } };
+      config.security = { permissions: {}, guardrails: { ...securityDefaults.guardrails } };
       saveConfig();
-    } catch {}
+    } catch {
+      config.security = { permissions: {}, guardrails: { ...securityDefaults.guardrails } };
+    }
   }
 }
 function saveConfig() {
@@ -110,8 +129,11 @@ let agent = null;
 let whisper = null;          // child process handle for push-to-talk dictation
 let whisperBuf = '';
 
+const runlog = require('../agent/runlog');
+
 function wireAgent() {
   agent = new Agent({
+    guardrailsPolicy: config.security,
     emit: (e) => {
       if (win && !win.isDestroyed()) win.webContents.send('agent:event', e);
       if (e.type === 'tool') glow('work', 'work');
@@ -318,6 +340,41 @@ ipcMain.handle('chat:send', async (e, { text, imageDataUrl }) => {
 ipcMain.handle('chat:stop', () => { agent && agent.stop(); return { ok: true }; });
 ipcMain.handle('chat:clear', () => { agent && (agent.history = []); return { ok: true }; });
 
+// ---- v1.1 seguridad: confirmaciones, permisos, guardarraíles, métricas ----
+ipcMain.handle('sec:resolve', (e, { id, approved }) => {
+  if (agent) agent.resolveConfirm(id, approved);
+  return { ok: true };
+});
+ipcMain.handle('sec:setToolPerm', (e, { tool, level }) => {
+  if (!config.security) config.security = { permissions: {}, guardrails: securityDefaults.guardrails };
+  if (level === 'default') delete config.security.permissions[tool];
+  else config.security.permissions[tool] = String(level);
+  if (agent) agent.setPolicy(config.security);
+  saveConfig();
+  return { ok: true, permissions: config.security.permissions };
+});
+ipcMain.handle('sec:setGuardrail', (e, patch) => {
+  if (!config.security) config.security = { permissions: {}, guardrails: securityDefaults.guardrails };
+  const g = config.security.guardrails;
+  for (const [k, v] of Object.entries(patch || {})) {
+    if (k in g) g[k] = Math.max(0, Number(v) || 0);   // 0 = sin límite
+  }
+  if (agent) agent.setPolicy(config.security);
+  saveConfig();
+  return { ok: true, guardrails: g };
+});
+ipcMain.handle('meta:get', () => {
+  const g = (config.security && config.security.guardrails) || {};
+  return {
+    model: (config.active && config.active.model) || null,
+    guardrails: g,
+    permissions: (config.security && config.security.permissions) || {},
+    run: agent ? agent.getMeta() : null,
+    logFile: runlog.currentLogFile(),
+  };
+});
+ipcMain.handle('logs:recent', (e, n) => runlog.readRecent(Number(n) || 200));
+
 ipcMain.on('glow:set', (e, { mode, color }) => glow(mode, color));
 
 // ---- voice (Windows dictation: WinRT engine + SAPI fallback, UTF-8 protocol) ----
@@ -436,6 +493,7 @@ app.whenReady().then(() => {
   }
   loadConfig();
   seedStarterSkills();
+  runlog.log({ agent: 'sagitari', event: 'app_boot', version: app.getVersion() });
   createChatWindow();
 
   globalShortcut.register('Alt+Space', () => {
@@ -460,4 +518,5 @@ app.on('before-quit', () => {
   globalShortcut.unregisterAll();
   if (whisper) { try { whisper.kill(); } catch {} }            // dictado en marcha
   try { browser.ws && browser.send('Browser.close'); } catch {} // Chrome/Edge lanzado por CDP
+  try { runlog.close(); } catch {}                              // logs de sesión
 });

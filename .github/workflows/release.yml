@@ -1,0 +1,61 @@
+name: Release
+
+on:
+  push:
+    tags: ['v*']
+  workflow_dispatch:
+
+permissions:
+  contents: write
+
+jobs:
+  release:
+    runs-on: windows-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 20
+          cache: npm
+
+      - name: Install dependencies
+        run: npm ci
+
+      - name: Unit tests
+        run: npm test
+
+      - name: Build installer + portable
+        run: npm run dist
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+
+      - name: Compute SHA-256
+        id: hashes
+        shell: bash
+        run: |
+          echo "setup=$(sha256sum dist/SAGITARI-Setup-*.exe | cut -d' ' -f1)" >> $GITHUB_OUTPUT
+          echo "portable=$(sha256sum dist/SAGITARI-Portable-*.exe | cut -d' ' -f1)" >> $GITHUB_OUTPUT
+
+      - name: Release
+        uses: softprops/action-gh-release@v2
+        with:
+          generate_release_notes: true
+          files: |
+            dist/SAGITARI-Setup-*.exe
+            dist/SAGITARI-Portable-*.exe
+          body: |
+            Binarios oficiales de este tag, compilados automáticamente (CI).
+
+            **Descargas / Downloads**
+            - `SAGITARI-Setup-${{ github.ref_name }}.exe` — instalador / installer
+            - `SAGITARI-Portable-${{ github.ref_name }}.exe` — portable
+
+            **SHA-256**
+            ```
+            Setup:    ${{ steps.hashes.outputs.setup }}
+            Portable: ${{ steps.hashes.outputs.portable }}
+            ```
+
+            > Binario sin firmar: Windows SmartScreen puede avisar en la primera ejecución (Más información → Ejecutar de todas formas).
+            > Unsigned binary: SmartScreen may warn on first run (More info → Run anyway).

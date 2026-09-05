@@ -28,6 +28,18 @@ function parseFrontMatter(raw) {
     if (!kv) continue;
     const key = kv[1].trim().toLowerCase();
     let val = kv[2].trim();
+    // lista YAML ("- item" en las líneas siguientes) → array
+    if (val === '' && lines[i + 1] !== undefined && /^\s+-\s+\S/.test(lines[i + 1])) {
+      const list = [];
+      let j = i + 1;
+      while (j < lines.length && /^\s+-\s+\S/.test(lines[j])) {
+        list.push(lines[j].replace(/^\s+-\s+/, '').trim().replace(/^"|"$/g, ''));
+        j++;
+      }
+      i = j - 1;
+      meta[key] = list;
+      continue;
+    }
     // bloque YAML (>, |, >-, |-…): consume y une las líneas indentadas siguientes
     if (/^[>|][+-]?\d*$/.test(val)) {
       const block = [];
@@ -69,6 +81,8 @@ async function listSkills() {
       name: fm.meta.name,
       description: fm.meta.description || '',
       version: fm.meta.version || '',
+      author: fm.meta.author || '',
+      allowTools: Array.isArray(fm.meta.tools) ? fm.meta.tools.join(', ') : (fm.meta.tools || ''),
       enabled,
       bodyChars: fm.body.length,
       body: fm.body
@@ -180,4 +194,4 @@ async function deleteSkill(id) {
   await fsp.rm(path.join(skillsDir(), id), { recursive: true, force: true });
 }
 
-module.exports = { listSkills, promptIndex, promptIndexSync, getSkill, setEnabled, importFromGitHub, createSkill, deleteSkill, skillsDir };
+module.exports = { listSkills, promptIndex, promptIndexSync, getSkill, setEnabled, importFromGitHub, createSkill, deleteSkill, skillsDir, __test: { parseFrontMatter } };

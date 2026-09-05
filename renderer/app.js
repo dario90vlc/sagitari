@@ -252,6 +252,14 @@ window.sagitari.onAgentEvent((ev) => {
       speak(ev.text);
       feed('Respuesta lista', 'cy');
       break;
+    case 'guardrail':
+      toolChip('Límite de seguridad — ' + ev.reason.slice(0, 100), 'err');
+      feed('Límite de seguridad', 'err');
+      showToast(ev.reason);
+      break;
+    case 'confirm_request':
+      showConfirm(ev);
+      break;
     case 'busy':
       busy = ev.busy;
       setSendMode();
@@ -282,6 +290,37 @@ window.sagitari.onAgentEvent((ev) => {
 });
 
 function glowOffSoon() { setTimeout(() => window.sagitari.glow('off'), 2600); }
+
+// ============ v1.1: confirmación de acciones + métricas de ejecución ============
+let currentConfirm = null;
+function showConfirm(ev) {
+  currentConfirm = ev;
+  const bar = $('#confirmBar');
+  $('#confirmTitle').textContent = 'El agente quiere: ' + (ev.description || ev.tool);
+  $('#confirmDetail').textContent = ev.summary ? String(ev.summary).slice(0, 240) : 'Herramienta: ' + ev.tool;
+  bar.hidden = false;
+  feed('Esperando tu confirmación: ' + ev.tool, 'blu');
+}
+function hideConfirm() { currentConfirm = null; $('#confirmBar').hidden = true; }
+$('#confirmOk').onclick = async () => { const c = currentConfirm; hideConfirm(); if (c) await window.sagitari.secResolve(c.id, true); };
+$('#confirmNo').onclick = async () => { const c = currentConfirm; hideConfirm(); if (c) await window.sagitari.secResolve(c.id, false); };
+
+let devMode = false;
+async function paintMeta() {
+  const line = $('#devMeta');
+  if (!line) return;
+  if (!devMode) { line.hidden = true; return; }
+  try {
+    const m = await window.sagitari.metaGet();
+    const r = m.run || {};
+    const gr = m.guardrails || {};
+    line.hidden = false;
+    line.textContent = (m.model || '—') + ' · ' + (r.tokensIn || 0) + ' in / ' + (r.tokensOut || 0) + ' out tok · '
+      + (r.llmCalls || 0) + ' llamadas · ' + (r.toolCalls || 0) + ' herramientas · ' + (r.lastLatencyMs || 0) + ' ms'
+      + ' · límites: ' + (gr.maxSteps || '∞') + ' pasos / ' + (gr.maxDurationMs ? Math.round(gr.maxDurationMs / 60000) + ' min' : '∞');
+  } catch { line.hidden = true; }
+}
+setInterval(paintMeta, 2000);
 
 function setSendMode() {
   for (const id of ['#heroSend', '#chatSend']) {
@@ -551,6 +590,62 @@ $('#swTts').onclick = async (e) => { const on = !e.currentTarget.classList.conta
 $('#voiceLang').onchange = (e) => window.sagitari.setSettings({ voiceLang: e.target.value });
 $('#setUserName').onchange = (e) => { window.sagitari.setSettings({ userName: e.target.value }); CFG.settings.userName = e.target.value; tickClock(); };
 
+// ---- seguridad: permisos por herramienta + guardarraíles (v1.1) ----
+const PERM_TOOLS = [
+  { n: 'run_command', d: 'Ejecutar comandos en la terminal' },
+  { n: 'write_file', d: 'Crear o sobrescribir archivos' },
+  { n: 'browser_control', d: 'Controlar el navegador' },
+  { n: 'open_app', d: 'Abrir aplicaciones' },
+  { n: 'window_manage', d: 'Gestionar ventanas' },
+  { n: 'clipboard', d: 'Portapapeles' },
+];
+async function renderSecurity() {
+  let cfg = { permissions: {} };
+  try { const m = await window.sagitari.metaGet(); cfg.permissions = m.permissions || (CFG.security && CFG.security.permissions) || {}; } catch {}
+  const permBox = $('#permList');
+  if (!permBox) return;
+  permBox.innerHTML = '';
+  for (const t of PERM_TOOLS) {
+    const lvl = (cfg.permissions && cfg.permissions[t.n]) || 'default';
+    const row = document.createElement('div');
+    row.className = 'permrow';
+    row.innerHTML = `<span class="mt"><b>${t.n}</b><br><small class="md">${t.d}</small></span>
+      <select data-tool="${t.n}">
+        <option value="default"${lvl === 'default' ? ' selected' : ''}>Por defecto</option>
+        <option value="safe"${lvl === 'safe' ? ' selected' : ''}>Seguro</option>
+        <option value="confirm"${lvl === 'confirm' ? ' selected' : ''}>Confirmar</option>
+        <option value="restricted"${lvl === 'restricted' ? ' selected' : ''}>Bloqueado</option>
+      </select>`;
+    row.querySelector('select').onchange = (e) => window.sagitari.secSetToolPerm(t.n, e.target.value);
+    permBox.appendChild(row);
+  }
+}
+async function initSecurity() {
+  try {
+    const m = await window.sagitari.metaGet();
+    const g = m.guardrails || {};
+    $('#grSteps').value = g.maxSteps ?? 60;
+    $('#grToolCalls').value = g.maxToolCalls ?? 80;
+    $('#grMinutes').value = g.maxDurationMs ? Math.round(g.maxDurationMs / 60000) : 0;
+    $('#grTokens').value = g.maxTokens ?? 0;
+    $('#grLoop').value = g.loopThreshold ?? 3;
+    if (CFG.settings.devMode) { devMode = true; $('#devModeSw').classList.add('on'); paintMeta(); }
+  } catch {}
+  renderSecurity();
+}
+$('#grSteps').onchange = (e) => window.sagitari.secSetGuardrail({ maxSteps: Number(e.target.value) || 0 });
+$('#grToolCalls').onchange = (e) => window.sagitari.secSetGuardrail({ maxToolCalls: Number(e.target.value) || 0 });
+$('#grMinutes').onchange = (e) => window.sagitari.secSetGuardrail({ maxDurationMs: (Number(e.target.value) || 0) * 60000 });
+$('#grTokens').onchange = (e) => window.sagitari.secSetGuardrail({ maxTokens: Number(e.target.value) || 0 });
+$('#grLoop').onchange = (e) => window.sagitari.secSetGuardrail({ loopThreshold: Number(e.target.value) || 3 });
+$('#devModeSw').onclick = async (e) => {
+  devMode = !e.currentTarget.classList.contains('on');
+  e.currentTarget.classList.toggle('on', devMode);
+  await window.sagitari.setSettings({ devMode });
+  paintMeta();
+};
+initSecurity();
+
 // ============ conversation history ============
 let convTitle = 'Nueva conversación';
 function setChatTitle(t) {
@@ -682,7 +777,7 @@ async function renderSkills() {
     it.className = 'memitem skillitem' + (s.enabled ? '' : ' off');
     it.innerHTML = `
       <span class="tc-mark">${ic('zap')}</span>
-      <span class="mt"><b>${esc(s.name)}</b>${s.version ? ` <span class="md">v${esc(s.version)}</span>` : ''}<br><small class="md">${esc(s.description)}</small></span>
+      <span class="mt"><b>${esc(s.name)}</b>${s.version ? ` <span class="md">v${esc(s.version)}</span>` : ''}<br><small class="md">${esc(s.description)}</small>${s.author ? `<br><small class="md">por ${esc(s.author)}${s.allowTools ? ' · herramientas: ' + esc(s.allowTools) : ''}</small>` : (s.allowTools ? `<br><small class="md">herramientas: ${esc(s.allowTools)}</small>` : '')}</span>
       <span class="md">~${Math.ceil(s.bodyChars / 4)} tok</span>
       <button class="btn ghost sq" data-view title="Ver skill">${ic('search')}</button>
       <label class="sw ${s.enabled ? 'on' : ''}" data-sw title="Activar/desactivar"></label>

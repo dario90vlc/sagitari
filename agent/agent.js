@@ -6,8 +6,8 @@ const path = require('path');
 const { toolDefs } = require('./tools');
 const { executeTool } = require('./executors');
 const skills = require('./skills');
-
-const MAX_STEPS = 15;
+const { Guardrails } = require('./guardrails');
+const runlog = require('./runlog');
 
 function loadMemory() {
   try {
@@ -63,12 +63,29 @@ class Agent {
     this.emit = opts.emit;               // (event) => void  (to renderer)
     this.screenshotFn = opts.screenshotFn;
     this.browser = opts.browser;
-    this.history = [];                   // [{role, content, tool_calls?, tool_call_id?, name?, images?}]    this.busy = false;
+    this.history = [];                   // [{role, content, tool_calls?, tool_call_id?, name?, images?}]
+    this.busy = false;
     this.abort = null;
     this.stopRequested = false;       // el usuario pulsó Detener en esta conversación
     this.runningTool = null;          // { stop() } de la herramienta en ejecución
     this.toolsFired = new Map();      // name -> {count, lastAt}
+    this.guardrails = new Guardrails(opts.guardrailsPolicy || {});   // límites + permisos
+    this.pendingConfirm = null;       // {resolve, call} mientras el usuario decide
+    this.meta = { model: null, tokensIn: 0, tokensOut: 0, llmCalls: 0, toolCalls: 0, startedAt: null, lastLatencyMs: null, lastError: null };
   }
+
+  setPolicy(policy) { this.guardrails.setPolicy(policy); }
+
+  /** Respuesta del usuario a una tarjeta de confirmación (toolbar del chat). */
+  resolveConfirm(id, approved) {
+    const pc = this.pendingConfirm;
+    if (!pc || pc.id !== id) return false;
+    this.pendingConfirm = null;
+    pc.resolve(!!approved);
+    return true;
+  }
+
+  getMeta() { return { ...this.meta, busy: this.busy }; }
 
   isBusy() { return this.busy; }
   getToolsFired() {
@@ -121,6 +138,13 @@ class Agent {
     }
     const mode = MODE_PROFILES[settings.settings?.mode] || MODE_PROFILES.act;
     this._mode = mode;
+    this.meta.model = cfg.model || this.meta.model;
+    this.meta.startedAt = Date.now();
+    this.meta.lastError = null;
+    this.guardrails.beginRun();
+    const runStart = Date.now();
+    const runId = 'r' + runStart.toString(36);
+    runlog.log({ agent: 'sagitari', task: runId, event: 'run_start', mode: settings.settings?.mode || 'act', model: cfg.model });
 
     const content = imageDataUrl
       ? [{ type: 'text', text: userText || 'Analiza esta imagen' }, { type: 'image_url', image_url: { url: imageDataUrl } }]
@@ -140,13 +164,36 @@ class Agent {
     this.emit({ type: 'busy', busy: true });
     let assistantSaidSomething = false;
 
-    while (true) { // sin límite de pasos: el agente para cuando termina o el usuario detiene
+    while (true) {
+      // ---- guardrail: límites de pasos / tiempo (configurables; 0 = sin límite) ----
+      const stepCheck = this.guardrails.checkStep();
+      if (!stepCheck.ok) {
+        this.emit({ type: 'status', text: 'Límite de seguridad alcanzado — detenido' });
+        this.emit({ type: 'guardrail', reason: stepCheck.reason });
+        runlog.log({ agent: 'sagitari', task: runId, event: 'guardrail_stop', reason: stepCheck.reason });
+        this._pushAssistant(assistantSaidSomething ? { role: 'assistant', content: '(detenido por límite de seguridad)' } : null);
+        return;
+      }
       if (signal.aborted) {
         this._pushAssistant(assistantSaidSomething ? { role: 'assistant', content: '(detenido por el usuario)' } : null);
         this.emit({ type: 'stopped' });
         return;
       }
+      const t0 = Date.now();
       const res = await this._streamOnce(cfg, messages, signal);
+      this.meta.llmCalls++;
+      this.meta.lastLatencyMs = Date.now() - t0;
+      if (res.usage) {
+        this.meta.tokensIn += res.usage.prompt_tokens || 0;
+        this.meta.tokensOut += res.usage.completion_tokens || 0;
+        runlog.log({ agent: 'sagitari', task: runId, event: 'llm', model: cfg.model, durationMs: this.meta.lastLatencyMs, tokens: res.usage });
+        const tok = this.guardrails.addTokens((res.usage.total_tokens || 0));
+        if (!tok.ok) {
+          this.emit({ type: 'guardrail', reason: tok.reason });
+          this._pushAssistant(assistantSaidSomething ? { role: 'assistant', content: '(detenido por límite de tokens)' } : null);
+          return;
+        }
+      }
       if (res.aborted) { this._pushAssistant(assistantSaidSomething ? { role: 'assistant', content: res.text || '(interrumpido)' } : null); this.emit({ type: 'stopped' }); return; }
 
       if (res.toolCalls && res.toolCalls.length) {
@@ -163,6 +210,45 @@ class Agent {
           this.emit({ type: 'status', text: statusFor(tc.function.name, args) });
           const tf = this.toolsFired.get(tc.function.name) || { count: 0, lastAt: 0 };
           this.toolsFired.set(tc.function.name, { count: tf.count + 1, lastAt: Date.now() });
+
+          // ---- guardrail: límite de llamadas + detección de bucles ----
+          const callCheck = this.guardrails.checkToolCall();
+          if (!callCheck.ok) { this.emit({ type: 'guardrail', reason: callCheck.reason }); break; }
+          const loop = this.guardrails.isLoop(tc.function.name, args);
+          if (loop.loop) {
+            const reason = `Bucle detectado (${loop.pattern}): la misma acción se repite sin avanzar. Ejecución detenida para proteger el sistema.`;
+            this.emit({ type: 'status', text: 'Bucle detectado — detenido' });
+            this.emit({ type: 'guardrail', reason });
+            runlog.log({ agent: 'sagitari', task: runId, event: 'loop_detected', tool: tc.function.name, pattern: loop.pattern });
+            this._pushAssistant(assistantSaidSomething ? { role: 'assistant', content: '(detenido: bucle detectado)' } : null);
+            return;
+          }
+
+          // ---- permisos: safe → ejecuta; confirm → pregunta; restricted → bloquea ----
+          const decision = this.guardrails.decide(tc.function.name, args);
+          if (decision.action === 'deny') {
+            const text = decision.reason;
+            messages.push({ role: 'tool', tool_call_id: tc.id, name: tc.function.name, content: text });
+            this.history.push({ role: 'tool', tool_call_id: tc.id, name: tc.function.name, content: text });
+            this.emit({ type: 'tool_result', name: tc.function.name, result: text.slice(0, 400) });
+            continue;
+          }
+          if (decision.action === 'confirm') {
+            const cid = 'c' + Date.now().toString(36);
+            this.emit({ type: 'confirm_request', id: cid, tool: tc.function.name, description: decision.description, summary: decision.summary });
+            runlog.log({ agent: 'sagitari', task: runId, event: 'confirm_request', tool: tc.function.name, args });
+            const approved = await new Promise((resolve) => { this.pendingConfirm = { id: cid, resolve }; });
+            if (!approved) {
+              const text = 'El usuario DENEGÓ esta acción. No la repitas; continúa con la tarea por otra vía o pregunta qué prefiere hacer.';
+              messages.push({ role: 'tool', tool_call_id: tc.id, name: tc.function.name, content: text });
+              this.history.push({ role: 'tool', tool_call_id: tc.id, name: tc.function.name, content: text });
+              this.emit({ type: 'tool_result', name: tc.function.name, result: 'Denegado por el usuario' });
+              continue;
+            }
+            this.guardrails.approve(decision.signature);
+          }
+
+          const toolT0 = Date.now();
           let result;
           try {
             result = await executeTool(tc.function.name, args, {
@@ -176,9 +262,15 @@ class Agent {
             });
           } catch (e) { result = 'Error: ' + e.message; }
           this.runningTool = null;
-
+          this.meta.toolCalls++;
           const images = result && typeof result === 'object' ? result.images : undefined;
           const text = result && typeof result === 'object' ? result.text : String(result);
+          runlog.log({
+            agent: 'sagitari', task: runId, event: 'tool', tool: tc.function.name,
+            args, durationMs: Date.now() - toolT0,
+            success: !(typeof text === 'string' && text.startsWith('Error')),
+            error: (typeof text === 'string' && text.startsWith('Error')) ? String(text).slice(0, 200) : undefined,
+          });
           // Feed vision inputs (screenshots) back to the model when supported
           const toolContent = images && cfg.vision !== false
             ? [{ type: 'text', text }, ...images.map(u => ({ type: 'image_url', image_url: { url: u } }))]
@@ -193,10 +285,10 @@ class Agent {
 
       // Final text answer
       this.history.push({ role: 'assistant', content: res.text });
+      runlog.log({ agent: 'sagitari', task: runId, event: 'run_end', durationMs: Date.now() - runStart, tokens: { prompt_tokens: this.meta.tokensIn, completion_tokens: this.meta.tokensOut } });
       this.emit({ type: 'assistant_done', text: res.text });
       return;
     }
-    // (sin límite de pasos)
   }
 
   _pushAssistant(msg) { if (msg) { this.history.push(msg); this.emit({ type: 'assistant_done', text: msg.content }); } }
@@ -211,6 +303,9 @@ class Agent {
       tool_choice: 'auto'
     };
     if (cfg.maxTokens) body.max_tokens = cfg.maxTokens;
+    // Ask OpenAI-compatible providers to include usage in the final SSE chunk
+    // (harmless for those that ignore it; Ollama's OpenAI layer includes usage anyway).
+    if (!cfg.noUsage) body.stream_options = { include_usage: true };
 
     const url = cfg.baseUrl.replace(/\/+$/, '') + '/chat/completions';
     const resp = await this.fetchFn(url, {
@@ -230,6 +325,7 @@ class Agent {
 
     let text = '';
     let aborted = false;
+    let usage = null;
     const toolCalls = [];
     const reader = resp.body.getReader();
     const decoder = new TextDecoder();
@@ -250,6 +346,7 @@ class Agent {
         if (payload === '[DONE]') continue;
         let json;
         try { json = JSON.parse(payload); } catch { continue; }
+        if (json.usage) usage = json.usage;   // chunk final (choices vacías) con tokens
         const delta = json.choices?.[0]?.delta;
         if (!delta) continue;
         if (delta.content) {
@@ -269,7 +366,7 @@ class Agent {
         }
       }
     }
-    return { text: text.trim(), toolCalls: toolCalls.filter(Boolean).filter(t => t.function.name), aborted };
+    return { text: text.trim(), toolCalls: toolCalls.filter(Boolean).filter(t => t.function.name), aborted, usage };
   }
 }
 

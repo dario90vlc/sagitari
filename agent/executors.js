@@ -96,7 +96,9 @@ async function executeTool(name, args, ctx) {
     case 'use_skill': {
       const s = await skills.getSkill(args.name || '');
       if (!s) return `Error: skill "${args.name}" no encontrada. Skills disponibles: ${(await skills.listSkills()).filter(x => x.enabled).map(x => x.name).join(', ') || '(ninguna)'}`;
-      return `# Skill: ${s.name}\n\n${s.body}`;
+      // límite declarado de herramientas (informativo para el agente; los permisos reales los decide el usuario en Ajustes)
+      const scope = s.allowTools ? `\n\nHERRAMIENTAS AUTORIZADAS POR ESTA SKILL: ${s.allowTools}. Evita usar otras salvo necesidad justificada.` : '';
+      return `# Skill: ${s.name}\n\n${s.body}${scope}`;
     }
     case 'run_command': {
       const timeout = Math.min(Math.max(args.timeout_seconds || 60, 5), 300) * 1000;
