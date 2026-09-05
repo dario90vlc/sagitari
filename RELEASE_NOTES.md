@@ -71,9 +71,13 @@ automatic CI/CD.
 
 ## Verificación / Verification
 
-Los hashes SHA-256 de ambos ejecutables están en el cuerpo de la release (calculados por el
-workflow de CI). / SHA-256 hashes for both executables are in the release body (computed by
-the CI workflow).
+SHA-256 de los ejecutables (calculados por el workflow de CI) / SHA-256 of the executables
+(computed by the CI workflow):
+
+```
+SAGITARI-Setup-1.1.0.exe    4a0848fd30f9c1e99df6cf9df35876aa779a039dc33a18558a10fdef28d85e4a
+SAGITARI-Portable-1.1.0.exe 2d81e0913c3160cbdb3914430a33098dc12fd30e57f0c9d6ab3d863e8160bbe7
+```
 
 ## Requisitos / Requirements
 
