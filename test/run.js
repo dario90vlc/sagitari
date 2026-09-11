@@ -3,11 +3,25 @@
 /* Minimal test runner for SAGITARI's pure logic. Node-only, no Electron.
    Usage: node test/run.js   (exit code 0 = all green) */
 
+const fs = require('fs');
+const path = require('path');
+
 let pass = 0, fail = 0;
 const failures = [];
+const pendingAsync = [];
 
 function test(name, fn) {
-  try { fn(); pass++; console.log('  ok  ' + name); }
+  try {
+    const r = fn();
+    if (r && typeof r.then === 'function') {
+      pendingAsync.push(r.then(
+        () => { pass++; console.log('  ok  ' + name); },
+        (e) => { fail++; failures.push({ name, err: e.message }); console.error('FAIL  ' + name + ' — ' + e.message); }
+      ));
+      return;
+    }
+    pass++; console.log('  ok  ' + name);
+  }
   catch (e) { fail++; failures.push({ name, err: e.message }); console.error('FAIL  ' + name + ' — ' + e.message); }
 }
 function eq(a, b, msg) { if (a !== b) throw new Error((msg || 'eq') + `: esperado ${JSON.stringify(b)}, obtenido ${JSON.stringify(a)}`); }
@@ -133,11 +147,1213 @@ test('parseFrontMatter extracts version/author and YAML lists', () => {
   eq(fm.meta.tools[1], 'read_file');
 });
 
-console.log('');
-if (fail) {
-  console.error(`${fail} test(s) fallaron, ${pass} pasaron`);
-  failures.forEach(f => console.error('  ✗ ' + f.name + ' → ' + f.err));
-  process.exit(1);
-} else {
-  console.log(`Todos los tests en verde (${pass})`);
+/* ---------- v1.2: guardrails de coste y ausencia de progreso ---------- */
+const { pricingFor } = require('../agent/guardrails');
+
+test('pricingFor matches model families with a sane default', () => {
+  ok(pricingFor('gpt-4o-2024').in > 0);
+  eq(pricingFor('claude-sonnet-4').out, 15);
+  ok(pricingFor('modelo-desconocido').in > 0, 'default pricing');
+});
+
+test('addTokens enforces the estimated-cost budget', () => {
+  const g = new Guardrails({ guardrails: { maxCostUsd: 0.01 } });
+  g.model = 'gpt-4o';
+  // 100k in + 100k out a tarifas gpt-4o ≫ 0.01 USD
+  const r = g.addTokens(200000, { prompt_tokens: 100000, completion_tokens: 100000 });
+  eq(r.ok, false);
+  ok(g.getCost() > 0.01, 'coste acumulado por encima del límite');
+});
+
+test('addTokens passes under the cost budget', () => {
+  const g = new Guardrails({ guardrails: { maxCostUsd: 10 } });
+  g.model = 'llama';
+  ok(g.addTokens(1000, { prompt_tokens: 600, completion_tokens: 400 }).ok);
+});
+
+test('checkStall fires after N steps without progress and resets with progress', () => {
+  const g = new Guardrails({ guardrails: { stallThreshold: 3 } });
+  ok(g.checkStall({}).ok);
+  ok(g.checkStall({}).ok);
+  ok(!g.checkStall({}).ok, '3 pasos sin progreso = stall');
+  ok(g.checkStall({ assistantText: 'voy bien' }).ok, 'texto = progreso, reinicia');
+  ok(g.checkStall({ toolName: 'read_file' }).ok, 'herramienta nueva = progreso');
+  ok(g.checkStall({ toolName: 'read_file' }).ok, 'repetida #1 tras progreso: _stall=1');
+  ok(g.checkStall({ toolName: 'read_file' }).ok, 'repetida #2: _stall=2');
+  ok(!g.checkStall({ toolName: 'read_file' }).ok, 'repetida #3: _stall=3 = stall');
+  ok(g.checkStall({ toolName: 'write_file' }).ok, 'herramienta nueva = progreso');
+});
+
+test('stallThreshold 0 disables stall detection', () => {
+  const g = new Guardrails({ guardrails: { stallThreshold: 0 } });
+  for (let i = 0; i < 50; i++) ok(g.checkStall({}).ok);
+});
+
+/* ---------- v1.2: memoria avanzada (almacén aislado en tmp) ---------- */
+const os = require('os');
+const memory = require('../agent/memory');
+const MEM_DIR = fs.mkdtempSync(path.join(os.tmpdir(), 'sagi-mem-'));
+memory.__test._resetForTests(path.join(MEM_DIR, 'memory.json'));
+
+test('memory add + list keep full metadata', () => {
+  const m = memory.add({ text: 'El usuario prefiere informes en PDF', source: 'agent', importance: 0.9 });
+  ok(m.id && m.date && m.uses === 0);
+  eq(m.importance, 0.9);
+  eq(m.confidence, 0.8);
+  eq(memory.list().length, 1);
+});
+
+test('memory dedupes identical text and reinforces instead', () => {
+  memory.add({ text: 'El usuario prefiere informes en PDF', importance: 0.3 });
+  eq(memory.list().length, 1, 'no duplicados');
+  eq(memory.list()[0].importance, 0.9, 'importancia = max');
+});
+
+test('relevantMemories ranks overlapping memories first and filters irrelevant', () => {
+  memory.add({ text: 'Uso VSCode como editor principal' });
+  memory.add({ text: 'Trabajo con proyectos de Blender y renders' });
+  const rel = memory.relevantMemories('¿qué editor de código uso para programar?', { minScore: 0 });
+  ok(rel.length >= 1);
+  ok(rel[0].mem.text.includes('VSCode'), 'el recuerdo sobre editores va primero');
+  const strict = memory.relevantMemories('cocinar pasta carbonara', { minScore: 0.99 });
+  ok(!strict.some(x => x.overlap > 0), 'nada relevante para recetas de cocina');
+});
+
+test('relevantMemories falls back to most important when nothing overlaps', () => {
+  const rel = memory.relevantMemories('tema totalmente distinto xyzzy', { minScore: 0.99 });
+  ok(rel.length >= 1, 'fallback a importantes');
+  ok(rel.every(x => x.overlap === 0));
+});
+
+test('memory update clamps importance and removes work', () => {
+  const l = memory.list();
+  const id = l[0].id;
+  memory.update(id, { importance: 7 });
+  eq(memory.list().find(x => x.id === id).importance, 1, 'clamp a 1');
+  memory.remove(id);
+  ok(!memory.list().find(x => x.id === id));
+});
+
+/* ---------- v1.2: checkpoints (directorio aislado en tmp) ---------- */
+const checkpoints = require('../agent/checkpoints');
+const TASKS_TMP = fs.mkdtempSync(path.join(os.tmpdir(), 'sagi-tasks-'));
+checkpoints.__test._resetForTests(TASKS_TMP);
+
+test('checkpoints: newRun + save + read roundtrip', () => {
+  const run = checkpoints.newRun({ goal: 'Investigar precios de vuelos', mode: 'plan' });
+  checkpoints.save(run);
+  const r = checkpoints.read(run.runId);
+  ok(r && r.runId === run.runId);
+  eq(r.status, 'running');
+  eq(r.step, 'EXECUTE');
+});
+
+test('checkpoints: record keeps last completed step and history', () => {
+  const run = checkpoints.newRun({ goal: 'g' });
+  checkpoints.record(run, { step: 'EXECUTE', tool: 'open_url', ok: true, summary: 'abierta' });
+  checkpoints.record(run, { step: 'EXECUTE', tool: 'write_file', ok: false, summary: 'Error: EACCES' });
+  const r = checkpoints.read(run.runId);
+  eq(r.history.length, 2);
+  eq(r.lastOkStep, 'EXECUTE');
+});
+
+test('checkpoints: fail stores which step failed and why', () => {
+  const run = checkpoints.newRun({ goal: 'g2' });
+  checkpoints.fail(run, { step: 'VERIFY', tool: 'browser_control', message: 'la página no mostró confirmación' });
+  const r = checkpoints.read(run.runId);
+  eq(r.status, 'failed');
+  eq(r.lastError.step, 'VERIFY');
+  ok(r.lastError.message.includes('confirmación'));
+});
+
+test('checkpoints: pause/resume/interrupt lifecycle + recoverable', () => {
+  const run = checkpoints.newRun({ goal: 'g3' });
+  checkpoints.pause(run);
+  eq(checkpoints.read(run.runId).status, 'paused');
+  checkpoints.resume(run);
+  eq(checkpoints.read(run.runId).status, 'running');
+  checkpoints.interrupt(run);
+  const rec = checkpoints.recoverable();
+  ok(rec.some(t => t.runId === run.runId), 'interrumpida es recuperable');
+});
+
+test('checkpoints: complete archives the task with its result', () => {
+  const run = checkpoints.newRun({ goal: 'g4' });
+  checkpoints.complete(run, 'Informe creado y verificado');
+  const r = checkpoints.read(run.runId);
+  eq(r.status, 'completed');
+  ok(r.result.includes('verificado'));
+});
+
+test('checkpoints: list and remove', () => {
+  const all = checkpoints.list('all');
+  ok(all.length >= 4, 'hay tareas archivadas');
+  const target = all[0];
+  checkpoints.remove(target.runId);
+  ok(!checkpoints.list('all').find(t => t.runId === target.runId));
+});
+
+test('checkpoints: list("active") excluye las tareas archivadas', () => {
+  const dir = fs.mkdtempSync(path.join(os.tmpdir(), 'sagi-active-'));
+  checkpoints.__test._resetForTests(dir);
+  const a = checkpoints.newRun({ goal: 'activa' }); checkpoints.save(a);
+  const c = checkpoints.newRun({ goal: 'completada' }); checkpoints.save(c); checkpoints.complete(c, 'hecho');
+  const f = checkpoints.newRun({ goal: 'fallida' }); checkpoints.fail(f, { step: 'EXECUTE', message: 'boom' });
+  const activeIds = checkpoints.list('active').map(t => t.runId);
+  ok(activeIds.includes(a.runId), 'la activa aparece');
+  ok(!activeIds.includes(c.runId), 'la completada NO aparece en activas');
+  ok(!activeIds.includes(f.runId), 'la fallida NO aparece en activas');
+  eq(checkpoints.list('all').length, 3, 'all sí incluye las tres');
+});
+
+/* ---------- v1.2: herramienta remember (integración con executors) ---------- */
+const { executeTool } = require('../agent/executors');
+test('remember tool stores a memory via executeTool', async () => {
+  const before = memory.list().length;
+  const out = await executeTool('remember', { text: 'Prefiero respuestas concisas', importance: 0.7 }, {});
+  ok(out.startsWith('OK'), out);
+  eq(memory.list().length, before + 1);
+});
+
+test('remember tool rejects empty text', async () => {
+  const out = await executeTool('remember', { text: '' }, {});
+  ok(out.startsWith('Error'));
+});
+
+(async () => {
+  for (const p of pendingAsync) { try { await p; } catch {} }
+  /* ---------- v1.3: TaskManager (cola, concurrencia, pausa, cancelar, programadas) ---------- */
+const { TaskManager } = require('../agent/tasks');
+const TASKS_TM = fs.mkdtempSync(path.join(os.tmpdir(), 'sagi-tm-'));
+checkpoints.__test._resetForTests(TASKS_TM);
+
+function makeManager(overrides = {}) {
+  const pausedOnce = new Set();   // behavior 'pause': pausa solo el primer arranque de cada tarea
+  return new TaskManager({
+    getSettings: () => ({ active: { model: 'fake-model', baseUrl: 'http://localhost:0/v1' }, settings: { maxConcurrentTasks: 1, ...(overrides.settings || {}) } }),
+    agentFactory: () => ({
+      chat: async (goal, settings, img, opts) => {
+        if (overrides.behavior === 'fail') {
+          if (opts && opts.task) checkpoints.fail(opts.task, { step: 'EXECUTE', tool: 'run_command', message: 'fallo simulado' });
+          throw new Error('fallo simulado');
+        }
+        if (overrides.behavior === 'pause' && opts && opts.task && !pausedOnce.has(opts.task.runId)) {
+          pausedOnce.add(opts.task.runId);
+          checkpoints.pause(opts.task);
+          (overrides.onPaused || (() => {}))(opts.task);
+          return;
+        }
+        if (opts && opts.task) checkpoints.complete(opts.task, 'hecho: ' + goal.slice(0, 20));
+      },
+      stop: () => {},
+      getMeta: () => ({ busy: false, tokensIn: 0, tokensOut: 0, costUsd: 0, toolCalls: 0 }),
+      getToolsFired: () => [],
+      pause: () => {},
+    }),
+    emit: overrides.emit || (() => {}),
+    notify: overrides.notify || (() => {}),
+  });
 }
+
+const wait = (ms) => new Promise(r => setTimeout(r, ms));
+
+test('TaskManager: enqueue + running → completed with notification', async () => {
+  const notes = [];
+  const tm = makeManager({ notify: (run, kind) => notes.push(kind) });
+  const r = tm.enqueue({ goal: 'Investigar vuelos baratos' });
+  ok(r.ok && r.runId);
+  await wait(80);
+  const t = checkpoints.read(r.runId);
+  eq(t.status, 'completed');
+  ok(notes.includes('completed'), 'notifica al terminar: ' + JSON.stringify(notes));
+  ok(t.result.includes('vuelos'));
+  tm.dispose();
+});
+
+test('TaskManager: rejects empty goal and invalid schedule', async () => {
+  const tm = makeManager();
+  eq(tm.enqueue({ goal: '' }).ok, false);
+  eq(tm.enqueue({ goal: 'x', scheduledAt: 'no-es-fecha' }).ok, false);
+  tm.dispose();
+});
+
+test('TaskManager: scheduled task waits and ticks to pending', async () => {
+  const tm = makeManager();
+  const r = tm.enqueue({ goal: 'tarea futura', scheduledAt: new Date(Date.now() + 30 * 60000).toISOString() });
+  ok(r.ok);
+  await wait(30);
+  eq(checkpoints.read(r.runId).status, 'scheduled', 'queda programada');
+  // fuerza el vencimiento y tick manual (no esperamos los 20s del timer)
+  const run = checkpoints.read(r.runId);
+  run.scheduledAt = new Date(Date.now() - 1000).toISOString();
+  checkpoints.save(run);
+  tm._tick();
+  await wait(30);
+  const t = checkpoints.read(r.runId);
+  ok(['pending', 'running', 'completed'].includes(t.status), 'tras tick se encola/ejecuta: ' + t.status);
+  tm.dispose();
+});
+
+test('TaskManager: pause a pending task keeps it paused, resume re-enqueues', async () => {
+  const tm = makeManager({ behavior: 'pause' });
+  tm.enqueue({ goal: 'tarea pausable' });
+  await wait(60);
+  const pend = checkpoints.list('active').find(t => t.goal === 'tarea pausable');
+  ok(pend, 'la tarea existe');
+  // encolamos otra pendiente y la pausamos (status pending → paused)
+  const r2 = tm.enqueue({ goal: 'otra más' });
+  // con concurrencia 1 y behavior pause, la primera se completa como paused
+  await wait(60);
+  const r = tm.pause(r2.runId);
+  eq(r.ok, true);
+  eq(checkpoints.read(r2.runId).status, 'paused');
+  const rs = tm.resume(r2.runId);
+  eq(rs.ok, true);
+  await wait(60);
+  eq(checkpoints.read(r2.runId).status, 'completed');
+  tm.dispose();
+});
+
+test('TaskManager: cancel archives the task as cancelled', async () => {
+  const tm = makeManager({ behavior: 'pause' });
+  const r = tm.enqueue({ goal: 'tarea cancelable' });
+  await wait(40);
+  const c = tm.cancel(r.runId, 'ya no la quiero');
+  eq(c.ok, true);
+  const t = checkpoints.read(r.runId);
+  eq(t.status, 'cancelled');
+  ok(t.lastError.message.includes('ya no la quiero'));
+  eq(tm.cancel(r.runId).ok, false, 'no se cancela dos veces');
+  tm.dispose();
+});
+
+test('TaskManager: autoResume re-enqueues interrupted tasks', async () => {
+  const run = checkpoints.newRun({ goal: 'huérfana del crash' });
+  checkpoints.interrupt(run);
+  const tm = makeManager();
+  const r = tm.autoResume();
+  ok(r.resumed >= 1, 're-encola al menos la huérfana');
+  await wait(60);
+  eq(checkpoints.read(run.runId).status, 'completed');
+  tm.dispose();
+});
+
+test('TaskManager: no model configured → task parked as paused', async () => {
+  const tm = new TaskManager({
+    getSettings: () => ({ active: null, settings: {} }),
+    agentFactory: () => { throw new Error('no debería crearse'); },
+    emit: () => {}, notify: () => {},
+  });
+  const r = tm.enqueue({ goal: 'sin proveedor' });
+  await wait(40);
+  const t = checkpoints.read(r.runId);
+  eq(t.status, 'paused');
+  tm.dispose();
+});
+
+/* ---------- v1.4: subagentes y delegación ---------- */
+const subagents = require('../agent/subagents');
+
+test('subagents: every spec has tools, budget and a system prompt', () => {
+  ok(subagents.SUBAGENT_KEYS.length >= 6);
+  for (const k of subagents.SUBAGENT_KEYS) {
+    const spec = subagents.SUBAGENTS[k];
+    ok(spec.allowTools.length >= 2, k + ' tiene herramientas');
+    ok(spec.maxSteps > 0 && spec.maxSteps <= 40, k + ' presupuesto razonable');
+    ok(subagents.subagentSystemPrompt(k).includes('RESULT:'), k + ' prompt con formato');
+  }
+});
+
+test('subagents: toolDefsFor restricts to allowed tools only', () => {
+  const defs = subagents.toolDefsFor('research');
+  ok(defs.length >= 2);
+  ok(defs.every(d => subagents.SUBAGENTS.research.allowTools.includes(d.function.name)));
+  ok(!defs.some(d => d.function.name === 'run_command'), 'research NO tiene terminal');
+  ok(!subagents.toolDefsFor('vision').some(d => d.function.name === 'write_file'));
+});
+
+test('subagents: delegate def is in toolDefs and has the right enum', () => {
+  const { toolDefs } = require('../agent/tools');
+  const d = toolDefs.find(t => t.function.name === 'delegate');
+  ok(d, 'delegate registrada');
+  ok(d.function.parameters.properties.agent.enum.includes('verification'));
+});
+
+test('subagents: parseSubagentResult extracts structured output', () => {
+  const p = subagents.parseSubagentResult('RESULT: Encontrados 3 vuelos\nDETAILS: url=x\nSTATUS: OK');
+  eq(p.status, 'OK');
+  eq(p.result, 'Encontrados 3 vuelos');
+  eq(p.details, 'url=x');
+  const f = subagents.parseSubagentResult('RESULT: nada\nSTATUS: FAILED');
+  eq(f.status, 'FAILED');
+  const legacy = subagents.parseSubagentResult('hice lo que pediste sin formato');
+  ok(legacy.result.length > 0, 'fallback al texto plano');
+});
+
+/* ---------- v1.5: seguridad del navegador + perfiles ---------- */
+const { isSensitiveBrowserAction } = require('../agent/guardrails');
+
+test('sensitive browser actions always require confirmation', () => {
+  ok(isSensitiveBrowserAction('browser_control', { action: 'click', text: 'Finalizar compra' }));
+  ok(isSensitiveBrowserAction('browser_control', { action: 'click', text: 'Eliminar cuenta' }));
+  ok(isSensitiveBrowserAction('browser_control', { action: 'type', selector: '#card-number', text: '4111' }));
+  ok(isSensitiveBrowserAction('browser_control', { action: 'click', text: 'Publicar comentario' }));
+});
+
+test('regular browser actions are NOT sensitive', () => {
+  ok(!isSensitiveBrowserAction('browser_control', { action: 'click', text: 'Más información' }));
+  ok(!isSensitiveBrowserAction('browser_control', { action: 'navigate', url: 'https://x.com' }));
+  ok(!isSensitiveBrowserAction('browser_control', { action: 'screenshot' }));
+  ok(!isSensitiveBrowserAction('run_command', { command: 'comprar pan' }));
+});
+
+test('guardrails.decide forces confirm on sensitive actions even when browser is safe', () => {
+  const g = new Guardrails({ permissions: { browser_control: 'safe' } });
+  const d = g.decide('browser_control', { action: 'click', text: 'Pagar ahora' });
+  eq(d.action, 'confirm');
+  eq(d.sensitive, true);
+  // y una acción normal sigue permitida
+  eq(g.decide('browser_control', { action: 'navigate', url: 'https://x.com' }).action, 'allow');
+});
+
+test('browser profiles: each profile gets its own data dir', () => {
+  const { profileDirFor } = require('../agent/browser-profiles');
+  const d1 = profileDirFor('default');
+  const work = profileDirFor('work');
+  const personal = profileDirFor('personal');
+  ok(work !== d1, 'work ≠ default');
+  ok(/work/.test(work));
+  ok(personal !== d1 && personal !== work, 'personal ≠ default ≠ work');
+  ok(/personal/.test(personal));
+  eq(profileDirFor('Mi Work!').toLowerCase().includes('mi_work'), true, 'saneado de nombres');
+  eq(profileDirFor(''), profileDirFor(undefined), 'vacío → default');
+});
+
+/* ---------- v1.6: Model Router, Fallback y Health ---------- */
+const modelsMod = require('../agent/models');
+const HEALTH_TMP = fs.mkdtempSync(path.join(os.tmpdir(), 'sagi-health-'));
+modelsMod._resetForTests(path.join(HEALTH_TMP, 'health.json'));
+
+test('classify detects task categories', () => {
+  eq(modelsMod.classify('escribe un script de python que ordene archivos'), 'coding');
+  eq(modelsMod.classify('navega a wikipedia y lee el artículo'), 'browser');
+  eq(modelsMod.classify('investiga y compara precios de portátiles'), 'research');
+  eq(modelsMod.classify('razona sobre este dilema y decide'), 'reasoning');
+  eq(modelsMod.classify('hola'), 'simple');
+  eq(modelsMod.classify('analiza esto', { hasImage: true }), 'vision');
+});
+
+test('fallbackChain: primary → manual → others → locals', () => {
+  const cfg = {
+    providers: [
+      { id: 'openrouter', name: 'OpenRouter', baseUrl: 'https://openrouter.ai/api/v1', apiKey: 'k', models: ['gpt-5', 'claude-sonnet-4'], activeModel: 'gpt-5' },
+      { id: 'groq', name: 'Groq', baseUrl: 'https://api.groq.com/openai/v1', apiKey: 'k2', models: ['llama-3-70b'] },
+      { id: 'ollama', name: 'Ollama (local)', baseUrl: 'http://localhost:11434/v1', models: ['llama3.2:8b'] },
+    ],
+    active: { providerId: 'openrouter', name: 'OpenRouter', baseUrl: 'https://openrouter.ai/api/v1', apiKey: 'k', model: 'gpt-5' },
+    fallbackChain: [],
+  };
+  const chain = modelsMod.fallbackChain(cfg, 'coding');
+  eq(chain[0].model, 'gpt-5', 'primario primero');
+  ok(chain.some(c => c.providerId === 'groq'), 'secundario incluido');
+  const locals = chain.filter(c => c.role === 'local');
+  eq(locals.length, 1, 'ollama como red de salvamento');
+  eq(locals[0].providerId, 'ollama');
+  // sin duplicados y con modelo siempre definido
+  const ids = chain.map(c => c.providerId);
+  eq(new Set(ids).size, ids.length);
+  ok(chain.every(c => c.model));
+});
+
+test('pickModelFor prefers adequate models per category', () => {
+  const ms = ['llama3.2:8b', 'qwen2.5-coder:14b', 'llava'];
+  ok(modelsMod.pickModelFor(ms, 'coding').includes('coder'));
+  eq(modelsMod.pickModelFor(ms, 'vision'), 'llava');
+  eq(modelsMod.pickModelFor([], 'coding'), null);
+});
+
+test('health record accumulates and summarizes', () => {
+  modelsMod.record('gpt-5', { ok: true, durationMs: 500, tokens: { prompt_tokens: 100, completion_tokens: 50 } });
+  modelsMod.record('gpt-5', { ok: false, durationMs: 200, error: 'HTTP 502', fallbackFrom: true });
+  const s = modelsMod.summary().find(x => x.model === 'gpt-5');
+  eq(s.calls, 2);
+  eq(s.errors, 1);
+  eq(s.fallbacks, 1);
+  eq(s.avgLatencyMs, 350);
+  ok(s.errorRate > 0 && s.errorRate < 1);
+});
+
+/* ---------- v1.7: skills avanzadas + marketplace ---------- */
+const mkdtemp = (p) => fs.mkdtempSync(p);
+const SKILLS_TMP = mkdtemp(path.join(os.tmpdir(), 'sagi-skills-'));
+skills.__test._resetForTests(SKILLS_TMP);   // redirige el almacén para los tests
+
+const { execSync } = require('child_process');
+const { spawnSync } = require('child_process');
+
+// escribe una skill con triggers y dependencias para las pruebas async
+const skillDir = path.join(SKILLS_TMP, 'test-skill');
+fs.mkdirSync(skillDir, { recursive: true });
+fs.writeFileSync(path.join(skillDir, 'SKILL.md'), '---\nname: blender-pro\ndescription: Automatiza escenas de Blender y renders 3D\ntriggers:\n  - blender\ndependencies:\n  - blender >= 4.0\ncategory: 3D\nversion: 1.1.0\n---\nInstrucciones de blender.');
+
+test('skills: search finds by description and triggers', async () => {
+  const r = await skills.searchSkills('blender');
+  ok(r.length === 1 && r[0].name === 'blender-pro');
+  const none = await skills.searchSkills('zzz-nada');
+  eq(none.length, 0);
+});
+
+test('skills: suggestSkillsFor auto-activates by trigger', async () => {
+  const hits = await skills.suggestSkillsFor('abre blender y renderiza la escena');
+  ok(hits.length === 1 && hits[0].name === 'blender-pro', 'trigger blender → skill');
+  const no = await skills.suggestSkillsFor('cocina una pasta');
+  eq(no.length, 0);
+});
+
+test('skills: metadata (category, deps, triggers) is exposed', async () => {
+  const s = (await skills.listSkills()).find(x => x.name === 'blender-pro');
+  ok(s, 'skill presente');
+  eq(s.category, '3D');
+  eq(s.dependencies.length, 1);
+  eq(s.triggers[0], 'blender');
+});
+
+test('marketplace catalog marks installed repos', async () => {
+  const marketplace = require('../agent/marketplace');
+  const cat = await marketplace.catalog(['anthropics/skills']);
+  ok(cat.length >= 3);
+  eq(cat.find(x => x.repo === 'anthropics/skills').installed, true);
+  eq(cat.find(x => x.repo === 'anthropics/skills/webapp-testing').installed, false);
+});
+
+/* ---------- v2.0: hábitos ---------- */
+const habits = require('../agent/habits');
+const HABITS_TMP = fs.mkdtempSync(path.join(os.tmpdir(), 'sagi-habits-'));
+habits.__test._resetForTests(path.join(HABITS_TMP, 'habits.json'));
+
+test('habits: observation builds a profile the agent can use', () => {
+  habits.observe('tool', { name: 'open_app', args: { name: 'spotify.exe' } });
+  habits.observe('tool', { name: 'open_app', args: { name: 'Spotify' } });
+  habits.observe('tool', { name: 'run_command', args: { command: 'git status', cwd: 'C:\\dev\\mi-proyecto' } });
+  habits.observe('tool', { name: 'run_command', args: { command: 'git push' } });
+  habits.observe('tool', { name: 'browser_control', args: { url: 'https://github.com/ejemplo/mi-repo' } });
+  habits.observe('tool', { name: 'browser_control', args: { url: 'github.com/explore' } });
+  habits.observe('mode', { mode: 'plan' });
+  habits.observe('mode', { mode: 'plan' });
+  habits.observe('confirm', { approved: false });
+  habits.observe('confirm', { approved: true });
+  const p = habits.profile();
+  ok(p.includes('Spotify') || p.includes('spotify'), 'app habitual');
+  ok(p.includes('git'), 'comando frecuente');
+  ok(p.includes('github.com'), 'web frecuente');
+  ok(p.includes('plan'), 'modo preferido');
+  const s = habits.stats();
+  eq(s.confirms.approved, 1);
+  eq(s.confirms.denied, 1);
+});
+
+test('habits: single occurrences do not become habits (MIN_COUNT)', () => {
+  habits.observe('tool', { name: 'open_app', args: { name: 'regedit.exe' } });   // 1 sola vez
+  ok(!habits.profile().toLowerCase().includes('regedit'), 'no es hábito todavía');
+  habits.reset();
+  eq(habits.profile(), '');
+});
+
+/* ---------- OpenCode Go: sesión/identificación (cabeceras obligatorias) ---------- */
+const opencode = require('../agent/opencode');
+
+test('opencode: isOpenCode reconoce los endpoints Go/Zen y no otros', () => {
+  ok(opencode.isOpenCode('https://opencode.ai/zen/go/v1'));
+  ok(!opencode.isOpenCode('https://api.openai.com/v1'));
+  ok(!opencode.isOpenCode('http://localhost:11434/v1'));
+});
+
+test('opencode: identityHeaders añade x-opencode-session solo para OpenCode', () => {
+  const h = opencode.identityHeaders('https://opencode.ai/zen/go/v1', 'sagi-abc');
+  eq(h['x-opencode-session'], 'sagi-abc');
+  eq(h['x-opencode-client'], 'sagitari');
+  eq(Object.keys(opencode.identityHeaders('https://api.openai.com/v1', 'sagi-abc')).length, 0, 'no ensucia otros proveedores');
+});
+
+test('opencode: la sesión es estable por conversación y única si no hay id', () => {
+  eq(opencode.sessionFor('c123abc'), opencode.sessionFor('c123abc'));
+  ok(opencode.sessionFor('c123abc') !== opencode.sessionFor('c999'));
+  ok(opencode.sessionFor('').startsWith('sagi-'));
+});
+
+test('opencode: userAgent identifica al cliente con su versión', () => {
+  ok(/^Sagitari\/\d/.test(opencode.userAgent()), opencode.userAgent());
+});
+
+/* ---------- protocolos de proveedor (OpenAI / Anthropic / Responses) ---------- */
+const protocols = require('../agent/protocols');
+
+function sseResponse(chunks, status = 200) {
+  const enc = new TextEncoder();
+  const stream = new ReadableStream({ start(c) { for (const ch of chunks) c.enqueue(enc.encode(ch)); c.close(); } });
+  return new Response(stream, { status, headers: { 'content-type': 'text/event-stream' } });
+}
+function fakeFetch(chunks, sink) {
+  return async (url, opts) => {
+    if (sink) { sink.url = url; sink.headers = opts.headers; sink.body = JSON.parse(opts.body); }
+    return sseResponse(chunks);
+  };
+}
+const evData = (o) => 'data: ' + JSON.stringify(o) + '\n\n';
+const evNamed = (name, o) => `event: ${name}\ndata: ${JSON.stringify(o)}\n\n`;
+const noSignal = () => new AbortController().signal;
+
+test('protocols: detectFormat elige el endpoint por proveedor y modelo', () => {
+  eq(protocols.detectFormat({ baseUrl: 'https://opencode.ai/zen/go/v1', model: 'glm-5.3-flash' }), 'openai');
+  eq(protocols.detectFormat({ baseUrl: 'https://opencode.ai/zen/go/v1', model: 'qwen3.8-max' }), 'anthropic');
+  eq(protocols.detectFormat({ baseUrl: 'https://opencode.ai/zen/go/v1', model: 'kimi-k2.7-code' }), 'openai');
+  eq(protocols.detectFormat({ baseUrl: 'https://opencode.ai/zen/go/v1', model: 'grok-4.6' }), 'responses');
+  eq(protocols.detectFormat({ baseUrl: 'https://api.anthropic.com/v1', model: 'claude-sonnet-4' }), 'anthropic');
+  eq(protocols.detectFormat({ baseUrl: 'https://api.openai.com/v1', model: 'gpt-4o' }), 'openai');
+  eq(protocols.detectFormat({ baseUrl: 'https://x/v1', model: 'm', format: 'responses' }), 'responses');
+  eq(protocols.detectFormat({ baseUrl: 'https://opencode.ai/zen/go/v1', model: 'opencode-go/qwen3.8-max' }), 'anthropic', 'admite id con prefijo');
+});
+
+test('protocols: authHeaders usa Bearer salvo en Anthropic (x-api-key)', () => {
+  const o = protocols.authHeaders({ apiKey: 'k' }, 'openai');
+  eq(o.Authorization, 'Bearer k');
+  const a = protocols.authHeaders({ apiKey: 'k' }, 'anthropic');
+  eq(a['x-api-key'], 'k');
+  ok(!a.Authorization, 'Anthropic no usa Bearer');
+  eq(a['anthropic-version'], '2023-06-01');
+});
+
+test('protocols: openai usa /chat/completions y ensambla texto, tools y uso', async () => {
+  const sink = {};
+  const chunks = [
+    evData({ choices: [{ delta: { content: 'Ho' } }] }),
+    evData({ choices: [{ delta: { content: 'la' } }] }),
+    evData({ choices: [{ delta: { tool_calls: [{ index: 0, id: 'call_1', function: { name: 'read_file', arguments: '{"path":' } }] } }] }),
+    evData({ choices: [{ delta: { tool_calls: [{ index: 0, function: { arguments: '"a.txt"}' } }] } }] }),
+    evData({ choices: [], usage: { prompt_tokens: 10, completion_tokens: 4, total_tokens: 14 } }),
+    'data: [DONE]\n\n',
+  ];
+  const res = await protocols.stream(
+    { baseUrl: 'https://api.openai.com/v1', model: 'gpt-4o', apiKey: 'k', temperature: 0.2, format: 'openai' },
+    { fetchFn: fakeFetch(chunks, sink), messages: [{ role: 'user', content: 'hola' }], tools: [], signal: noSignal(), onText: () => {} }
+  );
+  eq(sink.url, 'https://api.openai.com/v1/chat/completions');
+  eq(sink.headers.Authorization, 'Bearer k');
+  eq(res.text, 'Hola');
+  eq(res.toolCalls.length, 1);
+  eq(res.toolCalls[0].function.name, 'read_file');
+  eq(res.toolCalls[0].function.arguments, '{"path":"a.txt"}');
+  eq(res.usage.total_tokens, 14);
+});
+
+test('protocols: anthropic usa /messages, x-api-key y ensambla tool_use', async () => {
+  const sink = {};
+  const chunks = [
+    evNamed('message_start', { type: 'message_start', message: { usage: { input_tokens: 12, output_tokens: 0 } } }),
+    evNamed('content_block_delta', { type: 'content_block_delta', index: 0, delta: { type: 'text_delta', text: 'Vale' } }),
+    evNamed('content_block_start', { type: 'content_block_start', index: 1, content_block: { type: 'tool_use', id: 'toolu_1', name: 'run_command' } }),
+    evNamed('content_block_delta', { type: 'content_block_delta', index: 1, delta: { type: 'input_json_delta', partial_json: '{"cmd":' } }),
+    evNamed('content_block_delta', { type: 'content_block_delta', index: 1, delta: { type: 'input_json_delta', partial_json: '"dir"}' } }),
+    evNamed('message_delta', { type: 'message_delta', usage: { output_tokens: 7 } }),
+    evNamed('message_stop', { type: 'message_stop' }),
+  ];
+  const res = await protocols.stream(
+    { baseUrl: 'https://opencode.ai/zen/go/v1', providerId: 'opencode-go', model: 'qwen3.8-max', apiKey: 'k', format: 'anthropic' },
+    { fetchFn: fakeFetch(chunks, sink), messages: [{ role: 'system', content: 'sys' }, { role: 'user', content: 'hola' }], tools: [], signal: noSignal(), onText: () => {} }
+  );
+  eq(sink.url, 'https://opencode.ai/zen/go/v1/messages');
+  eq(sink.headers['x-api-key'], 'k');
+  eq(sink.body.max_tokens, 4096, 'Messages exige max_tokens');
+  eq(sink.body.system, 'sys');
+  eq(res.text, 'Vale');
+  eq(res.toolCalls[0].function.name, 'run_command');
+  eq(res.toolCalls[0].function.arguments, '{"cmd":"dir"}');
+  eq(res.usage.total_tokens, 19);
+});
+
+test('protocols: responses usa /responses y ensambla function_call + uso', async () => {
+  const sink = {};
+  const chunks = [
+    evData({ type: 'response.output_text.delta', delta: 'Listo' }),
+    evData({ type: 'response.output_item.added', item: { id: 'item_1', type: 'function_call', call_id: 'call_x', name: 'write_file' } }),
+    evData({ type: 'response.function_call_arguments.delta', item_id: 'item_1', delta: '{"path":"b' }),
+    evData({ type: 'response.function_call_arguments.delta', item_id: 'item_1', delta: '.txt"}' }),
+    evData({ type: 'response.completed', response: { usage: { input_tokens: 5, output_tokens: 3, total_tokens: 8 } } }),
+  ];
+  const res = await protocols.stream(
+    { baseUrl: 'https://opencode.ai/zen/go/v1', providerId: 'opencode-go', model: 'grok-4.6', apiKey: 'k', format: 'responses' },
+    { fetchFn: fakeFetch(chunks, sink), messages: [{ role: 'user', content: 'hola' }], tools: [], signal: noSignal(), onText: () => {} }
+  );
+  eq(sink.url, 'https://opencode.ai/zen/go/v1/responses');
+  eq(sink.headers.Authorization, 'Bearer k');
+  eq(res.text, 'Listo');
+  eq(res.toolCalls[0].function.name, 'write_file');
+  eq(res.toolCalls[0].function.arguments, '{"path":"b.txt"}');
+  eq(res.usage.total_tokens, 8);
+});
+
+test('protocols: la conversión a Anthropic separa el system y agrupa tool_result', () => {
+  const out = protocols.toAnthropicMessages([
+    { role: 'system', content: 'eres sagitari' },
+    { role: 'user', content: 'lista la carpeta' },
+    { role: 'assistant', content: '', tool_calls: [{ id: 't1', function: { name: 'list_dir', arguments: '{"path":"."}' } }] },
+    { role: 'tool', tool_call_id: 't1', content: 'a.txt' },
+    { role: 'tool', tool_call_id: 't2', content: 'ok' },
+  ]);
+  eq(out.system, 'eres sagitari');
+  const assistant = out.messages.find(m => m.role === 'assistant');
+  eq(assistant.content[0].type, 'tool_use');
+  eq(assistant.content[0].input.path, '.');
+  const last = out.messages[out.messages.length - 1];
+  eq(last.role, 'user');
+  eq(last.content.filter(b => b.type === 'tool_result').length, 2, 'agrupa tool_result consecutivos');
+});
+
+test('protocols: la conversión a Responses usa function_call / function_call_output', () => {
+  const out = protocols.toResponsesInput([
+    { role: 'system', content: 'sys' },
+    { role: 'user', content: 'hola' },
+    { role: 'assistant', tool_calls: [{ id: 't1', function: { name: 'f', arguments: '{}' } }] },
+    { role: 'tool', tool_call_id: 't1', content: 'salida' },
+  ]);
+  eq(out.instructions, 'sys');
+  ok(out.input.some(i => i.type === 'function_call' && i.call_id === 't1'), 'function_call');
+  ok(out.input.some(i => i.type === 'function_call_output' && i.output === 'salida'), 'function_call_output');
+});
+
+test('protocols: los screenshots de una herramienta no se pierden en Anthropic/Responses', () => {
+  const dataUrl = 'data:image/png;base64,AAAA';
+  const msgs = [
+    { role: 'user', content: 'captura la pantalla' },
+    { role: 'assistant', tool_calls: [{ id: 't1', function: { name: 'screenshot', arguments: '{}' } }] },
+    { role: 'tool', tool_call_id: 't1', content: [{ type: 'text', text: 'Captura tomada' }, { type: 'image_url', image_url: { url: dataUrl } }] },
+  ];
+  const a = protocols.toAnthropicMessages(msgs);
+  const lastA = a.messages[a.messages.length - 1];
+  ok(lastA.content[0].content.some(b => b.type === 'image'), 'imagen dentro del tool_result');
+  const r = protocols.toResponsesInput(msgs);
+  ok(r.input.some(i => Array.isArray(i.content) && i.content.some(c => c.type === 'input_image')), 'imagen como entrada de usuario');
+});
+
+test('agent: la cadena elige el protocolo del modelo (Qwen en Go → /messages)', async () => {
+  const { Agent } = require('../agent/agent');
+  const seen = [];
+  const chunks = [
+    evNamed('message_start', { type: 'message_start', message: { usage: { input_tokens: 1, output_tokens: 0 } } }),
+    evNamed('content_block_delta', { type: 'content_block_delta', index: 0, delta: { type: 'text_delta', text: 'hola' } }),
+    evNamed('message_delta', { type: 'message_delta', usage: { output_tokens: 1 } }),
+  ];
+  const agent = new Agent({
+    fetchFn: async (url) => { seen.push(url); return sseResponse(chunks); },
+    emit: () => {},
+    screenshotFn: async () => ({ dataUrl: 'data:image/png;base64,AA', w: 1, h: 1 }),
+  });
+  const settings = {
+    active: { name: 'Go', baseUrl: 'https://opencode.ai/zen/go/v1', apiKey: 'k', model: 'qwen3.8-max' },
+    settings: { mode: 'act', modelRouting: false },
+  };
+  await agent.chat('hola', settings);
+  ok(seen.length === 1 && seen[0].endsWith('/messages'), 'llamó a /messages: ' + seen[0]);
+  const last = agent.history.filter(h => h.role === 'assistant').pop();
+  eq(last.content, 'hola', 'la respuesta llega al historial');
+});
+
+test('agent: stop() corta la ejecución aunque el stream se quede mudo', async () => {
+  const { Agent } = require('../agent/agent');
+  const events = [];
+  const enc = new TextEncoder();
+  // envía un evento y deja el stream ABIERTO (nunca cierra): sin abort, colgaría
+  const body = new ReadableStream({ start(c) { c.enqueue(enc.encode(evData({ choices: [{ delta: { content: 'x' } }] }))); } });
+  const agent = new Agent({
+    fetchFn: async () => new Response(body, { headers: { 'content-type': 'text/event-stream' } }),
+    emit: (e) => events.push(e),
+    screenshotFn: async () => ({ dataUrl: 'data:image/png;base64,AA', w: 1, h: 1 }),
+  });
+  const settings = { active: { name: 'x', baseUrl: 'https://api.openai.com/v1', apiKey: 'k', model: 'gpt-4o' }, settings: { mode: 'act', modelRouting: false } };
+  const run = agent.chat('hola', settings);
+  await new Promise(r => setTimeout(r, 80));
+  ok(agent.isBusy(), 'seguía trabajando');
+  agent.stop();
+  await Promise.race([
+    run,
+    new Promise((_, rej) => setTimeout(() => rej(new Error('stop() no interrumpió la ejecución')), 3000)),
+  ]);
+  ok(events.some(e => e.type === 'stopped'), 'emitió stopped');
+  ok(!agent.isBusy(), 'el agente quedó libre');
+});
+
+test('ajustes: cada pestaña tiene su panel, y la búsqueda tiene filas que filtrar', () => {
+  const html = fs.readFileSync(path.join(__dirname, '..', 'renderer', 'index.html'), 'utf8');
+  const tabs = [...html.matchAll(/class="settab[^"]*"\s+data-set="([^"]+)"/g)].map(m => m[1]);
+  const panels = [...html.matchAll(/class="setpanel[^"]*"\s+data-panel="([^"]+)"/g)].map(m => m[1]);
+  ok(tabs.length >= 5, 'pestañas de Ajustes: ' + tabs.length);
+  eq(tabs.slice().sort().join(','), panels.slice().sort().join(','), 'pestañas y paneles deben coincidir');
+  for (const id of ['setWrap', 'setTabs', 'setSearch', 'setNoResults', 'activeModelName']) {
+    ok(html.includes('id="' + id + '"'), 'falta el contenedor ' + id);
+  }
+  const rows = (html.match(/class="[^"]*\bsrow\b/g) || []).length;
+  ok(rows >= 25, 'filas buscables (.srow): ' + rows);
+});
+
+/* ---------- chat: ChatKit (lógica pura del chat) ---------- */
+const ChatKit = require('../renderer/chatkit');
+const ICON_SRC = fs.readFileSync(path.join(__dirname, '..', 'renderer', 'icons.js'), 'utf8');
+const ICON_NAMES = new Set([...ICON_SRC.matchAll(/^\s{2}([A-Za-z0-9_]+):\s*'/gm)].map(m => m[1]));
+
+/** ¿Existe este icono en el sistema de iconos? (evita iconos fantasma) */
+function iconExists(name) { return ICON_NAMES.has(name); }
+
+test('chat: los tres modos tienen identidad propia y real', () => {
+  eq(ChatKit.MODE_ORDER.join(','), 'act,plan,think');
+  for (const k of ChatKit.MODE_ORDER) {
+    const m = ChatKit.MODES[k];
+    ok(m.label && m.name && m.tagline, k + ' debe explicarse en la UI');
+    ok(m.bullets && m.bullets.length >= 2, k + ' debe detallar en qué se diferencia');
+    ok(/^#[0-9a-f]{6}$/i.test(m.color), k + ' necesita color propio');
+    ok(/^\d+,\d+,\d+$/.test(m.rgb), k + ' necesita rgb para el tema');
+    ok(iconExists(m.icon), 'icono del modo ' + k + ': ' + m.icon);
+    ok(ChatKit.MODE_ORDER.indexOf(m.key) >= 0, k + ' debe pertenecer al ciclo');
+  }
+  const colors = new Set(ChatKit.MODE_ORDER.map(k => ChatKit.MODES[k].color));
+  eq(colors.size, 3, 'los tres modos no pueden compartir color');
+});
+
+test('chat: nextMode cicla ACT → PLAN → THINK → ACT', () => {
+  eq(ChatKit.nextMode('act'), 'plan');
+  eq(ChatKit.nextMode('plan'), 'think');
+  eq(ChatKit.nextMode('think'), 'act');
+  eq(ChatKit.nextMode('inexistente'), 'plan', 'un modo inválido se trata como ACT');
+  eq(ChatKit.mode('PLAN').key, 'plan', 'acepta el nombre en mayúsculas');
+});
+
+test('chat: toda herramienta del agente tiene etiqueta humana e icono real', () => {
+  const toolsSrc = fs.readFileSync(path.join(__dirname, '..', 'agent', 'tools.js'), 'utf8');
+  const names = [...toolsSrc.matchAll(/name: '([a-z_]+)'/g)].map(m => m[1]);
+  names.push('delegate');   // definida en subagents.js
+  ok(names.length >= 16, 'herramientas detectadas: ' + names.length);
+  const missing = names.filter(n => !ChatKit.TOOLS[n]);
+  eq(missing.join(', '), '', 'herramientas sin ficha en ChatKit.TOOLS');
+  for (const n of names) {
+    const meta = ChatKit.tool(n);
+    ok(meta.label && meta.label !== n, n + ' debe tener una etiqueta humana (no el nombre técnico)');
+    ok(iconExists(meta.icon), 'icono de ' + n + ': ' + meta.icon);
+  }
+});
+
+test('chat: una herramienta desconocida no deja la tarjeta vacía', () => {
+  const meta = ChatKit.tool('hacer_magia');
+  eq(meta.label, 'Hacer magia');
+  ok(iconExists(meta.icon), 'usa un icono genérico existente');
+  eq(ChatKit.tool('').label, 'Herramienta');
+});
+
+test('chat: summarizeArgs resume la llamada en una línea útil', () => {
+  eq(ChatKit.summarizeArgs('run_command', { command: 'npm test' }), 'npm test');
+  eq(ChatKit.summarizeArgs('read_file', { path: 'C:/x/a.txt' }), 'C:/x/a.txt');
+  eq(ChatKit.summarizeArgs('search_files', { pattern: 'TODO', path: 'src' }), 'TODO → src');
+  ok(ChatKit.summarizeArgs('browser_control', { action: 'navigate', url: 'https://a.b' }).includes('navigate'));
+  eq(ChatKit.summarizeArgs('delegate', { agent: 'research', task: 'busca precios' }), 'Investigador → busca precios');
+  eq(ChatKit.summarizeArgs('run_command', {}), '', 'sin argumentos no inventa texto');
+  ok(ChatKit.summarizeArgs('otra_cosa', { zona: 'norte' }).includes('zona'));
+});
+
+test('chat: fmtDuration en milisegundos, segundos y minutos', () => {
+  eq(ChatKit.fmtDuration(640), '640 ms');
+  eq(ChatKit.fmtDuration(1440), '1,4 s');
+  eq(ChatKit.fmtDuration(60000), '1 min');
+  eq(ChatKit.fmtDuration(72000), '1 min 12 s');
+  eq(ChatKit.fmtDuration(-1), '');
+  eq(ChatKit.fmtDuration(NaN), '');
+  eq(ChatKit.toolCount(1), '1 herramienta');
+  eq(ChatKit.toolCount(3), '3 herramientas');
+});
+
+test('chat: clip corta sólo cuando hace falta y avisa', () => {
+  eq(ChatKit.clip('abc', 10), 'abc');
+  eq(ChatKit.clip('abcdefghij', 5), 'abcd…');
+  eq(ChatKit.clip(null, 5), '');
+});
+
+test('chat: el parser de PLAN separa los pasos del resto de la respuesta', () => {
+  const r = ChatKit.parsePlan('PLAN:\n1. Buscar precios\n2. Comparar\n3. Informe\n\nYa está listo.');
+  eq(r.steps.length, 3);
+  eq(r.steps[0].text, 'Buscar precios');
+  eq(r.steps[2].n, 3);
+  eq(r.body, 'Ya está listo.', 'el resto del texto sobrevive');
+  eq(ChatKit.parsePlan('**PLAN:**\n- paso uno\n- paso dos').steps.length, 2, 'admite viñetas y negritas');
+  eq(ChatKit.parsePlan('Sin plan aquí.').steps.length, 0, 'sin PLAN no hay tarjeta');
+  eq(ChatKit.parsePlan('Sin plan aquí.').body, 'Sin plan aquí.', 'sin PLAN el texto queda intacto');
+  eq(ChatKit.parsePlan('PLAN:\n\n1. tras una línea vacía').steps.length, 1, 'tolera una línea en blanco tras la cabecera');
+  eq(ChatKit.parsePlan('PLAN:\n1) uno').steps[0].text, 'uno', 'admite 1) además de 1.');
+  eq(ChatKit.parsePlan('').steps.length, 0);
+});
+
+test('chat: el plan no se come el texto que viene después', () => {
+  const r = ChatKit.parsePlan('PLAN:\n1. Uno\n2. Dos\n\n## Resultado\nHecho.');
+  eq(r.steps.length, 2);
+  ok(r.body.startsWith('## Resultado'), 'el cuerpo conserva el markdown: ' + r.body);
+});
+
+test('chat: looksFailed detecta errores sin confundir salidas normales', () => {
+  ok(ChatKit.looksFailed('Error: no se pudo abrir el archivo'));
+  ok(ChatKit.looksFailed('Denegado por el usuario'));
+  ok(!ChatKit.looksFailed('archivo creado correctamente'));
+  ok(!ChatKit.looksFailed(''));
+});
+
+test('chat: los subagentes tienen nombre humano para etiquetar sus pasos', () => {
+  const keys = [...fs.readFileSync(path.join(__dirname, '..', 'agent', 'subagents.js'), 'utf8')
+    .matchAll(/^\s{2}([a-z]+):\s*\{/gm)].map(m => m[1]);
+  const known = ['research', 'browser', 'coding', 'file', 'vision', 'verify'];
+  const missing = known.filter(k => !ChatKit.subagent(k));
+  eq(missing.join(', '), '', 'subagentes sin ficha');
+  for (const k of known) ok(iconExists(ChatKit.subagent(k).icon), 'icono de subagente ' + k);
+  eq(ChatKit.subagent('nadie'), null, 'un subagente desconocido no rompe');
+  ok(keys.length >= 1, 'los subagentes del backend se pudieron enumerar');
+});
+
+test('chat: todo icono usado por app.js existe en el sistema de iconos', () => {
+  const app = fs.readFileSync(path.join(__dirname, '..', 'renderer', 'app.js'), 'utf8');
+  const used = new Set([...app.matchAll(/\bic\('([A-Za-z0-9_]+)'/g)].map(m => m[1]));
+  const missing = [...used].filter(n => !iconExists(n));
+  eq(missing.join(', '), '', 'iconos referencia dos pero no definidos');
+  ok(used.size > 10, 'se detectaron iconos en app.js: ' + used.size);
+});
+
+test('renderer: los scripts conviven en el mismo ámbito (sin redeclaraciones)', () => {
+  // Los tres ficheros son scripts CLÁSICOS: comparten un único ámbito global.
+  // Un `const MODE_ORDER` repetido es un SyntaxError de compilación y el
+  // segundo fichero NO se ejecuta — la app se queda sin iconos, sin botones y
+  // sin nada, con el HTML estático aún en pantalla. Se compila el conjunto
+  // como un solo script (sin ejecutarlo) para detectarlo antes de arrancar.
+  const vm = require('vm');
+  const files = ['icons.js', 'chatkit.js', 'app.js'];
+  const code = files
+    .map(f => fs.readFileSync(path.join(__dirname, '..', 'renderer', f), 'utf8'))
+    .join('\n;\n');
+  new vm.Script(code, { filename: 'renderer-bundle-check.js' });
+});
+
+test('chat: el estado vacío vive fuera de #messages (no se lo lleva innerHTML)', () => {
+  // #messages se vacía con innerHTML en cada conversación nueva: si el estado
+  // vacío estuviera dentro, desaparecería para siempre al arrancar la app.
+  const html = fs.readFileSync(path.join(__dirname, '..', 'renderer', 'index.html'), 'utf8');
+  const open = html.indexOf('<div id="messages"');
+  ok(open > 0, 'debe existir #messages');
+  // recorre el anidamiento de <div> para aislar el contenido de #messages
+  let depth = 0, i = open, inner = '';
+  while (i < html.length) {
+    const nOpen = html.indexOf('<div', i);
+    const nClose = html.indexOf('</div>', i);
+    if (nClose < 0) break;
+    if (nOpen >= 0 && nOpen < nClose) { depth++; i = nOpen + 4; }
+    else { depth--; i = nClose + 6; if (depth === 0) { inner = html.slice(open, i); break; } }
+  }
+  ok(inner.length > 0, 'no se pudo aislar #messages');
+  ok(!inner.includes('chat-empty'), '#chatEmpty NO puede estar dentro de #messages');
+  ok(html.includes('id="chatEmpty"'), 'debe existir #chatEmpty');
+  ok(html.includes('class="msgs-area"'), 'el estado vacío necesita su capa sobre los mensajes');
+});
+
+test('chat: la vista tiene estado en vivo, estado vacío y salto al final', () => {
+  const html = fs.readFileSync(path.join(__dirname, '..', 'renderer', 'index.html'), 'utf8');
+  for (const id of ['chatStatus', 'chatStatusMode', 'chatStatusText', 'chatEmpty', 'ceModes', 'jumpDown', 'modeSeg', 'btnCopyConv']) {
+    ok(html.includes('id="' + id + '"'), 'falta el contenedor ' + id);
+  }
+  ok(/<section class="view on" id="view-chat" data-mode="act"/.test(html), 'el chat necesita data-mode y debe ser la vista inicial');
+  // chatkit.js debe cargarse ANTES de app.js: define el catálogo que usa
+  const kit = html.indexOf('chatkit.js');
+  const app2 = html.indexOf('app.js');
+  ok(kit > 0 && app2 > kit, 'chatkit.js debe cargarse antes que app.js');
+});
+
+test('chat: el CSS da color propio a cada modo y estiliza las tarjetas', () => {
+  const css = fs.readFileSync(path.join(__dirname, '..', 'renderer', 'styles.css'), 'utf8');
+  for (const k of ChatKit.MODE_ORDER) {
+    ok(css.includes(`#view-chat[data-mode="${k}"]`), 'el modo ' + k + ' necesita su tema en el chat');
+  }
+  for (const cls of ['tcard', 'tgroup', 'plancard', 'codeblock', 'msg-actions', 'msg-mode', 'chat-empty', 'jumpdown', 'stream']) {
+    ok(css.includes('.' + cls), 'falta el estilo .' + cls);
+  }
+  // el título del chat es la primera frase del usuario: una sola línea
+  const title = css.match(/#chatTitle\s*\{[^}]*\}/);
+  ok(title && /nowrap/.test(title[0]) && /ellipsis/.test(title[0]), 'el título del chat debe cortarse en una línea');
+  // el estado vacío es una capa sobre el área de mensajes, y su contenido debe
+  // estirarse o las tres tarjetas de modo se apilan en una sola columna
+  const empty = css.match(/\.chat-empty\s*\{[^}]*\}/);
+  ok(empty && /position:\s*absolute/.test(empty[0]), '.chat-empty debe ser una capa sobre los mensajes');
+  const inner = css.match(/\.ce-inner\s*\{[^}]*\}/);
+  ok(inner && /width:\s*100%/.test(inner[0]), '.ce-inner necesita width:100% para que quepan los tres modos');
+  ok(/\.chat-empty\[hidden\]/.test(css), 'el estado vacío necesita poder ocultarse pese a su display:grid');
+});
+
+test('chat: los componentes de la burbuja no heredan el pre-wrap de la burbuja', () => {
+  // La burbuja usa white-space: pre-wrap (para respetar los saltos del modelo).
+  // Los componentes con marcado multilínea DEBEN volver al flujo normal o los
+  // saltos del propio HTML se dibujan como líneas en blanco dentro de la tarjeta.
+  const css = fs.readFileSync(path.join(__dirname, '..', 'renderer', 'styles.css'), 'utf8');
+  const rules = [...css.matchAll(/([^{}]+)\{[^}]*white-space:\s*normal[^}]*\}/g)].map(m => m[1]);
+  ok(rules.length, 'debe existir alguna regla que devuelva el flujo normal a los componentes');
+  const sel = rules.join('\n');
+  for (const cls of ['tgroup', 'tcard', 'plancard', 'codeblock', 'msg-actions']) {
+    ok(sel.includes('.' + cls), 'ninguna regla con white-space:normal cubre .' + cls);
+  }
+});
+
+/* ---------- chat: backend (eventos y regenerar) ---------- */
+test('agent: el evento busy viaja con el modo del turno', async () => {
+  const { Agent } = require('../agent/agent');
+  const events = [];
+  const chunks = [evData({ choices: [{ delta: { content: 'ok' } }] })];
+  const agent = new Agent({ fetchFn: fakeFetch(chunks), emit: (e) => events.push(e), screenshotFn: async () => ({ dataUrl: 'data:image/png;base64,AA' }) });
+  const settings = { active: { name: 'x', baseUrl: 'https://api.openai.com/v1', apiKey: 'k', model: 'gpt-4o' }, settings: { mode: 'think', modelRouting: false } };
+  await agent.chat('hola', settings);
+  const start = events.find(e => e.type === 'busy' && e.busy);
+  ok(start, 'debe emitir busy al arrancar');
+  eq(start.mode, 'think', 'la UI necesita el modo para sellar el turno');
+  eq(start.model, 'gpt-4o', 'y el modelo que va a responder');
+});
+
+test('agent: el resultado de una herramienta llega con duración y si falló', async () => {
+  const { Agent } = require('../agent/agent');
+  const events = [];
+  // 1ª vuelta: el modelo pide una herramienta segura; 2ª: responde y termina
+  const step1 = [evData({
+    choices: [{ delta: { tool_calls: [{ index: 0, id: 't1', function: { name: 'list_dir', arguments: '{"path":"."}' } }] } }],
+  })];
+  const step2 = [evData({ choices: [{ delta: { content: 'listo' } }] })];
+  let n = 0;
+  const agent = new Agent({
+    fetchFn: async () => sseResponse(n++ === 0 ? step1 : step2),
+    emit: (e) => events.push(e),
+    screenshotFn: async () => ({ dataUrl: 'data:image/png;base64,AA' }),
+  });
+  const settings = { active: { name: 'x', baseUrl: 'https://api.openai.com/v1', apiKey: 'k', model: 'gpt-4o' }, settings: { mode: 'act', modelRouting: false } };
+  await agent.chat('lista la carpeta', settings);
+  const res = events.find(e => e.type === 'tool_result');
+  ok(res, 'debe emitir tool_result');
+  eq(res.name, 'list_dir');
+  ok(typeof res.durationMs === 'number', 'la tarjeta necesita la duración real');
+  ok(res.ok === true, 'la salida correcta se marca como ok');
+  const card = events.find(e => e.type === 'tool');
+  ok(card && card.args && card.args.path === '.', 'el evento tool trae los argumentos');
+});
+
+test('agent: retry descarta la respuesta anterior y repite la misma pregunta', async () => {
+  const { Agent } = require('../agent/agent');
+  const prompts = [];
+  const agent = new Agent({
+    fetchFn: async (url, opts) => {
+      const body = JSON.parse(opts.body);
+      prompts.push(body.messages.filter(m => m.role === 'user').pop().content);
+      return sseResponse([evData({ choices: [{ delta: { content: 'respuesta ' + prompts.length } }] })]);
+    },
+    emit: () => {},
+    screenshotFn: async () => ({ dataUrl: 'data:image/png;base64,AA' }),
+  });
+  const settings = { active: { name: 'x', baseUrl: 'https://api.openai.com/v1', apiKey: 'k', model: 'gpt-4o' }, settings: { mode: 'act', modelRouting: false } };
+  await agent.chat('primera pregunta', settings);
+  const before = agent.history.length;
+  await agent.retry(settings);
+  eq(prompts.length, 2, 'el modelo volvió a ser consultado');
+  eq(prompts[1], 'primera pregunta', 'se repite la misma pregunta');
+  // el historial no acumula la respuesta descartada: user + assistant, sin duplicar
+  eq(agent.history.filter(h => h.role === 'user').length, 1, 'no se duplica la pregunta');
+  eq(agent.history.filter(h => h.role === 'assistant').length, 1, 'sólo queda la respuesta nueva');
+  ok(agent.history.length <= before, 'el historial no crece al regenerar');
+});
+
+test('agent: regenerar conserva la imagen que llevaba el mensaje', async () => {
+  const { Agent } = require('../agent/agent');
+  const bodies = [];
+  const agent = new Agent({
+    fetchFn: async (url, opts) => { bodies.push(JSON.parse(opts.body)); return sseResponse([evData({ choices: [{ delta: { content: 'ok' } }] })]); },
+    emit: () => {},
+    screenshotFn: async () => ({ dataUrl: 'data:image/png;base64,AA' }),
+  });
+  const settings = { active: { name: 'x', baseUrl: 'https://api.openai.com/v1', apiKey: 'k', model: 'gpt-4o' }, settings: { mode: 'act', modelRouting: false } };
+  await agent.chat('mira esto', settings, 'data:image/png;base64,ZZZ');
+  await agent.retry(settings);
+  const last = bodies[bodies.length - 1].messages.filter(m => m.role === 'user').pop();
+  ok(JSON.stringify(last).includes('ZZZ'), 'la imagen se vuelve a enviar en el reintento');
+});
+
+test('sidebar: grupos, contadores, pie y atajos coherentes con las vistas', () => {
+  const html = fs.readFileSync(path.join(__dirname, '..', 'renderer', 'index.html'), 'utf8');
+  const groups = [...html.matchAll(/class="navgroup"\s+data-label="([^"]+)"/g)].map(m => m[1]);
+  ok(groups.length >= 4, 'grupos del sidebar: ' + groups.join(' / '));
+  const views = [...html.matchAll(/class="navitem[^"]*"\s+data-view="([^"]+)"/g)].map(m => m[1]);
+  eq(views.length, 9, 'ítems de navegación (sin Inicio: la app abre en Chat)');
+  eq(new Set(views).size, views.length, 'sin vistas duplicadas en el sidebar');
+  // cada ítem debe apuntar a una sección real (si no, goto() deja la app en blanco)
+  const missing = views.filter(v => !html.includes('id="view-' + v + '"'));
+  eq(missing.join(', '), '', 'ítems del sidebar sin sección .view');
+  // los elementos que usa la lógica nueva del sidebar deben existir
+  for (const id of ['sideToggle', 'sideStatusBtn', 'sideModeBtn', 'sideModeLabel', 'nbChat', 'nbTasks', 'nbMemory', 'nbSkills', 'app']) {
+    ok(html.includes('id="' + id + '"'), 'falta el elemento ' + id);
+  }
+  const js = fs.readFileSync(path.join(__dirname, '..', 'renderer', 'app.js'), 'utf8');
+  // atajos Alt+1..0 prometidos en los tooltips: deben tener destino
+  const hot = js.match(/VIEW_HOTKEY\s*=\s*\[([^\]]+)\]/);
+  ok(hot, 'falta la tabla de atajos del sidebar');
+  const n = hot[1].split(',').length;
+  eq(n, views.length, 'atajos y ítems del sidebar deben coincidir');
+});
+
+/* ---------- guardas de integración (regresiones de la auditoría) ---------- */
+
+test('integración: cada método sagitari.* del renderer existe en el preload', () => {
+  const preload = fs.readFileSync(path.join(__dirname, '..', 'main', 'preload.js'), 'utf8');
+  const renderer = fs.readFileSync(path.join(__dirname, '..', 'renderer', 'app.js'), 'utf8');
+  const exposed = new Set([...preload.matchAll(/^\s*([A-Za-z0-9_]+)\s*:/gm)].map(m => m[1]));
+  const used = new Set([...renderer.matchAll(/sagitari\.([A-Za-z0-9_]+)/g)].map(m => m[1]));
+  const missing = [...used].filter(k => !exposed.has(k));
+  eq(missing.join(', '), '', 'métodos usados por el renderer pero ausentes del preload');
+});
+
+test('integración: cada canal invocado en el preload tiene handler en main', () => {
+  const preload = fs.readFileSync(path.join(__dirname, '..', 'main', 'preload.js'), 'utf8');
+  const main = fs.readFileSync(path.join(__dirname, '..', 'main', 'main.js'), 'utf8');
+  const channels = [...preload.matchAll(/invoke\('([^']+)'/g)].map(m => m[1]);
+  const handlers = new Set([...main.matchAll(/handle\('([^']+)'/g)].map(m => m[1]));
+  const missing = [...new Set(channels)].filter(c => !handlers.has(c));
+  eq(missing.join(', '), '', 'canales sin handler en main');
+});
+
+/* ---------- arranque e instancia única (regresión de «la app se cierra») ---------- */
+
+const MAIN_SRC = fs.readFileSync(path.join(__dirname, '..', 'main', 'main.js'), 'utf8');
+
+test('arranque: los modos de prueba no comparten userData con la app real', () => {
+  // El bloqueo de instancia única va ligado al userData. Si smoke/ui-check
+  // compartieran el de la app real, una prueba que tardara en morir retenía el
+  // bloqueo y el lanzamiento siguiente (paso final de probar.bat) se cerraba
+  // solo, en silencio: exactamente «la app se cierra».
+  const headless = MAIN_SRC.match(/const HEADLESS = ([^;]+);/);
+  ok(headless, 'debe existir la detección HEADLESS');
+  ok(/--hidden/.test(headless[1]) && /\bSMOKE\b/.test(headless[1]), 'HEADLESS cubre smoke y ui-check');
+  const seteo = MAIN_SRC.match(/if \(HEADLESS\) \{[\s\S]{0,240}?setPath\('userData'[\s\S]{0,80}?\n\}/);
+  ok(seteo, 'HEADLESS debe fijar su propio userData');
+  // y, sobre todo: antes de pedir el bloqueo
+  const iSeteo = MAIN_SRC.indexOf("app.setPath('userData'");
+  const iLock = MAIN_SRC.indexOf('app.requestSingleInstanceLock()');
+  ok(iSeteo > -1 && iLock > -1 && iSeteo < iLock, 'el userData de prueba se fija ANTES de pedir el bloqueo');
+});
+
+test('arranque: la segunda instancia no muere en silencio y reutiliza la ventana', () => {
+  ok(/app\.on\('second-instance',\s*\(\)\s*=>\s*showWindow\(\)\)/.test(MAIN_SRC),
+    'debe atender second-instance mostrando la ventana existente');
+  ok(/ya está abierta/.test(MAIN_SRC), 'debe avisar por consola de que ya había una instancia abierta');
+  // showWindow tiene que poder recrear la ventana si se cerró con la X
+  ok(/function showWindow\(\)[\s\S]{0,200}?createChatWindow\(\)/.test(MAIN_SRC),
+    'showWindow debe recrear la ventana si ya no existe');
+});
+
+test('arranque: un fallo del proceso principal no cierra la app', () => {
+  ok(/process\.on\('uncaughtException'/.test(MAIN_SRC), 'debe capturar uncaughtException');
+  ok(/process\.on\('unhandledRejection'/.test(MAIN_SRC), 'debe capturar unhandledRejection');
+  ok(/crash\.log/.test(MAIN_SRC), 'debe dejar rastro en logs/crash.log');
+});
+
+test('probar.bat avisa si ya hay una instancia abierta', () => {
+  const bat = fs.readFileSync(path.join(__dirname, '..', 'probar.bat'), 'utf8');
+  ok(/tasklist/.test(bat), 'debe mirar si hay instancias vivas antes de lanzar');
+  ok(/[Aa][Vv][Ii][Ss][Oo]|YA_ABIERTA/.test(bat), 'debe avisar en vez de parecer que la app se cierra');
+});
+
+test('ui-check espera a que la instancia de prueba muera antes de salir', () => {
+  const ui = fs.readFileSync(path.join(__dirname, '..', 'scripts', 'ui-check.js'), 'utf8');
+  ok(/child\.once\('exit'/.test(ui), 'debe esperar la salida real del hijo');
+  ok(/--hidden/.test(ui), 'debe lanzar la app de prueba oculta');
+});
+
+/* ---------- apariencia: acento de UI + glow personalizable ---------- */
+
+test('apariencia: el CSS tematiza por triplets RGB y el glow escala con intensidad', () => {
+  const css = fs.readFileSync(path.join(__dirname, '..', 'renderer', 'styles.css'), 'utf8');
+  for (const v of ['--acc-rgb', '--acc2-rgb', '--acc3-rgb', '--glow-rgb', '--glow-str'])
+    ok(css.includes(v + ':'), 'debe declarar ' + v);
+  ok(/rgba\(var\(--glow-rgb\), calc\(/.test(css), 'las capas del glow deben multiplicar por --glow-str');
+  ok((css.match(/rgba\(var\(--acc/g) || []).length >= 40, 'los tintes decorativos deben usar los triplets (' + (css.match(/rgba\(var\(--acc/g) || []).length + ')');
+  // los modos conservan su color aunque cambie el acento
+  ok(/#view-chat\[data-mode="plan"\]\s*\{[^}]*167,139,250/.test(css), 'PLAN mantiene su violeta');
+  ok(/#view-chat\[data-mode="think"\]\s*\{[^}]*125,180,255/.test(css), 'THINK mantiene su azul');
+  ok(/#view-chat, #view-chat\[data-mode="act"\]/.test(css), 'ACT mantiene su verde');
+  // glow al hablar: animación propia y clase
+  ok(/\.shell\.glow-speak::before\s*\{[^}]*frame-speak/.test(css), 'el estado speak debe tener animación propia');
+  ok(/input\[type="range"\]\.glowslider/.test(css), 'debe existir el estilo del slider de intensidad');
+});
+
+test('apariencia: Ajustes expone color de UI, color de glow e intensidad', () => {
+  const html = fs.readFileSync(path.join(__dirname, '..', 'renderer', 'index.html'), 'utf8');
+  for (const id of ['uiColor', 'glowColor', 'glowStrength', 'dotUiColor', 'dotGlowColor', 'glowStrengthLabel'])
+    ok(html.includes('id="' + id + '"'), 'falta #' + id);
+  ok(html.includes('<b>Apariencia</b>'), 'debe existir la tarjeta Apariencia');
+  const app = fs.readFileSync(path.join(__dirname, '..', 'renderer', 'app.js'), 'utf8');
+  ok(/const PALETTES = \{[\s\S]{0,900}\};/.test(app), 'debe existir la tabla PALETTES');
+  ok(/function applyTheme\(\)/.test(app), 'debe existir applyTheme');
+  ok(/\$\('#glowStrength'\)\.oninput/.test(app) && /\$\('#uiColor'\)\.onchange/.test(app), 'los controles deben estar cableados');
+  // el glow se enciende al hablar y se apaga al terminar la voz
+  ok(/window\.sagitari\.glow\('speak'\)/.test(app), 'speak() debe encender el glow');
+  ok(/onTtsDone/.test(app), 'el fin de la voz debe apagar el glow');
+  ok(/onThemeChanged/.test(app), 'los cambios de tema deben aplicarse al vuelo');
+});
+
+test('apariencia: main guarda preferencias y emite tts:done + theme:changed', () => {
+  ok(/uiColor: 'violet'/.test(MAIN_SRC) && /glowStrength: 1/.test(MAIN_SRC), 'defaults de apariencia en settings');
+  ok(/glowColor: 'match'/.test(MAIN_SRC), 'el glow sigue al tema por defecto');
+  ok(/tts:done/.test(MAIN_SRC), 'el fin del TTS debe notificarse al renderer');
+  ok(/theme:changed/.test(MAIN_SRC), 'los cambios de apariencia deben broadcastearse');
+  const preload = fs.readFileSync(path.join(__dirname, '..', 'main', 'preload.js'), 'utf8');
+  ok(/onTtsDone/.test(preload) && /onThemeChanged/.test(preload), 'preload debe exponer onTtsDone y onThemeChanged');
+});
+
+/* ---------- adjuntos del chat: archivos, documentos e imágenes ---------- */
+
+test('adjuntos: main expone pick/read con límites y extracción de texto', () => {
+  ok(/attachments:pick/.test(MAIN_SRC) && /attachments:read/.test(MAIN_SRC), 'faltan los handlers IPC de adjuntos');
+  ok(/MAX_FILE_BYTES/.test(MAIN_SRC) && /MAX_ATTACH_CHARS/.test(MAIN_SRC), 'deben existir límites de tamaño y caracteres');
+  ok(/BINARY_EXTS/.test(MAIN_SRC), 'debe haber lista de extensiones binarias (no leerlas como texto)');
+  ok(/IMG_EXTS/.test(MAIN_SRC) && /TEXT_EXTS/.test(MAIN_SRC), 'deben existir las listas de tipos imagen/texto');
+  // el mensaje guardado conserva metadatos de adjuntos (miniaturas al recargar)
+  ok(/attachments: attMeta/.test(MAIN_SRC), 'los metadatos de adjuntos deben guardarse en la conversación');
+  // el texto de documentos viaja inline (visible para cualquier modelo)
+  ok(/ARCHIVO ADJUNTO/.test(MAIN_SRC), 'los documentos se inyectan como texto del mensaje');
+  // el body por defecto con imagen pero sin texto sigue funcionando
+  ok(/\(análisis de imagen\)/.test(MAIN_SRC), 'imagen sola debe tener texto por defecto');
+});
+
+test('adjuntos: el agente acepta varias imágenes y retry las conserva', () => {
+  const agent = fs.readFileSync(path.join(__dirname, '..', 'agent', 'agent.js'), 'utf8');
+  ok(/const imgUrls = \[imageDataUrl, \.\.\.extraImgs\]/.test(agent), 'debe combinar la imagen principal con los adjuntos');
+  ok(/const images = parts \? parts\.filter\(c => c\.type === 'image_url'\)\.map/.test(agent), 'retry debe recuperar TODAS las imágenes');
+  ok(/attachments: images\.slice\(1\)/.test(agent), 'retry debe reenviar el resto de imágenes');
+});
+
+test('adjuntos: UI completa — botón, drag&drop, pegar, chips y miniaturas', () => {
+  const html = fs.readFileSync(path.join(__dirname, '..', 'renderer', 'index.html'), 'utf8');
+  ok(html.includes('id="chatAttach"'), 'falta el botón de adjuntar');
+  ok(html.includes('id="attachStrip"'), 'falta la tira de adjuntos del compositor');
+  const app = fs.readFileSync(path.join(__dirname, '..', 'renderer', 'app.js'), 'utf8');
+  ok(/\$\('#chatAttach'\)\.onclick/.test(app), 'el botón debe abrir el selector');
+  ok(/addEventListener\('drop'/.test(app), 'debe aceptar drag & drop');
+  ok(/addEventListener\('paste'/.test(app), 'debe aceptar imágenes pegadas');
+  ok(/function paintAttachments/.test(app), 'las burbujas deben pintar los adjuntos');
+  ok(/MAX_ATTACHMENTS = 8/.test(app), 'límite de adjuntos por mensaje');
+  ok(/pendingAttachments\.slice\(\)/.test(app) && /sendChat\(text, null, atts\)/.test(app), 'envío debe incluir los adjuntos');
+  const icons = fs.readFileSync(path.join(__dirname, '..', 'renderer', 'icons.js'), 'utf8');
+  ok(/  clip: /.test(icons) && /  x: /.test(icons), 'faltan los iconos clip y x');
+  // integración preload↔renderer (mismo guardián que el resto)
+  const preload = fs.readFileSync(path.join(__dirname, '..', 'main', 'preload.js'), 'utf8');
+  ok(/attachmentsPick/.test(preload) && /attachmentsRead/.test(preload), 'preload debe exponer los canales de adjuntos');
+});
+
+console.log('');
+  if (fail) {
+    console.error(`${fail} test(s) fallaron, ${pass} pasaron`);
+    failures.forEach(f => console.error('  ✗ ' + f.name + ' → ' + f.err));
+    process.exit(1);
+  } else {
+    console.log(`Todos los tests en verde (${pass})`);
+  }
+})();

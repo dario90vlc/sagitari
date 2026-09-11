@@ -6,6 +6,7 @@ const fs = require('fs');
 const fsp = require('fs/promises');
 const path = require('path');
 const skills = require('./skills');
+const memory = require('./memory');
 
 function run(cmd, opts = {}) {
   return new Promise((resolve) => {
@@ -93,6 +94,15 @@ async function executeTool(name, args, ctx) {
     return path.isAbsolute(p) ? p : path.join(workspace, p);
   };
   switch (name) {
+    case 'remember': {
+      const m = memory.add({
+        text: args.text,
+        source: 'agent',
+        importance: Number.isFinite(Number(args.importance)) ? Number(args.importance) : 0.6,
+        confidence: Number.isFinite(Number(args.confidence)) ? Number(args.confidence) : 0.8,
+      });
+      return m ? `OK: recuerdo guardado (importancia ${m.importance}). Estará disponible en conversaciones futuras.` : 'Error: no pude guardar el recuerdo (texto vacío).';
+    }
     case 'use_skill': {
       const s = await skills.getSkill(args.name || '');
       if (!s) return `Error: skill "${args.name}" no encontrada. Skills disponibles: ${(await skills.listSkills()).filter(x => x.enabled).map(x => x.name).join(', ') || '(ninguna)'}`;

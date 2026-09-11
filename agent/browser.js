@@ -34,16 +34,35 @@ function getJSON(url, timeoutMs = 2500) {
 
 const sleep = (ms) => new Promise((r) => setTimeout(r, ms));
 
+/* v1.5: perfiles de navegador — cada perfil tiene SU propia carpeta de datos
+   (cookies, sesiones, logins) bajo %APPDATA%/SagitariAI/browser-profiles/<id>. */
+const { profileDirFor, profileId } = require('./browser-profiles');
+
 class Browser {
   constructor() {
     this.ws = null;
     this.port = 0;
     this.browserExe = null;
     this.activeId = null;      // targetId of the tab every action targets
+    this.profile = 'default';  // v1.5: perfil activo
     this._id = 0;
     this._pending = new Map();
-    // dedicated persistent profile (not tmp): logins survive restarts
-    this.profileDir = path.join(process.env.APPDATA || os.homedir(), 'SagitariAI', 'browser-profile');
+    // carpeta de datos del perfil activo (persistentes: los logins sobreviven)
+    this.profileDir = profileDirFor('default');
+  }
+
+  /** Cambia de perfil: cierra la sesión actual si procede; el próximo launch usa ese perfil. */
+  async switchProfile(profile) {
+    const id = profileId(profile);
+    if (id === this.profile && this.ws) return `OK: ya estás en el perfil «${id}».`;
+    if (this.ws) {
+      try { await this.send('Browser.close'); } catch {}
+      try { this.ws.close(); } catch {}
+      this.ws = null; this.activeId = null; this.port = 0;
+    }
+    this.profile = id;
+    this.profileDir = profileDirFor(id);
+    return `OK: perfil activo → «${id}». Se abrirá (con sus propias cookies y sesiones) en el próximo launch.`;
   }
 
   // ---------- discovery / connection ----------
@@ -117,6 +136,7 @@ class Browser {
 
   async launch(browserArg, url) {
     const want = (browserArg || 'chrome').toLowerCase();
+    fs.mkdirSync(this.profileDir, { recursive: true });   // asegura el perfil activo
 
     // 1) Already connected? Just (maybe) navigate — never spawn a second window.
     if (this.ws) {
@@ -152,7 +172,6 @@ class Browser {
     if (!exe) return 'Error: no encontré Chrome ni Edge instalado en este equipo.';
 
     this.port = 9223 + Math.floor(Math.random() * 500);
-    fs.mkdirSync(this.profileDir, { recursive: true });
     const target = url || 'about:blank';
     const cmd = `"${exe}" --remote-debugging-port=${this.port} --user-data-dir="${this.profileDir}"` +
       ` --no-first-run --no-default-browser-check --disable-session-crashed-bubble --hide-crash-restore-bubble --start-maximized "${target}"`;
@@ -221,6 +240,68 @@ class Browser {
   async screenshot(sessionId, fullPage) {
     const r = await this.send('Page.captureScreenshot', { format: 'png', captureBeyondViewport: !!fullPage }, sessionId);
     return 'data:image/png;base64,' + r.data;
+  }
+
+  // ---------- v1.5: percepción visual avanzada (DOM + bounding boxes) ----------
+
+  /** Inventario clicable/legible de la página con índices estables y coordenadas:
+      el modelo puede actuar con click_index sin selectores ni capturas a ciegas. */
+  async elements(sessionId) {
+    const js = `
+      (() => {
+        const norm = s => (s||'').replace(/\\s+/g,' ').trim();
+        const visible = e => { const r = e.getBoundingClientRect(); return r.width > 2 && r.height > 2 && r.top >= 0 && r.left >= 0 && r.bottom <= (window.innerHeight||800) + 200 && getComputedStyle(e).visibility !== 'hidden' && getComputedStyle(e).display !== 'none'; };
+        const sel = 'a,button,input,select,textarea,[role=button],[role=tab],[role=link],[role=menuitem],[role=checkbox],[role=radio],summary,label,[onclick]';
+        const out = [];
+        for (const e of document.querySelectorAll(sel)) {
+          if (!visible(e)) continue;
+          const r = e.getBoundingClientRect();
+          const label = norm(e.innerText || e.value || e.getAttribute('aria-label') || e.title || e.placeholder || e.alt || '');
+          const type = (e.tagName || '').toLowerCase() + (e.getAttribute('role') ? ':' + e.getAttribute('role') : '');
+          out.push({
+            tag: type,
+            text: label.slice(0, 80),
+            id: e.id || undefined,
+            name: e.name || undefined,
+            href: (e.tagName === 'A' && e.href) ? e.href.slice(0, 120) : undefined,
+            x: Math.round(r.x + r.width/2), y: Math.round(r.y + r.height/2),
+            w: Math.round(r.width), h: Math.round(r.height),
+          });
+          if (out.length >= 80) break;
+        }
+        return JSON.stringify({ url: location.href, title: document.title, count: out.length, elements: out });
+      })()`;
+    const raw = await this.evalJs(js, sessionId);
+    let data;
+    try { data = JSON.parse(raw); } catch { return 'Error: no pude analizar la página.'; }
+    if (!data.elements || !data.elements.length) return 'Sin elementos interactivos visibles. Prueba action=screenshot o action=content.';
+    this._lastElements = data.elements;   // índices válidos hasta la próxima navegación
+    const lines = data.elements.map((e, i) => {
+      const bits = [`${i}: <${e.tag}>`];
+      if (e.text) bits.push(`"${e.text}"`);
+      if (e.id) bits.push(`#${e.id}`);
+      if (e.href) bits.push(`→ ${e.href}`);
+      bits.push(`(${e.x},${e.y} ${e.w}x${e.h})`);
+      return bits.join(' ');
+    });
+    return `Página: ${data.title}\nURL: ${data.url}\nElementos interactivos (${data.count}):
+${lines.join('\n')}
+
+Usa action=click_index con estos índices, o selector/text como antes.`;
+  }
+
+  /** Clic por índice del último inventory de elements(). */
+  async clickIndex(idx, sessionId) {
+    const el = (this._lastElements || [])[Number(idx)];
+    if (!el) return `Error: índice ${idx} inválido. Ejecuta action=elements para ver los índices actuales.`;
+    await this.send('Input.dispatchMouseEvent', { type: 'mouseMoved', x: el.x, y: el.y }, sessionId);
+    await sleep(50);
+    for (const type of ['mousePressed', 'mouseReleased']) {
+      await this.send('Input.dispatchMouseEvent', { type, x: el.x, y: el.y, button: 'left', clickCount: 1 }, sessionId);
+      await sleep(40);
+    }
+    await sleep(800);
+    return `OK: clic por índice ${idx} en «${el.text || el.tag}» (${el.x},${el.y})`;
   }
 
   // ---------- interaction ----------
@@ -301,6 +382,7 @@ class Browser {
     const a = args.action;
     try {
       if (a === 'launch') return await this.launch(args.browser, args.url);
+      if (a === 'profile') return await this.switchProfile(args.profile);
       if (a === 'close') {
         try { await this.send('Browser.close'); } catch {}
         this.kill();
@@ -354,6 +436,21 @@ class Browser {
           }
           return `OK: pestaña cerrada. Activas: ${(await this.pages()).length}.`;
         }
+
+        case 'elements': {
+          const { sessionId } = await this.currentSession();
+          const inv = await this.elements(sessionId);
+          // v1.5: junto al inventario DOM, una captura para el análisis visual fusionado
+          if (args.screenshot !== false) {
+            try {
+              const dataUrl = await this.screenshot(sessionId, false);
+              return { text: inv + '\n[Captura de la página adjunta para análisis visual]', images: [dataUrl] };
+            } catch {}
+          }
+          return inv;
+        }
+
+        case 'click_index': return await this.clickIndex(args.index, await this.sessionIdOf());
 
         case 'click': return await this.findAndClick(args.selector, args.text, await this.sessionIdOf());
 

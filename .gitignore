@@ -18,3 +18,5 @@ Thumbs.db
 # Local test debris
 _*.js
 _*.png
+_*.html
+.freebuff/

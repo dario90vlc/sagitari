@@ -49,7 +49,17 @@ const P = {
   maximize: '<rect x="5" y="5" width="14" height="14" rx="1.5"/>',
   restore: '<rect x="8" y="3" width="13" height="13" rx="1.5"/><path d="M16 8v10a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2V10a2 2 0 0 1 2-2h3"/>',
   close: '<path d="M6 6l12 12M18 6 6 18"/>',
-  dots: '<circle cx="6" cy="12" r="1.4"/><circle cx="12" cy="12" r="1.4"/><circle cx="18" cy="12" r="1.4"/>'
+  clip: '<path d="m21.44 11.05-9.19 9.19a6 6 0 0 1-8.49-8.49l8.57-8.57A4 4 0 1 1 18 8.84l-8.59 8.57a2 2 0 0 1-2.83-2.83l8.49-8.48"/>',
+  x: '<path d="M18 6 6 18M6 6l12 12"/>',
+  dots: '<circle cx="6" cy="12" r="1.4"/><circle cx="12" cy="12" r="1.4"/><circle cx="18" cy="12" r="1.4"/>',
+  list: '<path d="M8.5 6h12M8.5 12h12M8.5 18h12"/><circle cx="3.6" cy="6" r="1.3"/><circle cx="3.6" cy="12" r="1.3"/><circle cx="3.6" cy="18" r="1.3"/>',
+  panel: '<rect x="3" y="4" width="18" height="16" rx="2"/><path d="M9.5 4v16"/>',
+  copy: '<rect x="9" y="9" width="11.5" height="11.5" rx="2"/><path d="M5 15.5V5a2 2 0 0 1 2-2h9.5"/>',
+  refresh: '<path d="M20.5 12a8.5 8.5 0 1 1-2.6-6.1"/><path d="M20.5 4.5V11h-6.5"/>',
+  volume: '<path d="M4 9.5v5h3.2L13 19.2V4.8L7.2 9.5z"/><path d="M16.2 9.2a4.2 4.2 0 0 1 0 5.6M18.8 6.6a8 8 0 0 1 0 10.8"/>',
+  arrowDown: '<path d="M12 4.5v14M6 12.5l6 6 6-6"/>',
+  chevron: '<path d="m9.5 6 6 6-6 6"/>',
+  clock: '<circle cx="12" cy="12" r="9"/><path d="M12 7v5.5l3.5 2"/>',
 };
 
 function icon(name, cls) {

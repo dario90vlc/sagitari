@@ -1,6 +1,6 @@
 'use strict';
 
-/* Guardrails + permissions for the SAGITARI agent (v1.1 security block).
+/* Guardrails + permissions for the SAGITARI agent (v1.1 security block, v1.2 cost+stall).
    Pure logic, no Electron / no I/O → fully unit-testable (test/guardrails.test.js).
 
    Permission levels:
@@ -9,9 +9,36 @@
      restricted → blocked unless the user explicitly allows it in Settings
 
    Guardrails (per run): max steps, max tool calls, max duration, max tokens,
-   and repeated-call / loop detection with configurable similarity. */
+   max estimated cost (USD), repeated-call / loop detection, and STALL detection
+   (N steps without any new tool call or assistant output = no progress). */
 
 const LEVELS = ['safe', 'confirm', 'restricted'];
+
+/* Coste por 1M tokens (USD) — estimación para el límite de coste. Claves por
+   familia de modelo; lo no reconocido usa el default. El override del usuario
+   (config.security.modelPricing) siempre gana. */
+const MODEL_PRICING = {
+  'gpt-5': { in: 1.25, out: 10 },
+  'gpt-4o': { in: 2.5, out: 10 },
+  'gpt-4': { in: 30, out: 60 },
+  'claude-sonnet': { in: 3, out: 15 },
+  'claude-opus': { in: 15, out: 75 },
+  'claude-haiku': { in: 0.8, out: 4 },
+  'gemini-2': { in: 1.25, out: 10 },
+  'deepseek': { in: 0.27, out: 1.1 },
+  'llama': { in: 0.2, out: 0.6 },
+  __default: { in: 1, out: 3 },
+};
+
+function pricingFor(model, override) {
+  if (override && typeof override === 'object') return override;
+  const m = String(model || '').toLowerCase();
+  for (const k of Object.keys(MODEL_PRICING)) {
+    if (k.startsWith('__')) continue;
+    if (m.includes(k)) return MODEL_PRICING[k];
+  }
+  return MODEL_PRICING.__default;
+}
 
 /* Default risk per tool. The registry (tools.js) declares intent; a user
    override in settings always wins over these defaults. */
@@ -32,6 +59,8 @@ const DEFAULT_RISK = {
   window_manage: 'confirm',
   system_info: 'safe',
   use_skill: 'safe',
+  remember: 'safe',
+  delegate: 'safe',   // delegar no pide permiso; las herramientas del subagente sí, con los mismos niveles
 };
 
 /* Arg summaries shown to the user in the confirmation card. */
@@ -68,32 +97,60 @@ function describeAction(name, args = {}) {
   }
 }
 
+/* Acciones del navegador SIEMPRE sensibles (v1.5): aunque browser_control esté
+   en 'safe', estas acciones piden confirmación — comprar, pagar, eliminar,
+   publicar, enviar datos o cambiar ajustes críticos nunca son automáticas. */
+const SENSITIVE_BROWSER_RX = /(comprar|compra|pagar|pago|checkout|finalizar|eliminar|borrar|delete|suspender|cancelar suscripci|dar de baja|publicar|enviar|transferir|vender|contratar)/i;
+
+/* Campos de datos sensibles: escribir en ellos también exige confirmación */
+const SENSITIVE_FIELD_RX = /(card|cvv|cvc|expir|iban|tarjeta|password|contrase|passwd|pin\b|cuenta.*number|account.*num|ssn|dni\b)/i;
+
+function isSensitiveBrowserAction(name, args = {}) {
+  if (name !== 'browser_control') return false;
+  const a = args || {};
+  if (!['click', 'type', 'press'].includes(a.action)) return false;
+  if (SENSITIVE_BROWSER_RX.test(String(a.text || '') + ' ' + String(a.selector || ''))) return true;
+  if (a.action === 'type' && SENSITIVE_FIELD_RX.test(String(a.selector || '') + ' ' + String(a.name || '') + ' ' + String(a.id || ''))) return true;
+  return false;
+}
+
 class Guardrails {
   /**
-   * @param {object} policy  { permissions: {toolName: level}, guardrails: {maxSteps, maxToolCalls, maxDurationMs, loopThreshold} }
+   * @param {object} policy  { permissions: {toolName: level},
+   *   guardrails: {maxSteps, maxToolCalls, maxDurationMs, maxTokens, maxCostUsd, loopThreshold, stallThreshold},
+   *   modelPricing: {in, out} }
    */
   constructor(policy = {}) {
     this.policy = {
       permissions: { ...policy.permissions },
+      modelPricing: policy.modelPricing || null,
       guardrails: {
-        maxSteps: policy.guardrails?.maxSteps ?? 60,          // 0 or null = unlimited
-        maxToolCalls: policy.guardrails?.maxToolCalls ?? 80,  // 0 or null = unlimited
+        maxSteps: policy.guardrails?.maxSteps ?? 60,           // 0 or null = unlimited
+        maxToolCalls: policy.guardrails?.maxToolCalls ?? 80,   // 0 or null = unlimited
         maxDurationMs: policy.guardrails?.maxDurationMs ?? 15 * 60 * 1000,
-        maxTokens: policy.guardrails?.maxTokens ?? 0,         // 0 = unlimited (needs usage tracking)
-        loopThreshold: policy.guardrails?.loopThreshold ?? 3, // identical consecutive calls before loop
+        maxTokens: policy.guardrails?.maxTokens ?? 0,          // 0 = unlimited
+        maxCostUsd: policy.guardrails?.maxCostUsd ?? 0,        // 0 = unlimited (estimación)
+        loopThreshold: policy.guardrails?.loopThreshold ?? 3,  // identical consecutive calls before loop
+        stallThreshold: policy.guardrails?.stallThreshold ?? 6, // pasos sin señal de progreso
       },
     };
     this.startedAt = 0;
     this.steps = 0;
     this.toolCalls = 0;
     this.tokensUsed = 0;
+    this.tokensIn = 0;
+    this.tokensOut = 0;
+    this.costUsd = 0;
+    this.model = null;
     this.recentCalls = [];       // signatures of last N tool calls
     this.approvals = new Map();  // remembered confirmations: signature -> expiry
+    this._stall = 0;             // pasos consecutivos sin progreso
   }
 
   /** Hot-reload policy from Settings without losing run counters. */
   setPolicy(policy = {}) {
     if (policy.permissions) this.policy.permissions = { ...policy.permissions };
+    if (policy.modelPricing) this.policy.modelPricing = policy.modelPricing;
     if (policy.guardrails) this.policy.guardrails = { ...this.policy.guardrails, ...policy.guardrails };
   }
 
@@ -103,7 +160,11 @@ class Guardrails {
     this.steps = 0;
     this.toolCalls = 0;
     this.tokensUsed = 0;
+    this.tokensIn = 0;
+    this.tokensOut = 0;
+    this.costUsd = 0;
     this.recentCalls = [];
+    this._stall = 0;
   }
 
   /** Call once per model turn. Returns {ok, reason?}. */
@@ -129,16 +190,36 @@ class Guardrails {
     return { ok: true };
   }
 
-  /** Accumulate usage reported by the provider. Returns {ok, reason?}. */
-  addTokens(n) {
+  /** Coste estimado (USD) del último turno según tokens y modelo. */
+  _turnCost(promptTokens, completionTokens) {
+    const p = pricingFor(this.model, this.policy.modelPricing);
+    return (promptTokens / 1e6) * p.in + (completionTokens / 1e6) * p.out;
+  }
+
+  /**
+   * Accumulate usage reported by the provider. Returns {ok, reason?}.
+   * Enforce token budget AND estimated-cost budget.
+   */
+  addTokens(n, usage) {
     if (!n) return { ok: true };
     this.tokensUsed += n;
-    const max = this.policy.guardrails.maxTokens;
-    if (max > 0 && this.tokensUsed >= max) {
-      return { ok: false, reason: `Límite de tokens alcanzado (${max}).` };
+    if (usage) {
+      this.tokensIn += usage.prompt_tokens || 0;
+      this.tokensOut += usage.completion_tokens || 0;
+      this.costUsd += this._turnCost(usage.prompt_tokens || 0, usage.completion_tokens || 0);
+    }
+    const g = this.policy.guardrails;
+    if (g.maxTokens > 0 && this.tokensUsed >= g.maxTokens) {
+      return { ok: false, reason: `Límite de tokens alcanzado (${g.maxTokens}).` };
+    }
+    if (g.maxCostUsd > 0 && this.costUsd >= g.maxCostUsd) {
+      return { ok: false, reason: `Límite de coste estimado alcanzado ($${g.maxCostUsd}).` };
     }
     return { ok: true };
   }
+
+  /** Para el panel: coste estimado de la ejecución en curso. */
+  getCost() { return this.costUsd; }
 
   /* ---------- loop detection ---------- */
   signature(name, args = {}) {
@@ -175,6 +256,31 @@ class Guardrails {
     return { loop: false };
   }
 
+  /* ---------- stall detection (ausencia de progreso) ---------- */
+
+  /** Señales de progreso: una herramienta NUEVA distinta de la anterior, o texto no vacío. */
+  _lastSig() { return this.recentCalls[this.recentCalls.length - 1]; }
+
+  /**
+   * Llamar UNA vez por vuelta del modelo (antes de checkStep idealmente).
+   * Si no hay herramientas nuevas y no hay texto → paso "estancado".
+   * Detecta el bucle por firma de herramientas incluso si los args varían poco:
+   * aquí interesa el ritmo, el bucle exacto lo cubre isLoop().
+   */
+  checkStall({ toolName = null, assistantText = '' } = {}) {
+    const g = this.policy.guardrails;
+    if (g.stallThreshold > 0) {
+      const progressed = Boolean(assistantText && assistantText.trim()) || (toolName && toolName !== this._lastToolName);
+      if (toolName) this._lastToolName = toolName;
+      this._stall = progressed ? 0 : this._stall + 1;
+      if (this._stall >= g.stallThreshold) {
+        this._stall = 0;
+        return { ok: false, reason: `Sin progreso: ${g.stallThreshold} pasos sin acciones ni respuestas nuevas. Ejecución detenida.` };
+      }
+    }
+    return { ok: true };
+  }
+
   /* ---------- permissions ---------- */
   /** Effective level for a tool: user override wins, else default. */
   levelFor(name) {
@@ -187,8 +293,25 @@ class Guardrails {
    * Decide what to do with a pending tool call.
    * Returns {action:'allow'} | {action:'confirm', description, summary, signature}
    *                       | {action:'deny', reason}.
+   * v1.5: las acciones sensibles del navegador fuerzan 'confirm' aunque el
+   * usuario tenga browser_control en 'safe' (la seguridad gana a la comodidad).
    */
   decide(name, args = {}) {
+    if (isSensitiveBrowserAction(name, args)) {
+      const sig = this.signature(name, args);
+      const memo = this.approvals.get(sig);
+      if (!(memo && memo > Date.now())) {
+        const a = args || {};
+        return {
+          action: 'confirm',
+          tool: name,
+          description: 'ACCIÓN SENSIBLE en la web: ' + (a.action === 'click' ? 'hacer clic en «' + (a.text || a.selector || '') + '»' : a.action === 'type' ? 'escribir en «' + (a.selector || '') + '»' : 'pulsar ' + (a.key || '')) + ' — parece una compra/pago/eliminación/publicación',
+          summary: summarizeArgs(name, args),
+          signature: sig,
+          sensitive: true,
+        };
+      }
+    }
     const level = this.levelFor(name);
     if (level === 'safe') return { action: 'allow' };
     const sig = this.signature(name, args);
@@ -220,4 +343,4 @@ class Guardrails {
   }
 }
 
-module.exports = { Guardrails, DEFAULT_RISK, LEVELS, describeAction, summarizeArgs };
+module.exports = { Guardrails, DEFAULT_RISK, LEVELS, describeAction, summarizeArgs, pricingFor, MODEL_PRICING, isSensitiveBrowserAction, SENSITIVE_BROWSER_RX, SENSITIVE_FIELD_RX };

@@ -5,6 +5,7 @@
      safe       → runs automatically
      confirm    → asks the user before running
      restricted → blocked unless explicitly allowed */
+const { delegateToolDef } = require('./subagents');
 const RISK = {
   run_command: 'confirm',
   write_file: 'confirm',
@@ -21,6 +22,7 @@ const RISK = {
   window_manage: 'confirm',
   system_info: 'safe',
   use_skill: 'safe',
+  delegate: 'safe',   // v1.4: la delegación no pide permiso; las herramientas del SUBAGENTE sí (con los mismos niveles)
 };
 
 const defs = [
@@ -122,11 +124,13 @@ const defs = [
     type: 'function',
     function: {
       name: 'browser_control',
-      description: 'Controla un navegador Chrome/Edge real mediante DevTools Protocol. UNA SOLA ventana con múltiples pestañas gestionables. Acciones: launch (abrir/reutilizar), navigate, new_tab, select_tab, close_tab, tabs (listar), click (por texto visible o selector), type (con clear/submit), press, scroll, wait, content (leer), eval, screenshot (con fullPage), close.',
+      description: 'Controla un navegador Chrome/Edge real mediante DevTools Protocol. UNA SOLA ventana con múltiples pestañas gestionables. Acciones: launch (abrir/reutilizar), profile (cambiar de perfil: cookies/sesiones propias), navigate, new_tab, select_tab, close_tab, tabs (listar), elements (inventario clicable con índices + captura), click_index (clic por índice de elements), click (por texto visible o selector), type (con clear/submit), press, scroll, wait, content (leer), eval, screenshot (con fullPage), close.',
       parameters: {
         type: 'object',
         properties: {
-          action: { type: 'string', enum: ['launch', 'navigate', 'new_tab', 'select_tab', 'close_tab', 'tabs', 'click', 'type', 'press', 'scroll', 'wait', 'content', 'eval', 'screenshot', 'close'] },
+          action: { type: 'string', enum: ['launch', 'profile', 'navigate', 'new_tab', 'select_tab', 'close_tab', 'tabs', 'elements', 'click_index', 'click', 'type', 'press', 'scroll', 'wait', 'content', 'eval', 'screenshot', 'close'] },
+          profile: { type: 'string', description: 'profile: nombre del perfil (default, personal, work, research, shopping, development). Cada perfil tiene sus propias cookies y sesiones' },
+          index: { type: 'number', description: 'click_index: número de elemento del inventario de elements' },
           url: { type: 'string', description: 'URL para launch/navigate/new_tab. Dominio simple vale (ej: "wikipedia.org")' },
           selector: { type: 'string', description: 'Selector CSS para click/type. Si no lo sabes, usa click con text' },
           text: { type: 'string', description: 'click: texto visible del botón/enlace. type: texto a escribir' },
@@ -216,6 +220,22 @@ const defs = [
   {
     type: 'function',
     function: {
+      name: 'remember',
+      description: 'Guarda un recuerdo permanente para futuras conversaciones (preferencias del usuario, datos importantes, decisiones). Úsalo cuando el usuario diga "recuerda que...", o para anotar hábitos y preferencias relevantes que descubras.',
+      parameters: {
+        type: 'object',
+        properties: {
+          text: { type: 'string', description: 'El recuerdo, en una frase clara y autónoma' },
+          importance: { type: 'number', description: '0-1: 1 = crítico (siempre relevante), 0.5 = normal, 0.2 = detalle menor' },
+          confidence: { type: 'number', description: '0-1: cómo de seguro estás del recuerdo (0.8 por defecto)' }
+        },
+        required: ['text']
+      }
+    }
+  },
+  {
+    type: 'function',
+    function: {
       name: 'use_skill',
       description: 'Carga las instrucciones especializadas de una skill instalada (código, investigación, diseño, ahorro de tokens…). Úsala ANTES de empezar una tarea en la que alguna skill del índice aplique: seguirás sus instrucciones expertas para esa tarea. Devuelve el cuerpo completo de la skill.',
       parameters: {
@@ -226,5 +246,8 @@ const defs = [
     }
   }
 ];
+
+// v1.4: la herramienta delegate se añade al final (definida en subagents.js)
+defs.push(delegateToolDef());
 
 module.exports = { toolDefs: defs, RISK };

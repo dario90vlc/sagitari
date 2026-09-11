@@ -1,6 +1,7 @@
 'use strict';
 const { app, nativeImage } = require('electron');
-const SRC = 'C:\\Users\\dario\\Desktop\\sagitari_logo_transparente.png';
+const path = require('path');
+const SRC = process.argv[2] || path.join(__dirname, '..', 'renderer', 'assets', 'logo-full.png');
 app.disableHardwareAcceleration();
 app.whenReady().then(() => {
   const img = nativeImage.createFromPath(SRC);

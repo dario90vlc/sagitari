@@ -31,11 +31,11 @@ Full control of your Windows PC from a holographic interface: chat, voice, brows
 
 <table>
   <tr>
-    <td width="50%"><img src="docs/shot-home.png" alt="Home"></td>
+    <td width="50%"><img src="docs/shot-empty.png" alt="Chat welcome"></td>
     <td width="50%"><img src="docs/shot-agents.png" alt="Agents"></td>
   </tr>
   <tr>
-    <td align="center"><sub><b>Home</b> — launch pad with your workspace</sub></td>
+    <td align="center"><sub><b>Chat</b> — pick a mode, attach files, just ask</sub></td>
     <td align="center"><sub><b>Agents</b> — live telemetry of every run</sub></td>
   </tr>
   <tr>
@@ -99,11 +99,25 @@ Most desktop AI assistants stop at the chat bubble. SAGITARI is built as an **ag
 **Interface**
 
 - **Holographic UI** hand-built in vanilla HTML/CSS — no UI frameworks.
-- **Reactive glow:** the frame lights up (violet ↔ turquoise blend) while the agent
-  thinks, works or speaks.
+- **Reactive glow:** the frame lights up while the agent thinks, works or speaks —
+  color and intensity are yours to tune (Settings → Appearance).
 - **Voice both ways:** dictate with Windows speech engines, hear answers out loud (TTS).
+- **Attach anything:** drag & drop, paste or pick images, code and text files — images
+  travel as vision parts, text files are read for you (30+ formats).
 - **Conversation history** with separate threads, and a live Agents view showing every
   run's steps as they happen.
+- **Themeable:** six UI accent palettes and a glow color/intensity slider, applied live.
+
+**Autonomy**
+
+- **Background tasks:** long jobs keep running while you keep chatting — pause, resume,
+  cancel, and get notified on completion.
+- **Specialist subagents:** the orchestrator delegates research, browser, coding, file or
+  vision work; every subagent brings its own tools and reports back.
+- **Checkpoints & recovery:** long tasks save progress; a crash or a closed window no
+  longer loses the work — SAGITARI resumes where it left off and shows what failed.
+- **Model fallback:** if a provider fails, the next one takes over automatically and the
+  task continues.
 
 ## Installation
 
@@ -111,8 +125,8 @@ Download your preferred artifact from the [releases page](../../releases):
 
 | Artifact | What it is |
 |---|---|
-| `SAGITARI-Setup-1.1.0.exe` | Windows installer (NSIS): shortcuts, uninstaller |
-| `SAGITARI-Portable-1.1.0.exe` | Portable: single executable, no install |
+| `SAGITARI-Setup-2.1.0.exe` | Windows installer (NSIS): shortcuts, uninstaller |
+| `SAGITARI-Portable-2.1.0.exe` | Portable: single executable, no install |
 | `Source code (zip)` | Source code |
 
 > Windows SmartScreen may warn on first run (unsigned binary). Click
@@ -124,8 +138,9 @@ Download your preferred artifact from the [releases page](../../releases):
 2. Paste your API key → **Detect models** → choose one → **Activate**.
 3. Type or dictate your first request. With Ollama you don't even need an API key (local).
 
-**Shortcuts:** `Alt+Space` show/hide panel · `Alt+Shift+S` bring to front ·
-`Ctrl+Shift+G` glow pulse · `Alt+M` cycle agent mode · `/` in the input opens the skill palette.
+**Shortcuts:** `Alt+1…9` switch sections · `Ctrl+Alt+S` show/hide panel ·
+`Alt+Shift+S` bring to front · `Ctrl+Shift+G` glow pulse · `Alt+M` cycle agent mode ·
+`/` in the input opens the skill palette.
 
 ## Build from source
 
@@ -156,10 +171,15 @@ sagitari/
 │   ├── providers.js
 │   └── voice.ps1   # offline dictation (Windows speech engines)
 ├── agent/          # the agent's brain
-│   ├── agent.js    # streaming loop + tool calling, no step limits
+│   ├── agent.js    # streaming loop + tool calling + subagent delegation
 │   ├── tools.js    # tool definitions
 │   ├── executors.js
-│   ├── skills.js   # SKILL.md engine
+│   ├── guardrails.js # step/time/cost limits, loop detection
+│   ├── checkpoints.js # pause/resume/recover long tasks
+│   ├── memory.js   # persistent memory + habits
+│   ├── skills.js   # SKILL.md engine + marketplace
+│   ├── subagents.js # specialist agents (research, browser, coding…)
+│   ├── tasks.js    # background tasks
 │   └── browser.js  # Chrome/Edge via CDP (no puppeteer)
 ├── renderer/       # holographic UI
 │   ├── index.html / app.js / styles.css

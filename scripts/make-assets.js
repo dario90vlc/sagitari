@@ -6,7 +6,7 @@ const { app, nativeImage } = require('electron');
 const fs = require('fs');
 const path = require('path');
 
-const SRC = process.argv[2] || 'C:\\Users\\dario\\Desktop\\sagitari_logo_transparente.png';
+const SRC = process.argv[2] || path.join(__dirname, '..', 'sagitari_logo_transparente.png');
 const OUT = path.join(__dirname, '..', 'renderer', 'assets');
 
 app.disableHardwareAcceleration();

@@ -1,7 +1,7 @@
 param(
-  [string]$Src = "C:\Users\dario\Desktop\sagitari_logo_transparente.png",
-  [string]$OutDir = "C:\Users\dario\Desktop\sagitari\renderer\assets",
-  [string]$TmpDir = "C:\Users\dario\Desktop\sagitari\scripts\tmp_ico"
+  [string]$Src = "$PSScriptRoot\..\sagitari_logo_transparente.png",
+  [string]$OutDir = "$PSScriptRoot\..\renderer\assets",
+  [string]$TmpDir = "$PSScriptRoot\tmp_ico"
 )
 $ErrorActionPreference = "Stop"
 Add-Type -AssemblyName System.Drawing

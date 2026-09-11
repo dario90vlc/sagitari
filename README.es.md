@@ -31,11 +31,11 @@ Control total de tu PC con Windows desde una interfaz holográfica: chat, voz, n
 
 <table>
   <tr>
-    <td width="50%"><img src="docs/shot-home.png" alt="Inicio"></td>
+    <td width="50%"><img src="docs/shot-empty.png" alt="Bienvenida del chat"></td>
     <td width="50%"><img src="docs/shot-agents.png" alt="Agentes"></td>
   </tr>
   <tr>
-    <td align="center"><sub><b>Inicio</b> — punto de partida con tu espacio de trabajo</sub></td>
+    <td align="center"><sub><b>Chat</b> — elige modo, adjunta archivos, pide y ya</sub></td>
     <td align="center"><sub><b>Agentes</b> — telemetría en vivo de cada ejecución</sub></td>
   </tr>
   <tr>
@@ -103,12 +103,27 @@ construido como un **agente con manos**:
 **Interfaz**
 
 - **UI holográfica** hecha a mano en HTML/CSS vanilla — sin frameworks de interfaz.
-- **Glow reactivo:** el marco se ilumina (mezcla violeta ↔ turquesa) mientras el agente
-  piensa, trabaja o habla.
+- **Glow reactivo:** el marco se ilumina mientras el agente piensa, trabaja o habla — color
+  e intensidad configurables (Ajustes → Apariencia).
 - **Voz en ambos sentidos:** dicta con los motores de voz de Windows, escucha las respuestas
   en voz alta (TTS).
+- **Adjunta lo que quieras:** arrastra y suelta, pega o elige imágenes, código y documentos —
+  las imágenes van como partes de visión y los ficheros de texto se leen solos (30+ formatos).
 - **Historial de conversaciones** separadas, y una vista de Agentes en vivo que muestra cada
   paso de cada ejecución.
+- **Personalizable:** seis paletas de acento y slider de color/intensidad del glow, aplicados
+  al vuelo.
+
+**Autonomía**
+
+- **Tareas en segundo plano:** los trabajos largos siguen mientras sigues chateando — pausa,
+  reanudación, cancelación y aviso al terminar.
+- **Subagentes especialistas:** el orquestador delega investigación, navegador, código,
+  ficheros o visión; cada subagente tiene sus propias herramientas y devuelve su resultado.
+- **Checkpoints y recuperación:** las tareas largas guardan progreso; un cierre o fallo ya no
+  pierde el trabajo — SAGITARI reanuda donde estaba y muestra qué falló.
+- **Fallback de modelos:** si un proveedor falla, el siguiente toma el relevo y la tarea
+  continúa automáticamente.
 
 ## Instalación
 
@@ -116,8 +131,8 @@ Descarga el artefacto que prefieras de la [página de releases](../../releases):
 
 | Artefacto | Qué es |
 |---|---|
-| `SAGITARI-Setup-1.1.0.exe` | Instalador Windows (NSIS): accesos directos, desinstalador |
-| `SAGITARI-Portable-1.1.0.exe` | Portable: un solo ejecutable, sin instalación |
+| `SAGITARI-Setup-2.1.0.exe` | Instalador Windows (NSIS): accesos directos, desinstalador |
+| `SAGITARI-Portable-2.1.0.exe` | Portable: un solo ejecutable, sin instalación |
 | `Source code (zip)` | Código fuente |
 
 > Windows SmartScreen puede avisar en la primera ejecución (binario sin firma). Pulsa
@@ -129,8 +144,9 @@ Descarga el artefacto que prefieras de la [página de releases](../../releases):
 2. Pega tu API key → **Detectar modelos** → elige uno → **Activar**.
 3. Escribe o dicta tu primera petición. Con Ollama no necesitas API key (local).
 
-**Atajos:** `Alt+Espacio` muestra/oculta el panel · `Alt+Shift+S` trae al frente ·
-`Ctrl+Shift+G` pulso de glow · `Alt+M` cicla el modo del agente · `/` en el campo abre la paleta de skills.
+**Atajos:** `Alt+1…9` cambia de sección · `Ctrl+Alt+S` muestra/oculta el panel ·
+`Alt+Shift+S` trae al frente · `Ctrl+Shift+G` pulso de glow · `Alt+M` cicla el modo del agente ·
+`/` en el campo abre la paleta de skills.
 
 ## Compilar desde fuente
 
@@ -161,7 +177,7 @@ sagitari/
 │   ├── providers.js
 │   └── voice.ps1   # dictado (motores de voz de Windows)
 ├── agent/          # cerebro del agente
-│   ├── agent.js    # loop streaming + tool calling, sin límite de pasos
+│   ├── agent.js    # loop streaming + tool calling + delegación en subagentes
 │   ├── tools.js    # definiciones de herramientas
 │   ├── executors.js
 │   ├── skills.js   # motor de skills (SKILL.md)

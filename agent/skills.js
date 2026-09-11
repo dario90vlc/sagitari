@@ -16,7 +16,7 @@ const fs = require('fs');
 const fsp = require('fs/promises');
 const path = require('path');
 
-const SKILLS_DIR = path.join(process.env.APPDATA || require('os').homedir(), 'SagitariAI', 'skills');
+let SKILLS_DIR = path.join(process.env.APPDATA || require('os').homedir(), 'SagitariAI', 'skills');
 
 function parseFrontMatter(raw) {
   const m = raw.match(/^---\r?\n([\s\S]*?)\r?\n---\r?\n?([\s\S]*)$/);
@@ -76,13 +76,21 @@ async function listSkills() {
     if (!fm || !fm.meta.name) continue;
     let enabled = true;
     try { enabled = JSON.parse(await fsp.readFile(path.join(dir, e.name, 'enabled.json'), 'utf8')).enabled !== false; } catch {}
+    let source = null;
+    try { source = JSON.parse(await fsp.readFile(path.join(dir, e.name, 'source.json'), 'utf8')); } catch {}
     out.push({
       id: e.name,
       name: fm.meta.name,
       description: fm.meta.description || '',
       version: fm.meta.version || '',
       author: fm.meta.author || '',
+      category: fm.meta.category || '',
+      compatibility: fm.meta.compatibility || fm.meta.compatible || '',
+      dependencies: Array.isArray(fm.meta.dependencies) ? fm.meta.dependencies : (fm.meta.dependencies ? [String(fm.meta.dependencies)] : []),
+      examples: Array.isArray(fm.meta.examples) ? fm.meta.examples : (fm.meta.examples ? [String(fm.meta.examples)] : []),
+      triggers: Array.isArray(fm.meta.triggers) ? fm.meta.triggers : (fm.meta.triggers ? [String(fm.meta.triggers)] : []),
       allowTools: Array.isArray(fm.meta.tools) ? fm.meta.tools.join(', ') : (fm.meta.tools || ''),
+      source,
       enabled,
       bodyChars: fm.body.length,
       body: fm.body
@@ -118,6 +126,78 @@ async function getSkill(idOrName) {
   const all = await listSkills();
   const s = all.find(x => x.id === idOrName || x.name === idOrName);
   return s || null;
+}
+
+/* ---------- v1.7: búsqueda y auto-activación ---------- */
+
+/** Busca skills por texto en nombre/descripción/categoría/ejemplos. */
+async function searchSkills(query) {
+  const q = String(query || '').toLowerCase().trim();
+  if (!q) return listSkills();
+  const all = await listSkills();
+  const terms = q.split(/\s+/);
+  return all.filter(s => {
+    const hay = `${s.name} ${s.description} ${s.category} ${(s.examples || []).join(' ')} ${(s.triggers || []).join(' ')}`.toLowerCase();
+    return terms.every(t => hay.includes(t));
+  });
+}
+
+/**
+ * Auto-activación según la tarea (v1.7): devuelve las skills cuya descripción
+ * o triggers encajan con el texto de la petición. Solo skills habilitadas.
+ */
+async function suggestSkillsFor(text) {
+  const t = String(text || '').toLowerCase();
+  if (!t.trim()) return [];
+  const all = (await listSkills()).filter(s => s.enabled);
+  const hits = [];
+  for (const s of all) {
+    const triggers = (s.triggers || []).filter(Boolean);
+    if (triggers.some(tr => { try { return new RegExp(tr, 'i').test(t); } catch { return t.includes(tr.toLowerCase()); } })) { hits.push(s); continue; }
+    const hay = `${s.name} ${s.description}`.toLowerCase();
+    const words = hay.split(/[^a-z0-9áéíóúñü]+/).filter(w => w.length >= 4);
+    if (words.some(w => t.includes(w) && w.length >= 5)) hits.push(s);
+  }
+  return hits.slice(0, 3);
+}
+
+/* ---------- v1.7: actualización de skills importadas ---------- */
+
+/** Guarda el origen de una skill importada (repo + path) para poder actualizarla. */
+async function writeSource(id, source) {
+  try {
+    await fsp.mkdir(path.join(skillsDir(), id), { recursive: true });
+    await fsp.writeFile(path.join(skillsDir(), id, 'source.json'), JSON.stringify(source, null, 2), 'utf8');
+  } catch {}
+}
+
+/** Re-importa una skill desde su repo de origen. Devuelve {ok, changed}. */
+async function updateSkill(id) {
+  const s = await getSkill(id);
+  if (!s || !s.source || !s.source.repo) throw new Error('La skill no tiene origen registrado (no es importada).');
+  const { repo, path: repoPath } = s.source;
+  const { files } = await resolveRepoSkills(repo + (repoPath ? '/' + repoPath.split('/SKILL.md')[0] : ''));
+  const f = files.find(x => (repoPath && x.path === repoPath) || (!repoPath && x.path.includes('/' + id + '/')));
+  if (!f) throw new Error('No se encontró la skill en el repo de origen.');
+  const res = await fetch(f.url, { headers: { 'User-Agent': 'Sagitari' } });
+  if (!res.ok) throw new Error('GitHub ' + res.status);
+  const raw = await res.text();
+  const fm = parseFrontMatter(raw);
+  const changed = !fm || fm.meta.version !== s.version || fm.body !== s.body;
+  if (changed) await fsp.writeFile(path.join(skillsDir(), id, 'SKILL.md'), raw, 'utf8');
+  return { ok: true, changed, version: fm ? fm.meta.version : '' };
+}
+
+/** Actualiza todas las skills con origen. */
+async function updateAll() {
+  const all = await listSkills();
+  const results = [];
+  for (const s of all) {
+    if (!s.source) continue;
+    try { const r = await updateSkill(s.id); results.push({ id: s.id, ...r }); }
+    catch (e) { results.push({ id: s.id, ok: false, error: e.message }); }
+  }
+  return results;
 }
 
 async function setEnabled(id, enabled) {
@@ -173,6 +253,7 @@ async function importFromGitHub(repo) {
     const dest = path.join(skillsDir(), id);
     await fsp.mkdir(dest, { recursive: true });
     await fsp.writeFile(path.join(dest, 'SKILL.md'), raw, 'utf8');
+    await writeSource(id, { repo: repoName, path: f.path, installedAt: new Date().toISOString() });
     installed.push({ id, name: fm.meta.name, from: repoName });
   }
   if (!installed.length) throw new Error('Los SKILL.md encontrados no tienen front-matter válido (name/description).');
@@ -194,4 +275,4 @@ async function deleteSkill(id) {
   await fsp.rm(path.join(skillsDir(), id), { recursive: true, force: true });
 }
 
-module.exports = { listSkills, promptIndex, promptIndexSync, getSkill, setEnabled, importFromGitHub, createSkill, deleteSkill, skillsDir, __test: { parseFrontMatter } };
+module.exports = { listSkills, promptIndex, promptIndexSync, getSkill, setEnabled, importFromGitHub, createSkill, deleteSkill, searchSkills, suggestSkillsFor, updateSkill, updateAll, writeSource, skillsDir, __test: { parseFrontMatter, _resetForTests: (dir) => { SKILLS_DIR = dir; } } };
