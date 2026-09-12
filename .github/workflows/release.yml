@@ -34,32 +34,26 @@ jobs:
         env:
           GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
 
-      - name: Compute SHA-256
-        id: hashes
+      - name: Build release body (notes + SHA-256)
         shell: bash
         run: |
-          echo "setup=$(sha256sum dist/SAGITARI-Setup-*.exe | cut -d' ' -f1)" >> $GITHUB_OUTPUT
-          echo "portable=$(sha256sum dist/SAGITARI-Portable-*.exe | cut -d' ' -f1)" >> $GITHUB_OUTPUT
+          {
+            cat RELEASE_NOTES.md
+            echo
+            echo '## SHA-256'
+            echo '```'
+            for f in dist/SAGITARI-*.exe; do
+              echo "$(sha256sum "$f" | cut -d' ' -f1)  $(basename "$f")"
+            done
+            echo '```'
+          } > release-body.md
+          echo "--- cuerpo de la release ---"
+          cat release-body.md
 
       - name: Release
         uses: softprops/action-gh-release@v2
         with:
-          generate_release_notes: true
+          body_path: release-body.md
           files: |
             dist/SAGITARI-Setup-*.exe
             dist/SAGITARI-Portable-*.exe
-          body: |
-            Binarios oficiales de este tag, compilados automáticamente (CI).
-
-            **Descargas / Downloads**
-            - `SAGITARI-Setup-${{ github.ref_name }}.exe` — instalador / installer
-            - `SAGITARI-Portable-${{ github.ref_name }}.exe` — portable
-
-            **SHA-256**
-            ```
-            Setup:    ${{ steps.hashes.outputs.setup }}
-            Portable: ${{ steps.hashes.outputs.portable }}
-            ```
-
-            > Binario sin firmar: Windows SmartScreen puede avisar en la primera ejecución (Más información → Ejecutar de todas formas).
-            > Unsigned binary: SmartScreen may warn on first run (More info → Run anyway).
