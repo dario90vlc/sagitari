@@ -6,6 +6,11 @@
 const fs = require('fs');
 const path = require('path');
 
+/* Los tests crean almacenes temporales (memoria, checkpoints, skills…): se anotan
+   aquí para borrarlos al terminar. Sin esto, cada ejecución dejaba basura en %TEMP%. */
+const TMP_DIRS = [];
+const tmpDir = (prefix) => { const d = fs.mkdtempSync(path.join(os.tmpdir(), prefix)); TMP_DIRS.push(d); return d; };
+
 let pass = 0, fail = 0;
 const failures = [];
 const pendingAsync = [];
@@ -199,7 +204,7 @@ test('stallThreshold 0 disables stall detection', () => {
 /* ---------- v1.2: memoria avanzada (almacén aislado en tmp) ---------- */
 const os = require('os');
 const memory = require('../agent/memory');
-const MEM_DIR = fs.mkdtempSync(path.join(os.tmpdir(), 'sagi-mem-'));
+const MEM_DIR = tmpDir('sagi-mem-');
 memory.__test._resetForTests(path.join(MEM_DIR, 'memory.json'));
 
 test('memory add + list keep full metadata', () => {
@@ -243,7 +248,7 @@ test('memory update clamps importance and removes work', () => {
 
 /* ---------- v1.2: checkpoints (directorio aislado en tmp) ---------- */
 const checkpoints = require('../agent/checkpoints');
-const TASKS_TMP = fs.mkdtempSync(path.join(os.tmpdir(), 'sagi-tasks-'));
+const TASKS_TMP = tmpDir('sagi-tasks-');
 checkpoints.__test._resetForTests(TASKS_TMP);
 
 test('checkpoints: newRun + save + read roundtrip', () => {
@@ -301,7 +306,7 @@ test('checkpoints: list and remove', () => {
 });
 
 test('checkpoints: list("active") excluye las tareas archivadas', () => {
-  const dir = fs.mkdtempSync(path.join(os.tmpdir(), 'sagi-active-'));
+  const dir = tmpDir('sagi-active-');
   checkpoints.__test._resetForTests(dir);
   const a = checkpoints.newRun({ goal: 'activa' }); checkpoints.save(a);
   const c = checkpoints.newRun({ goal: 'completada' }); checkpoints.save(c); checkpoints.complete(c, 'hecho');
@@ -329,7 +334,7 @@ test('remember tool rejects empty text', async () => {
 
 /* ---------- edición anclada y lectura por rangos ---------- */
 test('edit_file: reemplaza un fragmento único y rechaza los ambiguos', async () => {
-  const dir = fs.mkdtempSync(path.join(os.tmpdir(), 'sagi-edit-'));
+  const dir = tmpDir('sagi-edit-');
   const p = path.join(dir, 'a.txt');
   fs.writeFileSync(p, 'uno\ndos\ntres\n', 'utf8');
   let out = await executeTool('edit_file', { path: 'a.txt', old_string: 'dos', new_string: 'DOS' }, { workspace: dir });
@@ -351,7 +356,7 @@ test('edit_file: reemplaza un fragmento único y rechaza los ambiguos', async ()
 });
 
 test('read_file: lee por rango con cabecera y avisa de cómo seguir', async () => {
-  const dir = fs.mkdtempSync(path.join(os.tmpdir(), 'sagi-read-'));
+  const dir = tmpDir('sagi-read-');
   const p = path.join(dir, 'b.txt');
   fs.writeFileSync(p, Array.from({ length: 50 }, (_, i) => 'linea' + (i + 1)).join('\n'), 'utf8');
   const out = await executeTool('read_file', { path: 'b.txt', offset: 10, limit: 3 }, { workspace: dir });
@@ -364,7 +369,7 @@ test('read_file: lee por rango con cabecera y avisa de cómo seguir', async () =
   for (const p of pendingAsync) { try { await p; } catch {} }
   /* ---------- v1.3: TaskManager (cola, concurrencia, pausa, cancelar, programadas) ---------- */
 const { TaskManager } = require('../agent/tasks');
-const TASKS_TM = fs.mkdtempSync(path.join(os.tmpdir(), 'sagi-tm-'));
+const TASKS_TM = tmpDir('sagi-tm-');
 checkpoints.__test._resetForTests(TASKS_TM);
 
 function makeManager(overrides = {}) {
@@ -571,7 +576,7 @@ test('browser profiles: each profile gets its own data dir', () => {
 
 /* ---------- v1.6: Model Router, Fallback y Health ---------- */
 const modelsMod = require('../agent/models');
-const HEALTH_TMP = fs.mkdtempSync(path.join(os.tmpdir(), 'sagi-health-'));
+const HEALTH_TMP = tmpDir('sagi-health-');
 modelsMod._resetForTests(path.join(HEALTH_TMP, 'health.json'));
 
 test('classify detects task categories', () => {
@@ -624,8 +629,7 @@ test('health record accumulates and summarizes', () => {
 });
 
 /* ---------- v1.7: skills avanzadas + marketplace ---------- */
-const mkdtemp = (p) => fs.mkdtempSync(p);
-const SKILLS_TMP = mkdtemp(path.join(os.tmpdir(), 'sagi-skills-'));
+const SKILLS_TMP = tmpDir('sagi-skills-');
 skills.__test._resetForTests(SKILLS_TMP);   // redirige el almacén para los tests
 
 const { execSync } = require('child_process');
@@ -668,7 +672,7 @@ test('marketplace catalog marks installed repos', async () => {
 
 /* ---------- v2.0: hábitos ---------- */
 const habits = require('../agent/habits');
-const HABITS_TMP = fs.mkdtempSync(path.join(os.tmpdir(), 'sagi-habits-'));
+const HABITS_TMP = tmpDir('sagi-habits-');
 habits.__test._resetForTests(path.join(HABITS_TMP, 'habits.json'));
 
 test('habits: observation builds a profile the agent can use', () => {
@@ -1492,6 +1496,9 @@ test('adjuntos: UI completa — botón, drag&drop, pegar, chips y miniaturas', (
 // el recuento DEBE esperar a los tests async registrados dentro de este bloque:
 // si no, el resumen se imprime antes de que terminen y sus fallos no cuentan
 while (pendingAsync.length) await Promise.all(pendingAsync.splice(0));
+
+// limpieza: la suite no debe dejar basura en %TEMP%
+for (const d of TMP_DIRS) { try { fs.rmSync(d, { recursive: true, force: true }); } catch {} }
 
 console.log('');
   if (fail) {
