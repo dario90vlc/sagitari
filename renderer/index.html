@@ -103,7 +103,7 @@
           <!-- el estado vacío va FUERA de #messages: esa capa se vacía con
                innerHTML en cada conversación nueva y se lo llevaría por delante -->
           <div class="msgs-area" id="msgsArea">
-            <div id="messages"></div>
+            <div id="messages" role="log" aria-live="polite" aria-relevant="additions text" aria-label="Conversación"></div>
             <div class="chat-empty" id="chatEmpty">
               <div class="ce-inner">
                 <div class="ce-mark"><i data-i="spark"></i></div>
@@ -126,10 +126,10 @@
             <div class="compline">
             <div class="modeseg" id="modeSeg" title="Modo del agente (Alt+M para cambiar)"></div>
             <textarea id="chatInput" rows="1" placeholder="Escribe a Sagitari… (/ para usar una skill)"></textarea>
-            <button class="cbtn" id="chatAttach" title="Adjuntar archivos, documentos o imágenes"><i data-i="clip"></i></button>
-            <button class="cbtn" id="chatMic" title="Dictado por voz"><i data-i="mic"></i></button>
-            <button class="cbtn" id="chatPause" title="Pausar tarea (checkpoint)"><i data-i="minimize"></i></button>
-            <button class="cbtn send" id="chatSend" title="Enviar"><i data-i="send"></i></button>
+            <button class="cbtn" id="chatAttach" title="Adjuntar archivos, documentos o imágenes" aria-label="Adjuntar archivos, documentos o imágenes"><i data-i="clip"></i></button>
+            <button class="cbtn" id="chatMic" title="Dictado por voz" aria-label="Dictado por voz" aria-pressed="false"><i data-i="mic"></i></button>
+            <button class="cbtn" id="chatPause" title="Pausar tarea (checkpoint)" aria-label="Pausar tarea"><i data-i="pause"></i></button>
+            <button class="cbtn send" id="chatSend" title="Enviar" aria-label="Enviar"><i data-i="send"></i></button>
             </div>
           </div>
             <div id="devMeta" class="devmeta" hidden></div>
@@ -402,7 +402,8 @@
 
             <div class="setcard">
               <div class="sc-head"><b>Atajos de teclado</b><span class="sc-hint">Disponibles en toda la app</span></div>
-              <div class="swrow srow" data-keys="atajo alt espacio mostrar ocultar ventana"><span class="st"><b>Mostrar u ocultar la ventana</b></span><span class="kbdrow"><kbd class="kbd">Alt</kbd><kbd class="kbd">Espacio</kbd></span></div>
+              <div class="swrow srow" data-keys="atajo mostrar ocultar ventana ctrl alt s"><span class="st"><b>Mostrar u ocultar la ventana</b></span><span class="kbdrow"><kbd class="kbd">Ctrl</kbd><kbd class="kbd">Alt</kbd><kbd class="kbd">S</kbd></span></div>
+              <div class="swrow srow" data-keys="atajo traer al frente primer plano ventana alt shift s"><span class="st"><b>Traer la ventana al frente</b></span><span class="kbdrow"><kbd class="kbd">Alt</kbd><kbd class="kbd">Shift</kbd><kbd class="kbd">S</kbd></span></div>
               <div class="swrow srow" data-keys="atajo pulso glow resplandor"><span class="st"><b>Pulso de resplandor</b></span><span class="kbdrow"><kbd class="kbd">Ctrl</kbd><kbd class="kbd">Shift</kbd><kbd class="kbd">G</kbd></span></div>
               <div class="swrow srow" data-keys="atajo modo act plan think agente"><span class="st"><b>Cambiar de modo (Act / Plan / Think)</b></span><span class="kbdrow"><kbd class="kbd">Alt</kbd><kbd class="kbd">M</kbd></span></div>
             </div>

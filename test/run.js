@@ -128,6 +128,13 @@ test('A-B ping-pong is detected as a loop', () => {
   g.isLoop('t', { x: 1 }); g.isLoop('t', { x: 2 }); g.isLoop('t', { x: 1 }); g.isLoop('t', { x: 2 });
   ok(g.isLoop('t', { x: 1 }).loop, 'A-B-A-B debe detectarse');
 });
+test('guardrails: un umbral de bucle 0/1 se eleva al mínimo útil', () => {
+  // Con T=0/1 la condición `run >= T` se cumplía en la PRIMERA herramienta y
+  // cualquier tarea moría al arrancar (el ajuste se podía guardar desde Ajustes).
+  const g = new Guardrails({ guardrails: { loopThreshold: 1 } });
+  ok(!g.isLoop('read_file', { path: 'a' }).loop, 'la primera llamada nunca puede ser un bucle');
+  ok(g.isLoop('read_file', { path: 'a' }).loop, 'el umbral efectivo es 2');
+});
 test('genuinely different consecutive work is not a loop', () => {
   const g = new Guardrails();
   ok(!g.isLoop('list_dir', { path: 'C:/a' }).loop);
@@ -318,6 +325,39 @@ test('remember tool stores a memory via executeTool', async () => {
 test('remember tool rejects empty text', async () => {
   const out = await executeTool('remember', { text: '' }, {});
   ok(out.startsWith('Error'));
+});
+
+/* ---------- edición anclada y lectura por rangos ---------- */
+test('edit_file: reemplaza un fragmento único y rechaza los ambiguos', async () => {
+  const dir = fs.mkdtempSync(path.join(os.tmpdir(), 'sagi-edit-'));
+  const p = path.join(dir, 'a.txt');
+  fs.writeFileSync(p, 'uno\ndos\ntres\n', 'utf8');
+  let out = await executeTool('edit_file', { path: 'a.txt', old_string: 'dos', new_string: 'DOS' }, { workspace: dir });
+  ok(out.startsWith('OK'), out);
+  eq(fs.readFileSync(p, 'utf8'), 'uno\nDOS\ntres\n', 'solo cambia el fragmento anclado');
+  // ambiguo: no debe tocar el archivo
+  fs.writeFileSync(p, 'x\nx\n', 'utf8');
+  out = await executeTool('edit_file', { path: 'a.txt', old_string: 'x', new_string: 'y' }, { workspace: dir });
+  ok(out.startsWith('Error'), out);
+  eq(fs.readFileSync(p, 'utf8'), 'x\nx\n', 'un fragmento ambiguo no puede modificar nada');
+  // replace_all sí las cambia todas
+  out = await executeTool('edit_file', { path: 'a.txt', old_string: 'x', new_string: 'y', replace_all: true }, { workspace: dir });
+  ok(out.startsWith('OK'), out);
+  eq(fs.readFileSync(p, 'utf8'), 'y\ny\n');
+  // el texto nuevo no se interpreta como patrón de reemplazo ($&)
+  fs.writeFileSync(p, 'gancho', 'utf8');
+  await executeTool('edit_file', { path: 'a.txt', old_string: 'gancho', new_string: 'precio: $&' }, { workspace: dir });
+  eq(fs.readFileSync(p, 'utf8'), 'precio: $&', 'el texto literal no debe expandirse');
+});
+
+test('read_file: lee por rango con cabecera y avisa de cómo seguir', async () => {
+  const dir = fs.mkdtempSync(path.join(os.tmpdir(), 'sagi-read-'));
+  const p = path.join(dir, 'b.txt');
+  fs.writeFileSync(p, Array.from({ length: 50 }, (_, i) => 'linea' + (i + 1)).join('\n'), 'utf8');
+  const out = await executeTool('read_file', { path: 'b.txt', offset: 10, limit: 3 }, { workspace: dir });
+  ok(out.includes('[líneas 10-12 de 50]'), out.slice(0, 80));
+  ok(out.includes('linea10') && out.includes('linea12') && !out.includes('linea13'), 'devuelve solo el rango pedido');
+  ok(/quedan 38 líneas/.test(out), 'debe indicar cómo continuar la lectura');
 });
 
 (async () => {
@@ -1084,7 +1124,12 @@ test('chat: el CSS da color propio a cada modo y estiliza las tarjetas', () => {
   ok(empty && /position:\s*absolute/.test(empty[0]), '.chat-empty debe ser una capa sobre los mensajes');
   const inner = css.match(/\.ce-inner\s*\{[^}]*\}/);
   ok(inner && /width:\s*100%/.test(inner[0]), '.ce-inner necesita width:100% para que quepan los tres modos');
-  ok(/\.chat-empty\[hidden\]/.test(css), 'el estado vacío necesita poder ocultarse pese a su display:grid');
+  // El estado vacío fija display:grid, y varias reglas del fichero fijan
+  // display:grid/flex: `hidden` debe ganarles SIEMPRE. Antes había un parche por
+  // selector (.chat-empty[hidden], .nb[hidden], .srow[hidden]…); ahora hay una
+  // sola regla global, así que comprobamos esa garantía y no el parche.
+  ok(/\[hidden\]\s*\{[^}]*display:\s*none\s*!important/.test(css),
+    'hidden debe ganar a las reglas de display (regla global, no parches por selector)');
 });
 
 test('chat: los componentes de la burbuja no heredan el pre-wrap de la burbuja', () => {
@@ -1176,6 +1221,102 @@ test('agent: regenerar conserva la imagen que llevaba el mensaje', async () => {
   await agent.retry(settings);
   const last = bodies[bodies.length - 1].messages.filter(m => m.role === 'user').pop();
   ok(JSON.stringify(last).includes('ZZZ'), 'la imagen se vuelve a enviar en el reintento');
+});
+
+/* ---------- regresiones de la auditoría del núcleo ---------- */
+
+test('agent: denegar una confirmación continúa la ejecución (no rompe el turno)', async () => {
+  const { Agent } = require('../agent/agent');
+  const events = [];
+  const bodies = [];
+  const step1 = [evData({ choices: [{ delta: { tool_calls: [{ index: 0, id: 'c1', function: { name: 'run_command', arguments: '{"command":"del algo"}' } }] } }] })];
+  const step2 = [evData({ choices: [{ delta: { content: 'vale, no lo ejecuto' } }] })];
+  let n = 0;
+  const agent = new Agent({
+    fetchFn: async (url, opts) => { bodies.push(JSON.parse(opts.body)); return sseResponse(n++ === 0 ? step1 : step2); },
+    emit: (e) => { events.push(e); if (e.type === 'confirm_request') setTimeout(() => agent.resolveConfirm(e.id, false), 0); },
+    screenshotFn: async () => ({ dataUrl: 'data:image/png;base64,AA' }),
+  });
+  const settings = { active: { name: 'x', baseUrl: 'https://api.openai.com/v1', apiKey: 'k', model: 'gpt-4o' }, settings: { mode: 'act', modelRouting: false } };
+  await agent.chat('borra la carpeta', settings);
+  const errs = events.filter(e => e.type === 'error');
+  eq(errs.length, 0, 'denegar no puede abortar con error: ' + (errs[0] && errs[0].message));
+  const denial = (bodies[1].messages || []).find(m => m.role === 'tool' && m.tool_call_id === 'c1');
+  ok(denial && /DENEGÓ/.test(denial.content), 'el modelo debe recibir la negativa como resultado de la herramienta');
+  ok(events.some(e => e.type === 'assistant_done'), 'el turno debe cerrarse con la respuesta del modelo');
+});
+
+test('agent: el payload descarta tool_calls sin respuesta y tool huérfanos', async () => {
+  const { Agent } = require('../agent/agent');
+  const bodies = [];
+  const agent = new Agent({
+    fetchFn: async (url, opts) => { bodies.push(JSON.parse(opts.body)); return sseResponse([evData({ choices: [{ delta: { content: 'ok' } }] })]); },
+    emit: () => {},
+    screenshotFn: async () => ({ dataUrl: 'data:image/png;base64,AA' }),
+  });
+  const settings = { active: { name: 'x', baseUrl: 'https://api.openai.com/v1', apiKey: 'k', model: 'gpt-4o' }, settings: { mode: 'act', modelRouting: false } };
+  // historial envenenado: el turno anterior murió entre el assistant y su respuesta
+  agent.history.push({ role: 'assistant', content: '', tool_calls: [{ id: 'x1', type: 'function', function: { name: 'read_file', arguments: '{}' } }] });
+  agent.history.push({ role: 'tool', tool_call_id: 'huerfano', name: 'read_file', content: 'no debería viajar' });
+  await agent.chat('continúa', settings);
+  const sent = bodies[0].messages;
+  ok(!sent.some(m => m.role === 'tool' && m.tool_call_id === 'huerfano'), 'un tool huérfano no puede viajar a la API');
+  for (const m of sent.filter(m => m.role === 'assistant' && m.tool_calls)) {
+    for (const tc of m.tool_calls) {
+      ok(sent.some(x => x.role === 'tool' && x.tool_call_id === tc.id), 'toda tool_call enviada necesita su respuesta');
+    }
+  }
+});
+
+test('agent: el subagente no deja tool_calls sin responder al detectar un bucle', async () => {
+  const { Agent } = require('../agent/agent');
+  const bodies = [];
+  const toolTurn = [evData({ choices: [{ delta: { tool_calls: [{ index: 0, id: 'r1', function: { name: 'read_file', arguments: '{"path":"package.json"}' } }] } }] })];
+  const textTurn = [evData({ choices: [{ delta: { content: 'RESULT: hecho\nSTATUS: OK' } }] })];
+  let n = 0;
+  const agent = new Agent({
+    fetchFn: async (url, opts) => { bodies.push(JSON.parse(opts.body)); return sseResponse(n++ < 3 ? toolTurn : textTurn); },
+    emit: () => {},
+    screenshotFn: async () => ({ dataUrl: 'data:image/png;base64,AA' }),
+  });
+  const settings = { active: { name: 'x', baseUrl: 'https://api.openai.com/v1', apiKey: 'k', model: 'gpt-4o' }, settings: { mode: 'act', modelRouting: false, workspace: process.cwd() } };
+  const out = await agent._delegate(subagents.SUBAGENTS.file, { task: 'lee package.json tres veces' }, { settings });
+  ok(/RESULT/.test(out), 'la delegación debe devolver el resultado estructurado: ' + out.slice(0, 80));
+  for (const body of bodies) {
+    const msgs = body.messages;
+    for (const m of msgs.filter(x => x.role === 'assistant' && x.tool_calls)) {
+      for (const tc of m.tool_calls) {
+        ok(msgs.some(x => x.role === 'tool' && x.tool_call_id === tc.id), 'el subagente envió una tool_call sin respuesta');
+      }
+    }
+  }
+});
+
+test('guardrails: el orden de las claves no evade la detección de bucles', () => {
+  const g = new Guardrails({ guardrails: { loopThreshold: 3 } });
+  ok(!g.isLoop('write_file', { path: 'a', content: 'x' }).loop);
+  ok(!g.isLoop('write_file', { content: 'x', path: 'a' }).loop);
+  ok(g.isLoop('write_file', { path: 'a', content: 'x' }).loop, 'la misma acción con las claves en otro orden sigue siendo un bucle');
+});
+
+test('guardrails: el gasto del subagente cuenta para el presupuesto global', () => {
+  const parent = new Guardrails({ guardrails: { maxTokens: 100 } });
+  parent.beginRun();
+  const sub = new Guardrails({ guardrails: { maxTokens: 100 } });
+  sub.beginRun();
+  sub.addTokens(80, { prompt_tokens: 60, completion_tokens: 20, total_tokens: 80 });
+  eq(parent.tokensUsed, 0, 'el padre no ve el consumo hasta absorberlo');
+  eq(parent.absorb(sub).ok, true);
+  eq(parent.tokensUsed, 80, 'el gasto del subagente se suma al del padre');
+  sub.addTokens(40, { prompt_tokens: 30, completion_tokens: 10, total_tokens: 40 });
+  const over = parent.absorb(sub);
+  eq(over.ok, false, 'el presupuesto global debe saltar con el consumo delegado');
+  ok(/tokens/i.test(over.reason));
+});
+
+test('subagents: sin formato RESULT se devuelve la primera línea, no el bloque entero', () => {
+  const r = subagents.parseSubagentResult('primera linea\nsegunda linea\ntercera');
+  eq(r.result, 'primera linea');
 });
 
 test('sidebar: grupos, contadores, pie y atajos coherentes con las vistas', () => {
@@ -1347,6 +1488,10 @@ test('adjuntos: UI completa — botón, drag&drop, pegar, chips y miniaturas', (
   const preload = fs.readFileSync(path.join(__dirname, '..', 'main', 'preload.js'), 'utf8');
   ok(/attachmentsPick/.test(preload) && /attachmentsRead/.test(preload), 'preload debe exponer los canales de adjuntos');
 });
+
+// el recuento DEBE esperar a los tests async registrados dentro de este bloque:
+// si no, el resumen se imprime antes de que terminen y sus fallos no cuentan
+while (pendingAsync.length) await Promise.all(pendingAsync.splice(0));
 
 console.log('');
   if (fail) {

@@ -30,8 +30,13 @@
   --r: 16px;
 }
 * { box-sizing: border-box; margin: 0; padding: 0; }
+/* el atributo hidden manda SIEMPRE: hay reglas con display:grid/flex/inline-flex
+   que, al ser más específicas que la hoja del navegador, lo anulaban. Una sola
+   regla global evita los parches sueltos repartidos por el fichero. */
+[hidden] { display: none !important; }
 html, body { height: 100%; background: transparent; overflow: hidden; }
-body { font-family: 'Space Grotesk', 'Segoe UI', sans-serif; color: var(--txt); }.shell {
+body { font-family: 'Space Grotesk', 'Segoe UI', sans-serif; color: var(--txt); }
+.shell {
   /* SIN margen transparente: el borde visible de la app ES el borde de la ventana,
      así se puede redimensionar agarrando el borde directamente.
      Las tres manchas de color siguen el acento elegido (degradado integrado). */
@@ -66,13 +71,20 @@ body { font-family: 'Space Grotesk', 'Segoe UI', sans-serif; color: var(--txt); 
 .shell.glow-work::before  { animation: frame-work 1.4s ease-in-out infinite; }
 .shell.glow-listen::before{ animation: frame-breathe 2s ease-in-out infinite; }
 .shell.glow-speak::before { animation: frame-speak 1.1s ease-in-out infinite; }
+/* ventana en segundo plano: el glow no se ve, pero su animación seguiría
+   repintando el marco. app.js pone/quita .nofocus en <body> al perder/recuperar
+   el foco de la ventana. */
+body.nofocus .shell::before { animation: none !important; }
 @keyframes frame-breathe { 0%, 100% { opacity: .75; } 50% { opacity: 1; } }
 @keyframes frame-work { 0%, 100% { opacity: .85; } 50% { opacity: 1; filter: brightness(1.35); } }
 @keyframes frame-speak { 0%, 100% { opacity: .8; } 50% { opacity: 1; filter: brightness(1.25); } }
 
 /* sin padding en el grid: cada columna llega hasta la esquina superior (fondo
    continuo) y se separa del titlebar con su PROPIO padding superior interno */
-.app { display: grid; grid-template-columns: 232px 1fr 300px; height: 100%; border-radius: 10px; overflow: hidden; position: relative; }
+/* la fila elástica DEBE estar acotada (minmax(0,1fr)): con la fila implícita el
+   grid la dimensiona por contenido y a 620px de alto el compositor del chat se
+   sale de la ventana en lugar de que #messages scrollee por dentro. */
+.app { display: grid; grid-template-columns: 232px 1fr 300px; grid-template-rows: minmax(0, 1fr); height: 100%; border-radius: 10px; overflow: hidden; position: relative; }
 
 /* ============ Sidebar ============ */
 .side { display: flex; flex-direction: column; padding-top: 46px; border-right: 1px solid var(--line2); background: rgba(8,5,24,0.35); }
@@ -140,7 +152,6 @@ body { font-family: 'Space Grotesk', 'Segoe UI', sans-serif; color: var(--txt); 
   border-radius: 9px; border: 1px solid var(--line); background: rgba(var(--acc2-rgb), 0.20);
   color: var(--txt); font: 600 10.5px 'Space Grotesk';
 }
-.nb[hidden] { display: none !important; }
 .nb.hot { background: linear-gradient(135deg, var(--vio), var(--blu)); border-color: transparent; color: #fff; }
 .nb.live {
   min-width: 8px; width: 8px; height: 8px; padding: 0;
@@ -148,6 +159,10 @@ body { font-family: 'Space Grotesk', 'Segoe UI', sans-serif; color: var(--txt); 
   animation: nb-pulse 1.3s ease-in-out infinite;
 }
 @keyframes nb-pulse { 0%, 100% { opacity: 1; } 50% { opacity: .35; } }
+/* los indicadores de "en curso" (tarjetas de agente, estado del chat, plan,
+   pulse-dot) declaran animation:blink, pero el keyframe no existía: estaban
+   estáticos. Fotogramas de pulso de opacidad, iguales al de nb-pulse. */
+@keyframes blink { 0%, 100% { opacity: 1; } 50% { opacity: .35; } }
 
 /* ---- botón compactar la barra ---- */
 .sidecollapse {
@@ -211,7 +226,9 @@ body { font-family: 'Space Grotesk', 'Segoe UI', sans-serif; color: var(--txt); 
 .dot.mg  { background: var(--mag); box-shadow: 0 0 8px var(--mag); }
 
 /* ============ Main ============ */
-.main { overflow-y: auto; scrollbar-width: thin; scrollbar-color: rgba(var(--acc2-rgb), 0.3) transparent; display: flex; flex-direction: column; }
+/* min-height:0 permite que .main encoja hasta la fila del grid: las vistas con
+   contenido largo siguen scrolleando DENTRO de él (overflow-y:auto). */
+.main { min-height: 0; overflow-y: auto; scrollbar-width: thin; scrollbar-color: rgba(var(--acc2-rgb), 0.3) transparent; display: flex; flex-direction: column; }
 #view-chat.on { flex: 1; min-height: 0; }
 .main::-webkit-scrollbar { width: 6px; }
 .main::-webkit-scrollbar-thumb { background: rgba(var(--acc2-rgb), 0.3); border-radius: 3px; }
@@ -450,7 +467,6 @@ input::placeholder, textarea::placeholder { color: var(--dim); }
 .setpanel.on { display: flex; flex-direction: column; gap: 16px; animation: fadein .2s ease; }
 /* durante una búsqueda se muestran todos los paneles y se filtran las filas */
 .setwrap.searching .setpanel { display: flex; flex-direction: column; gap: 16px; }
-.srow[hidden], .setcard[hidden], .setempty[hidden] { display: none !important; }
 .setcard {
   border: 1px solid var(--line2); border-radius: 16px; padding: 16px 18px;
   background: linear-gradient(170deg, rgba(30,20,64,0.42), rgba(14,9,34,0.52));
@@ -553,7 +569,7 @@ input::placeholder, textarea::placeholder { color: var(--dim); }
 .feed { display: flex; flex-direction: column; gap: 9px; margin-top: 10px; min-height: 120px; }
 .fitem { display: flex; align-items: center; gap: 9px; font-size: 12.5px; color: var(--dim); animation: fadein .25s ease; }
 .fitem .dot { margin: 0; flex-shrink: 0; }
-.fitem .ft { margin-left: auto; color: #6b6394; font-size: 11px; flex-shrink: 0; }
+.fitem .ft { margin-left: auto; color: var(--dim); font-size: 11px; flex-shrink: 0; }
 .fitem .ft-txt { white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
 
 /* history view */
@@ -570,9 +586,12 @@ input::placeholder, textarea::placeholder { color: var(--dim); }
 .hitem .hmain small { color: var(--dim); font-size: 11.5px; }
 .hitem .hdel { opacity: 0; }
 .hitem:hover .hdel { opacity: 1; }
+/* el botón solo se revelaba con :hover, así que seguía siendo focusable e
+   invisible: con Tab + Enter se borraba un elemento sin verlo. */
+.hitem:focus-within .hdel { opacity: 1; }
 
 /* misc */
-.wb:focus, .navitem:focus, .cbtn:focus, .btn:focus { outline: none; }
+.wb:focus, .navitem:focus, .cbtn:focus { outline: none; }
 #chatInput { min-height: 38px; max-height: 140px; box-sizing: border-box; }
 #memInput, #projPath { background: rgba(8,5,24,0.6); border: 1px solid var(--line2); border-radius: 11px; color: var(--txt); padding: 9px 12px; font: 500 13px 'Space Grotesk'; outline: none; width: 340px; }
 #memInput:focus { border-color: rgba(var(--acc-rgb), 0.55); }
@@ -628,12 +647,13 @@ i[data-i] { display: inline-flex; line-height: 0; }
 
 /* focus-visible polish */
 .navitem:focus-visible, .btn:focus-visible, .cbtn:focus-visible, .wb:focus-visible { outline: 2px solid rgba(var(--acc-rgb), 0.55); outline-offset: 2px; }
+/* los botones conservan un indicador de foco propio (halo de acento) en vez del
+   outline:none que lo borraba: navegable con teclado sin pulsar a ciegas. */
+.btn:focus-visible { outline-color: rgba(var(--acc-rgb), 0.75); box-shadow: 0 0 0 4px rgba(var(--acc2-rgb), 0.22), 0 0 16px rgba(var(--acc2-rgb), 0.35); }
 
 /* textarea rec state */
 #chatInput.rec { color: var(--warn); }
 /* ===== v1.1: confirmation bar, dev metrics, security panel ===== */
-/* el atributo hidden debe ganar siempre: display:flex lo pisaría */
-.confirmbar[hidden] { display: none !important; }
 .confirmbar {
   display: flex; align-items: center; gap: 12px;
   margin: 0 18px 8px; padding: 10px 14px;
@@ -740,7 +760,6 @@ i[data-i] { display: inline-flex; line-height: 0; }
   position: absolute; inset: 0; z-index: 5; overflow-y: auto;
   display: grid; place-items: center; padding: 16px 12px;
 }
-.chat-empty[hidden] { display: none; }
 .ce-inner { width: 100%; max-width: 620px; text-align: center; }
 .ce-mark {
   width: 52px; height: 52px; margin: 0 auto 12px; border-radius: 16px; display: grid; place-items: center;
@@ -790,7 +809,7 @@ i[data-i] { display: inline-flex; line-height: 0; }
   background: rgba(var(--mr), 0.13); border: 1px solid rgba(var(--mr), 0.34); color: rgb(var(--mr));
 }
 .msg-mode .ic { width: 10px; height: 10px; }
-.msg-ts { font-size: 10px; color: var(--dim); opacity: .75; }
+.msg-ts { font-size: 10px; color: var(--dim); }
 .msg-body { min-width: 0; }
 .msg-actions { display: flex; gap: 4px; margin-top: 6px; opacity: 0; transition: opacity .16s; }
 .msg:hover .msg-actions, .msg-actions:focus-within { opacity: 1; }
@@ -996,3 +1015,17 @@ input[type="range"].glowslider::-webkit-slider-thumb:active { transform: scale(1
 .msg-att-file b { font-weight: 500; color: var(--txt); max-width: 180px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 .msg-att-file small { color: var(--dim); font-size: 10px; }
 .msg-att-file.bin svg { color: var(--warn); }
+
+/* ============ accesibilidad: movimiento reducido ============
+   Apaga las animaciones INFINITAS (glow del marco, indicadores de actividad,
+   puntos de escritura, caret de streaming, barra de confirmación) porque son
+   las que no paran nunca. Las transiciones cortas de color/borde se mantienen:
+   no marean y conservan la respuesta visual del hover. */
+@media (prefers-reduced-motion: reduce) {
+  .shell::before,
+  .shell.glow-think::before, .shell.glow-work::before,
+  .shell.glow-listen::before, .shell.glow-speak::before,
+  .nb.live, .pulse-dot, .acard.on .adot, .ch-status .dot,
+  .plancard li.now .pl-n, .typing i, .stream::after,
+  .confirmbar .cb-dot { animation: none !important; }
+}

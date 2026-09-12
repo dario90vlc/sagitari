@@ -105,6 +105,18 @@ const SENSITIVE_BROWSER_RX = /(comprar|compra|pagar|pago|checkout|finalizar|elim
 /* Campos de datos sensibles: escribir en ellos también exige confirmación */
 const SENSITIVE_FIELD_RX = /(card|cvv|cvc|expir|iban|tarjeta|password|contrase|passwd|pin\b|cuenta.*number|account.*num|ssn|dni\b)/i;
 
+/* Ordena las claves de un valor de forma recursiva: dos argumentos equivalentes
+   deben producir la misma firma aunque el modelo cambie el orden de las claves. */
+function canonical(v) {
+  if (Array.isArray(v)) return v.map(canonical);
+  if (v && typeof v === 'object') {
+    const out = {};
+    for (const k of Object.keys(v).sort()) out[k] = canonical(v[k]);
+    return out;
+  }
+  return v;
+}
+
 function isSensitiveBrowserAction(name, args = {}) {
   if (name !== 'browser_control') return false;
   const a = args || {};
@@ -165,6 +177,7 @@ class Guardrails {
     this.costUsd = 0;
     this.recentCalls = [];
     this._stall = 0;
+    this._lastToolName = null;   // si no, la señal de progreso quedaba contaminada entre ejecuciones
   }
 
   /** Call once per model turn. Returns {ok, reason?}. */
@@ -221,10 +234,38 @@ class Guardrails {
   /** Para el panel: coste estimado de la ejecución en curso. */
   getCost() { return this.costUsd; }
 
+  /**
+   * Suma el consumo de otro Guardrails (un subagente) al presupuesto propio: el
+   * gasto de una delegación debe contar para el límite global del usuario.
+   * Devuelve {ok, reason?} con el estado del presupuesto tras absorber.
+   */
+  absorb(other) {
+    if (other) {
+      this.tokensUsed += other.tokensUsed || 0;
+      this.tokensIn += other.tokensIn || 0;
+      this.tokensOut += other.tokensOut || 0;
+      this.costUsd += other.costUsd || 0;
+      this.toolCalls += other.toolCalls || 0;
+    }
+    const g = this.policy.guardrails;
+    if (g.maxTokens > 0 && this.tokensUsed >= g.maxTokens) {
+      return { ok: false, reason: `Límite de tokens alcanzado (${g.maxTokens}) — incluye el consumo de los subagentes.` };
+    }
+    if (g.maxCostUsd > 0 && this.costUsd >= g.maxCostUsd) {
+      return { ok: false, reason: `Límite de coste estimado alcanzado ($${g.maxCostUsd}) — incluye el consumo de los subagentes.` };
+    }
+    return { ok: true };
+  }
+
   /* ---------- loop detection ---------- */
+
+  /**
+   * Firma estable de una llamada: el orden de las claves no puede servir para
+   * evadir la detección (={"a":1,"b":2} y {"b":2,"a":1} son la misma acción).
+   */
   signature(name, args = {}) {
     let s;
-    try { s = JSON.stringify(args); } catch { s = String(args); }
+    try { s = JSON.stringify(canonical(args)); } catch { s = String(args); }
     return name + ' ' + s.replace(/\s+/g, ' ');
   }
 
@@ -235,7 +276,9 @@ class Guardrails {
    */
   isLoop(name, args = {}) {
     const sig = this.signature(name, args);
-    const T = this.policy.guardrails.loopThreshold;
+    // Un umbral 0/1 marcaría bucle en la PRIMERA llamada y mataría cualquier
+    // tarea al arrancar; el mínimo que detecta algo es 2.
+    const T = Math.max(2, Math.floor(Number(this.policy.guardrails.loopThreshold) || 3));
     const recent = this.recentCalls;
     this.recentCalls.push(sig);
     if (this.recentCalls.length > 12) this.recentCalls.shift();

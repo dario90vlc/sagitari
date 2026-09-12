@@ -15,23 +15,91 @@ const path = require('path');
 let HABITS_FILE = path.join(process.env.APPDATA || require('os').homedir(), 'SagitariAI', 'habits.json');
 const TOP_N = 5;          // entradas por categoría en el prompt
 const MIN_COUNT = 2;      // mínimo de repeticiones para considerar un hábito
+const MAX_ENTRIES = 50;   // techo por categoría (recorte del mapa persistido)
+const FORGET_DAYS = 180;  // olvido por antigüedad
+const CATEGORIES = ['tools', 'apps', 'commands', 'folders', 'sites'];
+
+let _tainted = false;   // el archivo en disco no es legible/nuestro: no pisarlo
+
+/** Escritura atómica: escribe a .tmp y renombra, conservando el .bak anterior. */
+function _atomicWrite(file, text) {
+  const tmp = file + '.tmp';
+  fs.mkdirSync(path.dirname(file), { recursive: true });
+  fs.writeFileSync(tmp, text, 'utf8');
+  try { fs.copyFileSync(file, file + '.bak'); } catch {}   // aún no había archivo: no es un fallo
+  fs.renameSync(tmp, file);
+}
 
 function _load() {
+  let raw;
   try {
-    const d = JSON.parse(fs.readFileSync(HABITS_FILE, 'utf8'));
-    return d && typeof d === 'object' ? d : {};
-  } catch { return {}; }
-}
-function _save(d) {
+    raw = fs.readFileSync(HABITS_FILE, 'utf8');
+  } catch (e) {
+    if (e.code === 'ENOENT') return {};   // no existe → perfil vacío legítimo
+    // Error de E/S transitorio (EBUSY/EPERM): no es "sin hábitos"; no persistir nada.
+    _tainted = true;
+    console.error('habits.load: no se pudo leer ' + HABITS_FILE + ': ' + e.message);
+    return {};
+  }
   try {
-    fs.mkdirSync(path.dirname(HABITS_FILE), { recursive: true });
-    fs.writeFileSync(HABITS_FILE, JSON.stringify(d, null, 2), 'utf8');
-  } catch {}
+    const d = JSON.parse(raw);
+    if (!d || typeof d !== 'object' || Array.isArray(d)) throw new SyntaxError('el contenido no es un objeto');
+    _tainted = false;
+    return d;
+  } catch (e) {
+    // JSON truncado/corrupto: lo apartamos para no perderlo
+    const dest = HABITS_FILE.replace(/\.json$/i, '') + '.corrupt-' + Date.now() + '.json';
+    try {
+      fs.renameSync(HABITS_FILE, dest);
+      _tainted = false;   // el original ya está a salvo: se puede escribir un perfil nuevo
+      console.error('habits.load: ' + e.message + ' — conservado en ' + dest);
+    } catch (e2) {
+      _tainted = true;
+      console.error('habits.load: ' + e.message + ' y no se pudo conservar el original: ' + e2.message);
+    }
+    return {};
+  }
 }
 
-function _bump(map, key, weight = 1) {
+function _save(d) {
+  if (_tainted) return;   // el archivo en disco no es nuestro: no destruirlo con un perfil vacío
+  try {
+    _atomicWrite(HABITS_FILE, JSON.stringify(d, null, 2));
+  } catch (e) { console.error('habits.save', e.message); }
+}
+
+function _bump(d, map, key, weight = 1, cat = '') {
   if (!key) return;
-  map[key] = (map[key] || 0) + weight;
+  const k = String(key);
+  map[k] = (Number(map[k]) || 0) + weight;
+  if (!cat) return;   // categorías sin olvido (modes) no necesitan marca de uso
+  d.seen = d.seen || {};
+  d.seen[cat + '|' + k] = Date.now();   // marca de uso para el olvido por antigüedad
+}
+
+/**
+ * Recorta los mapas de cada categoría: olvida lo no usado en FORGET_DAYS y
+ * conserva como mucho MAX_ENTRIES por categoría (los más frecuentes; empate
+ * resuelto por clave para que el perfil sea determinista).
+ */
+function _prune(d) {
+  const seen = d.seen && typeof d.seen === 'object' ? d.seen : {};
+  const cutoff = Date.now() - FORGET_DAYS * 86400000;
+  for (const cat of CATEGORIES) {
+    const map = d[cat];
+    if (!map || typeof map !== 'object') continue;
+    d[cat] = Object.fromEntries(
+      Object.entries(map)
+        .filter(([, count]) => Number(count) > 0)
+        .filter(([key]) => { const t = Number(seen[cat + '|' + key]); return !t || t >= cutoff; })
+        .sort((a, b) => (Number(b[1]) - Number(a[1])) || String(a[0]).localeCompare(String(b[0])))
+        .slice(0, MAX_ENTRIES)
+    );
+  }
+  const alive = new Set();
+  for (const cat of CATEGORIES) for (const key of Object.keys(d[cat] || {})) alive.add(cat + '|' + key);
+  d.seen = Object.fromEntries(Object.entries(seen).filter(([k]) => alive.has(k)));
+  return d;
 }
 
 /* ---------- observación ---------- */
@@ -47,31 +115,32 @@ function observe(type, ev = {}) {
   d.updatedAt = new Date().toISOString();
   if (type === 'tool') {
     d.tools = d.tools || {};
-    _bump(d.tools, ev.name);
+    _bump(d, d.tools, ev.name, 1, 'tools');
     const args = ev.args || {};
-    if (ev.name === 'open_app' && args.name) { d.apps = d.apps || {}; _bump(d.apps, String(args.name).toLowerCase().replace(/\.exe$/, '')); }
+    if (ev.name === 'open_app' && args.name) { d.apps = d.apps || {}; _bump(d, d.apps, String(args.name).toLowerCase().replace(/\.exe$/, ''), 1, 'apps'); }
     if (ev.name === 'run_command' && args.command) {
       const cmd = String(args.command).trim().split(/\s+/)[0];
-      if (cmd) { d.commands = d.commands || {}; _bump(d.commands, cmd.toLowerCase()); }
+      if (cmd) { d.commands = d.commands || {}; _bump(d, d.commands, cmd.toLowerCase(), 1, 'commands'); }
       const cwd = String(args.cwd || '').trim();
-      if (cwd) { d.folders = d.folders || {}; _bump(d.folders, cwd); }
+      if (cwd) { d.folders = d.folders || {}; _bump(d, d.folders, cwd, 1, 'folders'); }
     }
     if ((ev.name === 'write_file' || ev.name === 'list_dir' || ev.name === 'read_file') && args.path) {
       const dir = String(args.path).replace(/[\\/][^\\/]*$/, '');
-      if (dir) { d.folders = d.folders || {}; _bump(d.folders, dir); }
+      if (dir) { d.folders = d.folders || {}; _bump(d, d.folders, dir, 1, 'folders'); }
     }
     if (ev.name === 'browser_control' && args.url) {
-      try { const host = new URL(/^https?:/.test(args.url) ? args.url : 'https://' + args.url).hostname; d.sites = d.sites || {}; _bump(d.sites, host); } catch {}
+      try { const host = new URL(/^https?:/.test(args.url) ? args.url : 'https://' + args.url).hostname; d.sites = d.sites || {}; _bump(d, d.sites, host, 1, 'sites'); } catch {}
     }
   }
   if (type === 'mode') {
     d.modes = d.modes || {};
-    _bump(d.modes, String(ev.mode || 'act').toLowerCase());
+    _bump(d, d.modes, String(ev.mode || 'act').toLowerCase());
   }
   if (type === 'confirm') {
     d.confirms = d.confirms || { approved: 0, denied: 0 };
     d.confirms[ev.approved ? 'approved' : 'denied']++;
   }
+  _prune(d);   // olvido por antigüedad + recorte por categoría
   _save(d);
 }
 
@@ -79,10 +148,16 @@ function observe(type, ev = {}) {
 
 function _top(map, n = TOP_N) {
   return Object.entries(map || {})
-    .sort((a, b) => b[1] - a[1])
+    .sort((a, b) => (Number(b[1]) - Number(a[1])) || String(a[0]).localeCompare(String(b[0])))
     .filter(([, c]) => c >= MIN_COUNT)
     .slice(0, n)
     .map(([k]) => k);
+}
+
+/** Entradas de un mapa ordenadas por frecuencia (empate resuelto por clave). */
+function _sorted(map) {
+  return Object.entries(map || {})
+    .sort((a, b) => (Number(b[1]) - Number(a[1])) || String(a[0]).localeCompare(String(b[0])));
 }
 
 /** Perfil legible para inyectar en el system prompt (vacío si no hay datos). */
@@ -93,7 +168,7 @@ function profile() {
   const folders = _top(d.folders, 3);
   const sites = _top(d.sites, 3);
   const tools = _top(d.tools);
-  const modes = Object.entries(d.modes || {}).sort((a, b) => b[1] - a[1]);
+  const modes = _sorted(d.modes);
   const lines = [];
   if (apps.length) lines.push(`- Aplicaciones habituales: ${apps.join(', ')}.`);
   if (commands.length) lines.push(`- Comandos frecuentes: ${commands.join(', ')}.`);
@@ -110,19 +185,20 @@ function profile() {
 /** Estadísticas para la UI. */
 function stats() {
   const d = _load();
+  const rows = (map, n) => _sorted(map).slice(0, n).map(([name, count]) => ({ name, count }));
   return {
-    tools: Object.entries(d.tools || {}).sort((a, b) => b[1] - a[1]).slice(0, 8).map(([name, count]) => ({ name, count })),
-    apps: Object.entries(d.apps || {}).sort((a, b) => b[1] - a[1]).slice(0, 8).map(([name, count]) => ({ name, count })),
-    commands: Object.entries(d.commands || {}).sort((a, b) => b[1] - a[1]).slice(0, 8).map(([name, count]) => ({ name, count })),
-    folders: Object.entries(d.folders || {}).sort((a, b) => b[1] - a[1]).slice(0, 5).map(([name, count]) => ({ name, count })),
-    sites: Object.entries(d.sites || {}).sort((a, b) => b[1] - a[1]).slice(0, 5).map(([name, count]) => ({ name, count })),
+    tools: rows(d.tools, 8),
+    apps: rows(d.apps, 8),
+    commands: rows(d.commands, 8),
+    folders: rows(d.folders, 5),
+    sites: rows(d.sites, 5),
     modes: d.modes || {},
     confirms: d.confirms || { approved: 0, denied: 0 },
     updatedAt: d.updatedAt || null,
   };
 }
 
-function reset() { _save({}); }
-function _resetForTests(file) { HABITS_FILE = file; }
+function reset() { _load(); _save({}); }
+function _resetForTests(file) { HABITS_FILE = file; _tainted = false; }
 
-module.exports = { observe, profile, stats, reset, __test: { _resetForTests } };
+module.exports = { observe, profile, stats, reset, __test: { _resetForTests, _prune, MAX_ENTRIES, FORGET_DAYS } };

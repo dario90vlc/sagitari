@@ -5,6 +5,7 @@
 
 const { app, BrowserWindow, ipcMain, desktopCapturer, screen, globalShortcut, shell, dialog, Tray, Menu } = require('electron');
 const path = require('path');
+const { pathToFileURL } = require('url');
 const fs = require('fs');
 const fsp = require('fs/promises');
 const { spawn } = require('child_process');
@@ -70,18 +71,24 @@ const securityDefaults = {
 };
 let providersChanged = false;
 
+function applyConfig(raw) {
+  config = { ...config, ...raw, settings: { ...config.settings, ...(raw.settings || {}) } };
+  config.security = {
+    permissions: { ...(raw.security && raw.security.permissions || {}) },
+    guardrails: { ...securityDefaults.guardrails, ...(raw.security && raw.security.guardrails || {}) },
+  };
+}
 function loadConfig() {
-  try {
-    const raw = JSON.parse(fs.readFileSync(CONFIG_FILE, 'utf8'));
-    config = { ...config, ...raw, settings: { ...config.settings, ...(raw.settings || {}) } };
-    config.security = {
-      permissions: { ...(raw.security && raw.security.permissions || {}) },
-      guardrails: { ...securityDefaults.guardrails, ...(raw.security && raw.security.guardrails || {}) },
-    };
-  } catch {
+  try { applyConfig(JSON.parse(fs.readFileSync(CONFIG_FILE, 'utf8'))); return; } catch (e) {
+    // config.json ilegible: antes de dar la configuración por perdida se prueba
+    // la copia .bak que deja cada guardado.
     try {
-      const legacy = JSON.parse(fs.readFileSync(LEGACY_CONFIG, 'utf8'));
-      config = { ...config, ...legacy, settings: { ...config.settings, ...(legacy.settings || {}) } };
+      applyConfig(JSON.parse(fs.readFileSync(CONFIG_FILE + '.bak', 'utf8')));
+      console.error('config.json ilegible, recuperado desde config.json.bak:', e.message);
+      return;
+    } catch {}
+    try {
+      applyConfig(JSON.parse(fs.readFileSync(LEGACY_CONFIG, 'utf8')));
       config.security = { permissions: {}, guardrails: { ...securityDefaults.guardrails } };
       saveConfig();
     } catch {
@@ -89,21 +96,53 @@ function loadConfig() {
     }
   }
 }
+/* Guardado atómico: se escribe en <archivo>.tmp y se renombra encima, y antes de
+   pisar el archivo bueno se conserva una copia .bak. Así un cierre a lo bruto o
+   un corte a mitad de escritura no dejan el JSON truncado y sin vuelta atrás. */
+function writeJsonAtomic(file, data) {
+  const tmp = file + '.tmp';
+  fs.mkdirSync(path.dirname(file), { recursive: true });
+  fs.writeFileSync(tmp, data, 'utf8');
+  try { if (fs.existsSync(file)) fs.copyFileSync(file, file + '.bak'); } catch {}
+  fs.renameSync(tmp, file);
+}
 function saveConfig() {
   try {
-    fs.mkdirSync(CONFIG_DIR, { recursive: true });
-    fs.writeFileSync(CONFIG_FILE, JSON.stringify(config, null, 2), 'utf8');
-  } catch (e) { console.error('saveConfig', e.message); }
+    writeJsonAtomic(CONFIG_FILE, JSON.stringify(config, null, 2));
+    return { ok: true };
+  } catch (e) {
+    console.error('saveConfig', e.message);
+    return { ok: false, error: e.message };
+  }
+}
+
+/* Persiste y, si falla, avisa al usuario: los controles de Ajustes ya han
+   confirmado el cambio en pantalla, así que un console.error silencioso deja al
+   usuario creyendo que se guardó algo que se perderá al reiniciar. */
+function persistConfig() {
+  const r = saveConfig();
+  if (!r.ok) {
+    try {
+      if (win && !win.isDestroyed()) {
+        win.webContents.send('agent:event', { type: 'toast', title: 'No se pudo guardar', message: 'La configuración no se pudo escribir en disco (' + r.error + ').' });
+      }
+    } catch {}
+  }
+  return r;
 }
 
 // ---------- windows ----------
+const INDEX_HTML = path.join(__dirname, '..', 'renderer', 'index.html');
 let win = null;        // chat
 let closing = false;
 
 function createChatWindow() {
   const { width, height } = screen.getPrimaryDisplay().workAreaSize;
-  const W = Math.min(1560, width - 88);
-  const H = Math.min(920, height - 88);
+  // El mínimo de la ventana manda: en pantallas estrechas (área de trabajo
+  // < 1088px) `width - 88` quedaba por debajo de minWidth, el SO forzaba 1000 y
+  // la ventana se salía por la derecha con la x calculada sobre un ancho menor.
+  const W = Math.max(1000, Math.min(1560, width - 88));
+  const H = Math.max(620, Math.min(920, height - 88));
   win = new BrowserWindow({
     width: W,
     height: H,
@@ -111,8 +150,8 @@ function createChatWindow() {
     // intacto hasta este límite (ver media queries en styles.css)
     minWidth: 1000,
     minHeight: 620,
-    x: Math.round((width - W) / 2),
-    y: Math.round((height - H) / 2),
+    x: Math.max(0, Math.round((width - W) / 2)),
+    y: Math.max(0, Math.round((height - H) / 2)),
     frame: false,
     transparent: true,
     resizable: true,
@@ -122,13 +161,31 @@ function createChatWindow() {
       preload: path.join(__dirname, 'preload.js'),
       contextIsolation: true,
       nodeIntegration: false,
+      sandbox: true,          // el preload solo usa contextBridge + ipcRenderer
       spellcheck: false
     },
     icon: path.join(__dirname, '..', 'renderer', 'assets', 'sagitari.ico'),
     show: !HEADLESS
   });
-  win.loadFile(path.join(__dirname, '..', 'renderer', 'index.html'));
+  win.loadFile(INDEX_HTML);
+  // La ventana no navega fuera de su index.html local: si un enlace o un script
+  // lo intenta, se cancela (las URLs http/https se abren en el navegador del
+  // sistema). Abrir ventanas nuevas queda denegado de plano.
+  const appUrl = pathToFileURL(INDEX_HTML).href;
+  win.webContents.on('will-navigate', (e, url) => {
+    if (String(url).split('#')[0] !== appUrl) {
+      e.preventDefault();
+      if (/^https?:\/\//i.test(url)) shell.openExternal(url);
+    }
+  });
+  win.webContents.setWindowOpenHandler(({ url }) => {
+    if (/^https?:\/\//i.test(url)) shell.openExternal(url);
+    return { action: 'deny' };
+  });
   win.webContents.on('did-finish-load', () => win.webContents.send('win:maximized', win.isMaximized()));
+  // si el renderer se cae, la confirmación pendiente ya no la puede contestar
+  // nadie: se detiene el agente en limpio en vez de dejarlo colgado esperando
+  win.webContents.on('render-process-gone', () => { try { if (agent) agent.stop(); } catch {} });
   win.on('closed', () => { win = null; });
   // cerrar = cerrar de verdad: X sale de la app completa (antes se ocultaba y
   // quedaban procesos vivos). Para ocultar/mostrar: Ctrl+Alt+S o la bandeja.
@@ -213,19 +270,27 @@ ipcMain.handle('attachments:pick', async () => {
 ipcMain.handle('attachments:read', async (e, filePath) => {
   try {
     if (typeof filePath !== 'string' || !path.isAbsolute(filePath)) return { ok: false, error: 'ruta inválida' };
-    const st = await fsp.stat(filePath);
+    // El drag&drop sí puede leer fuera del selector, pero nunca el directorio de
+    // datos de la app (ahí viven las API keys y las conversaciones) ni algo que no
+    // sea un archivo regular. realpath resuelve enlaces antes de comprobar.
+    let full;
+    try { full = await fsp.realpath(filePath); } catch { return { ok: false, error: 'La ruta no existe' }; }
+    const rel = path.relative(CONFIG_DIR, full);
+    if (rel === '' || (!rel.startsWith('..') && !path.isAbsolute(rel))) return { ok: false, error: 'ruta no permitida' };
+    const st = await fsp.stat(full);
+    if (!st.isFile()) return { ok: false, error: 'no es un archivo regular' };
     if (st.size > MAX_FILE_BYTES) return { ok: false, error: `Supera ${Math.round(MAX_FILE_BYTES / 1048576)} MB` };
-    const name = path.basename(filePath);
-    const ext = path.extname(filePath).toLowerCase();
+    const name = path.basename(full);
+    const ext = path.extname(full).toLowerCase();
     const kind = IMG_EXTS.has(ext) ? 'image'
       : (TEXT_EXTS.has(ext) || st.size < 512 * 1024 && !BINARY_EXTS.has(ext)) ? 'text' : 'binary';
     if (kind === 'image') {
-      const buf = await fsp.readFile(filePath);
+      const buf = await fsp.readFile(full);
       const mime = ext === '.svg' ? 'image/svg+xml' : `image/${ext === '.jpg' ? 'jpeg' : ext.slice(1)}`;
       return { ok: true, att: { name, kind, size: st.size, dataUrl: `data:${mime};base64,${buf.toString('base64')}` } };
     }
     if (kind === 'text') {
-      const buf = await fsp.readFile(filePath);
+      const buf = await fsp.readFile(full);
       let text = buf.toString('utf8').replace(/\u0000/g, '').trim();
       if (ext === '.srt' || ext === '.vtt') text = text.replace(/^\d+\s*$/gm, '').replace(/-->\s*/g, ' → ');   // subtítulos: solo texto útil
       const printable = text.replace(/[^\x09\x0A\x0D\x20-\x7E\u00A0-\uFFFF]/g, '');
@@ -332,19 +397,40 @@ ipcMain.handle('config:get', () => ({
   presets: PRESETS
 }));
 
+/* Validación compartida de un proveedor: guardar y activar deben exigir lo mismo
+   (antes activar no comprobaba nada y el badge decía «Conectado» con una URL rota).
+   `activate` no exige id (el catálogo lo resuelve después) pero sí modelo. */
+function validateProvider(p, { requireId = true, requireModel = false } = {}) {
+  if (!p || typeof p !== 'object') return { ok: false, error: 'proveedor inválido' };
+  if (requireId && (typeof p.id !== 'string' || !p.id.trim())) return { ok: false, error: 'id requerido' };
+  const baseUrl = typeof p.baseUrl === 'string' ? p.baseUrl.trim() : '';
+  if (!baseUrl || (!/^https?:\/\//i.test(baseUrl) && !/^(localhost|127\.0\.0\.1)(:\d+)?([/?#]|$)/i.test(baseUrl))) {
+    return { ok: false, error: 'baseUrl debe ser http(s) o localhost' };
+  }
+  if (requireModel && (typeof p.model !== 'string' || !p.model.trim())) {
+    return { ok: false, error: 'selecciona un modelo antes de activar' };
+  }
+  return null;
+}
+
 ipcMain.handle('provider:save', (e, p) => {
+  // Validación: un payload vacío (o con una baseUrl de otro esquema) propagaba un
+  // TypeError al guardar y dejaba la configuración a medias.
+  const bad = validateProvider(p);
+  if (bad) return bad;
   const idx = config.providers.findIndex(x => x.id === p.id);
   if (idx >= 0) config.providers[idx] = { ...config.providers[idx], ...p };
   else config.providers.push(p);
-  saveConfig();
-  return { ok: true };
+  return persistConfig();
 });
 
 ipcMain.handle('provider:delete', (e, id) => {
   config.providers = config.providers.filter(x => x.id !== id);
-  if (config.active && config.active.providerId === id) config.active = null;
-  saveConfig();
-  return { ok: true };
+  // el proveedor activo puede no llevar providerId (el renderer no siempre lo
+  // manda): se compara también por id/baseUrl para que borrarlo lo desactive
+  const a = config.active;
+  if (a && (a.providerId === id || a.id === id || (a.baseUrl && id && String(a.baseUrl) === String(id)))) config.active = null;
+  return persistConfig();
 });
 
 ipcMain.handle('provider:models', async (e, { baseUrl, apiKey }) => {
@@ -353,14 +439,20 @@ ipcMain.handle('provider:models', async (e, { baseUrl, apiKey }) => {
 });
 
 ipcMain.handle('provider:activate', (e, cfg) => {
-  config.active = cfg;
-  saveConfig();
-  return { ok: true };
+  // Activar sin validar dejaba el badge en «Conectado» con una URL inservible
+  // (o sin modelo) y el chat fallaba en cada envío.
+  const bad = validateProvider(cfg, { requireId: false, requireModel: true });
+  if (bad) return bad;
+  // id resuelto del catálogo: es lo que permite desactivarlo al borrarlo
+  const prov = config.providers.find(p => p.baseUrl === cfg.baseUrl && p.model === cfg.model)
+    || config.providers.find(p => p.baseUrl === cfg.baseUrl);
+  config.active = { ...cfg, providerId: cfg.providerId || cfg.id || (prov && prov.id) || null };
+  return persistConfig();
 });
 
 ipcMain.handle('settings:set', (e, patch) => {
   config.settings = { ...config.settings, ...patch };
-  saveConfig();
+  const saved = persistConfig();
   if ('glowEnabled' in patch && !patch.glowEnabled) glow('off');
   // si cambió la apariencia, el renderer repinta el tema; si el glow está
   // activo, relanzamos el estado actual para que el nuevo color se vea al momento
@@ -368,7 +460,9 @@ ipcMain.handle('settings:set', (e, patch) => {
     try { if (win && !win.isDestroyed()) win.webContents.send('theme:changed', { uiColor: config.settings.uiColor, glowColor: config.settings.glowColor, glowStrength: config.settings.glowStrength }); } catch {}
     if (config.settings.glowEnabled && !HEADLESS) glow('pulse');
   }
-  return config.settings;
+  // el renderer sigue recibiendo los ajustes; si el disco falló, se lo decimos
+  // además por el mismo canal (y ya ha recibido el toast de persistConfig)
+  return saved.ok ? config.settings : { ...config.settings, saveError: saved.error };
 });
 
 // ---- agent mode (Think / Plan / Act) — v2.0: observa la preferencia ----
@@ -424,13 +518,33 @@ ipcMain.handle('memory:remove', (e, id) => memory.remove(String(id)));
 
 // ---- conversations: separate chats, persisted, restorable ----
 const CONV_FILE = path.join(CONFIG_DIR, 'conversations.json');
+const MAX_CONVS = 300;   // techo solo al escribir; en memoria no se poda nada
 let convs = [];
 let currentConvId = null;
-try { convs = JSON.parse(fs.readFileSync(CONV_FILE, 'utf8')); } catch {}
+try {
+  convs = JSON.parse(fs.readFileSync(CONV_FILE, 'utf8'));
+  if (!Array.isArray(convs)) convs = [];
+} catch (err) {
+  // Antes este fallo se silenciaba y el historial «desaparecía» sin decir nada.
+  // Ahora se intenta la copia .bak y, si tampoco sirve, se avisa.
+  if (fs.existsSync(CONV_FILE)) {
+    try {
+      convs = JSON.parse(fs.readFileSync(CONV_FILE + '.bak', 'utf8'));
+      if (!Array.isArray(convs)) throw new Error('el .bak no contiene una lista');
+      console.error('conversations.json ilegible, recuperado desde conversations.json.bak:', err.message);
+    } catch (err2) {
+      convs = [];
+      console.error('conversations.json ilegible y sin .bak válido; se empieza de cero:', err.message, err2.message);
+    }
+  }
+}
 function saveConvs() {
   try {
-    convs = convs.slice(0, 60);
-    fs.writeFileSync(CONV_FILE, JSON.stringify(convs));
+    // Antes se recortaba el array EN MEMORIA a 60 conversaciones en cada guardado:
+    // pérdida de historial silenciosa. Ahora se guarda todo y solo se recorta al
+    // escribir, y solo si de verdad hay un exceso enorme (con .bak del anterior).
+    const out = convs.length > MAX_CONVS ? convs.slice(0, MAX_CONVS) : convs;
+    writeJsonAtomic(CONV_FILE, JSON.stringify(out));
   } catch (err) { console.error('saveConvs', err.message); }
 }
 const currentConv = () => convs.find(c => c.id === currentConvId);
@@ -531,7 +645,9 @@ ipcMain.handle('chat:send', async (e, { text, imageDataUrl, attachments }) => {
   glow('think');
   // afterglow: no apagar al instante al terminar el stream; deja respirar el glow
   const firstImage = imgAtts.length ? imgAtts[0].dataUrl : imageDataUrl;
-  agent.chat(body, config, firstImage, { attachments: atts }).finally(() => setTimeout(() => glow('off'), 2400));
+  agent.chat(body, config, firstImage, { attachments: atts })
+    .catch((err) => registrarFallo('chat:send', err))   // sin esto el fallo se perdía como promesa flotante
+    .finally(() => setTimeout(() => glow('off'), 2400));
   return { ok: true };
 });
 
@@ -565,7 +681,9 @@ ipcMain.handle('tasks:enqueue', (e, data) => wireTaskManager().enqueue({
 ipcMain.handle('tasks:pause', (e, runId) => (taskManager ? taskManager.pause(String(runId || '')) : { ok: false, error: 'sin gestor de tareas' }));
 ipcMain.handle('tasks:resume', (e, runId) => wireTaskManager().resume(String(runId || '')));
 ipcMain.handle('tasks:cancel', (e, runId) => (taskManager ? taskManager.cancel(String(runId || '')) : { ok: false, error: 'sin gestor de tareas' }));
-ipcMain.handle('tasks:remove', (e, runId) => checkpoints.remove(String(runId || '')));
+// borrar una tarea viva exige parar su agente: checkpoints.remove rechaza los
+// estados vivos, así que el borrado pasa por el gestor (que sí detiene y olvida)
+ipcMain.handle('tasks:remove', (e, runId) => (taskManager ? taskManager.remove(String(runId || '')) : checkpoints.remove(String(runId || ''))));
 
 // ---- v1.1 seguridad: confirmaciones, permisos, guardarraíles, métricas ----
 // v1.3: la confirmación puede ir dirigida a un agente de background (runId)
@@ -585,18 +703,19 @@ ipcMain.handle('sec:setToolPerm', (e, { tool, level }) => {
   if (level === 'default') delete config.security.permissions[tool];
   else config.security.permissions[tool] = String(level);
   if (agent) agent.setPolicy(config.security);
-  saveConfig();
-  return { ok: true, permissions: config.security.permissions };
+  return { ...persistConfig(), permissions: config.security.permissions };
 });
 ipcMain.handle('sec:setGuardrail', (e, patch) => {
   if (!config.security) config.security = { permissions: {}, guardrails: securityDefaults.guardrails };
   const g = config.security.guardrails;
+  // Con un umbral de bucle 0 o 1 la detección salta en la PRIMERA herramienta
+  // (cualquier tarea moriría al arrancar): se exige el mínimo que detecta algo.
   for (const [k, v] of Object.entries(patch || {})) {
-    if (k in g) g[k] = Math.max(0, Number(v) || 0);   // 0 = sin límite
+    if (!(k in g)) continue;
+    g[k] = Math.max(k === 'loopThreshold' ? 2 : 0, Math.floor(Number(v) || 0));
   }
   if (agent) agent.setPolicy(config.security);
-  saveConfig();
-  return { ok: true, guardrails: g };
+  return { ...persistConfig(), guardrails: g };
 });
 ipcMain.handle('meta:get', () => {
   const g = (config.security && config.security.guardrails) || {};
@@ -605,6 +724,7 @@ ipcMain.handle('meta:get', () => {
     guardrails: g,
     permissions: (config.security && config.security.permissions) || {},
     riskDefaults: DEFAULT_RISK,          // nivel de riesgo recomendado por herramienta
+    guardrailDefaults: securityDefaults.guardrails,   // fuente única de los «valores recomendados»
     dataDir: CONFIG_DIR,                 // carpeta de datos del usuario
     run: agent ? agent.getMeta() : null,
     tasks: taskManager ? taskManager.list() : [],
@@ -620,8 +740,13 @@ ipcMain.handle('voice:start', async () => {
   if (whisper) return { ok: true, note: 'Ya estaba escuchando' };
   whisperBuf = '';
   const lang = config.settings.voiceLang || 'es-ES';
-  whisper = spawn('powershell.exe', ['-NoProfile', '-ExecutionPolicy', 'Bypass', '-File', path.join(__dirname, 'voice.ps1'), '-Lang', lang, '-Nowinrt'], { windowsHide: true });
-  whisper.stdout.on('data', (d) => {
+  // El handle del proceso vive en `p`: cada listener comprueba identidad antes de
+  // tocar `whisper`, para que el 'exit' tardío de un proceso viejo no anule la
+  // referencia al nuevo.
+  const p = spawn('powershell.exe', ['-NoProfile', '-ExecutionPolicy', 'Bypass', '-File', path.join(__dirname, 'voice.ps1'), '-Lang', lang, '-NoWinrt'], { windowsHide: true });
+  whisper = p;
+  p.stdout.on('data', (d) => {
+    if (whisper !== p) return;   // proceso ya reemplazado: su salida no interesa
     whisperBuf += d.toString('utf8');
     let idx;
     while ((idx = whisperBuf.indexOf('\n')) >= 0) {
@@ -633,23 +758,40 @@ ipcMain.handle('voice:start', async () => {
       else if (line.startsWith('HINT::') && win && !win.isDestroyed()) win.webContents.send('voice:hint', line.slice(6));
       else if (line.startsWith('READY::') && win && !win.isDestroyed()) win.webContents.send('voice:ready', line.slice(6));
       else if (line.startsWith('STOPPED::')) {
-        try { whisper.kill(); } catch {}
-        whisper = null;
+        try { p.kill(); } catch {}
+        if (whisper === p) whisper = null;
       }
       else if (line.startsWith('ERROR::')) {
         if (win && !win.isDestroyed()) win.webContents.send('voice:error', line.slice(7));
-        try { whisper.kill(); } catch {}
-        whisper = null;
+        try { p.kill(); } catch {}
+        if (whisper === p) whisper = null;
       }
     }
   });
-  whisper.stderr.on('data', () => {});
-  whisper.on('exit', () => { whisper = null; if (win && !win.isDestroyed()) win.webContents.send('voice:stopped'); });
+  // El stderr deja de descartarse: un fallo de PowerShell (binding, ejecución,
+  // permisos) se perdía en silencio y el dictado parecía «no hacer nada».
+  let errBuf = '';
+  p.stderr.on('data', (d) => {
+    const chunk = d.toString('utf8');
+    errBuf = (errBuf + chunk).slice(-2000);
+    const msg = chunk.trim();
+    if (!msg) return;
+    console.error('[SAGITARI] voice.ps1: ' + msg.slice(0, 500));
+    try { runlog.log({ agent: 'voice', event: 'stderr', message: msg.slice(0, 300) }); } catch {}
+  });
+  p.on('exit', () => {
+    const current = whisper === p;
+    if (current) whisper = null;
+    // solo el proceso vigente puede reportar el error de su arranque
+    if (current && errBuf.trim() && win && !win.isDestroyed()) win.webContents.send('voice:error', errBuf.trim().slice(0, 500));
+    if (win && !win.isDestroyed()) win.webContents.send('voice:stopped');
+  });
   return { ok: true };
 });
 
 ipcMain.handle('voice:stop', async () => {
-  if (whisper) { try { whisper.kill(); } catch {} whisper = null; }
+  const p = whisper;
+  if (p) { whisper = null; try { p.kill(); } catch {} }
   return { ok: true };
 });
 
@@ -658,7 +800,7 @@ let ttsProc = null;
 ipcMain.handle('tts:speak', (e, text) => {
   if (!config.settings.ttsEnabled || !text) return { ok: false };
   try {
-    if (ttsProc) try { ttsProc.kill(); } catch {}
+    if (ttsProc) { try { ttsProc.kill(); } catch {} ttsProc = null; }
     const ps = `
 Add-Type -AssemblyName System.Speech
 $v = (New-Object System.Speech.Synthesis.SpeechSynthesizer)
@@ -666,13 +808,22 @@ $es = $v.GetInstalledVoices() | Where-Object { $_.VoiceInfo.Culture.Name -like '
 if ($es) { $v.SelectVoice($es.VoiceInfo.Name) }
 $v.Rate = 0
 $v.Speak([Console]::In.ReadToEnd())`;
-    ttsProc = spawn('powershell.exe', ['-NoProfile', '-Command', ps], { windowsHide: true });
-    ttsProc.stdin.write(String(text).slice(0, 1500));
-    ttsProc.stdin.end();
-    ttsProc.on('error', () => {});
+    const p = spawn('powershell.exe', ['-NoProfile', '-Command', ps], { windowsHide: true });
+    ttsProc = p;
+    // Red de seguridad: una síntesis colgada no puede dejar el proceso vivo (y el
+    // glow encendido) para siempre; el 'exit' siempre limpia el temporizador.
+    const killTimer = setTimeout(() => { try { p.kill(); } catch {} }, 60000);
+    p.stdin.write(String(text).slice(0, 1500));
+    p.stdin.end();
+    p.on('error', (err) => { console.error('tts:speak', err.message); });
     // al terminar de hablar (o al cortarlo con otra lectura), avisamos al
     // renderer para que el glow de 'speaking' vuelva a su calma
-    ttsProc.once('exit', () => { try { if (win && !win.isDestroyed()) win.webContents.send('tts:done'); } catch {} });
+    p.once('exit', () => {
+      clearTimeout(killTimer);
+      if (ttsProc !== p) return;   // ya lo reemplazó otra lectura: avisará ella
+      ttsProc = null;
+      try { if (win && !win.isDestroyed()) win.webContents.send('tts:done'); } catch {}
+    });
     return { ok: true };
   } catch { return { ok: false }; }
 });
@@ -696,14 +847,18 @@ ipcMain.handle('app:openDataDir', async () => {
 ipcMain.handle('shell:openPath', async (e, p) => {
   const { shell } = require('electron');
   const explicit = String(p || '').trim();
+  // UNC (\\servidor\recurso) fuera: no es una carpeta local y no debe poder fijar
+  // el espacio de trabajo de la app.
+  if (/^[\\/]{2}/.test(explicit)) return { ok: false, error: 'Ruta de red no permitida' };
   let target = explicit.replace(/^~(?=\/|\\|$)/, app.getPath('home'));
   if (!target) target = app.getPath('desktop');
-  try {
-    const st = fs.statSync(target);
-    if (st.isFile()) target = path.dirname(target);
-  } catch {
-    return { ok: false, error: 'La ruta no existe: ' + target };
+  let st;
+  try { st = fs.statSync(target); } catch { return { ok: false, error: 'La ruta no existe: ' + target }; }
+  if (st.isFile()) {
+    target = path.dirname(target);   // un archivo abre su carpeta contenedora
+    try { st = fs.statSync(target); } catch { return { ok: false, error: 'La ruta no es una carpeta: ' + target }; }
   }
+  if (!st.isDirectory()) return { ok: false, error: 'La ruta no es una carpeta: ' + target };
   const err = await shell.openPath(target);
   if (err) return { ok: false, error: err };
   // Proyectos = espacio de trabajo: abrir una carpeta aquí la convierte en la activa

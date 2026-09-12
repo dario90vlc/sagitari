@@ -39,6 +39,7 @@ const P = {
   alert: '<path d="M12 3 2 20h20L12 3z"/><path d="M12 10v4M12 17.5v.5"/>',
   trash: '<path d="M4 7h16M9 7V4h6v3M6.5 7l1 13h9l1-13"/><path d="M10 11v6M14 11v6"/>',
   play: '<path d="M7 4.5v15l12-7.5z"/>',
+  pause: '<rect x="6" y="4" width="4" height="16" rx="1"/><rect x="14" y="4" width="4" height="16" rx="1"/>',
   external: '<path d="M14 4h6v6M20 4 10.5 13.5"/><path d="M19 14v5a1.5 1.5 0 0 1-1.5 1.5h-11A1.5 1.5 0 0 1 5 19V8a1.5 1.5 0 0 1 1.5-1.5H11"/>',
   wave: '<path d="M3 12h2l2-5 3 10 3-14 3 12 2-3h4"/>',
   key: '<circle cx="8" cy="15" r="4.5"/><path d="m11.5 11.5 8-8M17 4l3 3M14 7l2.5 2.5"/>',

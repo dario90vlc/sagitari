@@ -67,6 +67,7 @@ const ChatKit = (function () {
     run_command:     { label: 'Terminal',        icon: 'terminal',  verb: 'Ejecutando' },
     read_file:       { label: 'Leer archivo',    icon: 'file',      verb: 'Leyendo' },
     write_file:      { label: 'Escribir archivo', icon: 'save',     verb: 'Escribiendo' },
+    edit_file:       { label: 'Editar archivo',  icon: 'save',     verb: 'Editando' },
     list_dir:        { label: 'Explorar carpeta', icon: 'folder',   verb: 'Explorando' },
     search_files:    { label: 'Buscar en archivos', icon: 'search', verb: 'Buscando' },
     open_app:        { label: 'Abrir aplicación', icon: 'window',   verb: 'Abriendo' },
@@ -96,7 +97,7 @@ const ChatKit = (function () {
   /* Claves que, por orden, mejor resumen lo que hace una llamada. */
   const ARG_HINTS = {
     run_command: ['command'],
-    read_file: ['path'], write_file: ['path'], list_dir: ['path'],
+    read_file: ['path'], write_file: ['path'], edit_file: ['path'], list_dir: ['path'],
     search_files: ['pattern', 'path'],
     open_app: ['name', 'args'],
     open_url: ['url'],

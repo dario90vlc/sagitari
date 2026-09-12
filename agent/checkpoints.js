@@ -16,11 +16,13 @@
 
 const fs = require('fs');
 const path = require('path');
+const crypto = require('crypto');
 
 let TASKS_DIR = path.join(process.env.APPDATA || require('os').homedir(), 'SagitariAI', 'tasks');
 const HISTORY_MAX = 60;   // eventos conservados por run.json
 
 const ALL_STATUS = ['pending', 'scheduled', 'running', 'paused', 'interrupted', 'failed', 'completed', 'cancelled'];
+const LIVE_STATUS = ['running', 'pending', 'scheduled'];   // vivos: no se borran sin detenerlos antes
 
 function dirFor(status) {
   if (status === 'completed') return path.join(TASKS_DIR, 'completed');
@@ -31,9 +33,49 @@ function dirFor(status) {
 
 function fileFor(run) { return path.join(dirFor(run.status), run.runId, 'run.json'); }
 
+/** Escritura atómica: escribe a .tmp y renombra, conservando el .bak anterior. */
+function atomicWrite(file, text) {
+  const tmp = file + '.tmp';
+  fs.mkdirSync(path.dirname(file), { recursive: true });
+  fs.writeFileSync(tmp, text, 'utf8');
+  try { fs.copyFileSync(file, file + '.bak'); } catch {}   // aún no había archivo: no es un fallo
+  fs.renameSync(tmp, file);
+}
+
+/** Copias persistidas de un run (puede haber más de una si un save anterior murió a medias). */
+function copiesOf(runId) {
+  const out = [];
+  for (const s of ALL_STATUS) {
+    const file = path.join(dirFor(s), runId, 'run.json');
+    try { out.push({ file, run: JSON.parse(fs.readFileSync(file, 'utf8')) }); } catch {}
+  }
+  return out;
+}
+
+/** Ordena copias por recencia; en empate gana 'cancelled' (terminal) y luego ALL_STATUS. */
+function newerCopy(a, b) {
+  const t = String(b.run.updatedAt || '').localeCompare(String(a.run.updatedAt || ''));
+  if (t) return t;
+  const ca = a.run.status === 'cancelled' ? 1 : 0;
+  const cb = b.run.status === 'cancelled' ? 1 : 0;
+  if (ca !== cb) return cb - ca;
+  return ALL_STATUS.indexOf(a.run.status) - ALL_STATUS.indexOf(b.run.status);
+}
+
+/** runId único: UUID (formato anterior como fallback) verificando que no exista ya. */
+function newRunId() {
+  for (let i = 0; i < 5; i++) {
+    let id = null;
+    try { id = crypto.randomUUID(); } catch {}
+    if (!id) break;                       // Node sin randomUUID: usa el formato clásico
+    if (!copiesOf(id).length) return id;
+  }
+  return 't' + Date.now().toString(36) + Math.random().toString(36).slice(2, 5);
+}
+
 function newRun({ goal, mode, step, status = 'running', scheduledAt = null, origin = 'chat' }) {
   return {
-    runId: 't' + Date.now().toString(36) + Math.random().toString(36).slice(2, 5),
+    runId: newRunId(),
     status: ALL_STATUS.includes(status) ? status : 'running',
     goal: String(goal || '').slice(0, 400),
     mode: mode || 'act',
@@ -50,38 +92,43 @@ function newRun({ goal, mode, step, status = 'running', scheduledAt = null, orig
   };
 }
 
-/** Guarda (o mueve si cambió el estado) el run.json de una tarea. Nunca lanza. */
+/** Guarda (o mueve de carpeta si cambió el estado) el run.json de una tarea. Nunca lanza. */
 function save(run) {
-  if (!run || !run.runId) return run;
+  if (!run || !run.runId || run.removed) return run;
+  const copies = copiesOf(run.runId);
+  // La cancelación es terminal e irreversible: ni el objeto vivo (marcado por el
+  // TaskManager) ni una copia ya persistida como 'cancelled' pueden volver a running.
+  if (run.cancelRequested || copies.some(c => c.run.status === 'cancelled')) {
+    run.cancelRequested = true;
+    run.status = 'cancelled';
+  }
   run.updatedAt = new Date().toISOString();
   try {
     const dest = fileFor(run);
     const destDir = path.dirname(dest);
     fs.mkdirSync(destDir, { recursive: true });
-    // Mueve el run.json si vivía en otra carpeta (p.ej. activa → completed) y
-    // elimina la copia obsoleta: read() debe devolver SIEMPRE el estado nuevo.
-    for (const s of ALL_STATUS) {
-      const otherDir = path.join(dirFor(s), run.runId);
-      if (otherDir === destDir) continue;
-      if (fs.existsSync(path.join(otherDir, 'run.json'))) {
-        fs.rmSync(destDir, { recursive: true, force: true });
-        fs.renameSync(otherDir, destDir);
-        break;   // tras esta corrección la tarea solo vive en un sitio
-      }
-    }
     const copy = { ...run };
+    delete copy.cancelRequested;   // marcas de control en vivo: no forman parte del checkpoint
+    delete copy.removed;
     if (copy.history && copy.history.length > HISTORY_MAX) copy.history = copy.history.slice(-HISTORY_MAX);
-    fs.writeFileSync(dest, JSON.stringify(copy, null, 2), 'utf8');
+    atomicWrite(dest, JSON.stringify(copy, null, 2));
+    // Elimina copias obsoletas del mismo run en OTRAS carpetas; el destino ya está
+    // escrito, así que nunca se borra antes de renombrar (EPERM/EBUSY de Windows).
+    for (const c of copies) {
+      const dir = path.dirname(c.file);
+      if (dir === destDir) continue;
+      try { fs.rmSync(dir, { recursive: true, force: true }); } catch {}
+    }
   } catch (e) { console.error('checkpoints.save', e.message); }
   return run;
 }
 
+/** Lee la copia más reciente de un run (no la primera carpeta de ALL_STATUS). */
 function read(runId) {
-  for (const s of ALL_STATUS) {
-    const f = path.join(dirFor(s), runId, 'run.json');
-    try { return JSON.parse(fs.readFileSync(f, 'utf8')); } catch {}
-  }
-  return null;
+  const copies = copiesOf(runId);
+  if (!copies.length) return null;
+  copies.sort(newerCopy);
+  return copies[0].run;
 }
 
 /** Lista tareas por carpeta. status='all' → activas + histórico. */
@@ -112,7 +159,14 @@ function list(status = 'all') {
       } catch {}
     }
   }
-  return out.sort((a, b) => String(b.updatedAt).localeCompare(String(a.updatedAt)));
+  // Un run puede quedar en dos carpetas si un save murió a medias: manda la copia
+  // más reciente (misma regla que read()) para no imponer un estado viejo.
+  const byId = new Map();
+  for (const t of out) {
+    const prev = byId.get(t.runId);
+    if (!prev || newerCopy({ run: t }, { run: prev }) < 0) byId.set(t.runId, t);
+  }
+  return [...byId.values()].sort((a, b) => String(b.updatedAt).localeCompare(String(a.updatedAt)));
 }
 
 /** Añade un evento al historial y persiste (checkpoint del último paso completado). */
@@ -158,6 +212,7 @@ function setStatus(run, status) {
 /** v1.3: cancelación — la tarea deja de estar activa y se archiva como cancelled. */
 function cancel(run, reason) {
   if (!run) return run;
+  run.cancelRequested = true;   // irreversible: ninguna escritura posterior puede reactivarla
   run.status = 'cancelled';
   run.lastError = { step: run.step || 'EXECUTE', tool: null, message: String(reason || 'Cancelada por el usuario').slice(0, 300), ts: new Date().toISOString() };
   return save(run);
@@ -168,8 +223,17 @@ function recoverable() {
   return list('active').filter(t => t.status === 'interrupted' || t.status === 'paused');
 }
 
-/** Borra una tarea del disco. */
+/**
+ * Borra una tarea del disco. Rechaza los estados vivos (running/pending/scheduled):
+ * borrarlos dejaría al agente huérfano ejecutando efectos y el siguiente save
+ * recrearía la carpeta. El TaskManager usa remove() tras detener el agente.
+ */
 function remove(runId) {
+  const run = read(runId);
+  if (!run) return { ok: false, error: 'Tarea no encontrada.' };
+  if (LIVE_STATUS.includes(run.status)) {
+    return { ok: false, error: 'La tarea está ' + run.status + ': deténla o cancélala antes de borrarla.' };
+  }
   for (const s of ALL_STATUS) {
     try { fs.rmSync(path.join(dirFor(s), runId), { recursive: true, force: true }); } catch {}
   }
@@ -180,4 +244,4 @@ function remove(runId) {
 function _resetForTests(dir) { TASKS_DIR = dir; }
 function _dir() { return TASKS_DIR; }
 
-module.exports = { newRun, save, read, list, record, setStep, fail, complete, pause, resume, interrupt, cancel, setStatus, recoverable, remove, _dir, __test: { _resetForTests, ALL_STATUS } };
+module.exports = { newRun, save, read, list, record, setStep, fail, complete, pause, resume, interrupt, cancel, setStatus, recoverable, remove, _dir, __test: { _resetForTests, ALL_STATUS, LIVE_STATUS, copiesOf } };

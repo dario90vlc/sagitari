@@ -129,6 +129,12 @@ const AFTER = {
     pending.set(myId, (m) => res(m.result && m.result.result ? m.result.result.value : undefined));
     ws.send(JSON.stringify({ id: myId, method: 'Runtime.evaluate', params: { expression: expr, returnByValue: true } }));
   });
+  /* Comando CDP cualquiera (se usa para emular el tamaño mínimo de ventana). */
+  const cmd = (method, params = {}) => new Promise((res) => {
+    const myId = ++id;
+    pending.set(myId, (m) => res(m.result));
+    ws.send(JSON.stringify({ id: myId, method, params }));
+  });
   await new Promise((r) => ws.on('open', r));
   await new Promise((r) => setTimeout(r, 1200));           // deja terminar el arranque del renderer
   await ws.send(JSON.stringify({ id: ++id, method: 'Runtime.enable' }));
@@ -155,6 +161,30 @@ const AFTER = {
   // el cambio de modo debe haber teñido la vista
   await judge('el modo elegido tiñe el chat',
     '(function(){ for (let i = 0; i < 40; i++) {} return document.querySelector("#view-chat").dataset.mode === "think"; })()');
+  /* ---- regresiones de la auditoría de UI (verificadas sobre la app viva) ---- */
+  // El atributo `hidden` era anulado por reglas con display:grid/flex/inline-flex
+  await judge('los elementos ocultos con [hidden] no se pintan',
+    '(function(){ return ["#jumpDown","#attachStrip","#chStatus"].every(function(s){ var e = document.querySelector(s); return !e || !e.hidden || getComputedStyle(e).display === "none"; }); })()');
+  // Sin @keyframes blink los indicadores de actividad quedaban estáticos
+  await judge('los indicadores de actividad tienen animación real',
+    '(function(){ for (var i = 0; i < document.styleSheets.length; i++) { var rules; try { rules = document.styleSheets[i].cssRules; } catch (e) { continue; } for (var j = 0; j < rules.length; j++) { if (rules[j].type === CSSRule.KEYFRAMES_RULE && rules[j].name === "blink") return true; } } return false; })()');
+  // Alt+0 mapeaba a una vista inexistente y dejaba la app en blanco
+  await judge('Alt+0 no deja la app sin vista activa',
+    '(function(){ window.dispatchEvent(new KeyboardEvent("keydown", { key: "0", altKey: true, bubbles: true })); var on = document.querySelector(".view.on"); return !!on && on.id === "view-chat"; })()');
+  // Los atajos no deben dispararse mientras se escribe en un campo
+  await judge('los atajos no saltan de vista escribiendo en el chat',
+    '(function(){ var input = document.querySelector("#chatInput"); input.focus(); input.dispatchEvent(new KeyboardEvent("keydown", { key: "4", altKey: true, bubbles: true })); var on = document.querySelector(".view.on"); var ok = !!on && on.id === "view-chat"; input.blur(); return ok; })()');
+  // Tamaño mínimo real de la ventana (main.js: minWidth 1000 x minHeight 620):
+  // el compositor quedaba 60px fuera de pantalla porque el grid se dimensionaba
+  // por contenido en vez de por la altura disponible
+  await cmd('Emulation.setDeviceMetricsOverride', { width: 1000, height: 620, deviceScaleFactor: 1, mobile: false });
+  await new Promise(r => setTimeout(r, 700));
+  await judge('a 1000x620 el compositor sigue dentro de la ventana',
+    '(function(){ var c = document.querySelector("#composer"); return !!c && c.getBoundingClientRect().bottom <= innerHeight + 1; })()');
+  await judge('a 1000x620 el chat no provoca scroll de página',
+    '(function(){ return document.documentElement.scrollHeight <= innerHeight + 1; })()');
+  await cmd('Emulation.clearDeviceMetricsOverride', {});
+
   // errores que la propia interfaz haya detectado (red de seguridad del renderer)
   const propios = await evaluate('Array.isArray(window.__errores) ? window.__errores.slice(0, 5) : null');
   if (Array.isArray(propios) && propios.length) {

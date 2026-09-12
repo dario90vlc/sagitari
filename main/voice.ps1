@@ -1,4 +1,10 @@
-param([string]$Lang = "es-ES")
+param(
+  [string]$Lang = "es-ES",
+  # El proceso principal arranca el dictado con -NoWinrt: así se salta el motor
+  # WinRT (depende de la política de voz en línea y en muchas máquinas falla) y
+  # se va directo al motor clásico.
+  [switch]$NoWinrt
+)
 
 $ErrorActionPreference = "Stop"
 # Node decodes stdout as UTF-8: force UTF-8 so accents survive the pipe.
@@ -26,6 +32,10 @@ function Await($WinRtTask, $ResultType) {
 }
 
 try {
+  # -NoWinrt: salta el motor WinRT sin intentarlo (el catch de abajo lo trata como
+  # «no disponible» y continúa con el clásico).
+  if ($NoWinrt) { throw "motor WinRT desactivado con -NoWinrt" }
+
   [Windows.Media.SpeechRecognition.SpeechRecognizer, Windows.Foundation, ContentType = WindowsRuntime] | Out-Null
   [Windows.Globalization.Language, Windows.Globalization, ContentType = WindowsRuntime] | Out-Null
   [Windows.Media.SpeechRecognition.SpeechRecognitionTopicConstraint, Windows.Foundation, ContentType = WindowsRuntime] | Out-Null
@@ -97,8 +107,10 @@ try {
     }
   }
 } catch {
-  Say ("NOTE::WinRT no disponible (" + ($_.Exception.Message.Split("`
+  if (-not $NoWinrt) {
+    Say ("NOTE::WinRT no disponible (" + ($_.Exception.Message.Split("`
 ")[0]) + "), usando motor clasico")
+  }
 }
 
 # ---------- Engine 2: System.Speech fallback (SAPI) ----------
@@ -135,11 +147,40 @@ try {
   Say "MODE::sapi"
   Say ("READY::" + $rid.Culture.Name)
 
+  # Fin de la entrada estándar: si la app se cierra de golpe, su tubería se cierra
+  # con ella y este bucle no puede quedarse girando para siempre con el micrófono
+  # abierto. La lectura va en un hilo aparte porque las lecturas asíncronas de
+  # .NET sobre la entrada estándar devuelven fin de flujo antes de tiempo.
+  $stdinWatch = $false
+  try {
+    Add-Type -Namespace Sagitari -Name StdinWatch -MemberDefinition @'
+public static volatile bool Eof;
+public static void Start()
+{
+    var t = new System.Threading.Thread(() => {
+        try
+        {
+            var input = System.Console.OpenStandardInput();
+            var buf = new byte[256];
+            while (input.Read(buf, 0, buf.Length) > 0) { }
+        }
+        catch { }
+        Eof = true;
+    });
+    t.IsBackground = true;
+    t.Start();
+}
+'@
+    [Sagitari.StdinWatch]::Start()
+    $stdinWatch = $true
+  } catch { }
+
   # mic guard: 30s without ANY engine event usually means the default capture
   # device is muted, dead, or the wrong one (e.g. a webcam mic across the room)
   $start = [DateTime]::Now
   while ($true) {
     Start-Sleep -Milliseconds 500
+    if ($stdinWatch -and [Sagitari.StdinWatch]::Eof) { break }
     if ($global:VoiceEvents -eq 0 -and ([DateTime]::Now - $start).TotalSeconds -gt 30) {
       Say "HINT::No llega audio: revisa el microfono predeterminado en ms-settings:sound (si usas NVIDIA Broadcast o similar, asegurate de que el microfono real sea el predeterminado)."
       $start = [DateTime]::Now

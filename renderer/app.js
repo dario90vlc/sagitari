@@ -11,7 +11,6 @@ const K = window.ChatKit;
 let CFG = { providers: [], active: null, settings: {}, presets: [] };
 let busy = false;
 let pendingAssistant = null;
-let pendingChipBox = null;
 let listening = false;
 let mode = 'act';
 let currentRunMode = 'act';   // modo con el que se lanzó el turno en curso
@@ -48,13 +47,26 @@ window.addEventListener('unhandledrejection', (e) => reportarError('promesa', e.
 
 // ============ routing ============
 $$('.navitem').forEach(b => b.addEventListener('click', () => goto(b.dataset.view)));
-function goto(view) {
-  $$('.navitem').forEach(b => b.classList.toggle('on', b.dataset.view === view));
+function goto(view, opts) {
+  // una vista inexistente (Alt+0, un data-view roto…) dejaba TODAS las
+  // secciones ocultas: la app se quedaba en blanco. Sin destino, no se toca nada.
+  const target = document.getElementById('view-' + view);
+  if (!target) return;
+  $$('.navitem').forEach(b => {
+    const on = b.dataset.view === view;
+    b.classList.toggle('on', on);
+    if (on) b.setAttribute('aria-current', 'page'); else b.removeAttribute('aria-current');
+  });
   $$('.view').forEach(v => v.classList.toggle('on', v.id === 'view-' + view));
   if (view === 'chat') $('#chatInput').focus();
+  else if (opts && opts.focus) {
+    // cambio de vista por atajo: el foco caía a <body>; se lleva al título de la vista
+    const h = target.querySelector('h2');
+    if (h) { h.setAttribute('tabindex', '-1'); h.focus(); }
+  }
   if (view === 'memory') renderMemory();
   if (view === 'tasks') renderTasks();
-  if (view === 'agents') { renderHealth(); renderHabits(); }
+  if (view === 'agents') { renderToolTray(); renderHealth(); renderHabits(); }
   if (view === 'skills') { renderMarket(); renderSkills(); }
   if (view === 'projects') window.sagitari.workspaceGet().then(w => { $('#projPath').value = w; });
   if (view === 'history') renderHistory();
@@ -62,6 +74,12 @@ function goto(view) {
   polishSwitches();   // los interruptores creados dinámicamente también deben ser accesibles
   syncChatBadge();
   setSideActive();
+}
+
+/** ¿El evento nace dentro de un campo editable? Los atajos globales deben cederle la tecla. */
+function esCampoDeTexto(t) {
+  const el = t instanceof Element ? t : null;
+  return !!(el && el.closest('input, textarea, select, [contenteditable]'));
 }
 
 // ============ sidebar: compactar, contadores, atajos ============
@@ -112,6 +130,7 @@ function setSideActive() {
   sm.title = `Modo ${m.label} — ${m.desc} (Alt+M)`;
 }
 
+let sideBadgeErr = false;   // evita repetir el aviso en cada sondeo
 async function refreshSidebar() {
   if (document.hidden) return;   // sin ventana visible no hay nada que pintar
   syncChatBadge();
@@ -124,7 +143,16 @@ async function refreshSidebar() {
     setBadge('#nbMemory', mem.length);
     const sk = await window.sagitari.skillsList();
     setBadge('#nbSkills', sk.length);
-  } catch { /* el sidebar nunca debe romper la app */ }
+    sideBadgeErr = false;
+  } catch (e) {
+    // un canal IPC caído NO es «cero tareas»: avisa una vez con el error real
+    if (!sideBadgeErr) {
+      sideBadgeErr = true;
+      const msg = String((e && e.message) || e || 'error desconocido');
+      feed('No se pudo leer el estado lateral — ' + msg.slice(0, 80), 'err');
+      showToast('No se pudo leer el estado: ' + msg.slice(0, 120));
+    }
+  }
 }
 setInterval(refreshSidebar, 3000);
 
@@ -132,42 +160,92 @@ $('#sideStatusBtn').onclick = () => goto('settings');
 $('#sideModeBtn').onclick = () => setMode(MODE_ORDER[(MODE_ORDER.indexOf(mode) + 1) % MODE_ORDER.length]);
 window.addEventListener('keydown', (e) => {
   if (!e.altKey || e.ctrlKey || e.shiftKey) return;
+  // escribiendo en un campo, Alt+N pertenece a la edición: no cambia de vista
+  if (esCampoDeTexto(e.target)) return;
   if (e.key === 'b' || e.key === 'B') { e.preventDefault(); $('#sideToggle').click(); return; }
-  if (/^[0-9]$/.test(e.key)) {
+  // Alt+0 no tiene vista asignada: VIEW_HOTKEY sólo llega hasta Alt+9
+  if (/^[1-9]$/.test(e.key)) {
     e.preventDefault();
-    goto(VIEW_HOTKEY[e.key === '0' ? 9 : parseInt(e.key, 10) - 1]);
+    goto(VIEW_HOTKEY[parseInt(e.key, 10) - 1], { focus: true });
   }
 });
 
 // ============ clock + greeting (en el estado vacío del chat) ============
-function tickClock() {
-  const d = new Date();
-  const hh = String(d.getHours()).padStart(2, '0'), mm = String(d.getMinutes()).padStart(2, '0');
-  const chip = document.getElementById('chatStatusTime');
-  if (chip) chip.textContent = `${hh}:${mm}`;
+
+/* Escapa el texto para insertarlo como HTML o como valor de atributo. Las
+   COMILLAS también se escapan: sin esto, un argumento de herramienta con una
+   comilla rompía el atributo (title="…") y permitía inyectar manejadores. */
+function esc(s) {
+  return String(s).replace(/[&<>"']/g, c => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' }[c]));
 }
 
-function esc(s) { return String(s).replace(/[&<>]/g, c => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;' }[c])); }
+/* --- saneado previo a la inserción ---
+   El markdown lo produce el MODELO, así que nada de su HTML puede tocar el DOM
+   real sin filtrarse antes. Se parsea en un documento INERTE (DOMParser: las
+   imágenes no disparan ninguna petición y <style>/<base>/<link> no se aplican),
+   se descarta todo lo que no esté en la whitelist y cualquier src/href que no
+   sea data: o http(s):. */
+const OK_TAGS = new Set(['P', 'BR', 'UL', 'OL', 'LI', 'CODE', 'PRE', 'BLOCKQUOTE',
+  'H1', 'H2', 'H3', 'H4', 'H5', 'H6', 'TABLE', 'THEAD', 'TBODY', 'TR', 'TH', 'TD',
+  'A', 'STRONG', 'EM', 'DEL', 'HR', 'SPAN', 'DIV']);
+// etiquetas que se ELIMINAN con su contenido: nunca se muestran ni se conservan
+const DROP_TAGS = new Set(['SCRIPT', 'STYLE', 'BASE', 'LINK', 'META', 'TITLE', 'HEAD',
+  'IFRAME', 'FRAME', 'FRAMESET', 'NOSCRIPT', 'TEMPLATE', 'OBJECT', 'EMBED', 'APPLET',
+  'SVG', 'MATH', 'CANVAS', 'VIDEO', 'AUDIO', 'SOURCE', 'TRACK', 'FORM', 'INPUT',
+  'BUTTON', 'SELECT', 'TEXTAREA', 'OPTION', 'LABEL', 'MARQUEE']);
+// atributos sin valor ejecutable que marked sí genera (presentación/tablas)
+const OK_ATTRS = new Set(['class', 'title', 'alt', 'colspan', 'rowspan', 'align', 'start']);
+
+function safeUrl(v) {
+  const u = String(v || '').trim();
+  return /^(data:|https?:)/i.test(u) ? u : '';
+}
+
+function cleanNode(node) {
+  if (node.nodeType === 3) return document.createTextNode(node.nodeValue);
+  if (node.nodeType !== 1) return document.createDocumentFragment();   // comentarios, etc.
+  const tag = node.tagName.toUpperCase();
+  if (DROP_TAGS.has(tag)) return document.createDocumentFragment();
+  if (!OK_TAGS.has(tag)) {
+    // etiqueta fuera de la whitelist: se elimina el elemento y se conserva su texto
+    const frag = document.createDocumentFragment();
+    for (const child of [...node.childNodes]) frag.appendChild(cleanNode(child));
+    return frag;
+  }
+  const el = document.createElement(tag.toLowerCase());
+  for (const attr of [...node.attributes]) {
+    const n = attr.name.toLowerCase();
+    if (n === 'href' || n === 'src') {
+      const u = safeUrl(attr.value);
+      if (u) el.setAttribute(n, u);
+    } else if (OK_ATTRS.has(n)) {
+      el.setAttribute(n, attr.value);
+    }
+    // on*, style, id, srcset… se descartan siempre
+  }
+  if (tag === 'A' && el.getAttribute('href')) {
+    el.setAttribute('target', '_blank');
+    el.setAttribute('rel', 'noopener noreferrer');
+  }
+  for (const child of [...node.childNodes]) el.appendChild(cleanNode(child));
+  return el;
+}
+
+function sanitizeHTML(html) {
+  const inert = new DOMParser().parseFromString(String(html || ''), 'text/html');
+  const out = document.createElement('div');
+  for (const node of [...inert.body.childNodes]) out.appendChild(cleanNode(node));
+  return out.innerHTML;
+}
+
 /* render markdown real (marked + GFM): tablas, listas, títulos, reglas, código.
-   El output de marked se SANEABA antes vía esc(); marked genera HTML de confianza
-   del texto del modelo, así que neutralizamos secuencias peligrosas y forzamos
-   que los links abran en el navegador del sistema, nunca dentro de la app. */
+   Los enlaces abren en el navegador del sistema por delegación (ver el listener
+   global de clic), nunca dentro de la app. */
 function fmt(text) {
   if (window.marked) {
     const html = window.marked.parse(String(text || ''), { gfm: true, breaks: true });
     const div = document.createElement('div');
-    div.innerHTML = html;
-    div.querySelectorAll('a[href]').forEach(a => {
-      a.target = '_blank'; a.rel = 'noopener noreferrer';
-      a.addEventListener('click', (e) => { e.preventDefault(); window.sagitari.openExternal(a.href); });
-    });
-    // sin HTML crudo escrito por el modelo: solo el que produce el propio markdown
-    div.querySelectorAll('*').forEach(el => {
-      for (const attr of [...el.attributes]) {
-        if (!/^(href|class|src)$/.test(attr.name) || /javascript:/i.test(attr.value)) el.removeAttribute(attr.name);
-      }
-      if (el.tagName === 'SCRIPT' || el.tagName === 'IFRAME' || (el.tagName === 'IMG' && !/^data:image\//.test(el.getAttribute('src') || ''))) el.remove();
-    });
+    div.innerHTML = sanitizeHTML(html);
     enhanceCode(div);
     // wrapper .md: neutraliza el pre-wrap del bubble para que el HTML de bloques
     // no genere líneas fantasma entre elementos
@@ -209,6 +287,15 @@ document.addEventListener('click', (e) => {
   if (pre) copyText(pre.textContent, 'Código copiado');
 });
 
+// los enlaces del markdown se abren SIEMPRE en el navegador del sistema: la
+// delegación evita re-enganchar un listener por cada token del stream
+document.addEventListener('click', (e) => {
+  const a = e.target.closest && e.target.closest('a[href]');
+  if (!a || !a.closest('.md')) return;
+  e.preventDefault();
+  window.sagitari.openExternal(a.href);
+});
+
 // ============ chat rendering ============
 const msgs = $('#messages');
 const chatEmpty = $('#chatEmpty');
@@ -224,6 +311,18 @@ msgs.addEventListener('scroll', () => {
 jumpDownBtn.onclick = () => { pinned = true; jumpDownBtn.hidden = true; scroll(true); };
 function scroll(force) {
   if (force || pinned) msgs.scrollTop = msgs.scrollHeight;
+}
+/* Las imágenes y capturas terminan de cargar DESPUÉS de pintar: la altura del
+   hilo crece y el scroll se quedaba a medio camino. Reajustamos el final sólo
+   si el usuario venía siguiendo el stream (pinned). */
+function pinImage(img) {
+  if (!img) return;
+  const fix = () => { if (pinned) scroll(); };
+  img.addEventListener('load', fix);
+  img.addEventListener('error', fix);
+}
+if (window.ResizeObserver) {
+  new ResizeObserver(() => { if (pinned) scroll(); }).observe(msgs);
 }
 function nowClock(ts) {
   return new Date(ts || Date.now()).toLocaleTimeString('es', { hour: '2-digit', minute: '2-digit' });
@@ -338,7 +437,12 @@ function msgActions(holder, text, opts) {
     btn.onclick = fn;
     return btn;
   };
-  row.appendChild(mk('copy', 'Copiar este mensaje', () => copyText(text, 'Mensaje copiado')));
+  // copiar SIEMPRE el texto visible ya renderizado (igual que «Copiar toda la
+  // conversación»): copiar el markdown crudo daba **negritas** y vallas
+  row.appendChild(mk('copy', 'Copiar este mensaje', () => {
+    const bub = holder.querySelector('.bubble') || holder;
+    copyText(bub.innerText, 'Mensaje copiado');
+  }));
   if (o.retry) row.appendChild(mk('refresh', 'Regenerar esta respuesta', regenerate));
   if (o.speak) row.appendChild(mk('volume', 'Leer en voz alta', () => speak(text)));
   holder.appendChild(row);
@@ -366,10 +470,23 @@ function refreshMsgActions() {
 async function regenerate() {
   if (busy) { showToast('Espera a que termine la ejecución actual'); return; }
   const last = lastAssistantEl;
-  if (last) { try { last.closest('.msg').remove(); } catch {} }
+  const msgEl = last ? last.closest('.msg') : null;
+  const parent = msgEl ? msgEl.parentNode : null;
+  const nextSibling = msgEl ? msgEl.nextSibling : null;
+  if (msgEl) msgEl.remove();
   lastAssistantEl = null;
   showToast('Regenerando respuesta…');
-  await window.sagitari.retryChat();
+  let r;
+  try { r = await window.sagitari.retryChat(); }
+  catch (e) { r = { ok: false, error: (e && e.message) || e }; }
+  if (!r || r.ok === false) {
+    // el reintento no salió: la respuesta sigue en el historial, así que se
+    // devuelve a la vista en su sitio en lugar de dejarla desaparecer
+    if (parent && msgEl) parent.insertBefore(msgEl, nextSibling);
+    lastAssistantEl = msgEl ? msgEl.querySelector('.bubble') : null;
+    refreshMsgActions();
+    showToast('No se pudo regenerar: ' + ((r && r.error) || 'error desconocido'));
+  }
 }
 
 /* ---------------------------------------------------------------------------
@@ -381,7 +498,6 @@ function ensureAssistantBubble() {
     dayStamp();
     currentRunMode = currentRunMode || mode;
     pendingAssistant = bubble('ai');
-    pendingChipBox = null;
     pendingTurn = {
       mode: currentRunMode, group: null, body: null, cards: [],
       tools: 0, totalMs: 0, plan: null, planIdx: 0,
@@ -398,14 +514,23 @@ function ensureToolGroup() {
     g.className = 'tgroup open';
     const head = document.createElement('div');
     head.className = 'tgroup-head';
+    // plegable operable por teclado: role button + aria-expanded sincronizado
+    head.setAttribute('role', 'button');
+    head.setAttribute('tabindex', '0');
+    head.setAttribute('aria-expanded', 'true');
     head.innerHTML = `<span class="tg-ic">${ic('tools')}</span><b class="tg-title">Herramientas</b>`
       + `<span class="tg-meta"></span><span class="tg-chev">${ic('chevron')}</span>`;
     const body = document.createElement('div');
     body.className = 'tgroup-body';
-    head.onclick = () => {
+    const toggle = () => {
       const open = g.classList.toggle('open');
       g.classList.toggle('closed', !open);
+      head.setAttribute('aria-expanded', open ? 'true' : 'false');
     };
+    head.onclick = toggle;
+    head.addEventListener('keydown', (e) => {
+      if (e.key === 'Enter' || e.key === ' ') { e.preventDefault(); toggle(); }
+    });
     g.append(head, body);
     b.appendChild(g);
     pendingTurn.group = { el: g, body, title: head.querySelector('.tg-title'), meta: head.querySelector('.tg-meta') };
@@ -443,7 +568,19 @@ function toolCard(ev) {
     <div class="tcard-body"></div>`;
   const body = card.querySelector('.tcard-body');
   body.innerHTML = `<div class="tb-label">ARGUMENTOS</div><pre class="args">${esc(JSON.stringify(ev.args || {}, null, 2))}</pre>`;
-  card.querySelector('.tcard-head').onclick = () => card.classList.toggle('open');
+  // tarjeta plegable operable por teclado
+  const tchead = card.querySelector('.tcard-head');
+  tchead.setAttribute('role', 'button');
+  tchead.setAttribute('tabindex', '0');
+  tchead.setAttribute('aria-expanded', 'false');
+  const toggleCard = () => {
+    const open = card.classList.toggle('open');
+    tchead.setAttribute('aria-expanded', open ? 'true' : 'false');
+  };
+  tchead.onclick = toggleCard;
+  tchead.addEventListener('keydown', (e) => {
+    if (e.key === 'Enter' || e.key === ' ') { e.preventDefault(); toggleCard(); }
+  });
   group.body.appendChild(card);
   pendingTurn.cards.push(card);
   pendingTurn.tools++;
@@ -495,7 +632,7 @@ function toolChip(text, state) {
   const c = document.createElement('div');
   c.className = 'toolchip' + (state ? ' ' + state : '');
   const mark = state === 'done' ? ic('check') : state === 'err' ? ic('alert') : '<span class="pulse-dot"></span>';
-  c.innerHTML = `<span class="tc-mark">${mark}</span><span class="tc-txt">${esc(text)}</span>`;
+  c.innerHTML = `<span class="tc-mark">${mark}</span><span class="tc-txt" title="${esc(text)}">${esc(text)}</span>`;
   (pendingTurn ? pendingTurn.body : b).appendChild(c);
   scroll();
 }
@@ -536,11 +673,38 @@ function advancePlan() {
   if (pendingTurn && pendingTurn.plan) pendingTurn.plan.advance();
 }
 
-function finishAssistant(finalText) {
+/** Cierra las tarjetas que quedaron «en curso…» cuando el turno muere a medias. */
+function closePendingCards(failed) {
+  if (!pendingTurn) return;
+  for (const card of pendingTurn.cards) {
+    if (!card.classList.contains('run')) continue;   // ya tenía su resultado
+    card.classList.remove('run');
+    card.classList.add(failed ? 'err' : 'cancelled');
+    const mark = card.querySelector('.tcard-ic');
+    if (mark) mark.innerHTML = ic(failed ? 'alert' : 'close');
+    const body = card.querySelector('.tcard-body');
+    if (body && !body.querySelector('[data-result]')) {
+      const wrap = document.createElement('div');
+      wrap.dataset.result = '1';
+      wrap.innerHTML = `<div class="tb-label">${failed ? 'ERROR' : 'CANCELADO'}</div>`
+        + `<pre>${failed ? 'La ejecución falló antes de recibir el resultado.' : 'Detenido por el usuario antes de recibir el resultado.'}</pre>`;
+      body.appendChild(wrap);
+    }
+  }
+  // el grupo tampoco puede seguir diciendo «en curso…» para siempre
+  if (pendingTurn.group) pendingTurn.group.meta.textContent = failed ? 'interrumpido' : 'detenido';
+}
+
+function finishAssistant(finalText, opts) {
+  cancelStreamRender();   // un frame pendiente repintaría el stream ya cerrado
   if (!pendingAssistant) return;
+  const o = opts || {};
   const holder = pendingAssistant;
   const stream = holder.querySelector('.stream');
+  // texto ya streameado: al Detener (o si la ejecución falla) NO se tira, se conserva
+  const acc = holder._stream || '';
   if (stream) stream.remove();
+  const keptText = finalText ? '' : (o.interrupted ? acc : '');
   if (finalText) {
     const runMode = (pendingTurn && pendingTurn.mode) || mode;
     const parsed = K.parsePlan(finalText);
@@ -563,25 +727,41 @@ function finishAssistant(finalText) {
       div.innerHTML = fmt(text);
       holder.appendChild(div);
     }
+  } else if (keptText) {
+    // turno cortado a medias con texto acumulado: se repinta igual que el stream
+    // pero SIN la clase .stream (su caret parpadeante diría «sigue escribiendo»)
+    const div = document.createElement('div');
+    div.className = 'interrupted';
+    div.innerHTML = fmt(keptText);
+    holder.appendChild(div);
+    const tag = document.createElement('div');
+    tag.className = 'subnote';
+    tag.textContent = o.failed ? 'Respuesta interrumpida por un error' : 'Respuesta interrumpida';
+    holder.appendChild(tag);
   }
   // turno completado: el plan queda cerrado. Si se detuvo a medias (sin
   // respuesta final) los pasos restantes se dejan como estaban — marcarlos
   // como cumplidos sería mentir sobre lo que realmente se hizo.
+  if (!finalText) closePendingCards(!!o.failed);
   if (finalText && pendingTurn && pendingTurn.plan) {
     const p = pendingTurn.plan;
     while (p.done < p.total) p.advance();
   }
-  if (pendingTurn && pendingTurn.tools) {
+  if (finalText && pendingTurn && pendingTurn.tools) {
     lastTurnSummary = K.toolCount(pendingTurn.tools) + (pendingTurn.totalMs ? ' · ' + K.fmtDuration(pendingTurn.totalMs) : '');
-  } else if (pendingTurn && pendingTurn.plan) {
+  } else if (finalText && pendingTurn && pendingTurn.plan) {
     lastTurnSummary = pendingTurn.plan.total + ' pasos completados';
+  } else if (!finalText) {
+    lastTurnSummary = o.failed ? 'error en la ejecución' : 'detenido por el usuario';
   } else {
     lastTurnSummary = 'respuesta entregada';
   }
-  if (finalText) msgActions(holder.closest('.msg-body') || holder, finalText, { speak: true });
+  // el pie ofrece copiar/leer también lo que quedó a medias
+  const said = finalText || keptText;
+  if (said) msgActions(holder.closest('.msg-body') || holder, said, { speak: true });
   lastAssistantEl = holder;
   refreshMsgActions();
-  pendingAssistant = null; pendingChipBox = null; pendingTurn = null;
+  pendingAssistant = null; pendingTurn = null;
   scroll(true);
 }
 
@@ -642,36 +822,59 @@ function agentStop() {
   document.querySelectorAll('.acard.on').forEach(c => c.classList.remove('on'));
   updateAgentCount();
 }
+/** id de tarjeta → agente: permite limpiar el rail cuando una tarjeta se apaga. */
+const CARD_AGENT = Object.values(AGENT_MAP).reduce((acc, a) => { if (!acc[a.el]) acc[a.el] = a; return acc; }, {});
+
 function updateAgentCount() {
-  const n = document.querySelectorAll('.acard.on').length;
+  const cards = [...document.querySelectorAll('.acard.on')];
+  const n = cards.length;
   $('#agentCount').textContent = n;
   $('#bigRing').parentElement.parentElement.classList.toggle('idle', n === 0);
+  // el rail lista SOLO agentes vivos: antes acumulaba entradas de herramientas ya
+  // terminadas mientras el contador marcaba 0 (lista y número se contradecían)
+  const rail = $('#railAgents');
+  if (!rail) return;
+  const live = new Set(cards.map(c => CARD_AGENT[c.id] && CARD_AGENT[c.id].name).filter(Boolean));
+  rail.querySelectorAll('.ragent').forEach(d => { if (!live.has(d.dataset.agent)) d.remove(); });
 }
 updateAgentCount();
 
-function renderToolTray() {
+/** Paneles de la vista Agentes: se pintan al entrar y se refrescan durante el turno. */
+function refreshAgentsPanels() {
+  const v = $('#view-agents');
+  if (!v || !v.classList.contains('on') || document.hidden) return;
+  renderToolTray(); renderHealth(); renderHabits();
+}
+
+/** «Actividad de herramientas» = lo realmente usado en la sesión, no el catálogo. */
+async function renderToolTray() {
   const tray = $('#toolTrayList');
-  if (!tray || tray.children.length) return;
-  for (const t of Object.keys(AGENT_MAP)) {
-    const c = document.createElement('span');
-    c.className = 'toolchip';
-    c.innerHTML = `<span class="tc-mark">${ic(AGENT_MAP[t].icon)}</span><span class="tc-txt">${t}</span>`;
-    tray.appendChild(c);
-  }
+  if (!tray) return;
+  let fired = [];
+  try { fired = ((await window.sagitari.getAgentsLive()) || {}).toolsFired || []; }
+  catch (e) { tray.innerHTML = `<div class="subnote">No se pudo leer la actividad: ${esc((e && e.message) || e)}</div>`; return; }
+  if (!fired.length) { tray.innerHTML = '<div class="subnote">Todavía no se ha usado ninguna herramienta en esta sesión.</div>'; return; }
+  tray.innerHTML = fired.map(t => {
+    const label = t.name + ' ×' + t.count;
+    return `<span class="toolchip" title="${esc(label)}"><span class="tc-mark">${ic(K.tool(t.name).icon)}</span><span class="tc-txt" title="${esc(label)}">${esc(label)}</span></span>`;
+  }).join('');
 }
 
 // ============ v1.6: Model Health panel ============
 async function renderHealth() {
   const box = $('#healthList');
   if (!box) return;
-  let rows = [];
-  try { rows = await window.sagitari.healthGet(); } catch {}
+  let rows = [], err = null;
+  try { rows = (await window.sagitari.healthGet()) || []; } catch (e) { err = e; }
+  if (err) { box.innerHTML = `<div class="subnote">No se pudo leer la salud del modelo: ${esc((err && err.message) || err)}</div>`; return; }
   if (!rows.length) { box.innerHTML = '<div class="subnote">Sin datos todavía. Cada llamada al modelo registrará latencia, errores y tokens aquí.</div>'; return; }
   box.innerHTML = rows.map(r => {
     const health = r.errorRate >= 0.3 ? 'mag' : r.errorRate > 0 ? 'a-y' : 'ok';
+    const plain = `${r.model} · ${r.calls} llamadas · ${r.avgLatencyMs || '—'} ms · ${(r.tokensIn + r.tokensOut).toLocaleString('es')} tok`
+      + `${r.errors ? ' · ' + r.errors + ' errores' : ''}${r.fallbacks ? ' · ' + r.fallbacks + ' fallbacks' : ''}`;
     return `<div class="toolchip" title="${esc(r.lastError || '')}">
       <span class="dot ${health}"></span>
-      <span class="tc-txt"><b>${esc(r.model)}</b> · ${r.calls} llamadas · ${r.avgLatencyMs || '—'} ms · ${(r.tokensIn + r.tokensOut).toLocaleString('es')} tok${r.errors ? ' · ' + r.errors + ' errores' : ''}${r.fallbacks ? ' · ' + r.fallbacks + ' fallbacks' : ''}</span>
+      <span class="tc-txt" title="${esc(plain)}"><b>${esc(r.model)}</b> · ${r.calls} llamadas · ${r.avgLatencyMs || '—'} ms · ${(r.tokensIn + r.tokensOut).toLocaleString('es')} tok${r.errors ? ' · ' + r.errors + ' errores' : ''}${r.fallbacks ? ' · ' + r.fallbacks + ' fallbacks' : ''}</span>
     </div>`;
   }).join('');
 }
@@ -684,13 +887,13 @@ async function renderHabits() {
   try { s = await window.sagitari.habitsGet(); } catch {}
   const parts = [];
   const fmtList = (arr, icon) => (arr || []).length
-    ? `<div class="toolchip"><span class="tc-mark">${ic(icon)}</span><span class="tc-txt">${arr.map(x => `${esc(x.name)} ×${x.count}`).join(' · ')}</span></div>`
+    ? `<div class="toolchip" title="${esc(arr.map(x => x.name + ' ×' + x.count).join(' · '))}"><span class="tc-mark">${ic(icon)}</span><span class="tc-txt" title="${esc(arr.map(x => x.name + ' ×' + x.count).join(' · '))}">${arr.map(x => `${esc(x.name)} ×${x.count}`).join(' · ')}</span></div>`
     : '';
   parts.push(fmtList(s.apps, 'zap'));
   parts.push(fmtList(s.commands, 'terminal'));
   parts.push(fmtList(s.sites, 'globe'));
   const c = s.confirms || {};
-  if (c.approved || c.denied) parts.push(`<div class="toolchip"><span class="tc-mark">${ic('check')}</span><span class="tc-txt">confirmaciones: ${c.approved || 0} aceptadas · ${c.denied || 0} denegadas</span></div>`);
+  if (c.approved || c.denied) parts.push(`<div class="toolchip"><span class="tc-mark">${ic('check')}</span><span class="tc-txt" title="Confirmaciones aceptadas y denegadas">confirmaciones: ${c.approved || 0} aceptadas · ${c.denied || 0} denegadas</span></div>`);
   box.innerHTML = parts.filter(Boolean).join('') || '<div class="subnote">Aún no hay hábitos observados. Se aprenden solo de lo que SAGITARI hace por ti.</div>';
 }
 
@@ -720,10 +923,13 @@ async function renderMarket() {
   });
 }
 $('#marketSearchBtn').onclick = async () => {
+  const btn = $('#marketSearchBtn');
+  if (btn.disabled) return;
   const q = $('#marketQuery').value.trim();
   if (!q) return;
   const box = $('#marketList');
   $('#marketMsg').textContent = 'Buscando en GitHub…';
+  btn.disabled = true;
   try {
     const res = await window.sagitari.marketSearch(q);
     box.innerHTML = res.map(r => `
@@ -741,18 +947,52 @@ $('#marketSearchBtn').onclick = async () => {
     });
     $('#marketMsg').textContent = '';
   } catch (e) { $('#marketMsg').textContent = 'Error: ' + (e.message || e); }
+  finally { btn.disabled = false; }
 };
 $('#skillsUpdateAllBtn').onclick = async () => {
+  const btn = $('#skillsUpdateAllBtn');
+  if (btn.disabled) return;
   $('#marketMsg').textContent = 'Actualizando skills…';
+  btn.disabled = true;
   try {
     const res = await window.sagitari.skillsUpdateAll();
     const changed = res.filter(r => r.changed).length;
     $('#marketMsg').textContent = `${res.length} skills con origen · ${changed} actualizadas`;
     renderSkills();
   } catch (e) { $('#marketMsg').textContent = 'Error: ' + (e.message || e); }
+  finally { btn.disabled = false; }
 };
 
 // ============ agent events ============
+/* --- stream por frame ---
+   Cada delta llega con un puñado de tokens; antes se rehacía el bloque entero
+   (marked + recorridos del DOM) por CADA uno. Ahora los deltas sólo acumulan
+   texto y el DOM se rehace como máximo una vez por frame, con lo que el texto
+   sigue viéndose en vivo sin coste cuadrático. */
+let streamRaf = 0;
+let streamTarget = null;
+function cancelStreamRender() {
+  if (streamRaf) { cancelAnimationFrame(streamRaf); streamRaf = 0; }
+  streamTarget = null;
+}
+function scheduleStreamRender(holder) {
+  streamTarget = holder;
+  if (streamRaf) return;
+  streamRaf = requestAnimationFrame(() => {
+    streamRaf = 0;
+    const h = streamTarget;
+    streamTarget = null;
+    if (!h || !h.isConnected) return;
+    const old = h.querySelector('.stream');
+    if (old) old.remove();
+    const s = document.createElement('div');
+    s.className = 'stream';
+    s.innerHTML = fmt(h._stream);
+    h.appendChild(s);
+    scroll();
+  });
+}
+
 window.sagitari.onAgentEvent((ev) => {
   // v1.3: los eventos de una tarea en background NO deben tocar el chat
   // interactivo (ni sus burbujas ni el estado busy/detener): solo el feed,
@@ -765,6 +1005,7 @@ window.sagitari.onAgentEvent((ev) => {
       case 'task_done':
         feed('Tarea en background completada', 'ok');
         if ($('#view-tasks').classList.contains('on')) renderTasks();
+        refreshAgentsPanels();
         break;
       case 'task_interrupted':
         feed('Tarea en background interrumpida — recuperable', 'err');
@@ -803,13 +1044,7 @@ window.sagitari.onAgentEvent((ev) => {
           b._stream = p.body;
         }
       }
-      const old = b.querySelector('.stream');
-      if (old) old.remove();
-      const s = document.createElement('div');
-      s.className = 'stream';
-      s.innerHTML = fmt(b._stream);
-      b.appendChild(s);
-      scroll();
+      scheduleStreamRender(b);
       break;
     }
     // cada llamada a herramienta abre su propia tarjeta con argumentos y estado
@@ -829,11 +1064,13 @@ window.sagitari.onAgentEvent((ev) => {
       agentStop();
       feed(K.tool(ev.name).label + (ev.ok === false ? ' — falló' : ' — completado'), ev.ok === false ? 'err' : 'ok');
       setChatStatus('Herramienta completada, continuando…');
+      refreshAgentsPanels();
       break;
     case 'image': {
       const b = ensureAssistantBubble();
       const img = document.createElement('img');
       img.src = ev.dataUrl; img.className = 'shot';
+      pinImage(img);
       b.appendChild(img);
       scroll();
       break;
@@ -842,10 +1079,12 @@ window.sagitari.onAgentEvent((ev) => {
       finishAssistant(ev.text);
       busy = false;
       setSendMode();
+      syncChatBadge();
       glowOffSoon();
       speak(ev.text);
       setChatStatus('Listo · ' + lastTurnLabel(), 'done');
       feed('Respuesta lista', 'cy');
+      if (devMode) paintMeta();
       break;
     case 'guardrail':
       toolChip('Límite de seguridad — ' + ev.reason.slice(0, 100), 'err');
@@ -855,17 +1094,21 @@ window.sagitari.onAgentEvent((ev) => {
     case 'paused':
       busy = false;
       setSendMode();
+      syncChatBadge();
       glowOffSoon();
+      agentStop();
       feed('Tarea pausada — checkpoint guardado', 'blu');
       showToast('Tarea pausada. Reanúdala desde el panel Tareas.');
       break;
     case 'task_done':
       feed('Tarea completada y verificada', 'ok');
       if ($('#view-tasks').classList.contains('on')) renderTasks();
+      refreshAgentsPanels();
       break;
     case 'task_interrupted':
       feed('Tarea interrumpida — recuperable en Tareas', 'err');
       if ($('#view-tasks').classList.contains('on')) renderTasks();
+      refreshAgentsPanels();
       break;
     case 'task_update':
       feed(ev.note || ('Tarea: ' + ev.status), 'blu');
@@ -877,39 +1120,66 @@ window.sagitari.onAgentEvent((ev) => {
     case 'busy':
       busy = ev.busy;
       setSendMode();
+      syncChatBadge();
       if (busy) {
         currentRunMode = K.mode(ev.mode || mode).key;
         applyModeTheme(currentRunMode);
         setChatStatus(K.mode(currentRunMode).tagline);
         feed('Sagitari está trabajando · ' + K.mode(currentRunMode).label, 'blu');
+        if (devMode) paintMeta();   // métricas del turno que arranca, no las del anterior
       } else {
         // terminó la ejecución: el color vuelve al modo que tengas elegido
         applyModeTheme(mode);
+        agentStop();                // sin ejecución no queda ningún agente vivo
+        if (devMode) paintMeta();
+        refreshAgentsPanels();
         if (!currentConfirm || !currentConfirm.runId) hideConfirm();
       }
       break;
     case 'stopped':
-      finishAssistant('');
+      finishAssistant('', { interrupted: true });
       busy = false;
       setSendMode();
+      syncChatBadge();
       glowOffSoon();
+      agentStop();
       setChatStatus('Detenido por el usuario');
       feed('Detenido por el usuario', 'err');
+      if (devMode) paintMeta();
       break;
     case 'toast':
       showToast(ev.title + ': ' + ev.message);
       break;
-    case 'error':
-      finishAssistant('');
-      {
-        const eb = bubble('ai');
-        eb.innerHTML = `<span class="errmsg">${ic('alert')} ${esc(ev.message)}</span>`;
+    case 'error': {
+      // «SAGITARI está ocupado» lo emite una ejecución que sigue VIVA: es un envío
+      // duplicado, así que no se cierra el turno ni se devuelve el botón a «Enviar».
+      const ocupado = /ocupad/i.test(String(ev.message || ''));
+      if (ocupado) {
+        showToast(ev.message);
+        feed('Envío ignorado: el agente sigue trabajando', 'err');
+        break;
       }
+      const hadTurn = !!pendingAssistant;
+      finishAssistant('', { interrupted: true, failed: true });
+      {
+        // el error se pinta DENTRO del turno cortado si lo había: sin duplicar
+        // burbujas ni dejar una respuesta huérfana sin su causa
+        const target = (hadTurn && lastAssistantEl) ? lastAssistantEl : bubble('ai');
+        const em = document.createElement('span');
+        em.className = 'errmsg';
+        em.innerHTML = `${ic('alert')} ${esc(ev.message)}`;
+        target.appendChild(em);
+      }
+      refreshMsgActions();
       busy = false;
       setSendMode();
+      syncChatBadge();
       glowOffSoon();
+      agentStop();
       feed('Error en la tarea', 'err');
+      if (devMode) paintMeta();
       break;
+    }
   }
 });
 
@@ -924,11 +1194,69 @@ function showConfirm(ev) {
   $('#confirmTitle').textContent = 'El agente quiere: ' + (ev.description || ev.tool) + who;
   $('#confirmDetail').textContent = ev.summary ? String(ev.summary).slice(0, 240) : 'Herramienta: ' + ev.tool;
   bar.hidden = false;
+  // con el foco en el chat la única salida era el ratón: se enfoca «Permitir» y
+  // Escape/Enter resuelven la confirmación con teclado
+  const ok = $('#confirmOk');
+  if (ok) ok.focus();
   feed('Esperando tu confirmación: ' + ev.tool, 'blu');
 }
 function hideConfirm() { currentConfirm = null; $('#confirmBar').hidden = true; }
-$('#confirmOk').onclick = async () => { const c = currentConfirm; hideConfirm(); if (c) await window.sagitari.secResolve(c.id, true, c.runId); };
-$('#confirmNo').onclick = async () => { const c = currentConfirm; hideConfirm(); if (c) await window.sagitari.secResolve(c.id, false, c.runId); };
+async function resolveConfirm(allow) {
+  const c = currentConfirm;
+  hideConfirm();
+  if (c) await window.sagitari.secResolve(c.id, allow, c.runId);
+}
+$('#confirmOk').onclick = () => resolveConfirm(true);
+$('#confirmNo').onclick = () => resolveConfirm(false);
+// Escape deniega siempre; Enter sólo confirma con el foco dentro de la barra
+// (si no, escribir en el chat dispararía la confirmación sin querer).
+document.addEventListener('keydown', (e) => {
+  const bar = $('#confirmBar');
+  if (!bar || bar.hidden) return;
+  if (e.key === 'Escape') { e.preventDefault(); resolveConfirm(false); return; }
+  if (e.key === 'Enter' && bar.contains(document.activeElement)) { e.preventDefault(); resolveConfirm(true); }
+});
+
+/**
+ * Confirmación inline para acciones destructivas: reutiliza el aspecto de
+ * #confirmBar y se inserta junto al elemento afectado (o al inicio de la vista
+ * activa si no se le pasa ancla). Devuelve true/false; Escape cancela.
+ */
+function askConfirm(anchor, message, detail) {
+  return new Promise((resolve) => {
+    const view = document.querySelector('.view.on');
+    const bar = document.createElement('div');
+    bar.className = 'confirmbar';
+    bar.setAttribute('role', 'alertdialog');
+    bar.setAttribute('aria-label', message);
+    bar.innerHTML = `<span class="cb-dot"></span>
+      <div class="cb-txt"><b></b><small></small></div>
+      <div class="btnrow" style="margin:0">
+        <button class="btn primary" data-ok>Confirmar</button>
+        <button class="btn ghost" data-no>Cancelar</button>
+      </div>`;
+    bar.querySelector('b').textContent = message;
+    bar.querySelector('small').textContent = detail || 'Esta acción no se puede deshacer.';
+    const finish = (v) => {
+      document.removeEventListener('keydown', onKey, true);
+      bar.remove();
+      resolve(v);
+    };
+    const onKey = (e) => {
+      if (e.key === 'Escape') { e.preventDefault(); e.stopPropagation(); finish(false); }
+      // Enter sólo confirma con el foco dentro de la barra: si el usuario se ha
+      // ido a escribir, Enter no debe borrar nada
+      else if (e.key === 'Enter' && bar.contains(document.activeElement)) { e.preventDefault(); e.stopPropagation(); finish(true); }
+    };
+    bar.querySelector('[data-ok]').onclick = () => finish(true);
+    bar.querySelector('[data-no]').onclick = () => finish(false);
+    document.addEventListener('keydown', onKey, true);
+    if (anchor && anchor.parentNode) anchor.parentNode.insertBefore(bar, anchor.nextSibling);
+    else if (view) view.insertBefore(bar, view.firstChild);
+    else document.body.appendChild(bar);
+    bar.querySelector('[data-ok]').focus();
+  });
+}
 
 let devMode = false;
 async function paintMeta() {
@@ -940,14 +1268,19 @@ async function paintMeta() {
     const r = m.run || {};
     const gr = m.guardrails || {};
     line.hidden = false;
-    line.textContent = (m.model || '—') + ' · ' + (r.tokensIn || 0) + ' in / ' + (r.tokensOut || 0) + ' out tok · '
+    line.textContent = (m.model || '—') + ' · turno: ' + (r.tokensIn || 0) + ' in / ' + (r.tokensOut || 0) + ' out tok · '
       + (r.llmCalls || 0) + ' llamadas · ' + (r.toolCalls || 0) + ' herramientas · ' + (r.lastLatencyMs || 0) + ' ms'
       + ' · límites: ' + (gr.maxSteps || '∞') + ' pasos / ' + (gr.maxDurationMs ? Math.round(gr.maxDurationMs / 60000) + ' min' : '∞');
   } catch { line.hidden = true; }
 }
 setInterval(paintMeta, 2000);
-// v1.3: la vista Tareas se refresca sola mientras está visible (estado en vivo)
-setInterval(() => { const v = $('#view-tasks'); if (v && v.classList.contains('on')) renderTasks(); }, 5000);
+// v1.3: la vista Tareas se refresca sola SÓLO mientras está visible (estado en vivo);
+// con la ventana oculta o en otra pestaña no hay nada que repintar
+setInterval(() => {
+  const v = $('#view-tasks');
+  if (!v || !v.classList.contains('on') || document.hidden) return;
+  renderTasks();
+}, 5000);
 
 function setSendMode() {
   const b = $('#chatSend');
@@ -990,7 +1323,21 @@ async function sendFrom(elId) {
   pinned = true;
   scroll(true);
   window.sagitari.glow('think');
-  await window.sagitari.sendChat(text, null, atts);
+  // optimista: el evento `busy` del agente tarda en llegar y hasta entonces un
+  // segundo Enter lanzaba otro turno que moría con «SAGITARI está ocupado» y
+  // devolvía el botón a «Enviar» con el agente aún trabajando.
+  busy = true;
+  setSendMode();
+  syncChatBadge();
+  try {
+    const r = await window.sagitari.sendChat(text, null, atts);
+    if (r && r.ok === false) throw new Error(r.error || 'no se pudo enviar');
+  } catch (e) {
+    busy = false;
+    setSendMode();
+    syncChatBadge();
+    showToast('No se pudo enviar: ' + ((e && e.message) || e));
+  }
 }
 
 // ============ adjuntos: archivos, documentos e imágenes ============
@@ -1033,6 +1380,7 @@ function paintAttachments(bubbleEl, atts) {
     if (a.kind === 'image' && a.dataUrl) {
       const im = document.createElement('img');
       im.src = a.dataUrl; im.alt = a.name; im.className = 'msg-att-img';
+      pinImage(im);   // la miniatura carga tarde: reajusta el final si seguías el hilo
       im.onclick = () => window.sagitari.openExternal && /^https?:/.test(a.dataUrl) && window.sagitari.openExternal(a.dataUrl);
       box.appendChild(im);
     } else {
@@ -1056,8 +1404,24 @@ async function addAttachmentPath(p) {
   goto('chat');
 }
 
+/* Ruta real de un File soltado: Electron ≥32 eliminó `File.path`, así que la
+   pide al preload (webUtils.getPathForFile). Sin esto el arrastre siempre
+   acababa en «No se pudo leer». */
+function filePathOf(f) {
+  if (!f) return '';
+  try {
+    if (f.path) return f.path;   // versiones antiguas / objetos ya resueltos
+    return (window.sagitari.filePath && window.sagitari.filePath(f)) || '';
+  } catch { return ''; }
+}
+
 async function addAttachmentFiles(files) {
-  for (const f of (files || []).slice(0, MAX_ATTACHMENTS)) {
+  const list = [...(files || [])];
+  const room = MAX_ATTACHMENTS - pendingAttachments.length;
+  if (room <= 0) { showToast(`Máximo ${MAX_ATTACHMENTS} adjuntos por mensaje`); return; }
+  // recorta al hueco REAL: antes cortaba a 8 y los que sobraban se perdían sin aviso
+  if (list.length > room) showToast(`Máximo ${MAX_ATTACHMENTS} adjuntos por mensaje`);
+  for (const f of list.slice(0, room)) {
     if (f && f.path) await addAttachmentPath(f.path);
     else if (f && f.type && f.type.startsWith('image/') && f.dataUrl) {
       // imagen pegada/drag&drop desde fuera del sistema de ficheros
@@ -1077,11 +1441,11 @@ $('#chatAttach').onclick = async () => {
 // drag & drop sobre toda la vista del chat
 const chatView = $('#view-chat');
 ['dragover', 'dragenter'].forEach(t => chatView.addEventListener(t, (e) => { e.preventDefault(); chatView.classList.add('dragging'); }));
-['dragleave', 'drop', 'dragend'].forEach(t => chatView.addEventListener(t, (e) => { if (t !== 'drop' || e.target === chatView || true) chatView.classList.remove('dragging'); }));
+['dragleave', 'drop', 'dragend'].forEach(t => chatView.addEventListener(t, () => chatView.classList.remove('dragging')));
 chatView.addEventListener('drop', (e) => {
   e.preventDefault();
   const files = [...(e.dataTransfer || {}).files || []];
-  if (files.length) addAttachmentFiles(files.map(f => ({ path: f.path, name: f.name, type: f.type })));
+  if (files.length) addAttachmentFiles(files.map(f => ({ path: filePathOf(f), name: f.name, type: f.type })));
   else {
     const txt = (e.dataTransfer || {}).getData('text/uri-list') || (e.dataTransfer || {}).getData('text/plain');
     if (txt && /^data:image\//.test(txt.trim())) addAttachmentFiles([{ dataUrl: txt.trim(), name: 'imagen pegada' }]);
@@ -1093,6 +1457,9 @@ $('#chatInput').addEventListener('paste', (e) => {
   const items = [...((e.clipboardData || {}).items || [])];
   const imgs = items.filter(it => it.type && it.type.startsWith('image/'));
   if (!imgs.length) return;
+  // con el cupo lleno se avisa ANTES de bloquear el pegado: un slice(0,0) se lo
+  // tragaba en silencio y el usuario creía que no había funcionado
+  if (pendingAttachments.length >= MAX_ATTACHMENTS) { showToast(`Máximo ${MAX_ATTACHMENTS} adjuntos por mensaje`); return; }
   e.preventDefault();
   for (const it of imgs.slice(0, MAX_ATTACHMENTS - pendingAttachments.length)) {
     const blob = it.getAsFile && it.getAsFile();
@@ -1103,7 +1470,9 @@ $('#chatInput').addEventListener('paste', (e) => {
   }
 });
 $('#chatSend').onclick = () => sendFrom('#chatInput');
-$('#chatInput').addEventListener('keydown', (e) => { if (e.key === 'Enter' && !e.shiftKey) { e.preventDefault(); sendFrom('#chatInput'); } });
+// Enter lo gestiona el listener de más abajo: si el menú de skills está abierto
+// la tecla pertenece al menú y NO se envía nada al modelo (antes había dos
+// listeners y éste enviaba el texto crudo aunque el menú estuviera visible).
 
 // ============ paleta de skills con "/" ============
 const skillMenu = $('#skillMenu');
@@ -1127,11 +1496,14 @@ function renderSkillMenu(query) {
 }
 function openSkillMenu() {
   const v = $('#chatInput').value;
+  // si el menú se cerró con este mismo valor, fue al elegir una skill: el foco
+  // no debe reabrirlo (si no, Enter volvería a elegir en vez de enviar)
+  if (v === skillMenu._for) return;
   const m = v.match(/^\/([\w-]*)\s*$/);
   if (m) { refreshSkillList().then(() => { skillIdx = skillList.length ? 0 : -1; renderSkillMenu(m[1]); }); }
   else closeSkillMenu();
 }
-function closeSkillMenu() { skillMenu.hidden = true; skillIdx = -1; }
+function closeSkillMenu() { skillMenu.hidden = true; skillIdx = -1; skillMenu._for = $('#chatInput').value; }
 function chooseSkill(name) {
   const rest = $('#chatInput').value.replace(/^\/[\w-]*\s*/, '');
   $('#chatInput').value = '/' + name + (rest ? ' ' + rest : ' ');
@@ -1236,8 +1608,10 @@ document.querySelector('.titlebar').addEventListener('dblclick', (e) => {
   if (e.target.closest('.wb')) return;
   window.sagitari.maximize();
 });
+// sin foco en la ventana, el CSS apaga las animaciones del glow (menos CPU)
+window.addEventListener('blur', () => document.body.classList.add('nofocus'));
+window.addEventListener('focus', () => document.body.classList.remove('nofocus'));
 $('#btnClose').onclick = () => window.sagitari.quit();
-$('#btnClear').onclick = async () => { await window.sagitari.clearChat(); msgs.innerHTML = ''; dayStamp(); showToast('Conversación reiniciada'); };
 
 // ============ settings ============
 async function fillSettings() {
@@ -1277,7 +1651,6 @@ async function fillSettings() {
   mode = CFG.settings.mode || 'act';
   updateModeUI();
   updateStatusLabels();
-  tickClock();
 }
 
 $('#btnDetect').onclick = async () => {
@@ -1295,21 +1668,37 @@ $('#btnDetect').onclick = async () => {
 const apiFormatValue = () => ($('#apiFormat') ? $('#apiFormat').value : 'auto') || 'auto';   // 'auto' = detectar
 
 $('#btnSaveProv').onclick = async () => {
+  const btn = $('#btnSaveProv');
+  if (btn.disabled) return;
   if (!$('#pUrl').value.trim()) return smsg('Falta la Base URL.');
-  await window.sagitari.saveProvider({ id: 'prov_' + Date.now().toString(36), name: $('#pName').value.trim() || 'Proveedor', baseUrl: $('#pUrl').value.trim(), apiKey: $('#pKey').value.trim(), format: apiFormatValue(), models: [...$('#modelSel').options].map(o => o.value).filter(Boolean) });
-  CFG = await window.sagitari.getConfig();
-  renderProviderList();
-  smsg('Proveedor guardado.');
+  btn.disabled = true;
+  try {
+    const r = await window.sagitari.saveProvider({ id: 'prov_' + Date.now().toString(36), name: $('#pName').value.trim() || 'Proveedor', baseUrl: $('#pUrl').value.trim(), apiKey: $('#pKey').value.trim(), format: apiFormatValue(), models: [...$('#modelSel').options].map(o => o.value).filter(Boolean) });
+    // main valida la URL y puede rechazar: la UI no puede decir «guardado» sin comprobarlo
+    if (r && r.ok === false) return smsg('Error: ' + (r.error || 'no se pudo guardar'));
+    CFG = await window.sagitari.getConfig();
+    renderProviderList();
+    smsg('Proveedor guardado.');
+  } catch (e) { smsg('Error: ' + ((e && e.message) || e)); }
+  finally { btn.disabled = false; }
 };
 $('#btnActivate').onclick = async () => {
+  const btn = $('#btnActivate');
+  if (btn.disabled) return;
   const baseUrl = $('#pUrl').value.trim(), model = $('#modelSel').value;
   if (!baseUrl || !model) return smsg('Detecta modelos y elige uno.');
   const vision = /(gpt-4|gpt-5|4o|vision|llava|claude|gemini|minimax|pixtral|qwen.*vl|vl-)/i.test(model);
-  await window.sagitari.activateProvider({ name: $('#pName').value.trim() || 'Proveedor', baseUrl, apiKey: $('#pKey').value.trim(), model, vision, format: apiFormatValue() });
-  CFG = await window.sagitari.getConfig();
-  renderProviderList();
-  smsg('Activado: ' + model);
-  updateStatusLabels();
+  btn.disabled = true;
+  try {
+    const r = await window.sagitari.activateProvider({ name: $('#pName').value.trim() || 'Proveedor', baseUrl, apiKey: $('#pKey').value.trim(), model, vision, format: apiFormatValue() });
+    // activar también valida: si falla, NO se pinta «activo»/«Conectado»
+    if (r && r.ok === false) return smsg('Error: ' + (r.error || 'no se pudo activar'));
+    CFG = await window.sagitari.getConfig();
+    renderProviderList();
+    smsg('Activado: ' + model);
+    updateStatusLabels();
+  } catch (e) { smsg('Error: ' + ((e && e.message) || e)); }
+  finally { btn.disabled = false; }
 };
 
 function renderProviderList() {
@@ -1319,21 +1708,26 @@ function renderProviderList() {
   for (const p of CFG.providers) {
     const item = document.createElement('div');
     item.className = 'provitem';
-    const inUse = CFG.active && CFG.active.baseUrl === p.baseUrl;
+    const inUse = CFG.active && (CFG.active.providerId === p.id || CFG.active.baseUrl === p.baseUrl);
     item.innerHTML = `<span class="nm">${esc(p.name)} <span class="md">· ${(p.models || []).length} modelos</span></span>${inUse ? '<span class="badge">EN USO</span>' : ''}
       <button class="btn ghost sq" data-act="use" title="Usar">${ic('play')}</button><button class="btn ghost sq danger" data-act="del" title="Eliminar">${ic('trash')}</button>`;
     item.querySelector('[data-act=use]').onclick = async () => {
       const model = (p.models || [])[0];
       if (!model) return smsg('Este proveedor no tiene modelos: detecta primero.');
-      await window.sagitari.activateProvider({ name: p.name, baseUrl: p.baseUrl, apiKey: p.apiKey, model, vision: /(gpt-4|4o|vision|llava|claude|gemini)/i.test(model), format: p.format });
+      // providerId: es lo que permite desactivarlo al borrarlo (main lo resuelve)
+      const r = await window.sagitari.activateProvider({ providerId: p.id, name: p.name, baseUrl: p.baseUrl, apiKey: p.apiKey, model, vision: /(gpt-4|4o|vision|llava|claude|gemini)/i.test(model), format: p.format });
+      if (r && r.ok === false) return smsg('Error: ' + (r.error || 'no se pudo activar'));
       CFG = await window.sagitari.getConfig();
       renderProviderList(); updateStatusLabels();
       smsg('Usando ' + p.name);
     };
     item.querySelector('[data-act=del]').onclick = async () => {
+      if (!(await askConfirm(item, '¿Eliminar el proveedor «' + p.name + '»?'))) return;
       await window.sagitari.deleteProvider(p.id);
       CFG = await window.sagitari.getConfig();
       renderProviderList();
+      updateStatusLabels();   // si era el activo, main lo desactiva: que se vea
+      showToast('Proveedor eliminado');
     };
     box.appendChild(item);
   }
@@ -1383,12 +1777,13 @@ $('#glowStrength').oninput = (e) => {
   clearTimeout(glowSaveTimer);
   glowSaveTimer = setTimeout(() => window.sagitari.setSettings({ glowStrength: Number(e.target.value) }), 250);
 };
-$('#setUserName').onchange = (e) => { window.sagitari.setSettings({ userName: e.target.value }); CFG.settings.userName = e.target.value; tickClock(); };
+$('#setUserName').onchange = (e) => { window.sagitari.setSettings({ userName: e.target.value }); CFG.settings.userName = e.target.value; };
 
 // ---- seguridad: permisos por herramienta + guardarraíles (v1.1) ----
 const PERM_TOOLS = [
   { n: 'run_command', d: 'Ejecutar comandos en la terminal' },
   { n: 'write_file', d: 'Crear o sobrescribir archivos' },
+  { n: 'edit_file', d: 'Editar archivos existentes' },
   { n: 'browser_control', d: 'Controlar el navegador' },
   { n: 'open_app', d: 'Abrir aplicaciones' },
   { n: 'window_manage', d: 'Gestionar ventanas' },
@@ -1442,13 +1837,26 @@ async function initSecurity() {
   } catch {}
   renderSecurity();
 }
-$('#grSteps').onchange = (e) => window.sagitari.secSetGuardrail({ maxSteps: Number(e.target.value) || 0 });
-$('#grToolCalls').onchange = (e) => window.sagitari.secSetGuardrail({ maxToolCalls: Number(e.target.value) || 0 });
-$('#grMinutes').onchange = (e) => window.sagitari.secSetGuardrail({ maxDurationMs: (Number(e.target.value) || 0) * 60000 });
-$('#grTokens').onchange = (e) => window.sagitari.secSetGuardrail({ maxTokens: Number(e.target.value) || 0 });
-$('#grLoop').onchange = (e) => window.sagitari.secSetGuardrail({ loopThreshold: Number(e.target.value) || 3 });
-if ($('#grCost')) $('#grCost').onchange = (e) => window.sagitari.secSetGuardrail({ maxCostUsd: Math.max(0, Number(e.target.value) || 0) });
-if ($('#grStall')) $('#grStall').onchange = (e) => window.sagitari.secSetGuardrail({ stallThreshold: Math.max(0, Number(e.target.value) || 0) });
+/** Lee un campo numérico de límites respetando el `min`/`max` declarado y lo
+    escribe de vuelta. loopThreshold<=1 hacía que el agente declarase bucle en la
+    PRIMERA herramienta y la tarea muriera al arrancar. */
+function clampGuardrail(el, fallback) {
+  const raw = String(el.value).trim();
+  let v = raw === '' ? fallback : Number(raw);
+  if (!Number.isFinite(v)) v = fallback;
+  const min = el.min === '' ? 0 : Number(el.min);
+  const max = el.max === '' ? Infinity : Number(el.max);
+  v = Math.min(max, Math.max(min, v));
+  el.value = v;
+  return v;
+}
+$('#grSteps').onchange = (e) => window.sagitari.secSetGuardrail({ maxSteps: clampGuardrail(e.target, 0) });
+$('#grToolCalls').onchange = (e) => window.sagitari.secSetGuardrail({ maxToolCalls: clampGuardrail(e.target, 0) });
+$('#grMinutes').onchange = (e) => window.sagitari.secSetGuardrail({ maxDurationMs: clampGuardrail(e.target, 0) * 60000 });
+$('#grTokens').onchange = (e) => window.sagitari.secSetGuardrail({ maxTokens: clampGuardrail(e.target, 0) });
+$('#grLoop').onchange = (e) => window.sagitari.secSetGuardrail({ loopThreshold: clampGuardrail(e.target, 3) });
+if ($('#grCost')) $('#grCost').onchange = (e) => window.sagitari.secSetGuardrail({ maxCostUsd: clampGuardrail(e.target, 0) });
+if ($('#grStall')) $('#grStall').onchange = (e) => window.sagitari.secSetGuardrail({ stallThreshold: clampGuardrail(e.target, 0) });
 if ($('#setMaxTasks')) $('#setMaxTasks').onchange = async (e) => {
   const v = Math.max(1, Math.min(4, Number(e.target.value) || 1));
   e.target.value = v;
@@ -1466,7 +1874,8 @@ $('#devModeSw').onclick = async (e) => {
   await window.sagitari.setSettings({ devMode });
   paintMeta();
 };
-initSecurity();
+// initSecurity() se llama desde init(), DESPUÉS de fillSettings(): en top-level
+// leía CFG.settings vacío y perdía devMode/maxConcurrentTasks/autoResume en cada arranque.
 
 /* ============ Ajustes: pestañas, búsqueda y utilidades ============ */
 
@@ -1480,7 +1889,15 @@ function showSetTab(panel) {
   setTabName = name;
   try { localStorage.setItem('sagi.setTab', name); } catch {}
   const tabs = $('#setTabs');
-  if (tabs) tabs.querySelectorAll('.settab').forEach(b => b.classList.toggle('on', b.dataset.set === name));
+  if (tabs) {
+    tabs.setAttribute('role', 'tablist');
+    tabs.querySelectorAll('.settab').forEach(b => {
+      const on = b.dataset.set === name;
+      b.classList.toggle('on', on);
+      b.setAttribute('role', 'tab');
+      b.setAttribute('aria-selected', on ? 'true' : 'false');
+    });
+  }
   const wrap = $('#setWrap');
   if (wrap) wrap.querySelectorAll('.setpanel').forEach(p => p.classList.toggle('on', p.dataset.panel === name));
 }
@@ -1493,21 +1910,22 @@ if ($('#setTabs')) $('#setTabs').querySelectorAll('.settab').forEach(b => {
 });
 
 /** Filtra los ajustes por texto. Con búsqueda activa se muestran todas las tarjetas
-    cuyas filas (.srow) coincidan. */
+    cuyas filas (`.srow` y `.themerow`) coincidan. */
+const SET_ROWS = '.srow, .themerow';
 function filterSettings(query) {
   const wrap = $('#setWrap');
   if (!wrap) return;
   const q = String(query || '').trim().toLowerCase();
   wrap.classList.toggle('searching', !!q);
   let shown = 0;
-  wrap.querySelectorAll('.srow').forEach(row => {
+  wrap.querySelectorAll(SET_ROWS).forEach(row => {
     const hay = ((row.dataset.keys || '') + ' ' + row.textContent).toLowerCase();
     const hit = !q || hay.includes(q);
     row.hidden = !hit;
     if (hit) shown++;
   });
   wrap.querySelectorAll('.setcard').forEach(card => {
-    card.hidden = !!q && ![...card.querySelectorAll('.srow')].some(r => !r.hidden);
+    card.hidden = !!q && ![...card.querySelectorAll(SET_ROWS)].some(r => !r.hidden);
   });
   const empty = $('#setNoResults');
   if (empty) empty.hidden = !(q && shown === 0);
@@ -1523,12 +1941,21 @@ if ($('#apiKeyReveal')) $('#apiKeyReveal').onclick = () => {
   $('#apiKeyReveal').title = show ? 'Ocultar la clave' : 'Mostrar la clave';
 };
 
-// restablecer límites y permisos a los valores recomendados
-const GUARDRAIL_DEFAULTS = { maxSteps: 60, maxToolCalls: 80, maxDurationMs: 15 * 60 * 1000, maxTokens: 0, maxCostUsd: 0, loopThreshold: 3, stallThreshold: 6 };
+// restablecer límites a los valores recomendados QUE DEFINE EL AGENTE (main los
+// expone en meta:get): antes había una segunda lista hardcodeada aquí que podía
+// desincronizarse de la del agente y «restablecer» a algo que ya no era lo suyo
 if ($('#secResetGuardrails')) $('#secResetGuardrails').onclick = async () => {
-  await window.sagitari.secSetGuardrail(GUARDRAIL_DEFAULTS);
-  await initSecurity();
-  showToast('Límites restablecidos a los valores recomendados');
+  try {
+    const m = await window.sagitari.metaGet();
+    const d = m && m.guardrailDefaults;
+    if (!d) throw new Error('el agente no informó de sus valores recomendados');
+    const r = await window.sagitari.secSetGuardrail(d);
+    if (r && r.ok === false) throw new Error(r.error || 'no se pudo guardar');
+    await initSecurity();
+    showToast('Límites restablecidos a los valores recomendados');
+  } catch (e) {
+    showToast('No se pudieron restablecer: ' + ((e && e.message) || 'error'));
+  }
 };
 if ($('#secResetPerms')) $('#secResetPerms').onclick = async () => {
   for (const t of PERM_TOOLS) await window.sagitari.secSetToolPerm(t.n, 'default');
@@ -1564,9 +1991,17 @@ async function initDataPanel() {
   renderHabitsPreview();
 }
 if ($('#habitsResetBtn')) $('#habitsResetBtn').onclick = async () => {
-  await window.sagitari.habitsReset();
-  await renderHabitsPreview();
-  showToast('Hábitos aprendidos reiniciados');
+  const btn = $('#habitsResetBtn');
+  if (btn.disabled) return;
+  const anchor = btn.closest('.srow') || btn;
+  if (!(await askConfirm(anchor, '¿Reiniciar los hábitos aprendidos?', 'Se borra lo que Sagitari ha deducido de tu uso: apps, comandos, webs y tu modo preferido.'))) return;
+  btn.disabled = true;
+  try {
+    await window.sagitari.habitsReset();
+    await renderHabitsPreview();
+    if ($('#view-agents').classList.contains('on')) renderHabits();
+    showToast('Hábitos aprendidos reiniciados');
+  } finally { btn.disabled = false; }
 };
 if ($('#openDataDirBtn')) $('#openDataDirBtn').onclick = async () => {
   const r = await window.sagitari.openDataDir();
@@ -1594,19 +2029,30 @@ polishSwitches();
 let convTitle = 'Nueva conversación';
 function setChatTitle(t) {
   convTitle = t || 'Nueva conversación';
-  $('#chatTitle').textContent = convTitle;
+  const h = $('#chatTitle');
+  h.textContent = convTitle;
+  h.title = convTitle;   // se trunca con ellipsis: la pista completa va en el title
   // sincroniza el título con la conversación real en el historial
   if (t) window.sagitari.convRename && window.sagitari.convRename(t);
 }
 
 async function renderHistory() {
-  const list = await window.sagitari.convList();
   const box = $('#histList');
+  if (!box) return;
+  let list = [], err = null;
+  try { list = (await window.sagitari.convList()) || []; } catch (e) { err = e; }
   box.innerHTML = '';
+  // una lista vacía por un IPC caído no es «no hay conversaciones»: se dice el error
+  if (err) { box.innerHTML = `<div class="subnote">No se pudieron cargar las conversaciones: ${esc((err && err.message) || err)}</div>`; return; }
   if (!list.length) { box.innerHTML = '<div class="subnote">Aún no hay conversaciones. Todo lo que hables con Sagitari aparecerá aquí.</div>'; return; }
   for (const c of list) {
     const it = document.createElement('div');
     it.className = 'hitem';
+    // fila operable con teclado: era un div con click, invisible para el tabulador
+    it.setAttribute('tabindex', '0');
+    it.setAttribute('role', 'button');
+    it.setAttribute('aria-label', 'Abrir la conversación «' + c.title + '»');
+    it.title = c.title;
     const d = new Date(c.updatedAt);
     const when = d.toLocaleDateString('es') + ' · ' + d.toLocaleTimeString('es', { hour: '2-digit', minute: '2-digit' });
     it.innerHTML = `<div class="hic">${ic('chat')}</div>
@@ -1616,8 +2062,14 @@ async function renderHistory() {
       if (ev.target.closest('.hdel')) return;
       openConversation(c.id);
     });
+    it.addEventListener('keydown', (ev) => {
+      if (ev.target !== it || (ev.key !== 'Enter' && ev.key !== ' ')) return;
+      ev.preventDefault();
+      it.click();
+    });
     it.querySelector('.hdel').onclick = async (ev) => {
       ev.stopPropagation();
+      if (!(await askConfirm(it, '¿Eliminar la conversación «' + c.title + '»?', 'Se borrará el hilo completo y sus mensajes.'))) return;
       await window.sagitari.convDel(c.id);
       renderHistory();
     };
@@ -1626,6 +2078,9 @@ async function renderHistory() {
 }
 
 async function openConversation(id) {
+  // cambiar de hilo con una ejecución en curso desviaría la respuesta (y su
+  // guardado) a la conversación equivocada
+  if (busy) { showToast('Detén o espera la ejecución en curso para cambiar de conversación'); return; }
   const r = await window.sagitari.convOpen(id);
   if (!r.ok) { showToast('No se pudo abrir la conversación'); return; }
   resetChatView(r.messages);
@@ -1636,8 +2091,11 @@ async function openConversation(id) {
 
 /** Vuelve el chat a cero y, si hay historial, lo pinta con su modo por turno. */
 function resetChatView(messages) {
+  // última barrera: ningún camino puede vaciar el hilo mientras el agente trabaja
+  if (busy) { showToast('Detén o espera la ejecución en curso para cambiar de conversación'); return false; }
+  cancelStreamRender();
   msgs.innerHTML = '';
-  pendingAssistant = null; pendingChipBox = null; pendingTurn = null;
+  pendingAssistant = null; pendingTurn = null;
   lastAssistantEl = null; lastTurnSummary = '';
   setChatStatus('');
   const list = messages || [];
@@ -1665,6 +2123,9 @@ function resetChatView(messages) {
 }
 
 async function newConversation() {
+  // no se crea un hilo nuevo con una ejecución en curso: la respuesta acabaría
+  // en el hilo nuevo y el original quedaría sin ella
+  if (busy) { showToast('Detén o espera la ejecución en curso para empezar una conversación nueva'); return; }
   await window.sagitari.convNew();
   resetChatView([]);
   setChatTitle('Nueva conversación');
@@ -1739,6 +2200,8 @@ function updateModeUI() {
 }
 window.addEventListener('keydown', (e) => {
   if (e.altKey && !e.ctrlKey && !e.shiftKey && (e.key === 'm' || e.key === 'M')) {
+    // escribiendo en un campo, Alt+M es del campo (no cambia el modo)
+    if (esCampoDeTexto(e.target)) return;
     e.preventDefault();
     setMode(MODE_ORDER[(MODE_ORDER.indexOf(mode) + 1) % MODE_ORDER.length]);
   }
@@ -1746,9 +2209,13 @@ window.addEventListener('keydown', (e) => {
 
 // ============ memory view ============
 async function renderMemory() {
-  const list = await window.sagitari.memoryList();
   const box = $('#memList');
+  if (!box) return;
+  let list = [], err = null;
+  try { list = (await window.sagitari.memoryList()) || []; } catch (e) { err = e; }
   box.innerHTML = '';
+  // sin datos y «IPC caído» no pueden verse igual
+  if (err) { box.innerHTML = `<div class="subnote">No se pudo leer la memoria: ${esc((err && err.message) || err)}</div>`; return; }
   if (!list.length) { box.innerHTML = '<div class="subnote">Sin recuerdos aún. Añade uno arriba o pídele a Sagitari que recuerde algo.</div>'; return; }
   for (const m of list) {
     const it = document.createElement('div');
@@ -1761,16 +2228,26 @@ async function renderMemory() {
       await window.sagitari.memoryUpdate(m.id, { importance: Number(e.target.value) / 100 });
       showToast('Importancia actualizada');
     };
-    it.querySelector('[data-del]').onclick = async () => { await window.sagitari.memoryRemove(m.id); renderMemory(); };
+    it.querySelector('[data-del]').onclick = async () => {
+      if (!(await askConfirm(it, '¿Olvidar este recuerdo?', String(m.text || '').slice(0, 200)))) return;
+      await window.sagitari.memoryRemove(m.id);
+      renderMemory();
+    };
     box.appendChild(it);
   }
 }
 $('#memAdd').onclick = async () => {
+  const btn = $('#memAdd');
+  if (btn.disabled) return;               // evita el doble envío mientras dura el IPC
   const t = $('#memInput').value.trim();
   if (!t) return;
-  await window.sagitari.memoryAdd(t);
-  $('#memInput').value = '';
-  renderMemory();
+  btn.disabled = true;
+  try {
+    await window.sagitari.memoryAdd(t);
+    $('#memInput').value = '';
+    await renderMemory();
+  } catch (e) { showToast('No se pudo añadir: ' + ((e && e.message) || e)); }
+  finally { btn.disabled = false; }
 };
 
 // ============ v1.2: relevancia de memoria (Ajustes) ============
@@ -1785,13 +2262,16 @@ async function fillMemorySens() {
     showToast('Sensibilidad de memoria: ' + v);
   };
 }
-fillMemorySens();
+// se llama desde init(), después de fillSettings() (antes CFG.settings iba vacío)
 
 // ============ skills view ============
 async function renderSkills() {
-  const list = await window.sagitari.skillsList();
   const box = $('#skillsList');
+  if (!box) return;
+  let list = [], err = null;
+  try { list = (await window.sagitari.skillsList()) || []; } catch (e) { err = e; }
   box.innerHTML = '';
+  if (err) { box.innerHTML = `<div class="subnote">No se pudieron cargar las skills: ${esc((err && err.message) || err)}</div>`; return; }
   if (!list.length) { box.innerHTML = '<div class="subnote">No hay skills instaladas todavía.</div>'; return; }
   for (const s of list) {
     const it = document.createElement('div');
@@ -1805,7 +2285,11 @@ async function renderSkills() {
       <label class="sw ${s.enabled ? 'on' : ''}" data-sw title="Activar/desactivar"></label>
       <button class="btn ghost sq danger" data-del title="Eliminar">${ic('trash')}</button>`;
     it.querySelector('[data-sw]').onclick = async (e) => { await window.sagitari.skillsToggle(s.id, !s.enabled); renderSkills(); };
-    it.querySelector('[data-del]').onclick = async () => { await window.sagitari.skillsDelete(s.id); renderSkills(); };
+    it.querySelector('[data-del]').onclick = async () => {
+      if (!(await askConfirm(it, '¿Eliminar la skill «' + s.name + '»?', 'Se borra su carpeta y no se puede deshacer.'))) return;
+      await window.sagitari.skillsDelete(s.id);
+      renderSkills();
+    };
     const ub = it.querySelector('[data-update]');
     if (ub) ub.onclick = async (e) => {
       e.stopPropagation();
@@ -1822,26 +2306,36 @@ async function renderSkills() {
   }
 }
 $('#skillImportBtn').onclick = async () => {
+  const btn = $('#skillImportBtn');
+  if (btn.disabled) return;
   const inp = $('#skillImportInput'), msg = $('#skillMsg');
   const repo = inp.value.trim();
   if (!repo) { msg.textContent = 'Escribe owner/repo (ej. anthropics/skills).'; return; }
   msg.textContent = 'Importando desde ' + repo + '…';
+  btn.disabled = true;
   try {
     const inst = await window.sagitari.skillsImport(repo);
     msg.textContent = 'Importadas: ' + inst.map(s => s.name).join(', ');
     inp.value = '';
     renderSkills();
   } catch (err) { msg.textContent = 'Error: ' + (err.message || err); }
+  finally { btn.disabled = false; }
 };
 $('#skillsFolderBtn').onclick = () => window.sagitari.skillsOpenFolder();
 $('#skillCreateBtn').onclick = async () => {
+  const btn = $('#skillCreateBtn');
+  if (btn.disabled) return;
   const msg = $('#skillMsg');
   const name = $('#skillNewName').value.trim(), desc = $('#skillNewDesc').value.trim(), body = $('#skillNewBody').value.trim();
   if (!name || !desc) { msg.textContent = 'Nombre y descripción son obligatorios.'; return; }
-  await window.sagitari.skillsCreate({ name, description: desc, body });
-  $('#skillNewName').value = $('#skillNewDesc').value = $('#skillNewBody').value = '';
-  msg.textContent = 'Skill "' + name + '" creada.';
-  renderSkills();
+  btn.disabled = true;
+  try {
+    await window.sagitari.skillsCreate({ name, description: desc, body });
+    $('#skillNewName').value = $('#skillNewDesc').value = $('#skillNewBody').value = '';
+    msg.textContent = 'Skill "' + name + '" creada.';
+    renderSkills();
+  } catch (err) { msg.textContent = 'Error: ' + (err.message || err); }
+  finally { btn.disabled = false; }
 };
 
 // ============ tools view ============
@@ -1885,9 +2379,10 @@ const TASK_STATUS = {
 async function renderTasks() {
   const box = $('#tasksList');
   if (!box) return;
-  let list = [];
-  try { list = await window.sagitari.tasksList(); } catch {}
+  let list = [], err = null;
+  try { list = (await window.sagitari.tasksList()) || []; } catch (e) { err = e; }
   box.innerHTML = '';
+  if (err) { box.innerHTML = `<div class="subnote">No se pudieron cargar las tareas: ${esc((err && err.message) || err)}</div>`; return; }
   if (!list.length) { box.innerHTML = '<div class="subnote">Aún no hay tareas. Lanza una arriba o espera a que el chat cree checkpoints automáticamente.</div>'; return; }
   for (const t of list) {
     const st = TASK_STATUS[t.status] || TASK_STATUS.completed;
@@ -1898,33 +2393,70 @@ async function renderTasks() {
     const err = t.lastError ? `<small class="md" style="color:var(--danger)">✗ ${esc(t.lastError.step || '')}${t.lastError.tool ? ' · ' + esc(t.lastError.tool) : ''}: ${esc(String(t.lastError.message).slice(0, 120))}</small><br>` : '';
     const live = t.live ? `<small class="md">${t.live.toolCalls || 0} herramientas · ${(t.live.tokensIn || 0) + (t.live.tokensOut || 0)} tok${t.live.costUsd ? ' · $' + t.live.costUsd.toFixed(4) : ''}${t.live.toolsFired && t.live.toolsFired.length ? ' · última: ' + esc(t.live.toolsFired[t.live.toolsFired.length - 1].name) : ''}</small><br>` : '';
     const sched = t.status === 'scheduled' && t.scheduledAt ? `<small class="md">→ ${new Date(t.scheduledAt).toLocaleString('es')}</small><br>` : '';
+    // fila operable con teclado; el borrado no se ofrece mientras la tarea corre
+    it.setAttribute('tabindex', '0');
+    it.setAttribute('role', 'button');
+    it.setAttribute('aria-label', 'Tarea: ' + (t.goal || 'sin objetivo') + ' — ' + st.label);
+    it.title = t.goal || '(sin objetivo)';
     it.innerHTML = `<div class="hic">${ic('history')}</div>
       <div class="hmain"><b>${esc(t.goal || '(sin objetivo)')}</b>
         <small><span class="dot ${st.cls}"></span> ${st.label} · paso ${esc(t.step || '—')} · ${t.steps || 0} pasos · ${when}</small><br>
         ${sched}${live}${err}
         ${t.result ? `<small class="md">${esc(String(t.result).slice(0, 140))}</small>` : ''}
       </div>
-      ${(t.status === 'running') ? `<button class="btn ghost sq" data-pause title="Pausar">${ic('minimize')}</button>` : ''}
+      ${(t.status === 'running') ? `<button class="btn ghost sq" data-pause title="Pausar">${ic('pause')}</button>` : ''}
       ${(t.status === 'paused' || t.status === 'interrupted' || t.status === 'failed' || t.status === 'pending') ? `<button class="btn primary sq" data-resume title="Reanudar">${ic('zap')}</button>` : ''}
       ${(t.status === 'scheduled') ? `<button class="btn primary sq" data-runnow title="Ejecutar ahora">${ic('zap')}</button>` : ''}
       ${!['completed', 'failed', 'cancelled'].includes(t.status) ? `<button class="btn ghost sq danger" data-cancel title="Cancelar">${ic('close')}</button>` : ''}
-      <button class="btn ghost sq danger" data-del title="Eliminar">${ic('trash')}</button>`;
+      ${t.status === 'running' ? '' : `<button class="btn ghost sq danger" data-del title="Eliminar">${ic('trash')}</button>`}`;
+    it.addEventListener('keydown', (ev) => {
+      if (ev.target !== it || (ev.key !== 'Enter' && ev.key !== ' ')) return;
+      ev.preventDefault();
+      // Enter/Space actúa como el clic en la fila: dispara su botón principal
+      const main = it.querySelector('button:not([data-del])');
+      if (main) main.click();
+    });
     const rb = it.querySelector('[data-resume]');
     if (rb) rb.onclick = async (ev) => {
       ev.stopPropagation();
+      if (rb.disabled) return;
       rb.disabled = true;
-      const r = await window.sagitari.taskResume(t.runId);
-      if (r && r.ok === false) { showToast(r.error || 'No se pudo reanudar'); rb.disabled = false; }
+      try {
+        const r = await window.sagitari.taskResume(t.runId);
+        if (r && r.ok === false) { showToast(r.error || 'No se pudo reanudar'); rb.disabled = false; }
+      } catch (e) { showToast('No se pudo reanudar: ' + ((e && e.message) || e)); rb.disabled = false; }
       renderTasks();
     };
     const pb = it.querySelector('[data-pause]');
-    if (pb) pb.onclick = async (ev) => { ev.stopPropagation(); await window.sagitari.taskPause(t.runId); renderTasks(); };
-    const sb = it.querySelector('[data-runnow]');
-    if (sb) sb.onclick = async (ev) => { ev.stopPropagation(); await window.sagitari.taskResume(t.runId); renderTasks(); };
-    const cb = it.querySelector('[data-cancel]');
-    if (cb) cb.onclick = async (ev) => { ev.stopPropagation(); await window.sagitari.taskCancel(t.runId); renderTasks(); };
-    it.querySelector('[data-del]').onclick = async (ev) => {
+    if (pb) pb.onclick = async (ev) => {
       ev.stopPropagation();
+      if (pb.disabled) return;
+      pb.disabled = true;
+      try { await window.sagitari.taskPause(t.runId); }
+      catch (e) { showToast('No se pudo pausar: ' + ((e && e.message) || e)); pb.disabled = false; }
+      renderTasks();
+    };
+    const sb = it.querySelector('[data-runnow]');
+    if (sb) sb.onclick = async (ev) => {
+      ev.stopPropagation();
+      if (sb.disabled) return;
+      sb.disabled = true;
+      try { await window.sagitari.taskResume(t.runId); }
+      catch (e) { showToast('No se pudo ejecutar: ' + ((e && e.message) || e)); sb.disabled = false; }
+      renderTasks();
+    };
+    const cb = it.querySelector('[data-cancel]');
+    if (cb) cb.onclick = async (ev) => {
+      ev.stopPropagation();
+      if (!(await askConfirm(it, '¿Cancelar esta tarea?', String(t.goal || '').slice(0, 160)))) return;
+      cb.disabled = true;
+      await window.sagitari.taskCancel(t.runId);
+      renderTasks();
+    };
+    const db = it.querySelector('[data-del]');
+    if (db) db.onclick = async (ev) => {
+      ev.stopPropagation();
+      if (!(await askConfirm(it, '¿Eliminar esta tarea del historial?', String(t.goal || '').slice(0, 160)))) return;
       await window.sagitari.taskRemove(t.runId);
       renderTasks();
     };
@@ -1935,30 +2467,42 @@ $('#tasksRefresh').onclick = () => renderTasks();
 
 // v1.3: crear y programar tareas en background
 $('#taskCreate').onclick = async () => {
+  const btn = $('#taskCreate');
+  if (btn.disabled) return;
   const goal = $('#taskGoal').value.trim();
   const msg = $('#taskMsg');
   if (!goal) { msg.textContent = 'Escribe el objetivo de la tarea.'; return; }
-  const r = await window.sagitari.taskEnqueue({ goal, mode: $('#taskMode').value, scheduledAt: null });
-  if (r && r.ok) {
-    msg.textContent = 'Tarea en cola (' + r.runId + ').';
-    $('#taskGoal').value = '';
-    feed('Tarea lanzada en background', 'blu');
-    renderTasks();
-  } else msg.textContent = (r && r.error) || 'No se pudo crear la tarea.';
+  btn.disabled = true;
+  try {
+    const r = await window.sagitari.taskEnqueue({ goal, mode: $('#taskMode').value, scheduledAt: null });
+    if (r && r.ok) {
+      msg.textContent = 'Tarea en cola (' + r.runId + ').';
+      $('#taskGoal').value = '';
+      feed('Tarea lanzada en background', 'blu');
+      renderTasks();
+    } else msg.textContent = (r && r.error) || 'No se pudo crear la tarea.';
+  } catch (e) { msg.textContent = 'Error: ' + ((e && e.message) || e); }
+  finally { btn.disabled = false; }
   setTimeout(() => { msg.textContent = ''; }, 4000);
 };
 $('#taskSchedule').onclick = async () => {
+  const btn = $('#taskSchedule');
+  if (btn.disabled) return;
   const goal = $('#taskGoal').value.trim();
   const when = $('#taskWhen').value;
   const msg = $('#taskMsg');
   if (!goal) { msg.textContent = 'Escribe el objetivo de la tarea.'; return; }
   if (!when) { msg.textContent = 'Elige fecha y hora.'; return; }
-  const r = await window.sagitari.taskEnqueue({ goal, mode: $('#taskMode').value, scheduledAt: new Date(when).toISOString() });
-  if (r && r.ok) {
-    msg.textContent = 'Tarea programada para ' + new Date(when).toLocaleString('es');
-    $('#taskGoal').value = ''; $('#taskWhen').value = '';
-    renderTasks();
-  } else msg.textContent = (r && r.error) || 'No se pudo programar.';
+  btn.disabled = true;
+  try {
+    const r = await window.sagitari.taskEnqueue({ goal, mode: $('#taskMode').value, scheduledAt: new Date(when).toISOString() });
+    if (r && r.ok) {
+      msg.textContent = 'Tarea programada para ' + new Date(when).toLocaleString('es');
+      $('#taskGoal').value = ''; $('#taskWhen').value = '';
+      renderTasks();
+    } else msg.textContent = (r && r.error) || 'No se pudo programar.';
+  } catch (e) { msg.textContent = 'Error: ' + ((e && e.message) || e); }
+  finally { btn.disabled = false; }
   setTimeout(() => { msg.textContent = ''; }, 4000);
 };
 $('#chatPause').onclick = async () => {
@@ -2087,14 +2631,22 @@ window.sagitari.onThemeChanged && window.sagitari.onThemeChanged(() => applyThem
 // ============ init ============
 (async function init() {
   await fillSettings();
+  // paneles que leen CFG/metaGet: van DESPUÉS de cargar la configuración real
+  fillMemorySens();
+  await initSecurity();
   applyTheme();            // acento + glow antes del primer frame
   setSendMode();
   // el chat arranca vacío: nada de sellos de hora sueltos, sólo la bienvenida
   resetChatView([]);
+  $('#chatTitle').title = convTitle;   // el título se trunca: pista completa siempre
   refreshSidebar();
   // la pestaña con la que se abre la app debe quedar marcada en el sidebar
   const on = $('.view.on');
-  if (on) $$('.navitem').forEach(b => b.classList.toggle('on', b.dataset.view === on.id.replace('view-', '')));
+  if (on) $$('.navitem').forEach(b => {
+    const active = b.dataset.view === on.id.replace('view-', '');
+    b.classList.toggle('on', active);
+    if (active) b.setAttribute('aria-current', 'page');
+  });
   feed('Sagitari iniciado', 'ok');
   feed('Esperando peticiones', 'blu');
   if (!CFG.active) {

@@ -13,7 +13,7 @@
 //  - Robust interaction: button finder with fallbacks, real mouse events,
 //    proper text clearing/typing, extended keys, waits.
 
-const { exec } = require('child_process');
+const { spawn } = require('child_process');
 const http = require('http');
 const WebSocket = require('ws');
 const fs = require('fs');
@@ -36,7 +36,7 @@ const sleep = (ms) => new Promise((r) => setTimeout(r, ms));
 
 /* v1.5: perfiles de navegador — cada perfil tiene SU propia carpeta de datos
    (cookies, sesiones, logins) bajo %APPDATA%/SagitariAI/browser-profiles/<id>. */
-const { profileDirFor, profileId } = require('./browser-profiles');
+const { profileId, ensureProfileDir } = require('./browser-profiles');
 
 class Browser {
   constructor() {
@@ -44,25 +44,31 @@ class Browser {
     this.port = 0;
     this.browserExe = null;
     this.activeId = null;      // targetId of the tab every action targets
-    this.profile = 'default';  // v1.5: perfil activo
+    this.profile = profileId('default');  // v1.5: id canónico del perfil activo
     this._id = 0;
     this._pending = new Map();
+    this._events = new Map();   // method -> esperadores de eventos CDP
+    this._sessions = new Map(); // targetId -> sessionId (una sesión por pestaña)
+    this.browserPid = null;     // pid del navegador lanzado (para matar el árbol)
     // carpeta de datos del perfil activo (persistentes: los logins sobreviven)
-    this.profileDir = profileDirFor('default');
+    this.profileDir = ensureProfileDir('default');
   }
 
   /** Cambia de perfil: cierra la sesión actual si procede; el próximo launch usa ese perfil. */
   async switchProfile(profile) {
     const id = profileId(profile);
-    if (id === this.profile && this.ws) return `OK: ya estás en el perfil «${id}».`;
+    const label = String(profile || 'default');
+    if (id === this.profile && this.ws) return `OK: ya estás en el perfil «${label}».`;
     if (this.ws) {
       try { await this.send('Browser.close'); } catch {}
       try { this.ws.close(); } catch {}
       this.ws = null; this.activeId = null; this.port = 0;
+      this._sessions.clear();
+      this._rejectPending('Cambiando de perfil.');
     }
     this.profile = id;
-    this.profileDir = profileDirFor(id);
-    return `OK: perfil activo → «${id}». Se abrirá (con sus propias cookies y sesiones) en el próximo launch.`;
+    this.profileDir = ensureProfileDir(profile);   // el dir se deriva del nombre original, no del id ya hasheado
+    return `OK: perfil activo → «${label}». Se abrirá (con sus propias cookies y sesiones) en el próximo launch.`;
   }
 
   // ---------- discovery / connection ----------
@@ -88,17 +94,42 @@ class Browser {
       url = page.webSocketDebuggerUrl;
     }
     if (this.ws) { try { this.ws.close(); } catch {} this.ws = null; }
-    this.ws = new WebSocket(url, { maxPayload: 64 * 1024 * 1024 });
-    await new Promise((res, rej) => { this.ws.once('open', res); this.ws.once('error', rej); });
-    this.ws.on('message', (m) => {
+    this._sessions.clear();   // una conexión nueva invalida todas las sesiones CDP cacheadas
+    const sock = new WebSocket(url, { maxPayload: 64 * 1024 * 1024 });
+    this.ws = sock;
+    try {
+      await new Promise((res, rej) => {
+        const onOpen = () => { sock.off('error', onErr); res(); };
+        const onErr = (e) => { sock.off('open', onOpen); rej(e); };
+        sock.once('open', onOpen);
+        sock.once('error', onErr);
+      });
+    } catch (e) {
+      if (this.ws === sock) this.ws = null;
+      throw e;
+    }
+    // Listener 'error' PERMANENTE: tras el handshake, un error de socket (Chrome
+    // cerrado, RST) sin handler lanzaría una excepción no capturada y tumbaría
+    // el proceso principal de Electron.
+    sock.on('error', () => {});
+    sock.on('message', (m) => {
       let msg; try { msg = JSON.parse(m); } catch { return; }
       if (msg.id && this._pending.has(msg.id)) {
         const { resolve, reject } = this._pending.get(msg.id);
         this._pending.delete(msg.id);
         msg.error ? reject(new Error(msg.error.message || JSON.stringify(msg.error))) : resolve(msg.result);
+      } else if (msg.method) {
+        this._emitEvent(msg.method, msg.params, msg.sessionId);
       }
     });
-    this.ws.on('close', () => { if (this.ws) { try { this.ws.close(); } catch {} } this.ws = null; });
+    sock.on('close', () => {
+      // Solo el socket vigente limpia el estado: el cierre tardío de un socket
+      // viejo no debe anular una reconexión recién establecida.
+      if (this.ws !== sock) return;
+      this.ws = null;
+      this._sessions.clear();
+      this._rejectPending('Navegador desconectado.');
+    });
   }
 
   send(method, params = {}, sessionId) {
@@ -107,8 +138,40 @@ class Browser {
       const id = ++this._id;
       this._pending.set(id, { resolve, reject });
       const payload = sessionId ? { id, method, params, sessionId } : { id, method, params };
-      this.ws.send(JSON.stringify(payload));
+      try { this.ws.send(JSON.stringify(payload)); }
+      catch (e) { this._pending.delete(id); return reject(e); }
       setTimeout(() => { if (this._pending.has(id)) { this._pending.delete(id); reject(new Error('CDP timeout: ' + method)); } }, 30000);
+    });
+  }
+
+  /** Rechaza y vacía todas las peticiones en vuelo (cierre de socket, kill, etc.). */
+  _rejectPending(reason) {
+    for (const { reject } of this._pending.values()) {
+      try { reject(new Error(reason)); } catch {}
+    }
+    this._pending.clear();
+  }
+
+  /** Notifica a los esperadores de un evento CDP (p. ej. Page.loadEventFired). */
+  _emitEvent(method, params, sessionId) {
+    const set = this._events.get(method);
+    if (!set) return;
+    for (const w of [...set]) {
+      if (w.sessionId && sessionId && w.sessionId !== sessionId) continue;
+      this._events.get(method)?.delete(w);
+      clearTimeout(w.timer);
+      w.resolve({ params, sessionId });
+    }
+  }
+
+  /** Espera un evento CDP; resuelve null si vence `timeoutMs` (red de seguridad). */
+  waitEvent(method, timeoutMs = 5000, sessionId) {
+    return new Promise((resolve) => {
+      let set = this._events.get(method);
+      if (!set) { set = new Set(); this._events.set(method, set); }
+      const w = { sessionId, timer: null, resolve: (v) => { this._events.get(method)?.delete(w); resolve(v); } };
+      w.timer = setTimeout(() => w.resolve(null), timeoutMs);
+      set.add(w);
     });
   }
 
@@ -118,8 +181,20 @@ class Browser {
   }
 
   async attach(targetId) {
+    // Reutiliza la sesión ya adjunta a este target (evita attach huérfano por acción).
+    const cached = this._sessions.get(targetId);
+    if (cached) return cached;
     const { sessionId } = await this.send('Target.attachToTarget', { targetId, flatten: true });
+    this._sessions.set(targetId, sessionId);
     return sessionId;
+  }
+
+  /** Libera la sesión CDP de un target (al cerrar su pestaña o al dejar de ser la activa). */
+  async detach(targetId) {
+    const sessionId = this._sessions.get(targetId);
+    if (!sessionId) return;
+    this._sessions.delete(targetId);
+    try { await this.send('Target.detachFromTarget', { sessionId }); } catch {}
   }
 
   // The tab every action operates on: the selected one, or the first alive.
@@ -127,7 +202,12 @@ class Browser {
     const list = await this.pages();
     if (!list.length) throw new Error('No hay pestañas abiertas. Usa action=launch o action=new_tab.');
     let page = list.find((p) => p.id === this.activeId);
-    if (!page) { page = list[0]; this.activeId = page.id; }
+    if (!page) {
+      const stale = this.activeId;
+      page = list[0];
+      this.activeId = page.id;
+      if (stale) await this.detach(stale);   // la pestaña activa ya no existe: libera su sesión
+    }
     const sessionId = await this.attach(page.id);
     return { sessionId, target: page };
   }
@@ -173,17 +253,27 @@ class Browser {
 
     this.port = 9223 + Math.floor(Math.random() * 500);
     const target = url || 'about:blank';
-    const cmd = `"${exe}" --remote-debugging-port=${this.port} --user-data-dir="${this.profileDir}"` +
-      ` --no-first-run --no-default-browser-check --disable-session-crashed-bubble --hide-crash-restore-bubble --start-maximized "${target}"`;
-    require('child_process').exec(cmd, { windowsHide: true });
+    // spawn + array de argumentos (sin shell): comillas, &, | o ^ de la ruta o la
+    // URL no pueden inyectar comandos en cmd.exe.
+    const args = [
+      `--remote-debugging-port=${this.port}`,
+      `--user-data-dir=${this.profileDir}`,
+      '--no-first-run', '--no-default-browser-check',
+      '--disable-session-crashed-bubble', '--hide-crash-restore-bubble',
+      '--start-maximized', target,
+    ];
+    const child = spawn(exe, args, { windowsHide: true, stdio: 'ignore' });
+    child.on('error', () => {});   // nunca dejar una excepción no capturada
+    this.browserPid = child.pid;
     this.browserExe = exe;
     this.activeId = null;
 
+    // Sondeo corto de condición (el puerto CDP responde) con timeout de ~9 s.
+    const spawnDeadline = Date.now() + 9000;
     let ok = false;
-    for (let i = 0; i < 30; i++) {
-      await sleep(400);
-      const t = await this.alive();
-      if (t) { ok = true; break; }
+    while (Date.now() < spawnDeadline) {
+      await sleep(250);
+      if (await this.alive()) { ok = true; break; }
     }
     if (!ok) return 'Error: el navegador no respondió al puerto de depuración.';
     await this.connect();
@@ -191,15 +281,24 @@ class Browser {
     const list = await this.pages();
     if (list.length) {
       this.activeId = list[0].id;
-      if (url) { await sleep(600); return this.navigate(url); }
+      if (url) return this.navigate(url);   // navigate ya espera la carga (waitReady)
     }
     return `OK: navegador abierto (${used}, puerto CDP ${this.port})${url ? ', navegando a ' + url : ''}.`;
   }
 
   kill() {
-    try { if (this.ws) this.send('Browser.close').catch(() => {}); } catch {}
+    try {
+      if (this.ws) { this.send('Browser.close').catch(() => {}); this.ws.close(); }
+    } catch {}
+    // Mata el árbol del proceso lanzado (Chrome abre hijos; taskkill /T los alcanza).
+    if (this.browserPid) {
+      try { spawn('taskkill', ['/PID', String(this.browserPid), '/T', '/F'], { windowsHide: true, stdio: 'ignore' }); } catch {}
+      this.browserPid = null;
+    }
     this.ws = null;
     this.activeId = null;
+    this._sessions.clear();
+    this._rejectPending('Navegador cerrado.');
   }
 
   // ---------- helpers ----------
@@ -210,15 +309,45 @@ class Browser {
     return r.result?.value;
   }
 
-  // Wait until the active tab finishes loading (polls readyState; never hangs).
+  // Espera a que la pestaña cargue: evento Page.loadEventFired y, como respaldo,
+  // sondeo corto de readyState. `timeoutMs` es la red de seguridad.
   async waitReady(sessionId, timeoutMs = 10000) {
-    const t0 = Date.now();
-    while (Date.now() - t0 < timeoutMs) {
+    const deadline = Date.now() + timeoutMs;
+    const ev = this.waitEvent('Page.loadEventFired', timeoutMs, sessionId);
+    let fired = false;
+    ev.then((v) => { if (v) fired = true; });
+    while (Date.now() < deadline) {
+      try { if (await this.evalJs('document.readyState', sessionId) === 'complete') return true; } catch {}
+      if (fired) return true;
+      await Promise.race([ev, sleep(150)]);
+    }
+    return false;
+  }
+
+  // Deja que la página reaccione a una acción (menús, modales, navegación) sin
+  // sleeps fijos: observa mutaciones del DOM y espera un periodo de calma; si la
+  // acción navega, el documento nuevo se considera listo al completar la carga.
+  async settle(sessionId, timeoutMs = 1500, quietMs = 250) {
+    try {
+      await this.evalJs(`(() => {
+        if (window.__sagitariObs) return;
+        window.__sagitariObs = true;
+        window.__sagitariLastMutation = Date.now();
+        try {
+          new MutationObserver(() => { window.__sagitariLastMutation = Date.now(); })
+            .observe(document, { subtree: true, childList: true, attributes: true, characterData: true });
+        } catch {}
+      })()`, sessionId);
+    } catch {}
+    const deadline = Date.now() + timeoutMs;
+    while (Date.now() < deadline) {
+      await sleep(80);
       try {
-        const st = await this.evalJs('document.readyState', sessionId);
-        if (st === 'complete') { await sleep(400); return true; }
+        const idle = await this.evalJs(
+          `document.readyState === 'complete' && (Date.now() - (window.__sagitariLastMutation || 0)) > ${quietMs}`,
+          sessionId);
+        if (idle) return true;
       } catch {}
-      await sleep(300);
     }
     return false;
   }
@@ -237,9 +366,29 @@ class Browser {
     return `OK: en «${title || u}»${loaded ? '' : ' (la página sigue cargando)'}\nURL: ${u}`;
   }
 
+  // Captura en JPEG y acotada (máx. 1280 px de ancho, 2400 de alto): un PNG a
+  // resolución completa cuesta muchísimos más tokens que un JPEG reducido.
   async screenshot(sessionId, fullPage) {
-    const r = await this.send('Page.captureScreenshot', { format: 'png', captureBeyondViewport: !!fullPage }, sessionId);
-    return 'data:image/png;base64,' + r.data;
+    const MAX_SHOT_W = 1280, MAX_SHOT_H = 2400, QUALITY = 60;
+    let x = 0, y = 0, w = 0, h = 0;
+    try {
+      const m = await this.send('Page.getLayoutMetrics', {}, sessionId);
+      if (fullPage) {
+        const c = m.cssContentSize || m.contentSize || {};
+        w = Math.round(c.width || 0); h = Math.round(c.height || 0);
+      } else {
+        const v = m.cssVisualViewport || m.visualViewport || {};
+        x = Math.round(v.pageX || 0); y = Math.round(v.pageY || 0);
+        w = Math.round(v.clientWidth || v.width || 0); h = Math.round(v.clientHeight || v.height || 0);
+      }
+    } catch {}
+    if (!w || !h) { w = MAX_SHOT_W; h = fullPage ? MAX_SHOT_H : 800; }
+    const scale = Math.min(w > MAX_SHOT_W ? MAX_SHOT_W / w : 1, h > MAX_SHOT_H ? MAX_SHOT_H / h : 1);
+    const r = await this.send('Page.captureScreenshot', {
+      format: 'jpeg', quality: QUALITY, captureBeyondViewport: !!fullPage,
+      clip: { x, y, width: w, height: h, scale },
+    }, sessionId);
+    return 'data:image/jpeg;base64,' + r.data;
   }
 
   // ---------- v1.5: percepción visual avanzada (DOM + bounding boxes) ----------
@@ -300,7 +449,7 @@ Usa action=click_index con estos índices, o selector/text como antes.`;
       await this.send('Input.dispatchMouseEvent', { type, x: el.x, y: el.y, button: 'left', clickCount: 1 }, sessionId);
       await sleep(40);
     }
-    await sleep(800);
+    await this.settle(sessionId, 1200);   // deja reaccionar (menús, modales, navegación)
     return `OK: clic por índice ${idx} en «${el.text || el.tag}» (${el.x},${el.y})`;
   }
 
@@ -343,7 +492,7 @@ Usa action=click_index con estos índices, o selector/text como antes.`;
       await this.send('Input.dispatchMouseEvent', { type, x, y, button: 'left', clickCount: 1 }, sessionId);
       await sleep(40);
     }
-    await sleep(900); // dejar reaccionar a la página (menus, modales, navegación)
+    await this.settle(sessionId, 1500); // deja reaccionar a la página (menús, modales, navegación)
     return `OK: clic en «${info}» (${how}, ${x},${y})`;
   }
 
@@ -370,7 +519,7 @@ Usa action=click_index con estos índices, o selector/text como antes.`;
     if (submit) {
       await this.send('Input.dispatchKeyEvent', { type: 'rawKeyDown', windowsVirtualKeyCode: 13, code: 'Enter', key: 'Enter', text: '\r' }, sessionId);
       await this.send('Input.dispatchKeyEvent', { type: 'keyUp', windowsVirtualKeyCode: 13, code: 'Enter', key: 'Enter' }, sessionId);
-      await sleep(900);
+      await this.settle(sessionId, 1500);
       await this.waitReady(sessionId, 6000);
     }
     return `OK: texto escrito en ${selector}${submit ? ' y Enter pulsado' : ''}`;
@@ -399,6 +548,7 @@ Usa action=click_index con estos índices, o selector/text como antes.`;
 
         case 'new_tab': {
           const { targetId } = await this.send('Target.createTarget', { url: args.url || 'about:blank' });
+          if (this.activeId && this.activeId !== targetId) await this.detach(this.activeId);
           this.activeId = targetId;
           if (args.url) await this.waitReady(await this.attach(targetId));
           return `OK: nueva pestaña abierta${args.url ? ' en ' + args.url : ''} y seleccionada.`;
@@ -416,6 +566,7 @@ Usa action=click_index con estos índices, o selector/text como antes.`;
                 || list.find(p => p.url && p.url.toLowerCase().includes(n));
           }
           if (!page) return 'Error: no encontré esa pestaña («' + q + '»). Abiertas:\n' + list.map((t, i) => `${i + 1}. ${t.title} — ${t.url}`).join('\n');
+          if (this.activeId && this.activeId !== page.id) await this.detach(this.activeId);
           this.activeId = page.id;
           return `OK: pestaña activa → «${page.title}» (${page.url}).`;
         }
@@ -429,6 +580,7 @@ Usa action=click_index con estos índices, o selector/text como antes.`;
             if (p) id = p.id;
           }
           if (!id) return 'Error: no hay pestaña que cerrar.';
+          await this.detach(id);   // libera la sesión CDP antes de cerrar el target
           await this.send('Target.closeTarget', { targetId: id });
           if (this.activeId === id) {
             const rest = await this.pages();
@@ -440,8 +592,9 @@ Usa action=click_index con estos índices, o selector/text como antes.`;
         case 'elements': {
           const { sessionId } = await this.currentSession();
           const inv = await this.elements(sessionId);
-          // v1.5: junto al inventario DOM, una captura para el análisis visual fusionado
-          if (args.screenshot !== false) {
+          // La captura solo se adjunta si el modelo la pide explícitamente
+          // (screenshot:true): así no se paga una imagen en cada inventario.
+          if (args.screenshot === true) {
             try {
               const dataUrl = await this.screenshot(sessionId, false);
               return { text: inv + '\n[Captura de la página adjunta para análisis visual]', images: [dataUrl] };

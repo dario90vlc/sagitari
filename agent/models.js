@@ -111,13 +111,23 @@ function pickModelFor(models, category) {
 
 let HEALTH_FILE = path.join(process.env.APPDATA || require('os').homedir(), 'SagitariAI', 'model-health.json');
 
+/* El fichero se lee una vez y se mantiene en memoria: `record()` corre en cada
+   llamada al modelo y no debe releer ni reescribir el JSON entero cada vez. */
+let _cache = null;
+
 function _load() {
-  try { return JSON.parse(fs.readFileSync(HEALTH_FILE, 'utf8')); } catch { return {}; }
+  if (_cache) return _cache;
+  try { _cache = JSON.parse(fs.readFileSync(HEALTH_FILE, 'utf8')); } catch { _cache = {}; }
+  return _cache;
 }
+
+/* Escritura atómica: un corte a mitad no debe truncar las estadísticas. */
 function _save(data) {
   try {
     fs.mkdirSync(path.dirname(HEALTH_FILE), { recursive: true });
-    fs.writeFileSync(HEALTH_FILE, JSON.stringify(data, null, 2), 'utf8');
+    const tmp = HEALTH_FILE + '.tmp';
+    fs.writeFileSync(tmp, JSON.stringify(data, null, 2), 'utf8');
+    fs.renameSync(tmp, HEALTH_FILE);
   } catch {}
 }
 
@@ -158,6 +168,6 @@ function summary() {
 }
 
 /** Para tests: redirige el fichero. */
-function _resetForTests(file) { HEALTH_FILE = file; }
+function _resetForTests(file) { HEALTH_FILE = file; _cache = null; }
 
 module.exports = { CATEGORIES, classify, fallbackChain, pickModelFor, record, summary, _resetForTests };

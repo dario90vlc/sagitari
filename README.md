@@ -125,8 +125,8 @@ Download your preferred artifact from the [releases page](../../releases):
 
 | Artifact | What it is |
 |---|---|
-| `SAGITARI-Setup-2.1.0.exe` | Windows installer (NSIS): shortcuts, uninstaller |
-| `SAGITARI-Portable-2.1.0.exe` | Portable: single executable, no install |
+| `SAGITARI-Setup-2.2.0.exe` | Windows installer (NSIS): shortcuts, uninstaller |
+| `SAGITARI-Portable-2.2.0.exe` | Portable: single executable, no install |
 | `Source code (zip)` | Source code |
 
 > Windows SmartScreen may warn on first run (unsigned binary). Click

@@ -38,7 +38,7 @@ const SUBAGENTS = {
     name: 'Coding Agent',
     emoji: '💻',
     role: 'escribe y ejecuta código, scripts y comandos',
-    allowTools: ['run_command', 'write_file', 'read_file', 'list_dir', 'search_files'],
+    allowTools: ['run_command', 'write_file', 'edit_file', 'read_file', 'list_dir', 'search_files'],
     maxSteps: 25,
     systemExtra: 'Eres el SUBAGENTE DE PROGRAMACIÓN. Escribe código limpio en el espacio de trabajo, ejecuta y VERIFICA (tests, salida del comando). No navegues por internet.',
   },
@@ -47,7 +47,7 @@ const SUBAGENTS = {
     name: 'File Agent',
     emoji: '📁',
     role: 'organiza y gestiona archivos y carpetas',
-    allowTools: ['read_file', 'write_file', 'list_dir', 'search_files', 'run_command'],
+    allowTools: ['read_file', 'write_file', 'edit_file', 'list_dir', 'search_files', 'run_command'],
     maxSteps: 20,
     systemExtra: 'Eres el SUBAGENTE DE ARCHIVOS. Organiza, copia, mueve y documenta. run_command solo para operaciones de ficheros (robocopy, move, del), nunca para instalar ni configurar.',
   },
@@ -107,17 +107,17 @@ function subagentSystemPrompt(key, workspace) {
   const spec = SUBAGENTS[key];
   const wsLine = workspace ? `\n\nESPACIO DE TRABAJO: ${workspace} (rutas relativas resuelven aquí).` : '';
   const tools = spec.allowTools.join(', ');
-  return `Eres SAGITARI — ${spec.name} (${spec.role}).\n\n${spec.systemExtra}\n\nTus herramientas (SOLO estas): ${tools}.${wsLine}\n\nMODO DE TRABAJO:\n1. Ejecuta tu subtarea con tus herramientas, paso a paso.\n2. VERIFICA el resultado antes de responder (no des por hecho el éxito).\n3. Tu ÚLTIMO mensaje debe ser EXCLUSIVAMENTE el resultado final en este formato:\nRESULT: <resumen en 1-3 líneas>\nDETAILS: <datos relevantes: URLs, rutas, valores encontrados, evidencia>\nSTATUS: OK | PARTIAL | FAILED\n— STATUS FAILED si no pudiste completar; PARTIAL si completaste solo parte.`;
+  return `Eres SAGITARI — ${spec.name} (${spec.role}).\n\n${spec.systemExtra}\n\nTus herramientas (SOLO estas): ${tools}.${wsLine}\n\nMODO DE TRABAJO:\n1. Ejecuta tu subtarea con tus herramientas, paso a paso.\n2. Algunas herramientas piden confirmación al usuario: si una acción queda denegada, NO la repitas — continúa por otra vía o refléjalo en el resultado.\n3. VERIFICA el resultado antes de responder (no des por hecho el éxito).\n4. Tu ÚLTIMO mensaje debe ser EXCLUSIVAMENTE el resultado final en este formato:\nRESULT: <resumen en 1-3 líneas>\nDETAILS: <datos relevantes: URLs, rutas, valores encontrados, evidencia>\nSTATUS: OK | PARTIAL | FAILED\n— STATUS FAILED si no pudiste completar; PARTIAL si completaste solo parte.`;
 }
 
 /** Parsea la respuesta final estructurada de un subagente. */
 function parseSubagentResult(text) {
   const t = String(text || '');
   const get = (tag) => {
-    const m = t.match(new RegExp(tag + '[ \\t]*:(.*)', 'i'));
+    const m = t.match(new RegExp(tag + '[ \\t]*:(.*)', 'im'));
     return m ? m[1].trim() : '';
   };
-  const result = get('RESULT') || t.split('\\n')[0].slice(0, 200);
+  const result = get('RESULT') || t.split('\n')[0].slice(0, 200);
   const details = get('DETAILS');
   const statusRaw = get('STATUS').toUpperCase();
   const status = ['OK', 'PARTIAL', 'FAILED'].includes(statusRaw) ? statusRaw

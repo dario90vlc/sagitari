@@ -47,6 +47,7 @@ REGLAS DE HERRAMIENTAS
   * type escribe en un campo (clear=true vacía antes; submit=true pulsa Enter, ideal para búsquedas). navigate espera a que la página cargue; usa wait si un elemento tarda en aparecer.
   * Cada acción devuelve OK/Error con detalle: léelo y decide el siguiente paso; si un clic falla, haz screenshot antes de reintentar a ciegas.
 - Con run_command usa sintaxis de cmd.exe de Windows. No uses comandos interactivos.
+- FICHEROS: lee antes de escribir. Para modificar un archivo existente usa edit_file (reemplazo exacto de un fragmento); reserva write_file para crear archivos nuevos o reescribir el archivo entero. En archivos largos, léelos por tramos con offset/limit en vez de volcarlos completos.
 
 DELEGACIÓN (v1.4)
 - Para subtareas autónomas y especializadas, usa delegate (research, browser, coding, file, vision, verification).
@@ -71,6 +72,64 @@ const MODE_PROFILES = {
   plan:  { temperature: 0.35, maxSteps: 20, planFirst: true,  note: 'PRIMERO presenta un PLAN numerado breve (3-6 pasos) y luego ejecútalo con herramientas, paso a paso.' },
   act:   { temperature: 0.25, maxSteps: 12, planFirst: false, note: 'Actúa directo y eficiente: minimiza explicaciones, ejecuta y reporta el resultado.' }
 };
+
+/* ---------- integridad del historial ---------- */
+
+/* Tope de mensajes que viajan al modelo (el historial completo vive en la UI). */
+const MAX_HISTORY = 40;
+
+/**
+ * Recorta el historial sin partir un intercambio de herramientas: si el corte
+ * dejara un mensaje 'tool' al principio, quedaría huérfano (sin su assistant) y
+ * el proveedor rechazaría la petición.
+ */
+function trimHistory(history, max = MAX_HISTORY) {
+  if (history.length <= max) return history;
+  let start = history.length - max;
+  while (start < history.length && history[start].role === 'tool') start++;
+  return history.slice(start);
+}
+
+/**
+ * Convierte el historial en mensajes válidos para la API. La API exige que cada
+ * `tool_call` de un assistant tenga su respuesta `tool` con el mismo id; un corte
+ * a mitad de un intercambio (error, Detener, recorte) dejaría el historial
+ * inválido y el proveedor devolvería 400 en el siguiente turno. Aquí se
+ * descartan los pares incompletos en vez de enviarlos.
+ */
+function payloadMessages(history) {
+  const out = [];
+  const pending = new Set();   // tool_call_id esperando su respuesta
+  for (let i = 0; i < history.length; i++) {
+    const h = history[i];
+    if (h.role === 'tool') {
+      if (!pending.has(h.tool_call_id)) continue;   // huérfano: se descarta
+      pending.delete(h.tool_call_id);
+      out.push({ role: 'tool', tool_call_id: h.tool_call_id, ...(h.name ? { name: h.name } : {}), content: h.content });
+      continue;
+    }
+    if (h.role === 'assistant' && h.tool_calls && h.tool_calls.length) {
+      const answered = new Set();
+      for (let j = i + 1; j < history.length && history[j].role === 'tool'; j++) answered.add(history[j].tool_call_id);
+      const calls = h.tool_calls.filter(tc => answered.has(tc.id));
+      if (!calls.length) { if (h.content) out.push({ role: 'assistant', content: h.content }); continue; }
+      const msg = { role: 'assistant', content: h.content || '', tool_calls: calls };
+      if (!msg.content) delete msg.content;
+      out.push(msg);
+      for (const tc of calls) pending.add(tc.id);
+      continue;
+    }
+    out.push({ role: h.role, content: h.content });
+  }
+  return out;
+}
+
+/* Id de confirmación irrepetible: dos tarjetas en el mismo milisegundo no deben
+   poder confundirse al resolverlas desde la UI. */
+let confirmSeq = 0;
+function newConfirmId(prefix) {
+  return prefix + Date.now().toString(36) + '-' + (++confirmSeq).toString(36) + Math.random().toString(36).slice(2, 5);
+}
 
 class Agent {
   constructor(opts) {
@@ -106,6 +165,28 @@ class Agent {
     this.pendingConfirm = null;
     pc.resolve(!!approved);
     return true;
+  }
+
+  /**
+   * Espera la decisión del usuario para una confirmación. Se libera sola si la
+   * ejecución se aborta: sin esto, Detener (o cancelar una tarea en segundo
+   * plano) dejaba la promesa esperando para siempre y el agente colgado.
+   */
+  _awaitConfirm(id, signal) {
+    return new Promise((resolve) => {
+      let settled = false;
+      const onAbort = () => finish(false);
+      const finish = (v) => {
+        if (settled) return;
+        settled = true;
+        signal.removeEventListener('abort', onAbort);
+        if (this.pendingConfirm && this.pendingConfirm.id === id) this.pendingConfirm = null;
+        resolve(v);
+      };
+      this.pendingConfirm = { id, resolve: finish };
+      if (signal.aborted) return onAbort();
+      signal.addEventListener('abort', onAbort, { once: true });
+    });
   }
 
   getMeta() { return { ...this.meta, busy: this.busy }; }
@@ -237,6 +318,14 @@ class Agent {
     this.meta.model = cfg.model || this.meta.model;
     this.meta.startedAt = Date.now();
     this.meta.lastError = null;
+    // el panel de métricas muestra el TURNO en curso, no el acumulado desde que
+    // arrancó la app (antes sumaba todos los turnos y todas las conversaciones)
+    this.meta.tokensIn = 0;
+    this.meta.tokensOut = 0;
+    this.meta.llmCalls = 0;
+    this.meta.toolCalls = 0;
+    this.meta.costUsd = 0;
+    this.meta.lastLatencyMs = null;
     this.guardrails.model = cfg.model;
     this.guardrails.beginRun();
     const runStart = Date.now();
@@ -273,7 +362,7 @@ class Agent {
          ...imgUrls.map(u => ({ type: 'image_url', image_url: { url: u } }))]
       : userText;
     this.history.push({ role: 'user', content });
-    if (this.history.length > 40) this.history = this.history.slice(-40);
+    this.history = trimHistory(this.history);
 
     const ws = (settings.settings && settings.settings.workspace) || path.join(os.homedir(), 'Desktop', 'Sagitari');
     // ---- memoria relevante: solo la que aplica a esta conversación ----
@@ -297,7 +386,7 @@ class Agent {
       + '\n- Solo toques otras ubicaciones si el usuario lo pide explícitamente (ruta absoluta).'
       + `\n\nMODO ACTUAL (${settings.settings?.mode || 'act'}): ${mode.note}`
       + (mode.planFirst ? '\nFormato del plan: una línea por paso, empieza tu respuesta con "PLAN:" y numera los pasos.' : '');
-    const messages = [{ role: 'system', content: sys }, ...this.history.map(h => ({ role: h.role, content: h.content, ...(h.tool_calls ? { tool_calls: h.tool_calls } : {}), ...(h.tool_call_id ? { tool_call_id: h.tool_call_id } : {}), ...(h.name ? { name: h.name } : {}) }))];
+    const messages = [{ role: 'system', content: sys }, ...payloadMessages(this.history)];
 
     // ---- v1.6: router + cadena de fallback ----
     const category = models.classify(userText, { hasImage: !!imageDataUrl });
@@ -418,21 +507,24 @@ class Agent {
           }
 
           // ---- permisos: safe → ejecuta; confirm → pregunta; restricted → bloquea ----
+          const toolT0 = Date.now();
           const decision = this.guardrails.decide(tc.function.name, args);
           if (decision.action === 'deny') {
             const text = decision.reason;
             answered.add(tc.id);
             messages.push({ role: 'tool', tool_call_id: tc.id, name: tc.function.name, content: text });
             this.history.push({ role: 'tool', tool_call_id: tc.id, name: tc.function.name, content: text });
-            this.emit({ type: 'tool_result', name: tc.function.name, result: text.slice(0, 1200), ok: false, durationMs: 0 });
+            this.emit({ type: 'tool_result', name: tc.function.name, result: text.slice(0, 1200), ok: false, durationMs: Date.now() - toolT0 });
             continue;
           }
           if (decision.action === 'confirm') {
-            const cid = 'c' + Date.now().toString(36);
+            const cid = newConfirmId('c');
             this.emit({ type: 'confirm_request', id: cid, tool: tc.function.name, description: decision.description, summary: decision.summary, sensitive: decision.sensitive, runId: (task && !task.closed) ? task.runId : undefined });
             runlog.log({ agent: 'sagitari', task: taskId, event: 'confirm_request', tool: tc.function.name, args });
-            const approved = await new Promise((resolve) => { this.pendingConfirm = { id: cid, resolve }; });
+            const approved = await this._awaitConfirm(cid, signal);
             if (!approved) {
+              // abortado (Detener / tarea cancelada) mientras esperábamos: no es una negativa del usuario
+              if (signal.aborted) { closePendingCalls('(no ejecutada: ejecución detenida)'); break; }
               try { habits.observe('confirm', { approved: false, tool: tc.function.name }); } catch {}
               const text = 'El usuario DENEGÓ esta acción. No la repitas; continúa con la tarea por otra vía o pregunta qué prefiere hacer.';
               answered.add(tc.id);
@@ -445,7 +537,6 @@ class Agent {
             this.guardrails.approve(decision.signature);
           }
 
-          const toolT0 = Date.now();
           let result;
           try {
             if (tc.function.name === 'delegate') {
@@ -561,6 +652,14 @@ class Agent {
       );
     } catch (e) {
       return `RESULT: delegación fallida (${e.message})\nSTATUS: FAILED`;
+    } finally {
+      // el gasto del subagente cuenta para el presupuesto global del usuario:
+      // sin esto una delegación podía multiplicar el coste sin tope
+      const over = this.guardrails.absorb(sub.guardrails);
+      if (!over.ok) {
+        runlog.log({ agent: 'sagitari', event: 'guardrail_budget', subagent: spec.key, reason: over.reason });
+        this.emit({ type: 'status', text: over.reason });
+      }
     }
     const parsed = subagents.parseSubagentResult(finalText);
     runlog.log({ agent: 'sagitari', event: 'delegate', subagent: spec.key, status: parsed.status, durationMs: Date.now() - t0, task: taskText.slice(0, 120) });
@@ -581,31 +680,48 @@ class Agent {
       if (!this.guardrails.checkStep().ok) break;
       if (signal.aborted) break;
       const res = await this._streamOnce(cfg, messages, signal, tools);
-      if (res.usage) this.guardrails.addTokens(res.usage.total_tokens || 0, res.usage);
+      // los límites del usuario (tokens/coste) también cuentan dentro del subagente
+      if (res.usage) {
+        const tok = this.guardrails.addTokens(res.usage.total_tokens || 0, res.usage);
+        if (!tok.ok) { this.emit({ type: 'guardrail', reason: tok.reason }); break; }
+      }
       if (res.aborted) break;
       if (!res.toolCalls || !res.toolCalls.length) { onFinalText(res.text); return; }
       const msg = { role: 'assistant', content: res.text || '', tool_calls: res.toolCalls };
       if (!res.text) delete msg.content;
       messages.push(msg);
+      // toda tool_call debe recibir su respuesta: cortar el bucle a mitad dejaría
+      // un assistant con tool_calls sin responder y la API devolvería 400
+      const answered = new Set();
+      const closePending = (reason) => {
+        for (const tc of res.toolCalls) {
+          if (answered.has(tc.id)) continue;
+          answered.add(tc.id);
+          messages.push({ role: 'tool', tool_call_id: tc.id, name: tc.function.name, content: reason });
+        }
+      };
       for (const tc of res.toolCalls) {
-        if (signal.aborted) break;
+        if (signal.aborted) { closePending('(no ejecutada: ejecución detenida)'); break; }
         let args = {};
         try { args = JSON.parse(tc.function.arguments || '{}'); } catch {}
         if (tc.function.name === 'delegate') {
+          answered.add(tc.id);
           messages.push({ role: 'tool', tool_call_id: tc.id, name: tc.function.name, content: 'Error: un subagente no puede delegar a otro.' });
           continue;
         }
         this.emit({ type: 'tool', name: tc.function.name, args });
-        if (this.guardrails.isLoop(tc.function.name, args).loop) break;
+        if (!this.guardrails.checkToolCall().ok) { closePending('(no ejecutada: límite de llamadas alcanzado)'); break; }
+        if (this.guardrails.isLoop(tc.function.name, args).loop) { closePending('(no ejecutada: bucle detectado)'); break; }
         const decision = this.guardrails.decide(tc.function.name, args);
         let approved = decision.action === 'allow';
         if (decision.action === 'confirm') {
-          const cid = 's' + Date.now().toString(36);
+          const cid = newConfirmId('s');
           Agent.CONFIRM_ROUTES.set(cid, this);
           this.emit({ type: 'confirm_request', id: cid, tool: tc.function.name, description: decision.description, summary: decision.summary });
-          approved = await new Promise((resolve) => { this.pendingConfirm = { id: cid, resolve }; });
+          approved = await this._awaitConfirm(cid, signal);
           Agent.CONFIRM_ROUTES.delete(cid);
         }
+        if (signal.aborted) { closePending('(no ejecutada: ejecución detenida)'); break; }
         let text;
         if (decision.action === 'deny') text = decision.reason;
         else if (!approved) text = 'El usuario DENEGÓ esta acción. Continúa por otra vía o indícalo en el resultado.';
@@ -623,11 +739,13 @@ class Agent {
             const images = r && typeof r === 'object' ? r.images : undefined;
             text = r && typeof r === 'object' ? r.text : String(r);
             if (images && cfg.vision !== false) {
+              answered.add(tc.id);
               messages.push({ role: 'tool', tool_call_id: tc.id, name: tc.function.name, content: [{ type: 'text', text }, ...images.map(u => ({ type: 'image_url', image_url: { url: u } }))] });
               continue;
             }
           } catch (e) { text = 'Error: ' + e.message; }
         }
+        answered.add(tc.id);
         messages.push({ role: 'tool', tool_call_id: tc.id, name: tc.function.name, content: text });
       }
     }
@@ -685,6 +803,7 @@ function statusFor(name, args) {
     case 'run_command': return 'Terminal — ' + (args.command || '').slice(0, 90);
     case 'read_file': return 'Leyendo ' + args.path;
     case 'write_file': return 'Escribiendo ' + args.path;
+    case 'edit_file': return 'Editando ' + args.path;
     case 'list_dir': return 'Explorando ' + args.path;
     case 'search_files': return 'Buscando «' + args.pattern + '»';
     case 'open_app': return 'Abriendo ' + args.name;

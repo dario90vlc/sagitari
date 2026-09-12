@@ -1,6 +1,9 @@
-const { contextBridge, ipcRenderer } = require('electron');
+const { contextBridge, ipcRenderer, webUtils } = require('electron');
 
 contextBridge.exposeInMainWorld('sagitari', {
+  // Electron ≥32 eliminó File.path: la ruta real de un archivo soltado/pegado
+  // sólo se obtiene por aquí (compatible con sandbox: true)
+  filePath: (file) => webUtils.getPathForFile(file),
   getConfig: () => ipcRenderer.invoke('config:get'),
   saveProvider: (p) => ipcRenderer.invoke('provider:save', p),
   deleteProvider: (id) => ipcRenderer.invoke('provider:delete', id),

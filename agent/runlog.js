@@ -11,37 +11,64 @@ const path = require('path');
 
 const LOG_DIR = path.join(process.env.APPDATA || require('os').homedir(), 'SagitariAI', 'logs');
 const MAX_LOGS = 20;
+const MAX_BYTES = 8 * 1024 * 1024;   // tope por archivo: una sesión larga no crece sin límite
 
 let stream = null;
 let currentFile = null;
+let written = 0;   // bytes escritos en el archivo actual
+
+function openStream() {
+  fs.mkdirSync(LOG_DIR, { recursive: true });
+  // rotate: keep newest MAX_LOGS-1, this session opens a new one
+  const files = fs.readdirSync(LOG_DIR).filter(f => f.endsWith('.jsonl')).sort();
+  while (files.length >= MAX_LOGS) {
+    try { fs.unlinkSync(path.join(LOG_DIR, files.shift())); } catch {}
+  }
+  currentFile = path.join(LOG_DIR, 'run-' + Date.now() + '.jsonl');
+  written = 0;
+  stream = fs.createWriteStream(currentFile, { flags: 'a' });
+  stream.on('error', () => { stream = null; });
+  return stream;
+}
 
 function ensureStream() {
   if (stream) return stream;
-  try {
-    fs.mkdirSync(LOG_DIR, { recursive: true });
-    // rotate: keep newest MAX_LOGS-1, this session opens a new one
-    const files = fs.readdirSync(LOG_DIR).filter(f => f.endsWith('.jsonl')).sort();
-    while (files.length >= MAX_LOGS) {
-      try { fs.unlinkSync(path.join(LOG_DIR, files.shift())); } catch {}
-    }
-    currentFile = path.join(LOG_DIR, 'run-' + Date.now() + '.jsonl');
-    stream = fs.createWriteStream(currentFile, { flags: 'a' });
-    stream.on('error', () => { stream = null; });
-  } catch { stream = null; }
-  return stream;
+  try { return openStream(); } catch { stream = null; return null; }
 }
 
 /** Append one structured event. Never throws — logging must not break the agent. */
 function log(event) {
-  const s = ensureStream();
+  let s = ensureStream();
   if (!s) return;
   try {
-    const rec = { ts: new Date().toISOString(), ...event };
-    s.write(JSON.stringify(rec) + '\n');
+    const line = JSON.stringify({ ts: new Date().toISOString(), ...event }) + '\n';
+    // el tope también se aplica dentro de la sesión, no solo al arrancar
+    if (written + line.length > MAX_BYTES) {
+      try { stream && stream.end(); } catch {}
+      stream = null;
+      s = ensureStream();
+      if (!s) return;
+    }
+    written += line.length;
+    s.write(line);
   } catch {}
 }
 
 function currentLogFile() { return currentFile; }
+
+/** Últimas líneas de un archivo sin cargarlo entero (los logs pueden ser grandes). */
+function tailLines(file, maxBytes) {
+  const fd = fs.openSync(file, 'r');
+  try {
+    const size = fs.fstatSync(fd).size;
+    const len = Math.min(size, maxBytes);
+    const buf = Buffer.alloc(len);
+    fs.readSync(fd, buf, 0, len, size - len);
+    const lines = buf.toString('utf8').split('\n');
+    if (size > len) lines.shift();   // la primera línea puede venir cortada
+    return lines.filter(Boolean);
+  } finally { fs.closeSync(fd); }
+}
 
 /** Read the last N events across all log files (newest last), for the dev panel. */
 function readRecent(n = 200) {
@@ -49,8 +76,9 @@ function readRecent(n = 200) {
   try {
     const files = fs.readdirSync(LOG_DIR).filter(f => f.endsWith('.jsonl')).sort().slice(-3);
     for (const f of files) {
-      const lines = fs.readFileSync(path.join(LOG_DIR, f), 'utf8').split('\n').filter(Boolean);
-      for (const l of lines) { try { out.push(JSON.parse(l)); } catch {} }
+      for (const l of tailLines(path.join(LOG_DIR, f), 512 * 1024)) {
+        try { out.push(JSON.parse(l)); } catch {}
+      }
     }
   } catch {}
   return out.slice(-n);

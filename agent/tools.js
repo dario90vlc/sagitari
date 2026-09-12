@@ -9,6 +9,7 @@ const { delegateToolDef } = require('./subagents');
 const RISK = {
   run_command: 'confirm',
   write_file: 'confirm',
+  edit_file: 'confirm',
   open_app: 'confirm',
   open_url: 'safe',
   read_file: 'safe',
@@ -46,10 +47,14 @@ const defs = [
     type: 'function',
     function: {
       name: 'read_file',
-      description: 'Lee el contenido de un archivo de texto.',
+      description: 'Lee el contenido de un archivo de texto. Con offset/limit lee solo un rango de líneas (útil para archivos largos, devuelve cabecera "[líneas A-B de N]").',
       parameters: {
         type: 'object',
-        properties: { path: { type: 'string', description: 'Ruta absoluta del archivo' } },
+        properties: {
+          path: { type: 'string', description: 'Ruta absoluta del archivo' },
+          offset: { type: 'number', description: 'Línea inicial, 1-based (opcional)' },
+          limit: { type: 'number', description: 'Máximo de líneas a devolver (opcional, tope 2000)' }
+        },
         required: ['path']
       }
     }
@@ -66,6 +71,23 @@ const defs = [
           content: { type: 'string' }
         },
         required: ['path', 'content']
+      }
+    }
+  },
+  {
+    type: 'function',
+    function: {
+      name: 'edit_file',
+      description: 'Edita un archivo existente con un reemplazo anclado por texto exacto: cambia old_string por new_string y escribe el resultado. old_string debe ser único en el archivo; si aparece varias veces y quieres cambiarlas todas, usa replace_all: true. El archivo debe existir (no lo crea): para crear un archivo nuevo o reescribirlo entero usa write_file.',
+      parameters: {
+        type: 'object',
+        properties: {
+          path: { type: 'string', description: 'Ruta del archivo a editar' },
+          old_string: { type: 'string', description: 'Texto exacto a reemplazar (debe ser único salvo replace_all: true)' },
+          new_string: { type: 'string', description: 'Texto de reemplazo' },
+          replace_all: { type: 'boolean', description: 'Reemplaza todas las ocurrencias (default false)' }
+        },
+        required: ['path', 'old_string', 'new_string']
       }
     }
   },
@@ -124,7 +146,7 @@ const defs = [
     type: 'function',
     function: {
       name: 'browser_control',
-      description: 'Controla un navegador Chrome/Edge real mediante DevTools Protocol. UNA SOLA ventana con múltiples pestañas gestionables. Acciones: launch (abrir/reutilizar), profile (cambiar de perfil: cookies/sesiones propias), navigate, new_tab, select_tab, close_tab, tabs (listar), elements (inventario clicable con índices + captura), click_index (clic por índice de elements), click (por texto visible o selector), type (con clear/submit), press, scroll, wait, content (leer), eval, screenshot (con fullPage), close.',
+      description: 'Controla un navegador Chrome/Edge real mediante DevTools Protocol. UNA SOLA ventana con múltiples pestañas gestionables. Acciones: launch (abrir/reutilizar), profile (cambiar de perfil: cookies/sesiones propias), navigate, new_tab, select_tab, close_tab, tabs (listar), elements (inventario clicable con índices), click_index (clic por índice de elements), click (por texto visible o selector), type (con clear/submit), press, scroll, wait, content (leer), eval, screenshot (con fullPage), close.',
       parameters: {
         type: 'object',
         properties: {
@@ -144,6 +166,7 @@ const defs = [
           expression: { type: 'string', description: 'eval: JS a ejecutar en la página' },
           query: { type: 'string', description: 'content: selector opcional para leer solo una parte' },
           fullPage: { type: 'boolean', description: 'screenshot: capturar toda la página (scroll incluido)' },
+          screenshot: { type: 'boolean', description: 'elements: adjuntar también una captura de la página (por defecto no, para no gastar tokens); para ver la página usa action=screenshot' },
           browser: { type: 'string', description: 'launch: chrome|edge' }
         },
         required: ['action']

@@ -1,105 +1,114 @@
-# SAGITARI 2.1.0
+# SAGITARI 2.2.0
 
-Versión mayor: **el agente completo**. Todo el roadmap 1.2 → 2.0 integrado: memoria avanzada,
-checkpoints, tareas en segundo plano, subagentes, navegador con perfiles, marketplace de skills,
-multi-proveedor con fallback, adjuntos y una interfaz renovada de principio a fin.
+Actualización de **calidad**: cierra los fallos que rompían la ejecución de tareas, añade
+edición de archivos anclada, endurece el guardado de datos y pule la interfaz (estado real
+en todo momento, accesibilidad y teclado).
 
-Major release: **the full agent**. The whole 1.2 → 2.0 roadmap integrated: advanced memory,
-checkpoints, background tasks, subagents, browser profiles, skills marketplace, multi-provider
-with fallback, file attachments and a UI rebuilt end to end.
+Quality update: **fixes the failures that broke task execution**, adds anchored file editing,
+hardens data persistence and polishes the interface (true state at all times, accessibility
+and keyboard).
 
 ## Descargas / Downloads
 
 | Archivo / File | Descripción / Description |
 |---|---|
-| `SAGITARI-Setup-2.1.0.exe` | **Instalador / Installer** (NSIS): accesos directos, desinstalador / shortcuts, uninstaller |
-| `SAGITARI-Portable-2.1.0.exe` | **Portable**: un solo ejecutable, sin instalación / single executable, no install |
+| `SAGITARI-Setup-2.2.0.exe` | **Instalador / Installer** (NSIS): accesos directos, desinstalador / shortcuts, uninstaller |
+| `SAGITARI-Portable-2.2.0.exe` | **Portable**: un solo ejecutable, sin instalación / single executable, no install |
 | `Source code (zip/tar.gz)` | Código fuente / Source code |
 
 > Binario sin firmar: Windows SmartScreen puede avisar en la primera ejecución (*Más información → Ejecutar de todas formas*). / Unsigned binary: SmartScreen may warn on first run (*More info → Run anyway*).
 
-## Novedades / What's new
+## Correcciones críticas / Critical fixes
 
-### Autonomía / Autonomy
+- **Denegar una acción ya no rompe la ejecución.** El camino de denegación de los permisos
+  lanzaba un `ReferenceError` y abortaba el turno; ahora el modelo recibe la negativa y
+  continúa por otra vía. / **Denying an action no longer breaks the run.** The permission
+  deny path threw a `ReferenceError` and aborted the turn; the model now gets the denial and
+  continues another way.
+- **El dictado por voz arranca.** `voice.ps1` no aceptaba el parámetro que le enviaba la app,
+  PowerShell abortaba el script y la app decía «ok»: el micrófono nunca se activaba. /
+  **Voice dictation starts.** `voice.ps1` did not accept the parameter the app passed,
+  PowerShell aborted the script and the app reported «ok»: the microphone never opened.
+- **Cerrar el navegador ya no tumba la app.** El websocket de DevTools no tenía listener de
+  error tras el handshake y una desconexión lanzaba una excepción no capturada en el proceso
+  principal. / **Closing the browser no longer crashes the app.** The DevTools websocket had
+  no error listener after the handshake and a disconnect threw an uncaught exception in the
+  main process.
+- **La memoria no se borra sola.** Un fallo de lectura (un simple EBUSY de Windows) se
+  interpretaba como «no hay memoria» y el guardado siguiente la sobrescribía vacía: adiós a
+  los recuerdos. Ahora se distinguen los casos, el archivo ilegible se pone en cuarentena y
+  no se pisa. / **Memory can no longer wipe itself.** A read failure (a plain Windows EBUSY)
+  was treated as «no memory» and the next save overwrote it with an empty store.
+- **Cancelar una tarea se respeta.** El agente conservaba su copia del estado y la resucitaba
+  como «en ejecución», así que al día siguiente se re-ejecutaba el trabajo ya hecho. /
+  **Cancelling a task sticks.** The agent kept its own copy of the state and revived it as
+  running, so on the next launch the work was re-executed.
+- **Cerrar un archivo o conversación a mitad no deja basura corrupta.** Configuración,
+  conversaciones, memoria, hábitos y checkpoints se escriben de forma atómica (`.tmp` +
+  renombrado, con `.bak`). / **Interrupted writes no longer corrupt data.** Config,
+  conversations, memory, habits and checkpoints are written atomically.
 
-- **Tareas en segundo plano / Background tasks** — Los trabajos largos siguen mientras sigues
-  chateando: pausa, reanudación, cancelación y notificación al terminar. / Long jobs keep
-  running while you keep chatting: pause, resume, cancel and completion notifications.
-- **Subagentes especialistas / Specialist subagents** — El orquestador delega en agentes de
-  investigación, navegador, código, ficheros o visión; cada uno con sus herramientas y
-  permisos. / The orchestrator delegates to research, browser, coding, file or vision agents;
-  each with its own tools and permissions.
-- **Checkpoints y recuperación / Checkpoints & recovery** — Las tareas largas guardan su
-  progreso: si la app se cierra o falla, se reanudan donde estaban y se muestra qué paso falló.
-  / Long tasks save progress: after a crash or a closed window they resume where they left off
-  and show which step failed.
-- **Memoria avanzada / Advanced memory** — Memoria persistente con importancia, confianza,
-  fechas de uso y búsqueda; más aprendizaje de hábitos del usuario. / Persistent memory with
-  importance, confidence, usage dates and search; plus user-habit learning.
+## Agente / Agent
 
-### Proveedores / Providers
+- **`edit_file`: edición anclada.** Cambia un fragmento exacto en vez de reescribir el
+  archivo entero, con aviso si el fragmento es ambiguo. / **`edit_file`: anchored editing.**
+- **`read_file` por rangos** (`offset`/`limit`) con cabecera `[líneas A-B de N]` y rechazo de
+  archivos enormes. / **`read_file` ranges** (`offset`/`limit`).
+- **Presupuesto real en subagentes:** tokens, coste y número de llamadas se aplican y se
+  suman al presupuesto global; antes una delegación podía multiplicar el gasto sin tope. /
+  **Real subagent budgets**, charged to the global limit.
+- **Historial siempre válido:** se descartan los pares `tool_call`/respuesta incompletos, que
+  rompían la conversación con un error del proveedor. / **History always valid.**
+- **Detener mata el árbol de procesos** (antes quedaban nietos huérfanos) y los acentos de
+  `cmd.exe` ya no llegan corruptos al modelo. / **Stop kills the process tree**; `cmd.exe`
+  accents are decoded correctly.
 
-- **8 proveedores / 8 providers** — OpenCode Go, Anthropic (Claude nativo), OpenAI, OpenRouter,
-  Groq, Ollama, LM Studio y endpoints personalizados. Detección automática de modelos y
-  fallback si un proveedor falla. / OpenCode Go, native Anthropic, OpenAI, OpenRouter, Groq,
-  Ollama, LM Studio and custom endpoints. Automatic model detection and fallback when a
-  provider fails.
+## Seguridad / Security
 
-### Navegador / Browser
+- Escrituras de configuración atómicas y errores de guardado **visibles** (antes todo
+  confirmaba en falso). / Atomic config writes and **visible** save failures.
+- `attachments:read` no puede leer el directorio de datos (donde viven las API keys). /
+  `attachments:read` can no longer read the app data directory.
+- Ventana con `sandbox`, navegación externa bloqueada y apertura de enlaces validada. /
+  Window with `sandbox`, blocked external navigation, validated link opening.
+- Sin inyección de shell en `open_app` ni en el lanzamiento del navegador (`spawn` sin shell).
+  / No shell injection in `open_app` or browser launch.
 
-- **Perfiles de navegador / Browser profiles** — Sesiones separadas (personal, trabajo,
-  investigación…) con sus propias cookies y logins. / Separate sessions (personal, work,
-  research…) each with its own cookies and logins.
-- **Percepción visual / Visual perception** — DOM + accessibility tree + capturas que el modelo
-  ve de verdad. / DOM + accessibility tree + screenshots the model actually sees.
+## Interfaz / Interface
 
-### Skills
-
-- **Marketplace / Marketplace** — Instala packs de skills desde repos de GitHub con un clic
-  (p. ej. `anthropics/skills` → 20 skills verificadas). / Install skill packs from GitHub repos
-  in one click (e.g. `anthropics/skills` → 20 verified skills).
-
-### Interfaz / Interface
-
-- **Chat renovado / Rebuilt chat** — Tarjetas de herramientas con resultado, duración y salida
-  copiable; planes que se pintan y se marcan en vivo; distinción clara de modos ACT/PLAN/THINK
-  con teñido completo de la interfaz. / Tool cards with result, duration and copyable output;
-  live-rendered plan cards; clear ACT/PLAN/THINK mode distinction tinting the whole UI.
-- **Adjuntos / Attachments** — Arrastra, pega o elige imágenes, código y documentos: las
-  imágenes viajan como visión y los textos se extraen solos (30+ formatos, hasta 8 por
-  mensaje). / Drag, paste or pick images, code and documents: images travel as vision parts and
-  text is extracted automatically (30+ formats, up to 8 per message).
-- **Glow personalizable / Customizable glow** — Resplandor suave y degradado que se ilumina al
-  pensar, trabajar y hablar; 6 paletas de color para la interfaz y slider de intensidad,
-  aplicados al vuelo. / Soft layered glow lighting up while thinking, working and speaking;
-  6 UI palettes and an intensity slider, applied live.
-- **Ajustes y sidebar renovados / New settings & sidebar** — Ajustes reorganizados por
-  categorías con estados vacíos útiles; sidebar compactable con contadores en vivo. /
-  Settings reorganized in categories with helpful empty states; collapsible sidebar with live
-  badges.
-- **Directo al chat / Straight to chat** — La app abre directamente en el chat: sin pantallas
-  intermedias. / The app opens straight into the chat: no intermediate screens.
-
-### Robustez / Robustness
-
-- **Instancia única sensata / Sensible single instance** — Si SAGITARI ya está abierto, el
-  segundo lanzamiento trae la ventana al frente en vez de morir en silencio. / If SAGITARI is
-  already open, a second launch focuses the existing window instead of dying silently.
-- **Fallos visibles / Visible failures** — Los errores del proceso principal y del renderer se
-  registran en `logs\crash.log` y se muestran; nada muere en silencio. / Main-process and
-  renderer errors are logged to `logs\crash.log` and surfaced; nothing dies silently.
+- **El compositor del chat ya no se sale de la ventana** al reducirla a su tamaño mínimo. /
+  **The chat composer no longer falls off-screen** at the minimum window size.
+- **Detener conserva la respuesta a medias** y cierra las tarjetas de herramienta que
+  quedaban girando para siempre. / **Stop keeps the partial answer** and closes tool cards
+  that used to spin forever.
+- Un segundo Enter ya no deja el agente trabajando sin botón de Detener. / A second Enter no
+  longer leaves the agent running with no Stop button.
+- Botones «ir al final», píldora de estado y tira de adjuntos **se ocultan de verdad**. /
+  Jump-to-bottom button, status pill and attachment strip **actually hide**.
+- Los indicadores de actividad **pulsan** (faltaba el `@keyframes`), el contraste cumple AA y
+  se respeta `prefers-reduced-motion`. / Activity indicators **pulse**; AA contrast;
+  `prefers-reduced-motion` respected.
+- **Ajustes dice la verdad**: al abrir muestra lo guardado (antes el modo desarrollador se
+  perdía en cada arranque), el buscador encuentra Apariencia, y guardar/activar un proveedor
+  inválido muestra el error en vez de «guardado». / **Settings tells the truth.**
+- **Acciones destructivas con confirmación** (conversación, memoria, skill, tarea, hábitos,
+  proveedor) y respondibles con teclado. / **Destructive actions require confirmation**.
+- Atajos: `Alt+0` ya no deja la app en blanco y `Alt+1…9` / `Alt+M` no se disparan mientras
+  escribes. / Shortcuts fixed.
+- Historial y Tareas operables con teclado; foco visible; estado del chat anunciado a
+  lectores de pantalla. / Keyboard-operable lists, visible focus, announced chat state.
 
 ## Verificación / Verification
 
-- **93 tests en verde** (`npm test`) y **17 comprobaciones de interfaz** (`npm run uicheck`)
-  sobre la app real. / **93 unit tests green** (`npm test`) and **17 real-app UI checks**
-  (`npm run uicheck`).
+- **122 tests en verde** (`npm test`) y **25 comprobaciones sobre la app real**
+  (`npm run uicheck`), incluidas regresiones del tamaño mínimo de ventana, del atributo
+  `hidden`, de los atajos y de los indicadores de actividad. / **122 unit tests green** and
+  **25 real-app UI checks**, including regressions for minimum window size, `hidden`,
+  shortcuts and activity indicators.
 - SHA-256 de los ejecutables calculado automáticamente por el workflow de CI al publicar. /
   Executable SHA-256 hashes computed automatically by the CI workflow on release.
 
 ## Requisitos / Requirements
 
-- Windows 10/11 · Proveedor de IA compatible (OpenCode Go, OpenRouter, Groq, OpenAI, Anthropic,
-  Ollama local, LM Studio…) · Node.js 18+ solo para compilar desde fuente.
-- Windows 10/11 · Any compatible AI provider (OpenCode Go, OpenRouter, Groq, OpenAI, Anthropic,
-  local Ollama, LM Studio…) · Node.js 18+ only to build from source.
+- Windows 10/11 · Proveedor de IA compatible (OpenCode Go, OpenRouter, Groq, OpenAI,
+  Anthropic, Ollama local, LM Studio…) · Node.js 18+ solo para compilar desde fuente.

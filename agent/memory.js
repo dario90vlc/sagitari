@@ -20,21 +20,61 @@ const MAX_MEMORIES = 300;         // techo duro del almacén
 const MAX_IN_CONTEXT = 30;        // tope de recuerdos inyectados en el prompt
 
 let cache = null;
+let tainted = false;   // el archivo no se pudo interpretar: NO persistir un almacén vacío encima
+
+/** Escritura atómica: escribe a .tmp y renombra, conservando el .bak anterior. */
+function atomicWrite(file, text) {
+  const tmp = file + '.tmp';
+  fs.mkdirSync(path.dirname(file), { recursive: true });
+  fs.writeFileSync(tmp, text, 'utf8');
+  try { fs.copyFileSync(file, file + '.bak'); } catch {}   // aún no había archivo: no es un fallo
+  fs.renameSync(tmp, file);
+}
+
+/** Conserva un archivo ilegible como memory.corrupt-<ts>.json en vez de perderlo. */
+function quarantine(reason) {
+  const dest = MEMORY_FILE.replace(/\.json$/i, '') + '.corrupt-' + Date.now() + '.json';
+  try {
+    fs.renameSync(MEMORY_FILE, dest);
+    console.error('memory.load: ' + reason + ' — conservado en ' + dest);
+  } catch (e2) {
+    console.error('memory.load: ' + reason + ' y no se pudo conservar el original: ' + e2.message);
+  }
+}
 
 function load() {
   if (cache) return cache;
+  let raw;
   try {
-    const raw = JSON.parse(fs.readFileSync(MEMORY_FILE, 'utf8'));
-    cache = Array.isArray(raw) ? raw.map(normalize) : [];
-  } catch { cache = []; }
+    raw = fs.readFileSync(MEMORY_FILE, 'utf8');
+  } catch (e) {
+    if (e.code === 'ENOENT') { cache = []; return cache; }   // no existe → memoria vacía legítima
+    // Error de E/S (EBUSY/EPERM transitorios de Windows): NO significa "no hay memoria".
+    tainted = true;
+    cache = [];
+    console.error('memory.load: no se pudo leer ' + MEMORY_FILE + ': ' + e.message);
+    return cache;
+  }
+  try {
+    const parsed = JSON.parse(raw);
+    if (!Array.isArray(parsed)) throw new SyntaxError('el contenido no es un array');
+    cache = parsed.map(normalize);
+  } catch (e) {
+    // JSON truncado/corrupto: lo apartamos y NO dejamos que un save() lo pise con []
+    tainted = true;
+    cache = [];
+    quarantine(e.message);
+  }
+  if (cache.length) prune();   // poda automática al cargar (una vez por proceso)
   return cache;
 }
 
 function save() {
   if (!cache) return;
+  if (tainted && !cache.length) return;   // tras un error de lectura nunca se persiste un almacén vacío
   try {
-    fs.mkdirSync(CONFIG_DIR, { recursive: true });
-    fs.writeFileSync(MEMORY_FILE, JSON.stringify(cache, null, 2), 'utf8');
+    atomicWrite(MEMORY_FILE, JSON.stringify(cache, null, 2));
+    tainted = false;
   } catch (e) { console.error('memory.save', e.message); }
 }
 
@@ -149,17 +189,31 @@ function update(id, patch = {}) {
   return { ok: true, memory: { ...m } };
 }
 
-/** Borra recuerdos con confianza muy baja (poda automática opcional). */
+/**
+ * Poda automática (se llama al cargar): elimina lo viejo, ocioso y poco
+ * importante, o lo de confianza ínfima nunca usado. Antes el predicado era
+ * `confidence >= 0.2 || reciente`, y como el default es 0.8 no borraba nada.
+ */
 function prune(minConfidence = 0.2, olderThanDays = 180) {
   const before = load().length;
-  const cutoff = Date.now() - olderThanDays * 86400000;
-  cache = load().filter(m => m.confidence >= minConfidence || Date.parse(m.date) > cutoff);
-  save();
+  const now = Date.now();
+  const maxAge = (Number(olderThanDays) || 180) * 86400000;
+  const maxIdle = 60 * 86400000;         // 2 meses sin usarse
+  const lowConf = Number.isFinite(Number(minConfidence)) ? Number(minConfidence) : 0.2;
+  cache = load().filter(m => {
+    const created = Date.parse(m.date) || now;
+    const last = Date.parse(m.lastUsed) || created;
+    if (m.confidence < lowConf && m.uses === 0) return false;   // confianza ínfima y sin uso
+    const old = now - created >= maxAge;
+    const idle = now - last >= maxIdle;
+    return !(old && idle && m.uses < 3 && m.importance < 0.6);
+  });
+  if (cache.length !== before) save();   // solo escribe si algo cambió
   return { removed: before - cache.length };
 }
 
 /** Para tests: reinicia el singleton apuntando a otro archivo. */
-function _resetForTests(file) { cache = null; MEMORY_FILE = file; }
+function _resetForTests(file) { cache = null; tainted = false; MEMORY_FILE = file; }
 
 module.exports = {
   list, add, remove, update, prune, relevantMemories, scoreAgainst, tokenize,
