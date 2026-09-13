@@ -5,6 +5,8 @@
 const { app, nativeImage } = require('electron');
 const fs = require('fs');
 const path = require('path');
+const { encodePNG, decodePNG, rgbaFrom } = require('./png-ops');
+const { DEFAULT_SIZES, icoEntry, buildIco } = require('./ico');
 
 const SRC = process.argv[2] || path.join(__dirname, '..', 'sagitari_logo_transparente.png');
 const OUT = path.join(__dirname, '..', 'renderer', 'assets');
@@ -68,17 +70,21 @@ app.whenReady().then(() => {
     // full logo (with wordmark) for splash/branding
     fs.copyFileSync(SRC, path.join(OUT, 'logo-full.png'));
 
-    // 5) multi-size PNGs → single .ico (PNG-compressed entries)
-    const sizes = [256, 128, 64, 48, 32, 16];
-    const pngs = sizes.map(s => ({
-      s,
-      png: mark.resize({ width: s, quality: 'best' }).toPNG()
-    }));
-    const ico = buildIco(pngs);
+    // 5) multi-size → single .ico. Los tamaños pequeños van como BMP/DIB porque
+    //    el shell de Windows no pinta las entradas PNG por debajo de 256 px (la
+    //    regla está en scripts/ico.js). Los píxeles se sacan decodificando el PNG
+    //    de cada tamaño: toBitmap() devuelve alfa PREMULTIPLICADO y oscurecería
+    //    los bordes translúcidos del icono.
+    const entries = DEFAULT_SIZES.map(s => {
+      const dec = decodePNG(mark.resize({ width: s, height: s, quality: 'best' }).toPNG());
+      const rgba = dec.ch === 4 ? dec.data : rgbaFrom(dec);
+      return { s, data: icoEntry(s, rgba, (size, px) => encodePNG(size, size, px)) };
+    });
+    const ico = buildIco(entries);
     fs.writeFileSync(path.join(OUT, 'sagitari.ico'), ico);
 
     console.log(`mark=${cw}x${ch} -> 512px saved`);
-    console.log(`ico=${ico.length} bytes with ${sizes.length} sizes`);
+    console.log(`ico=${ico.length} bytes with ${DEFAULT_SIZES.length} sizes`);
     console.log('OUT=' + OUT);
     app.exit(0);
   } catch (e) {
@@ -86,33 +92,3 @@ app.whenReady().then(() => {
     app.exit(1);
   }
 });
-
-// minimal ICO container for PNG blobs (valid on Vista+)
-function buildIco(entries) {
-  const count = entries.length;
-  const header = Buffer.alloc(6);
-  header.writeUInt16LE(0, 0);   // reserved
-  header.writeUInt16LE(1, 2);   // type: icon
-  header.writeUInt16LE(count, 4);
-
-  const dirSize = 16 * count;
-  let offset = 6 + dirSize;
-  const dir = Buffer.alloc(dirSize);
-  const blobs = [];
-
-  entries.forEach(({ s, png }, i) => {
-    const e = i * 16;
-    dir.writeUInt8(s >= 256 ? 0 : s, e);        // width (0 = 256)
-    dir.writeUInt8(s >= 256 ? 0 : s, e + 1);    // height
-    dir.writeUInt8(0, e + 2);                   // palette
-    dir.writeUInt8(0, e + 3);                   // reserved
-    dir.writeUInt16LE(1, e + 4);                // color planes
-    dir.writeUInt16LE(32, e + 6);               // bits per pixel
-    dir.writeUInt32LE(png.length, e + 8);       // data size
-    dir.writeUInt32LE(offset, e + 12);          // data offset
-    offset += png.length;
-    blobs.push(png);
-  });
-
-  return Buffer.concat([header, dir, ...blobs]);
-}

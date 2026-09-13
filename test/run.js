@@ -1493,6 +1493,72 @@ test('adjuntos: UI completa — botón, drag&drop, pegar, chips y miniaturas', (
   ok(/attachmentsPick/.test(preload) && /attachmentsRead/.test(preload), 'preload debe exponer los canales de adjuntos');
 });
 
+/* ---------- icono: Windows no pinta entradas PNG pequeñas dentro del .ico ---------- */
+const ico = require('../scripts/ico');
+const pngOps = require('../scripts/png-ops');
+
+test('ico: los tamaños pequeños van en BMP y los grandes en PNG', () => {
+  eq(ico.PNG_MIN_SIZE, 128, 'a partir de aquí la entrada es PNG');
+  eq(ico.DEFAULT_SIZES.join(','), '256,128,64,48,32,16', 'los tamaños que lleva el icono');
+  const entries = ico.DEFAULT_SIZES.map(s => ({
+    s,
+    data: ico.icoEntry(s, Buffer.alloc(s * s * 4, 200), (size, px) => pngOps.encodePNG(size, size, px)),
+  }));
+  const parsed = ico.parseIco(ico.buildIco(entries));
+  eq(parsed.length, 6, 'deben salir las seis entradas');
+  for (const e of parsed) {
+    const want = e.size >= ico.PNG_MIN_SIZE ? 'png' : 'bmp';
+    eq(e.format, want, 'el tamaño ' + e.size + 'px debe guardarse como ' + want.toUpperCase());
+  }
+  eq(ico.parseIco(ico.buildIco([entries[0]]))[0].size, 256, 'el 256 se codifica como 0 y se vuelve a leer como 256');
+});
+
+test('ico: la entrada BMP lleva la cabecera y el orden de píxeles de Windows', () => {
+  const size = 64;
+  const rgba = Buffer.alloc(size * size * 4);
+  rgba[0] = 10; rgba[1] = 20; rgba[2] = 30; rgba[3] = 40;   // píxel de la esquina SUPERIOR izquierda
+  const dib = ico.dibEntry(rgba, size);
+  eq(dib.length, ico.dibLength(size), 'longitud de la entrada DIB');
+  const d = ico.parseIco(ico.buildIco([{ s: size, data: dib }]))[0].dib;
+  eq(d.biSize, 40, 'biSize');
+  eq(d.biWidth, size, 'biWidth');
+  eq(d.biHeight, size * 2, 'biHeight: mapa XOR + máscara AND');
+  eq(d.biBitCount, 32, 'biBitCount');
+  eq(d.biCompression, 0, 'BI_RGB');
+  eq(d.biSizeImage, size * size * 4 + ico.maskRowBytes(size) * size, 'biSizeImage');
+  // el DIB va de abajo arriba: nuestro píxel de arriba termina en la última fila, en BGRA
+  const last = 40 + size * (size - 1) * 4;
+  eq([dib[last], dib[last + 1], dib[last + 2], dib[last + 3]].join(','), '30,20,10,40', 'orden BGRA y volteo vertical');
+});
+
+test('icono incluido: BMP en los tamaños pequeños (o Windows cae al icono genérico)', () => {
+  const buf = fs.readFileSync(path.join(__dirname, '..', 'renderer', 'assets', 'sagitari.ico'));
+  const icons = ico.parseIco(buf);
+  eq(icons.map(e => e.size).join(','), ico.DEFAULT_SIZES.join(','), 'el icono debe traer los tamaños esperados');
+  for (const e of icons) {
+    if (e.size >= ico.PNG_MIN_SIZE) eq(e.format, 'png', e.size + 'px debe ir como PNG');
+    else eq(e.format, 'bmp', e.size + 'px debe ir como BMP: el shell de Windows no pinta PNG por debajo de ' + ico.PNG_MIN_SIZE + 'px y acaba mostrando el icono genérico del ejecutable');
+  }
+  // contenedor coherente: entradas consecutivas, sin huecos ni bytes sueltos
+  let end = 6 + 16 * icons.length;
+  for (const e of icons) {
+    eq(e.offset, end, 'la entrada de ' + e.size + 'px debe empezar donde acaba la anterior');
+    ok(e.offset + e.dataSize <= buf.length, 'la entrada de ' + e.size + 'px debe caber en el archivo');
+    end = e.offset + e.dataSize;
+  }
+  eq(end, buf.length, 'no debe sobrar nada al final del archivo');
+  // y el DIB declara la geometría que Windows espera
+  const small = icons.find(e => e.format === 'bmp');
+  ok(small, 'debe haber al menos una entrada BMP');
+  eq(small.dib.biHeight, small.size * 2, 'biHeight del mapa XOR+AND');
+  eq(small.dib.biSizeImage, small.size * small.size * 4 + ico.maskRowBytes(small.size) * small.size, 'biSizeImage');
+});
+
+test('png-ops se puede importar sin ejecutar el pipeline', () => {
+  // el pipeline lee y escribe ficheros: al importarlo solo debe exponer el toolkit
+  ok(typeof pngOps.decodePNG === 'function' && typeof pngOps.encodePNG === 'function', 'debe exponer el toolkit');
+});
+
 // el recuento DEBE esperar a los tests async registrados dentro de este bloque:
 // si no, el resumen se imprime antes de que terminen y sus fallos no cuentan
 while (pendingAsync.length) await Promise.all(pendingAsync.splice(0));

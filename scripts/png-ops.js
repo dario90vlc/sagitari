@@ -4,9 +4,14 @@ const fs = require('fs');
 const path = require('path');
 const zlib = require('zlib');
 
+// El contenedor .ico y las entradas BMP viven en scripts/ico.js: allí está la
+// regla de qué tamaño va como PNG y cuál como BMP, y la usan también los tests
+// y scripts/make-assets.js.
+const { PNG_MIN_SIZE, DEFAULT_SIZES, dibEntry, icoEntry, buildIco, parseIco } = require('./ico');
+
 // ---------- PNG decode (color types 6/2, depth 8) ----------
 function decodePNG(file) {
-  const data = fs.readFileSync(file);
+  const data = Buffer.isBuffer(file) ? file : fs.readFileSync(file);
   if (data.readUInt32BE(0) !== 0x89504e47) throw new Error('No es un PNG');
   let pos = 8, W = 0, H = 0, depth = 8, colorType = 6, idat = [];
   while (pos < data.length) {
@@ -108,31 +113,31 @@ function resize(img, newW, newH) {
   return { W: newW, H: newH, ch, data: out };
 }
 
-// ---------- ICO builder (PNG entries) ----------
-function buildIco(entries) {
-  const header = Buffer.alloc(6);
-  header.writeUInt16LE(1, 2);
-  header.writeUInt16LE(entries.length, 4);
-  const dir = Buffer.alloc(16 * entries.length);
-  let offset = 6 + dir.length;
-  const blobs = [];
-  entries.forEach(({ s, png }, i) => {
-    const e = i * 16;
-    dir.writeUInt8(s >= 256 ? 0 : s, e);
-    dir.writeUInt8(s >= 256 ? 0 : s, e + 1);
-    dir.writeUInt16LE(1, e + 4);
-    dir.writeUInt16LE(32, e + 6);
-    dir.writeUInt32LE(png.length, e + 8);
-    dir.writeUInt32LE(offset, e + 12);
-    offset += png.length;
-    blobs.push(png);
-  });
-  return Buffer.concat([header, dir, ...blobs]);
+// ---------- toolkit para otros scripts ----------
+
+/* Al importarlo (tests, scripts/make-assets.js) este módulo solo debe exponer el
+   toolkit: el pipeline de abajo lee y escribe ficheros, así que solo tiene
+   sentido al lanzar el script directamente. Un `return` en la raíz de un módulo
+   CommonJS sale justo aquí y deja el pipeline sin ejecutar. */
+if (require.main !== module) {
+  module.exports = {
+    decodePNG, encodePNG, resize, rgbaFrom,
+    PNG_MIN_SIZE, DEFAULT_SIZES, dibEntry, icoEntry, buildIco, parseIco,
+  };
+  return;
 }
 
 // ---------- pipeline ----------
-const SRC = process.argv[2] || 'C:\\Users\\dario\\Desktop\\sagitari_logo_transparente.png';
+// Sin argumento, el logo se busca en la raíz del proyecto. Antes apuntaba a una
+// ruta absoluta del escritorio de una máquina concreta, que en cualquier otro
+// equipo no existe y hacía fallar el pipeline con un ENOENT confuso.
+const SRC = process.argv[2] || path.join(__dirname, '..', 'sagitari_logo_transparente.png');
 const OUT = path.join(__dirname, '..', 'renderer', 'assets');
+if (!fs.existsSync(SRC)) {
+  console.error('No encuentro el logo original: ' + SRC);
+  console.error('Uso: node scripts/png-ops.js [ruta/al/logo.png]');
+  process.exit(1);
+}
 fs.mkdirSync(OUT, { recursive: true });
 
 const img = decodePNG(SRC);
@@ -224,11 +229,13 @@ fs.copyFileSync(SRC, path.join(OUT, 'logo-full.png'));
   console.log(`wordmark=${ww}x${wh} box=(${wminX},${wminY})-(${wmaxX},${wmaxY}) saved`);
 }
 
-// 5) sizes + ico
-const sizes = [256, 128, 64, 48, 32, 16];
-const entries = sizes.map(s => ({ s, png: encodePNG(s, s, rgbaFrom(resize(markImg, s, s))) }));
+// 5) sizes + ico — los tamaños pequeños van en BMP/DIB (ver scripts/ico.js)
+const entries = DEFAULT_SIZES.map(s => {
+  const rgba = rgbaFrom(resize(markImg, s, s));
+  return { s, data: icoEntry(s, rgba, (size, px) => encodePNG(size, size, px)) };
+});
 fs.writeFileSync(path.join(OUT, 'sagitari.ico'), buildIco(entries));
-console.log('ico written (' + entries.reduce((a, e) => a + e.png.length, 0) + ' bytes of PNGs)');
+console.log('ico written (' + entries.reduce((a, e) => a + e.data.length, 0) + ' bytes, ' + DEFAULT_SIZES.length + ' sizes)');
 console.log('DONE -> ' + OUT);
 
 function rgbaFrom(bmp) {
