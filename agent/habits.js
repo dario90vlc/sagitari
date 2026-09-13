@@ -12,7 +12,7 @@
 const fs = require('fs');
 const path = require('path');
 
-let HABITS_FILE = path.join(process.env.APPDATA || require('os').homedir(), 'SagitariAI', 'habits.json');
+let HABITS_FILE = path.join(require('./datadir').dataDir(), 'habits.json');
 const TOP_N = 5;          // entradas por categoría en el prompt
 const MIN_COUNT = 2;      // mínimo de repeticiones para considerar un hábito
 const MAX_ENTRIES = 50;   // techo por categoría (recorte del mapa persistido)

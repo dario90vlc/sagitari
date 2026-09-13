@@ -109,7 +109,7 @@ function pickModelFor(models, category) {
 
 /* ---------- health ---------- */
 
-let HEALTH_FILE = path.join(process.env.APPDATA || require('os').homedir(), 'SagitariAI', 'model-health.json');
+let HEALTH_FILE = path.join(require('./datadir').dataDir(), 'model-health.json');
 
 /* El fichero se lee una vez y se mantiene en memoria: `record()` corre en cada
    llamada al modelo y no debe releer ni reescribir el JSON entero cada vez. */

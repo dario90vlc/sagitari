@@ -9,7 +9,7 @@
 const fs = require('fs');
 const path = require('path');
 
-const LOG_DIR_DEFAULT = path.join(process.env.APPDATA || require('os').homedir(), 'SagitariAI', 'logs');
+const LOG_DIR_DEFAULT = path.join(require('./datadir').dataDir(), 'logs');
 let LOG_DIR = LOG_DIR_DEFAULT;
 let MAX_LOGS = 20;
 let MAX_BYTES = 8 * 1024 * 1024;   // tope por archivo: una sesión larga no crece sin límite

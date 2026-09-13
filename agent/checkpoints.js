@@ -18,7 +18,7 @@ const fs = require('fs');
 const path = require('path');
 const crypto = require('crypto');
 
-let TASKS_DIR = path.join(process.env.APPDATA || require('os').homedir(), 'SagitariAI', 'tasks');
+let TASKS_DIR = path.join(require('./datadir').dataDir(), 'tasks');
 const HISTORY_MAX = 60;   // eventos conservados por run.json
 
 const ALL_STATUS = ['pending', 'scheduled', 'running', 'paused', 'interrupted', 'failed', 'completed', 'cancelled'];

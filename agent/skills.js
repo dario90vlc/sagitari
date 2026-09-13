@@ -16,7 +16,7 @@ const fs = require('fs');
 const fsp = require('fs/promises');
 const path = require('path');
 
-let SKILLS_DIR = path.join(process.env.APPDATA || require('os').homedir(), 'SagitariAI', 'skills');
+let SKILLS_DIR = path.join(require('./datadir').dataDir(), 'skills');
 
 function parseFrontMatter(raw) {
   const m = raw.match(/^---\r?\n([\s\S]*?)\r?\n---\r?\n?([\s\S]*)$/);

@@ -642,7 +642,6 @@ test('health record accumulates and summarizes', () => {
 const SKILLS_TMP = tmpDir('sagi-skills-');
 skills.__test._resetForTests(SKILLS_TMP);   // redirige el almacén para los tests
 
-const { execSync } = require('child_process');
 const { spawnSync } = require('child_process');
 
 // escribe una skill con triggers y dependencias para las pruebas async
@@ -1742,11 +1741,13 @@ test('seguridad: open_url solo acepta http(s), no manejadores del sistema', () =
 });
 
 test('guardrails: esperar la confirmación no consume el límite de duración', async () => {
-  const g = new Guardrails({ guardrails: { maxDurationMs: 80, maxSteps: 0 } });
+  /* Determinista a propósito: la pausa empieza antes de esperar y la espera es
+     mucho mayor que el límite, así que el resultado no depende de la carga de la
+     máquina (una versión anterior medía lapsos cortos y fallaba por ruido). */
+  const g = new Guardrails({ guardrails: { maxDurationMs: 400, maxSteps: 0 } });
   g.beginRun();
-  await new Promise(r => setTimeout(r, 20));
-  g.pauseClock();
-  await new Promise(r => setTimeout(r, 120));   // el usuario pensando
+  g.pauseClock();                                // el usuario tiene la tarjeta en pantalla
+  await new Promise(r => setTimeout(r, 600));    // más que el límite entero
   g.resumeClock();
   ok(g.checkStep().ok, 'el tiempo esperando al usuario no es tiempo de ejecución');
 });
@@ -2023,6 +2024,42 @@ test('updater: informa de la firma digital del binario descargado', async () => 
   ok(/Microsoft/.test(firmado.signer || ''), 'y se informa de quién lo firma (' + firmado.signer + ')');
   const inexistente = await updater.signatureOf(path.join(tmpDir('sagi-sig-'), 'no-existe.exe'));
   eq(inexistente, null, 'si no se puede consultar, no se inventa un estado');
+});
+
+test('arranque: TODOS los módulos del agente respetan la raíz de datos de prueba', () => {
+  /* Esta la rompió una versión anterior: main.js apuntaba los modos de prueba a su
+     propio directorio, pero cada módulo de agent/ calculaba el suyo con
+     «SagitariAI» escrito a mano, así que los skills, logs, memoria, hábitos,
+     checkpoints y salud de modelos seguían escribiéndose en los datos reales.
+     Se comprueba en un proceso limpio (las rutas se resuelven al cargar). */
+  const raiz = tmpDir('sagi-datadir-');
+  const code = `
+    const fs = require('fs');
+    const out = {};
+    out.skills = require('./agent/skills').skillsDir();
+    out.logs = require('./agent/runlog').LOG_DIR;
+    out.perfiles = require('./agent/browser-profiles').PROFILE_BASE;
+    require('./agent/memory').add({ text: 'prueba de aislamiento', source: 'user', importance: 0.5 });
+    require('./agent/habits').observe('mode', { mode: 'act' });
+    require('./agent/models').record('m', { ok: true });
+    const cp = require('./agent/checkpoints');
+    cp.save(cp.newRun({ goal: 'aislamiento' }));
+    out.ficheros = fs.readdirSync(process.env.SAGITARI_DATA_DIR).sort();
+    console.log(JSON.stringify(out));
+  `;
+  const r = spawnSync(process.execPath, ['-e', code], {
+    cwd: path.join(__dirname, '..'),
+    env: { ...process.env, SAGITARI_DATA_DIR: raiz },
+    encoding: 'utf8',
+  });
+  ok(r.status === 0, 'el proceso hijo debe terminar bien: ' + String(r.stderr || '').slice(0, 300));
+  const out = JSON.parse(String(r.stdout).trim());
+  for (const [que, ruta] of Object.entries({ skills: out.skills, logs: out.logs, perfiles: out.perfiles })) {
+    ok(ruta.startsWith(raiz), `${que} debe vivir dentro de la raíz de prueba (${ruta})`);
+  }
+  for (const f of ['memory.json', 'habits.json', 'model-health.json', 'tasks']) {
+    ok(out.ficheros.includes(f), `se esperaba ${f} dentro de la raíz (había: ${out.ficheros.join(', ')})`);
+  }
 });
 
 /* Los tests async registrados más arriba (la descarga del actualizador) todavía

@@ -10,6 +10,19 @@ const fs = require('fs');
 const fsp = require('fs/promises');
 const { spawn } = require('child_process');
 
+const DEV = process.argv.includes('--dev');
+const SMOKE = process.argv.includes('--smoke');
+// Las comprobaciones automáticas (smoke, ui-check) abren la app SIN mostrar
+// ventana: hasta ahora la ventana se abría y se cerraba sola dos veces durante
+// probar.bat, y eso se ve exactamente igual que «la app se cierra sola».
+const HEADLESS = SMOKE || process.argv.includes('--hidden') || process.argv.includes('--test');
+// Raíz de datos de la app. Se fija AQUÍ (antes de cargar los módulos de agent/)
+// porque cada uno resuelve su ruta al cargarse: es la única forma de que los
+// arranques de prueba no escriban en los skills, logs, memoria, hábitos,
+// checkpoints, perfiles de navegador y salud de modelos REALES del usuario.
+const DATA_DIR = path.join(app.getPath('appData'), HEADLESS ? 'SagitariAI-test' : 'SagitariAI');
+process.env.SAGITARI_DATA_DIR = DATA_DIR;
+
 const { Agent } = require('../agent/agent');
 const { DEFAULT_RISK } = require('../agent/guardrails');
 const { Browser } = require('../agent/browser');
@@ -21,12 +34,6 @@ const marketplace = require('../agent/marketplace');
 const models = require('../agent/models');
 const habits = require('../agent/habits');
 
-const DEV = process.argv.includes('--dev');
-const SMOKE = process.argv.includes('--smoke');
-// Las comprobaciones automáticas (smoke, ui-check) abren la app SIN mostrar
-// ventana: hasta ahora la ventana se abría y se cerraba sola dos veces durante
-// probar.bat, y eso se ve exactamente igual que «la app se cierra sola».
-const HEADLESS = SMOKE || process.argv.includes('--hidden') || process.argv.includes('--test');
 // Solo para probar el actualizador: apunta la comprobación a otra API de releases
 // (p. ej. un JSON local con una versión inventada) y hace que también se compruebe
 // en los arranques ocultos. En uso normal no está definida y no cambia nada.
@@ -59,10 +66,7 @@ if (!gotLock) {
 app.on('second-instance', () => showWindow());
 
 // ---------- config ----------
-// Los arranques de prueba escriben en SU PROPIO directorio de datos: ui-check
-// navega la interfaz de verdad y acaba guardando ajustes y conversaciones, y no
-// puede tocar las claves, las conversaciones ni la memoria reales del usuario.
-const CONFIG_DIR = path.join(app.getPath('appData'), HEADLESS ? 'SagitariAI-test' : 'SagitariAI');
+const CONFIG_DIR = DATA_DIR;   // la misma raíz que usan los módulos de agent/ (ver arriba)
 const LEGACY_CONFIG = path.join(app.getPath('appData'), 'JarvisAI', 'config.json');
 const CONFIG_FILE = path.join(CONFIG_DIR, 'config.json');
 let config = {

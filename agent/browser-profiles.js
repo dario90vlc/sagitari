@@ -7,7 +7,7 @@
 const path = require('path');
 const fs = require('fs');
 
-const PROFILE_BASE_DEFAULT = path.join(process.env.APPDATA || require('os').homedir(), 'SagitariAI', 'browser-profiles');
+const PROFILE_BASE_DEFAULT = path.join(require('./datadir').dataDir(), 'browser-profiles');
 let PROFILE_BASE = PROFILE_BASE_DEFAULT;
 
 /* FNV-1a de 32 bits: hash corto, estable y sin dependencias. */

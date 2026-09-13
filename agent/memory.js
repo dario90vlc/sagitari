@@ -14,7 +14,7 @@
 const fs = require('fs');
 const path = require('path');
 
-const CONFIG_DIR = path.join(process.env.APPDATA || require('os').homedir(), 'SagitariAI');
+const CONFIG_DIR = require('./datadir').dataDir();
 let MEMORY_FILE = path.join(CONFIG_DIR, 'memory.json');
 const MAX_MEMORIES = 300;         // techo duro del almacén
 const MAX_IN_CONTEXT = 30;        // tope de recuerdos inyectados en el prompt
