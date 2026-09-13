@@ -997,10 +997,13 @@ ipcMain.handle('update:page', async () => {
 
 app.whenReady().then(() => {
   if (!gotLock) return;
-  if (process.platform === 'win32') {
-    const ico = path.join(__dirname, '..', 'renderer', 'assets', 'sagitari.ico');
-    try { app.setAppUserModelId('com.sagitari.app'); if (fs.existsSync(ico)) app.setAppUserModelId('SAGITARI'); } catch {}
-  }
+  // Windows: el icono de la barra de tareas se resuelve por el AppUserModelID.
+  //   - Empaquetada: tiene que COINCIDIR con el del acceso directo que crea el
+  //     instalador (el appId de electron-builder) o Windows no lo asocia.
+  //   - Desde el código fuente: NO se fija. No hay ningún acceso directo con ese
+  //     id, y Windows cae entonces al icono del ejecutable… que en desarrollo es
+  //     electron.exe, es decir, el logo de Electron en la barra inferior.
+  if (process.platform === 'win32' && app.isPackaged) app.setAppUserModelId('com.sagitari.app');
   loadConfig();
   seedStarterSkills();
   // v1.3 recuperación: las 'running' de un crash/cierre pasan a 'interrupted' y el
