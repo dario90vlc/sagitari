@@ -32,6 +32,16 @@ function test(name, fn) {
 function eq(a, b, msg) { if (a !== b) throw new Error((msg || 'eq') + `: esperado ${JSON.stringify(b)}, obtenido ${JSON.stringify(a)}`); }
 function ok(v, msg) { if (!v) throw new Error(msg || 'esperado verdadero'); }
 
+/* Red de seguridad del propio runner: un test async que nunca resuelve dejaba el
+   proceso sin resumen y salía con código 0 (CI en verde con la suite colgada).
+   El temporizador se deja "vivo" a propósito: mantiene el proceso en pie hasta
+   dispararse, y se cancela justo antes de imprimir el resumen. */
+const SUITE_TIMEOUT_MS = 120000;
+const suiteTimer = setTimeout(() => {
+  console.error(`\nLa suite no terminó en ${SUITE_TIMEOUT_MS / 1000}s: algún test se quedó colgado.`);
+  process.exit(1);
+}, SUITE_TIMEOUT_MS);
+
 const { Guardrails, describeAction, summarizeArgs } = require('../agent/guardrails');
 const skills = require('../agent/skills');
 
@@ -1661,6 +1671,144 @@ test('updater: cada modo guarda el binario donde toca', () => {
   eq(path.basename(evil.path), '.._.._evil_name.exe', 'el nombre no puede escapar de la carpeta');
 });
 
+/* ---------- reparaciones: regresiones que no pueden volver ---------- */
+
+test('skills: un id con .. o separadores no puede salir del almacén', async () => {
+  const legitima = path.join(SKILLS_TMP, 'victima');
+  fs.mkdirSync(legitima, { recursive: true });
+  fs.writeFileSync(path.join(legitima, 'SKILL.md'), '---\nname: victima\ndescription: x\n---\ncuerpo');
+  const venenos = ['.', '..', '../fuera', '..\\..\\fuera', 'a/b', 'a\\b', '', '   ', '...', 'SKILL.md/..'];
+  for (const id of venenos) {
+    for (const [nombre, fn] of [['deleteSkill', skills.deleteSkill], ['setEnabled', (i) => skills.setEnabled(i, true)], ['writeSource', (i) => skills.writeSource(i, { repo: 'x/y' })]]) {
+      let lanzo = false;
+      try { await fn(id); } catch { lanzo = true; }
+      ok(lanzo, `${nombre}() debe rechazar ${JSON.stringify(id)}`);
+    }
+  }
+  ok(fs.existsSync(path.join(legitima, 'SKILL.md')), 'las skills legítimas siguen intactas');
+  ok(fs.existsSync(SKILLS_TMP), 'el almacén sigue existiendo');
+});
+
+test('skills: deleteSkill borra la indicada y solo esa', async () => {
+  const borrame = path.join(SKILLS_TMP, 'borrame');
+  fs.mkdirSync(borrame, { recursive: true });
+  await skills.deleteSkill('borrame');
+  eq(fs.existsSync(borrame), false, 'la skill indicada se borra');
+  ok(fs.existsSync(path.join(SKILLS_TMP, 'victima')), 'las demás siguen ahí');
+});
+
+test('skills: los triggers son literales, no expresiones regulares del repo', async () => {
+  // un trigger remoto tipo (a+)+$ congelaba el hilo principal (ReDoS)
+  const t0 = Date.now();
+  const hits = await skills.suggestSkillsFor('a'.repeat(40000));
+  ok(Date.now() - t0 < 2000, 'el análisis no puede quedarse colgado');
+  eq(hits.length, 0);
+});
+
+test('permisos: la tabla de riesgo es única y no tiene claves muertas', () => {
+  const { RISK, toolDefs } = require('../agent/tools');
+  const { DEFAULT_RISK } = require('../agent/guardrails');
+  eq(DEFAULT_RISK, RISK, 'guardrails debe consumir la MISMA tabla que declara tools.js');
+  const nombres = toolDefs.map(d => d.function.name);
+  const sinNivel = nombres.filter(n => !RISK[n]);
+  eq(sinNivel.join(', '), '', 'toda herramienta debe declarar su nivel de riesgo');
+  const muertas = Object.keys(RISK).filter(k => !nombres.includes(k));
+  eq(muertas.join(', '), '', 'la tabla no puede declarar herramientas que no existen');
+});
+
+test('permisos: leer el portapapeles y evaluar JS piden confirmación aunque el tool sea safe', () => {
+  const g = new Guardrails({ permissions: { clipboard: 'safe', browser_control: 'safe' } });
+  eq(g.decide('clipboard', { action: 'read' }).action, 'confirm', 'leer el portapapeles no es automático');
+  eq(g.decide('clipboard', { action: 'read' }).sensitive, true);
+  eq(g.decide('browser_control', { action: 'eval', expression: 'fetch("/x")' }).action, 'confirm', 'eval ejecuta JS en la página');
+  eq(g.decide('browser_control', { action: 'profile', profile: 'work' }).action, 'confirm', 'cambiar de perfil cambia de sesiones');
+  eq(g.decide('clipboard', { action: 'write', text: 'hola' }).action, 'allow', 'escribir en el portapapeles es inocuo');
+});
+
+test('permisos: abrir una URL pide confirmación por defecto', () => {
+  const g = new Guardrails();
+  eq(g.decide('open_url', { url: 'https://github.com' }).action, 'confirm');
+});
+
+test('seguridad: open_url solo acepta http(s), no manejadores del sistema', () => {
+  const { openUrlAllowed } = require('../agent/executors');
+  ok(openUrlAllowed('https://github.com/dario90vlc/sagitari'));
+  ok(openUrlAllowed('http://localhost:3000/x'));
+  ok(!openUrlAllowed('file:///C:/Windows/System32/calc.exe'), 'file: abriría un ejecutable local');
+  ok(!openUrlAllowed('ms-msdt:/id PCWDiagnostic'), 'los manejadores de Windows no son URLs de navegador');
+  ok(!openUrlAllowed('javascript:alert(1)'));
+  ok(!openUrlAllowed(''));
+  ok(!openUrlAllowed(undefined));
+});
+
+test('guardrails: esperar la confirmación no consume el límite de duración', async () => {
+  const g = new Guardrails({ guardrails: { maxDurationMs: 80, maxSteps: 0 } });
+  g.beginRun();
+  await new Promise(r => setTimeout(r, 20));
+  g.pauseClock();
+  await new Promise(r => setTimeout(r, 120));   // el usuario pensando
+  g.resumeClock();
+  ok(g.checkStep().ok, 'el tiempo esperando al usuario no es tiempo de ejecución');
+});
+
+test('health: el coste por modelo se acumula y llega al panel', () => {
+  modelsMod.record('cost-test-model', { ok: true, tokens: { prompt_tokens: 1000, completion_tokens: 500 }, costUsd: 0.25 });
+  modelsMod.record('cost-test-model', { ok: true, tokens: { prompt_tokens: 1000, completion_tokens: 500 }, costUsd: 0.25 });
+  const s = modelsMod.summary().find(r => r.model === 'cost-test-model');
+  eq(s.costUsd, 0.5, 'el panel publicaba siempre 0.0000 porque record() nunca guardaba el coste');
+});
+
+test('apariencia: cada clase de punto que usa el JS existe en el CSS', () => {
+  const app = fs.readFileSync(path.join(__dirname, '..', 'renderer', 'app.js'), 'utf8');
+  const css = fs.readFileSync(path.join(__dirname, '..', 'renderer', 'styles.css'), 'utf8');
+  const usadas = new Set();
+  // puntos de estado de tarea: { label: '…', cls: 'ok' } → class="dot ${st.cls}"
+  for (const m of app.matchAll(/\{\s*label:\s*'[^']*',\s*cls:\s*'([\w-]+)'/g)) usadas.add(m[1]);
+  // salud del modelo y color del feed: eligen la clase en un ternario
+  for (const m of app.matchAll(/(?:const|let)\s+(?:health|color)\s*=\s*([^;]+);/g)) {
+    for (const lit of m[1].matchAll(/'([a-z][\w-]*)'/g)) usadas.add(lit[1]);
+  }
+  for (const m of app.matchAll(/\bfeed\([^)]*,\s*'([\w-]+)'\s*\)/g)) usadas.add(m[1]);
+  ok(usadas.size >= 3, 'deben detectarse las clases de estado (' + [...usadas].join(', ') + ')');
+  // `.dot` no define fondo: una clase sin regla deja el punto invisible (pasó con mag/mg)
+  for (const c of usadas) ok(css.includes('.dot.' + c), `falta la regla .dot.${c} en styles.css`);
+});
+
+test('integración: cada canal push del preload tiene remitente en main', () => {
+  const preload = fs.readFileSync(path.join(__dirname, '..', 'main', 'preload.js'), 'utf8');
+  const main = fs.readFileSync(path.join(__dirname, '..', 'main', 'main.js'), 'utf8');
+  const canales = [...preload.matchAll(/\bon\('([^']+)'/g)].map(m => m[1]);
+  ok(canales.length >= 10, 'deben detectarse los canales push (' + canales.length + ')');
+  const emisores = new Set([...main.matchAll(/send\('([^']+)'/g)].map(m => m[1]));
+  const sinEmisor = [...new Set(canales)].filter(c => !emisores.has(c));
+  eq(sinEmisor.join(', '), '', 'canales push que el renderer nunca recibiría');
+});
+
+test('updater: una descarga que deja de recibir datos se corta sola', async () => {
+  const dir = tmpDir('sagi-upd3-');
+  const dest = path.join(dir, 'bin.exe');
+  // cuerpo que nunca entrega un chunk pero SÍ respeta la señal (como fetch real)
+  const fetchFn = async (url, opts = {}) => ({
+    ok: true,
+    headers: { get: () => null },
+    body: {
+      [Symbol.asyncIterator]: () => ({
+        next: () => new Promise((_, reject) => {
+          const s = opts.signal;
+          if (s) s.addEventListener('abort', () => reject(s.reason || new Error('abortado')), { once: true });
+        }),
+      }),
+    },
+  });
+  let error = null;
+  const t0 = Date.now();
+  try { await updater.downloadTo('https://x/bin.exe', dest, { fetchFn, idleTimeoutMs: 60 }); }
+  catch (e) { error = e; }
+  ok(error, 'debe rechazar en vez de esperar para siempre');
+  ok(Date.now() - t0 < 3000, 'el vigilante de inactividad debe dispararse pronto');
+  eq(fs.existsSync(dest + '.part'), false, 'no puede quedar un temporal a medias');
+});
+
 /* Los tests async registrados más arriba (la descarga del actualizador) todavía
    no han terminado: hay que esperarlos ANTES de borrar sus temporales. */
 while (pendingAsync.length) await Promise.all(pendingAsync.splice(0));
@@ -1668,6 +1816,7 @@ while (pendingAsync.length) await Promise.all(pendingAsync.splice(0));
 // limpieza: la suite no debe dejar basura en %TEMP%
 for (const d of TMP_DIRS) { try { fs.rmSync(d, { recursive: true, force: true }); } catch {} }
 
+clearTimeout(suiteTimer);   // fin normal: el vigilante ya no hace falta
 console.log('');
   if (fail) {
     console.error(`${fail} test(s) fallaron, ${pass} pasaron`);
