@@ -1998,6 +1998,21 @@ test('guardrails: el reloj se reanuda aunque la confirmación se aborte', async 
   eq(g._pausedAt, 0, 'y el reloj vuelve a correr');
 });
 
+test('herramientas: las que lanzan un proceso registran su cancelación', () => {
+  /* Detener solo cancela la herramienta en vuelo si esta registró cómo matarse.
+     La propiedad no es observable sin lanzar procesos reales (mataría ventanas del
+     equipo), así que se comprueba sobre el código: toda herramienta que llama a
+     run() debe pasar registerKillable. */
+  const src = fs.readFileSync(path.join(__dirname, '..', 'agent', 'executors.js'), 'utf8');
+  const casos = src.split(/\n    case /).filter(c => /await run\(/.test(c));
+  ok(casos.length >= 3, 'se esperan varias herramientas que lanzan procesos (' + casos.length + ')');
+  for (const c of casos) {
+    const nombre = (c.match(/^'([a-z_]+)'/) || [])[1] || '?';
+    ok(/registerKillable/.test(c), `la herramienta ${nombre} no registra cómo cancelarse al pulsar Detener`);
+  }
+  ok(/sendVK\(vk, ctx\.registerKillable\)/.test(src), 'media_control también pasa la cancelación');
+});
+
 /* Los tests async registrados más arriba (la descarga del actualizador) todavía
    no han terminado: hay que esperarlos ANTES de borrar sus temporales. */
 while (pendingAsync.length) await Promise.all(pendingAsync.splice(0));

@@ -86,11 +86,11 @@ const clip = (s, n = 8000) => {
 
 const MEDIA_KEYS = { play_pause: 0xB3, next: 0xB0, previous: 0xB1, volume_up: 0xAF, volume_down: 0xAE, mute: 0xAD };
 
-async function sendVK(vk) {
+async function sendVK(vk, registerKillable) {
   const ps = `
 Add-Type -Namespace J -Name K -MemberDefinition '[DllImport("user32.dll")] public static extern void keybd_event(byte k, byte s, uint f, UIntPtr e);'
 [J.K]::keybd_event(${vk},0,0,[UIntPtr]::Zero); Start-Sleep -m 40; [J.K]::keybd_event(${vk},0,2,[UIntPtr]::Zero)`;
-  return run(`powershell -NoProfile -Command "${ps.replace(/"/g, '\\"')}"`, { timeout: 15000 });
+  return run(`powershell -NoProfile -Command "${ps.replace(/"/g, '\\"')}"`, { timeout: 15000, registerKillable });
 }
 
 // ---- File helpers -------------------------------------------------------
@@ -244,7 +244,7 @@ async function executeTool(name, args, ctx) {
       const n = String(args.name ?? '');
       if (!n.trim()) return 'Error: falta el nombre de la aplicación.';
       if (/["&|^<>%\r\n]/.test(n)) return 'Error: el nombre de la aplicación no puede contener comillas ni metacaracteres de cmd (" & | ^ < > %) ni saltos de línea.';
-      const r = await run(`start "" "${n}"`, { timeout: 15000 });
+      const r = await run(`start "" "${n}"`, { timeout: 15000, registerKillable: ctx.registerKillable });
       return r.code === 0 ? `OK: intentando abrir "${n}"` : `Error: ${r.stderr}`;
     }
     case 'open_url': {
@@ -276,7 +276,7 @@ async function executeTool(name, args, ctx) {
     case 'media_control': {
       const vk = MEDIA_KEYS[args.action];
       if (!vk) return 'Acción desconocida';
-      await sendVK(vk);
+      await sendVK(vk, ctx.registerKillable);
       return `OK: ${args.action}`;
     }
     case 'window_manage': {
@@ -288,7 +288,7 @@ async function executeTool(name, args, ctx) {
       const cmd = args.action === 'show_desktop'
         ? `powershell -NoProfile -Command "(New-Object -ComObject Shell.Application).ToggleDesktop()"`
         : `powershell -NoProfile -Command "(New-Object -ComObject Shell.Application).MinimizeAll()"`;
-      await run(cmd, { timeout: 15000 });
+      await run(cmd, { timeout: 15000, registerKillable: ctx.registerKillable });
       return `OK: ${args.action}`;
     }
     case 'system_info': {
