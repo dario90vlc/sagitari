@@ -638,7 +638,7 @@ function toolChip(text, state) {
 }
 
 /* ---- plan del modo PLAN: se pinta como checklist y se marca al avanzar ---- */
-function renderPlanCard(container, steps, before) {
+function renderPlanCard(container, steps, before, prev) {
   const card = document.createElement('div');
   card.className = 'plancard';
   card.innerHTML = `<div class="plancard-head">${ic('map')}<b>PLAN</b><span class="pl-count"></span></div>`
@@ -647,11 +647,16 @@ function renderPlanCard(container, steps, before) {
   else container.appendChild(card);
   const count = card.querySelector('.pl-count');
   const items = [...card.querySelectorAll('li')];
-  count.textContent = `${steps.length} pasos`;
+  /* Al repintar la tarjeta (el plan creció tras el último delta) se conservan los
+     pasos ya cumplidos: si no, volvían a aparecer pendientes y el contador se
+     reiniciaba a 0. */
+  const done = Math.max(0, Math.min(prev ? (prev.done || 0) : 0, items.length));
+  for (let i = 0; i < done; i++) items[i].classList.add('done');
+  count.textContent = done ? `${done}/${items.length} pasos` : `${steps.length} pasos`;
   return {
     el: card,
     total: items.length,
-    done: 0,
+    done,
     next() {
       const cur = items[this.done];
       if (!cur) return;
@@ -715,8 +720,9 @@ function finishAssistant(finalText, opts) {
         pendingTurn.plan = renderPlanCard(holder, parsed.steps);
         pendingTurn.plan.next();
       } else if (parsed.steps.length > current.total) {
-        // el plan creció tras el último delta: se repinta completo, en su sitio
-        pendingTurn.plan = renderPlanCard(holder, parsed.steps, current.el);
+        // el plan creció tras el último delta: se repinta completo, en su sitio,
+        // conservando los pasos ya cumplidos (prev = tarjeta anterior)
+        pendingTurn.plan = renderPlanCard(holder, parsed.steps, current.el, current);
         pendingTurn.plan.next();
         current.el.remove();
       }
@@ -897,6 +903,18 @@ async function renderHabits() {
   box.innerHTML = parts.filter(Boolean).join('') || '<div class="subnote">Aún no hay hábitos observados. Se aprenden solo de lo que SAGITARI hace por ti.</div>';
 }
 
+/** Resumen legible de una importación: instaladas y omitidas (con el motivo). */
+function importSummary(inst) {
+  const list = Array.isArray(inst) ? inst : [];
+  const ok = list.filter(s => !s.skipped).map(s => s.name);
+  const omitidas = list.filter(s => s.skipped);
+  let txt = ok.length ? 'Instaladas: ' + ok.join(', ') : 'No se instaló ninguna skill';
+  if (omitidas.length) {
+    txt += ' · Omitidas: ' + omitidas.map(s => s.name + (s.reason ? ' (' + s.reason + ')' : '')).join(', ');
+  }
+  return txt;
+}
+
 // v1.7: marketplace de skills
 async function renderMarket() {
   const box = $('#marketList');
@@ -915,7 +933,7 @@ async function renderMarket() {
       $('#marketMsg').textContent = 'Instalando ' + b.dataset.install + '…';
       try {
         const inst = await window.sagitari.skillsImport(b.dataset.install);
-        $('#marketMsg').textContent = 'Instaladas: ' + inst.map(s => s.name).join(', ');
+        $('#marketMsg').textContent = importSummary(inst);
         renderSkills();
       } catch (e) { $('#marketMsg').textContent = 'Error: ' + (e.message || e); }
       renderMarket();
@@ -1186,24 +1204,58 @@ window.sagitari.onAgentEvent((ev) => {
 function glowOffSoon() { setTimeout(() => window.sagitari.glow('off'), 2600); }
 
 // ============ v1.1: confirmación de acciones + métricas de ejecución ============
+/* Cola FIFO de confirmaciones: con varias tareas en background (Ajustes permite
+   hasta 4) el agente pide permiso más de una vez. Antes había una sola
+   confirmación «en vuelo» y la segunda pisaba el contenido de la barra: la
+   primera ya no se podía responder y su tarea esperaba al timeout. Ahora se
+   muestra la primera de la cola y, al resolverla, la siguiente. */
+const confirmQueue = [];
 let currentConfirm = null;
+
 function showConfirm(ev) {
-  currentConfirm = ev;
+  confirmQueue.push(ev);
+  if (confirmQueue.length > 1) feed('Confirmación en cola (' + confirmQueue.length + ' pendientes): ' + ev.tool, 'blu');
+  paintConfirm();
+}
+
+/** Pinta la confirmación que toca (la primera de la cola) o esconde la barra. */
+function paintConfirm() {
   const bar = $('#confirmBar');
+  const ev = confirmQueue[0];
+  currentConfirm = ev || null;
+  if (!ev) { if (bar) bar.hidden = true; return; }
   const who = ev.runId ? ' (tarea en background)' : '';
-  $('#confirmTitle').textContent = 'El agente quiere: ' + (ev.description || ev.tool) + who;
+  // con varias esperando se dice cuál se está viendo: «1 de 3»
+  const prog = confirmQueue.length > 1 ? ' · 1 de ' + confirmQueue.length : '';
+  $('#confirmTitle').textContent = 'El agente quiere: ' + (ev.description || ev.tool) + who + prog;
   $('#confirmDetail').textContent = ev.summary ? String(ev.summary).slice(0, 240) : 'Herramienta: ' + ev.tool;
   bar.hidden = false;
+  // al mostrarse es un diálogo modal de aviso: el lector de pantalla lo anuncia
+  bar.setAttribute('role', 'alertdialog');
+  bar.setAttribute('aria-live', 'assertive');
   // con el foco en el chat la única salida era el ratón: se enfoca «Permitir» y
   // Escape/Enter resuelven la confirmación con teclado
   const ok = $('#confirmOk');
   if (ok) ok.focus();
   feed('Esperando tu confirmación: ' + ev.tool, 'blu');
 }
-function hideConfirm() { currentConfirm = null; $('#confirmBar').hidden = true; }
+
+function hideConfirm() {
+  // la que estaba a la vista ya no puede responderse (el turno acabó): se
+  // descarta y, si quedaban más esperando, se muestra la siguiente
+  if (currentConfirm && confirmQueue[0] === currentConfirm) confirmQueue.shift();
+  currentConfirm = null;
+  const bar = $('#confirmBar');
+  if (bar) bar.hidden = true;
+  if (confirmQueue.length) paintConfirm();
+}
 async function resolveConfirm(allow) {
-  const c = currentConfirm;
-  hideConfirm();
+  // se responde SIEMPRE a la primera de la cola, que es la que está a la vista
+  const c = confirmQueue.shift() || currentConfirm;
+  currentConfirm = null;
+  const bar = $('#confirmBar');
+  if (confirmQueue.length) paintConfirm();
+  else if (bar) bar.hidden = true;
   if (c) await window.sagitari.secResolve(c.id, allow, c.runId);
 }
 $('#confirmOk').onclick = () => resolveConfirm(true);
@@ -1237,7 +1289,17 @@ function askConfirm(anchor, message, detail) {
       </div>`;
     bar.querySelector('b').textContent = message;
     bar.querySelector('small').textContent = detail || 'Esta acción no se puede deshacer.';
+    let done = false;
+    /* Las vistas se repintan con `innerHTML = ''` (renderTasks, renderHistory,
+       renderMemory, renderSkills…), lo que arrancaba la barra del DOM sin pasar
+       por finish(): la promesa quedaba pendiente para siempre (el botón que la
+       espera, disabled) y el listener de teclado, vivo. El observador la cierra
+       como cancelada en cuanto deja de estar conectada. */
+    const mo = new MutationObserver(() => { if (!bar.isConnected) finish(false); });
     const finish = (v) => {
+      if (done) return;                 // una barra se resuelve UNA vez
+      done = true;
+      mo.disconnect();
       document.removeEventListener('keydown', onKey, true);
       bar.remove();
       resolve(v);
@@ -1254,6 +1316,7 @@ function askConfirm(anchor, message, detail) {
     if (anchor && anchor.parentNode) anchor.parentNode.insertBefore(bar, anchor.nextSibling);
     else if (view) view.insertBefore(bar, view.firstChild);
     else document.body.appendChild(bar);
+    mo.observe(document.body, { childList: true, subtree: true });
     bar.querySelector('[data-ok]').focus();
   });
 }
@@ -1434,8 +1497,10 @@ async function addAttachmentFiles(files) {
 }
 
 $('#chatAttach').onclick = async () => {
-  const paths = await window.sagitari.attachmentsPick();
-  for (const p of (paths || [])) await addAttachmentPath(p);
+  try {
+    const paths = await window.sagitari.attachmentsPick();
+    for (const p of (paths || [])) await addAttachmentPath(p);
+  } catch (e) { showToast('No se pudieron adjuntar archivos: ' + ((e && e.message) || e)); }
 };
 
 // drag & drop sobre toda la vista del chat
@@ -1741,7 +1806,10 @@ $('#wsPick').onclick = async () => {
   if (r && r.ok) { $('#wsPath').value = r.path; showToast('Espacio de trabajo: ' + r.path); }
 };
 $('#swTts').onclick = async (e) => { const on = !e.currentTarget.classList.contains('on'); e.currentTarget.classList.toggle('on', on); await window.sagitari.setSettings({ ttsEnabled: on }); };
-$('#voiceLang').onchange = (e) => window.sagitari.setSettings({ voiceLang: e.target.value });
+$('#voiceLang').onchange = async (e) => {
+  try { await window.sagitari.setSettings({ voiceLang: e.target.value }); }
+  catch (err) { showToast('No se pudo guardar el idioma de voz'); }
+};
 
 // ---- apariencia: aplicar al vuelo y persistir ----
 function refreshGlowLabels() {
@@ -1777,7 +1845,11 @@ $('#glowStrength').oninput = (e) => {
   clearTimeout(glowSaveTimer);
   glowSaveTimer = setTimeout(() => window.sagitari.setSettings({ glowStrength: Number(e.target.value) }), 250);
 };
-$('#setUserName').onchange = (e) => { window.sagitari.setSettings({ userName: e.target.value }); CFG.settings.userName = e.target.value; };
+$('#setUserName').onchange = async (e) => {
+  CFG.settings.userName = e.target.value;
+  try { await window.sagitari.setSettings({ userName: e.target.value }); }
+  catch (err) { showToast('No se pudo guardar tu nombre'); }
+};
 
 // ---- seguridad: permisos por herramienta + guardarraíles (v1.1) ----
 const PERM_TOOLS = [
@@ -1920,12 +1992,19 @@ function filterSettings(query) {
   if (!wrap) return;
   const q = String(query || '').trim().toLowerCase();
   wrap.classList.toggle('searching', !!q);
+  // Con búsqueda activa se muestran TODOS los paneles (CSS .setwrap.searching
+  // .setpanel), así que cuentan las filas de cualquiera de ellos; sin búsqueda
+  // solo hay abierto el panel con .on. Contar las filas de un panel cerrado
+  // (display:none) daba por buena una búsqueda cuyo único resultado no se veía
+  // y, además, ocultaba el aviso «Ningún ajuste coincide».
+  const buscando = wrap.classList.contains('searching');
   let shown = 0;
   wrap.querySelectorAll(SET_ROWS).forEach(row => {
     const hay = ((row.dataset.keys || '') + ' ' + row.textContent).toLowerCase();
     const hit = !q || hay.includes(q);
     row.hidden = !hit;
-    if (hit) shown++;
+    const panel = row.closest('.setpanel');
+    if (hit && (buscando || !panel || panel.classList.contains('on'))) shown++;
   });
   wrap.querySelectorAll('.setcard').forEach(card => {
     card.hidden = !!q && ![...card.querySelectorAll(SET_ROWS)].some(r => !r.hidden);
@@ -2043,8 +2122,9 @@ function renderUpdate(state) {
     available: !!v.available, ready: v.ready || null, status: v.status || 'idle',
     error: v.error || null, progress: v.progress || null
   };
-  // un archivo con verificación fallida no existe: main ya lo descartó
-  const ready = s.ready && s.ready.verified !== false ? s.ready : null;
+  // un archivo con verificación fallida no existe (main lo descarta): `verified`
+  // sólo puede valer true cuando hay algo listo para instalar
+  const ready = s.ready && s.ready.verified === true ? s.ready : null;
 
   const ver = updVer(s.current);
   const cur = $('#updCurrent'); if (cur) cur.textContent = ver;
@@ -2105,7 +2185,6 @@ function renderUpdate(state) {
   const notes = [];
   if (s.kind === 'dev') notes.push('Estás ejecutando desde el código fuente; para actualizarte, compila o usa el instalador.');
   if (ready) {
-    if (ready.verified === null) notes.push('No había firma publicada para comparar, así que el archivo se descargó sin verificar.');
     if (s.kind === 'nsis') notes.push('La app se cerrará para instalarse. Vuelve a abrirla cuando termine.');
     if (s.kind === 'portable') notes.push('Cierra la app y ejecuta el archivo nuevo desde la carpeta que se abrirá.');
   }
@@ -2272,7 +2351,14 @@ function setChatTitle(t) {
   h.textContent = convTitle;
   h.title = convTitle;   // se trunca con ellipsis: la pista completa va en el title
   // sincroniza el título con la conversación real en el historial
-  if (t) window.sagitari.convRename && window.sagitari.convRename(t);
+  if (t) {
+    // fire-and-forget: si el IPC rechaza, el fallo se avisa aquí en vez de
+    // acabar como promesa sin manejar (burbuja roja en el chat)
+    try {
+      const p = window.sagitari.convRename && window.sagitari.convRename(t);
+      if (p && p.catch) p.catch(() => showToast('No se pudo guardar el nombre de la conversación'));
+    } catch { showToast('No se pudo guardar el nombre de la conversación'); }
+  }
 }
 
 async function renderHistory() {
@@ -2289,7 +2375,8 @@ async function renderHistory() {
     it.className = 'hitem';
     // fila operable con teclado: era un div con click, invisible para el tabulador
     it.setAttribute('tabindex', '0');
-    it.setAttribute('role', 'button');
+    // sin role=button: la fila CONTIENE un botón (eliminar) y un solo rol
+    // anunciaría un botón que en realidad tiene dos acciones
     it.setAttribute('aria-label', 'Abrir la conversación «' + c.title + '»');
     it.title = c.title;
     const d = new Date(c.updatedAt);
@@ -2554,13 +2641,16 @@ $('#skillImportBtn').onclick = async () => {
   btn.disabled = true;
   try {
     const inst = await window.sagitari.skillsImport(repo);
-    msg.textContent = 'Importadas: ' + inst.map(s => s.name).join(', ');
+    msg.textContent = importSummary(inst);
     inp.value = '';
     renderSkills();
   } catch (err) { msg.textContent = 'Error: ' + (err.message || err); }
   finally { btn.disabled = false; }
 };
-$('#skillsFolderBtn').onclick = () => window.sagitari.skillsOpenFolder();
+$('#skillsFolderBtn').onclick = async () => {
+  try { await window.sagitari.skillsOpenFolder(); }
+  catch (e) { showToast('No se pudo abrir la carpeta de skills: ' + ((e && e.message) || e)); }
+};
 $('#skillCreateBtn').onclick = async () => {
   const btn = $('#skillCreateBtn');
   if (btn.disabled) return;
@@ -2634,7 +2724,7 @@ async function renderTasks() {
     const sched = t.status === 'scheduled' && t.scheduledAt ? `<small class="md">→ ${new Date(t.scheduledAt).toLocaleString('es')}</small><br>` : '';
     // fila operable con teclado; el borrado no se ofrece mientras la tarea corre
     it.setAttribute('tabindex', '0');
-    it.setAttribute('role', 'button');
+    // sin role=button: la fila lleva botones propios (pausar, reanudar, borrar…)
     it.setAttribute('aria-label', 'Tarea: ' + (t.goal || 'sin objetivo') + ' — ' + st.label);
     it.title = t.goal || '(sin objetivo)';
     it.innerHTML = `<div class="hic">${ic('history')}</div>
@@ -2754,16 +2844,21 @@ $('#projOpen').onclick = async () => {
   const btn = $('#projOpen');
   btn.disabled = true;
   $('#projMsg').textContent = 'Abriendo…';
-  const r = await window.sagitari.openPath($('#projPath').value);
-  btn.disabled = false;
-  if (r && r.ok) {
-    $('#projMsg').textContent = 'Espacio de trabajo activo: ' + (r.workspace || r.path);
-    $('#wsPath').value = r.workspace || r.path;
-    feed('Espacio de trabajo: ' + (r.workspace || r.path), 'ok');
-  } else {
-    $('#projMsg').textContent = (r && r.error) || 'No se pudo abrir la ruta.';
+  try {
+    const r = await window.sagitari.openPath($('#projPath').value);
+    if (r && r.ok) {
+      $('#projMsg').textContent = 'Espacio de trabajo activo: ' + (r.workspace || r.path);
+      $('#wsPath').value = r.workspace || r.path;
+      feed('Espacio de trabajo: ' + (r.workspace || r.path), 'ok');
+    } else {
+      $('#projMsg').textContent = (r && r.error) || 'No se pudo abrir la ruta.';
+    }
+  } catch (e) {
+    $('#projMsg').textContent = (e && e.message) || 'No se pudo abrir la ruta.';
+  } finally {
+    btn.disabled = false;
+    setTimeout(() => { $('#projMsg').textContent = ''; }, 4000);
   }
-  setTimeout(() => { $('#projMsg').textContent = ''; }, 4000);
 };
 $('#projPick').onclick = async () => {
   const r = await window.sagitari.pickFolder();
@@ -2794,6 +2889,9 @@ function showToast(text) {
   document.querySelectorAll('.toast').forEach(t => t.remove());
   const t = document.createElement('div');
   t.className = 'toast';
+  // aviso no bloqueante: el lector de pantalla lo anuncia sin robar el foco
+  t.setAttribute('role', 'status');
+  t.setAttribute('aria-live', 'polite');
   t.innerHTML = `<span class="dot pur"></span>${esc(text)}`;
   document.body.appendChild(t);
   setTimeout(() => t.remove(), 3200);
@@ -2889,7 +2987,10 @@ window.sagitari.onThemeChanged && window.sagitari.onThemeChanged(() => applyThem
   feed('Sagitari iniciado', 'ok');
   feed('Esperando peticiones', 'blu');
   if (!CFG.active) {
-    const b = ensureAssistantBubble();
+    // bienvenida SIN abrir turno: con ensureAssistantBubble quedaban vivos
+    // pendingAssistant/pendingTurn y el primer mensaje real se escribía dentro
+    // de esta misma burbuja, heredando el modo del arranque
+    const b = bubble('ai');
     b.innerHTML = fmt('**Sagitari online.** Antes de hablar conmigo, ve a **Ajustes** y activa un proveedor y modelo (OpenCode Go, OpenRouter, Ollama…).');
   }
   // recupera la conversación activa si la app se cerró a medias

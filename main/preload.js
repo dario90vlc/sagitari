@@ -1,5 +1,14 @@
 const { contextBridge, ipcRenderer, webUtils } = require('electron');
 
+/* Suscripción con baja. Cada on* devuelve la función que la cancela: sin ella,
+   volver a llamar a un on* (reinit del renderer, recableado de estado) dejaba
+   dos listeners vivos y el mismo evento se atendía dos veces. */
+const on = (channel, make) => (cb) => {
+  const h = (e, ...args) => cb(...make(args));
+  ipcRenderer.on(channel, h);
+  return () => ipcRenderer.removeListener(channel, h);
+};
+
 contextBridge.exposeInMainWorld('sagitari', {
   // Electron ≥32 eliminó File.path: la ruta real de un archivo soltado/pegado
   // sólo se obtiene por aquí (compatible con sandbox: true)
@@ -17,25 +26,25 @@ contextBridge.exposeInMainWorld('sagitari', {
   retryChat: () => ipcRenderer.invoke('chat:retry'),
   clearChat: () => ipcRenderer.invoke('chat:clear'),
   glow: (mode, color) => ipcRenderer.send('glow:set', { mode, color }),
-  onAgentEvent: (cb) => ipcRenderer.on('agent:event', (e, ev) => cb(ev)),
-  onGlow: (cb) => ipcRenderer.on('glow:set', (e, v) => cb(v)),
+  onAgentEvent: on('agent:event', ([ev]) => [ev]),
+  onGlow: on('glow:set', ([v]) => [v]),
   voiceStart: () => ipcRenderer.invoke('voice:start'),
   voiceStop: () => ipcRenderer.invoke('voice:stop'),
-  onVoice: (cb) => ipcRenderer.on('voice:partial', (e, t) => cb('partial', t)),
-  onVoiceFinal: (cb) => ipcRenderer.on('voice:final', (e, t) => cb('final', t)),
-  onVoiceReady: (cb) => ipcRenderer.on('voice:ready', (e, t) => cb('ready', t)),
-  onVoiceMode: (cb) => ipcRenderer.on('voice:mode', (e, t) => cb('mode', t)),
-  onVoiceHint: (cb) => ipcRenderer.on('voice:hint', (e, t) => cb('hint', t)),
-  onVoiceStopped: (cb) => ipcRenderer.on('voice:stopped', () => cb('stopped')),
-  onVoiceError: (cb) => ipcRenderer.on('voice:error', (e, t) => cb('error', t)),
+  onVoice: on('voice:partial', ([t]) => ['partial', t]),
+  onVoiceFinal: on('voice:final', ([t]) => ['final', t]),
+  onVoiceReady: on('voice:ready', ([t]) => ['ready', t]),
+  onVoiceMode: on('voice:mode', ([t]) => ['mode', t]),
+  onVoiceHint: on('voice:hint', ([t]) => ['hint', t]),
+  onVoiceStopped: on('voice:stopped', () => ['stopped']),
+  onVoiceError: on('voice:error', ([t]) => ['error', t]),
   speak: (text) => ipcRenderer.invoke('tts:speak', text),
-  onTtsDone: (cb) => ipcRenderer.on('tts:done', () => cb()),
-  onThemeChanged: (cb) => ipcRenderer.on('theme:changed', (e, v) => cb(v)),
+  onTtsDone: on('tts:done', () => []),
+  onThemeChanged: on('theme:changed', ([v]) => [v]),
   quit: () => ipcRenderer.invoke('app:quit'),
   openExternal: (url) => ipcRenderer.invoke('app:openExternal', url),
   minimize: () => ipcRenderer.invoke('app:minimize'),
   maximize: () => ipcRenderer.invoke('app:maximize'),
-  onWinState: (cb) => ipcRenderer.on('win:maximized', (e, v) => cb(v)),
+  onWinState: on('win:maximized', ([v]) => [v]),
   openPath: (p) => ipcRenderer.invoke('shell:openPath', p),
   openDataDir: () => ipcRenderer.invoke('app:openDataDir'),
   pickFolder: () => ipcRenderer.invoke('shell:pickFolder'),
@@ -84,5 +93,5 @@ contextBridge.exposeInMainWorld('sagitari', {
   updateDownload: () => ipcRenderer.invoke('update:download'),
   updateInstall: () => ipcRenderer.invoke('update:install'),
   updatePage: () => ipcRenderer.invoke('update:page'),
-  onUpdate: (cb) => ipcRenderer.on('update:event', (e, ev) => cb(ev))
+  onUpdate: on('update:event', ([ev]) => [ev])
 });
