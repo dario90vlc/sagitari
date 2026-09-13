@@ -1919,6 +1919,85 @@ test('runlog: escribe, se lee y rota por bytes reales', async () => {
   runlog.__test._resetForTests({});
 });
 
+/* ---------- un solo camino de ejecución de herramientas ---------- */
+const { Agent: AgentCls } = require('../agent/agent');
+const guardrailsMod = require('../agent/guardrails');
+
+const fakeCtx = (extra = {}) => ({
+  signal: new AbortController().signal,
+  settings: { settings: {} },
+  ...extra,
+});
+const toolCall = (name, args) => ({ id: 't1', function: { name, arguments: typeof args === 'string' ? args : JSON.stringify(args || {}) } });
+
+test('herramientas: una inventada no llega a pedir permiso', async () => {
+  const ev = [];
+  const a = new AgentCls({ emit: (e) => ev.push(e) });
+  const r = await a._runToolCall(toolCall('borrar_todo', {}), fakeCtx());
+  eq(r.action, 'unknown', 'no puede ejecutarse ni pedir confirmación');
+  ok(!ev.some(e => e.type === 'confirm_request'), 'el usuario no ve una tarjeta por una herramienta que no existe');
+  eq(a.meta.toolCalls, 0);
+});
+
+test('herramientas: argumentos ilegibles no ejecutan nada', async () => {
+  const a = new AgentCls({ emit: () => {} });
+  const r = await a._runToolCall(toolCall('write_file', '{"path":'), fakeCtx());
+  eq(r.action, 'bad-args');
+  ok(/no son JSON válido/.test(r.text), 'se lo dice al modelo para que reenvíe la llamada');
+  eq(a.meta.toolCalls, 0);
+});
+
+test('herramientas: una restringida se bloquea sin ejecutarse', async () => {
+  const a = new AgentCls({ emit: () => {}, guardrailsPolicy: { permissions: { screenshot: 'restricted' } } });
+  const r = await a._runToolCall(toolCall('screenshot', {}), fakeCtx());
+  eq(r.action, 'denied');
+  eq(r.reason, 'restricted');
+  eq(a.meta.toolCalls, 0);
+});
+
+test('herramientas: el subagente no puede salirse de su lista', async () => {
+  const subagentsMod = require('../agent/subagents');
+  const a = new AgentCls({ emit: () => {} });
+  const tools = subagentsMod.toolDefsFor('research');
+  const r = await a._runToolCall(toolCall('run_command', { command: 'whoami' }), fakeCtx({ tools, noDelegate: true }));
+  eq(r.action, 'not-allowed', 'research no tiene terminal');
+  ok(/no está disponible/.test(r.text));
+  eq(a.meta.toolCalls, 0, 'no se ha ejecutado ningún comando');
+  const d = await a._runToolCall(toolCall('delegate', { agent: 'research', task: 'x' }), fakeCtx({ tools, noDelegate: true }));
+  eq(d.action, 'not-allowed');
+  ok(/no puede delegar/.test(d.text));
+});
+
+test('herramientas: una acción sensible pide confirmación y la denegación se explica', async () => {
+  const ev = [];
+  const a = new AgentCls({ emit: (e) => ev.push(e) });
+  const p = a._runToolCall(toolCall('clipboard', { action: 'read' }), fakeCtx());
+  // el agente emite la tarjeta y espera: se responde como haría la UI
+  await new Promise(r => setTimeout(r, 10));
+  const card = ev.find(e => e.type === 'confirm_request');
+  ok(card, 'leer el portapapeles pide permiso');
+  eq(card.sensitive, true);
+  ok(a.resolveConfirm(card.id, false), 'la confirmación pendiente es resolubible');
+  const r = await p;
+  eq(r.action, 'denied');
+  eq(r.reason, 'user');
+  ok(/DENEGÓ/.test(r.text));
+  eq(a.meta.toolCalls, 0);
+});
+
+test('guardrails: el reloj se reanuda aunque la confirmación se aborte', async () => {
+  const g = new guardrailsMod.Guardrails({ guardrails: { maxDurationMs: 5000 } });
+  g.beginRun();
+  const a = new AgentCls({ emit: () => {}, guardrailsPolicy: { guardrails: { maxDurationMs: 5000 } } });
+  a.guardrails = g;
+  const ac = new AbortController();
+  const p = a._awaitConfirm('c1', ac.signal);
+  eq(g._pausedAt > 0, true, 'el reloj queda parado mientras se espera');
+  ac.abort();
+  eq(await p, false, 'abortar resuelve la espera');
+  eq(g._pausedAt, 0, 'y el reloj vuelve a correr');
+});
+
 /* Los tests async registrados más arriba (la descarga del actualizador) todavía
    no han terminado: hay que esperarlos ANTES de borrar sus temporales. */
 while (pendingAsync.length) await Promise.all(pendingAsync.splice(0));

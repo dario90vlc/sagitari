@@ -496,102 +496,59 @@ class Agent {
 
         for (const tc of res.toolCalls) {
           if (signal.aborted) { closePendingCalls('(no ejecutada: ejecución detenida por el usuario)'); break; }
-          let args = {};
-          let argsError = null;
-          try { args = JSON.parse(tc.function.arguments || '{}'); }
-          catch { argsError = 'Error: los argumentos de la herramienta no son JSON válido. Reenvía la llamada con argumentos correctos (objeto JSON).'; }
-          this.emit({ type: 'tool', name: tc.function.name, args });
-          this.emit({ type: 'status', text: statusFor(tc.function.name, args) });
           const tf = this.toolsFired.get(tc.function.name) || { count: 0, lastAt: 0 };
           this.toolsFired.set(tc.function.name, { count: tf.count + 1, lastAt: Date.now() });
+          const toolT0 = Date.now();
 
-          // Argumentos ilegibles: NO se ejecuta nada (antes se ejecutaba con {}
-          // y write_file acababa escribiendo en el workspace por un `path` vacío)
-          if (argsError) {
+          // un solo camino de ejecución (permisos, límites, confirmación y errores
+          // incluidos) compartido con los subagentes
+          const r = await this._runToolCall(tc, {
+            signal, settings, task,
+            onStatus: (text) => this.emit({ type: 'status', text }),
+          });
+          const guardar = (text, modelContent) => {
             answered.add(tc.id);
-            messages.push({ role: 'tool', tool_call_id: tc.id, name: tc.function.name, content: argsError });
-            this.history.push({ role: 'tool', tool_call_id: tc.id, name: tc.function.name, content: argsError });
-            this.emit({ type: 'tool_result', name: tc.function.name, result: argsError, ok: false, durationMs: Date.now() - toolT0 });
-            continue;
-          }
+            messages.push({ role: 'tool', tool_call_id: tc.id, name: tc.function.name, content: modelContent === undefined ? text : modelContent });
+            this.history.push({ role: 'tool', tool_call_id: tc.id, name: tc.function.name, content: text });
+          };
 
-          // ---- guardrail: límite de llamadas + detección de bucles ----
-          const callCheck = this.guardrails.checkToolCall();
-          if (!callCheck.ok) { this.emit({ type: 'guardrail', reason: callCheck.reason }); closePendingCalls('(no ejecutada: límite de llamadas alcanzado)'); break; }
-          const loop = this.guardrails.isLoop(tc.function.name, args);
-          if (loop.loop) {
-            const reason = `Bucle detectado (${loop.pattern}): la misma acción se repite sin avanzar. Ejecución detenida para proteger el sistema.`;
+          if (r.action === 'limit') {
+            this.emit({ type: 'guardrail', reason: r.reason });
+            closePendingCalls('(no ejecutada: límite de llamadas alcanzado)');
+            break;
+          }
+          if (r.action === 'loop') {
+            const reason = `Bucle detectado (${r.pattern}): la misma acción se repite sin avanzar. Ejecución detenida para proteger el sistema.`;
             this.emit({ type: 'status', text: 'Bucle detectado — detenido' });
             this.emit({ type: 'guardrail', reason });
-            runlog.log({ agent: 'sagitari', task: taskId, event: 'loop_detected', tool: tc.function.name, pattern: loop.pattern });
+            runlog.log({ agent: 'sagitari', task: taskId, event: 'loop_detected', tool: tc.function.name, pattern: r.pattern });
             closePendingCalls('(no ejecutada: bucle detectado)');
             if (task && !task.closed) checkpoints.interrupt(task);
             this._pushAssistant(assistantSaidSomething ? { role: 'assistant', content: '(detenido: bucle detectado)' } : null);
             return;
           }
-
-          // ---- permisos: safe → ejecuta; confirm → pregunta; restricted → bloquea ----
-          const toolT0 = Date.now();
-          const decision = this.guardrails.decide(tc.function.name, args);
-          if (decision.action === 'deny') {
-            const text = decision.reason;
-            answered.add(tc.id);
-            messages.push({ role: 'tool', tool_call_id: tc.id, name: tc.function.name, content: text });
-            this.history.push({ role: 'tool', tool_call_id: tc.id, name: tc.function.name, content: text });
-            this.emit({ type: 'tool_result', name: tc.function.name, result: text.slice(0, 1200), ok: false, durationMs: Date.now() - toolT0 });
+          if (r.action === 'aborted') { closePendingCalls('(no ejecutada: ejecución detenida)'); break; }
+          if (r.action !== 'ok') {
+            // rechazada sin ejecutar (argumentos ilegibles, herramienta fuera de
+            // alcance o desconocida, o denegada): se responde y el turno continúa
+            if (r.action === 'denied' && r.reason === 'user') {
+              try { habits.observe('confirm', { approved: false, tool: tc.function.name }); } catch {}
+            }
+            guardar(r.text);
+            this.emit({
+              type: 'tool_result', name: tc.function.name, ok: false, durationMs: Date.now() - toolT0,
+              result: (r.action === 'denied' && r.reason === 'user') ? 'Denegado por el usuario' : String(r.text).slice(0, 1200),
+            });
             continue;
           }
-          if (decision.action === 'confirm') {
-            const cid = newConfirmId('c');
-            this.emit({ type: 'confirm_request', id: cid, tool: tc.function.name, description: decision.description, summary: decision.summary, sensitive: decision.sensitive, runId: (task && !task.closed) ? task.runId : undefined });
-            runlog.log({ agent: 'sagitari', task: taskId, event: 'confirm_request', tool: tc.function.name, args });
-            const approved = await this._awaitConfirm(cid, signal);
-            if (!approved) {
-              // abortado (Detener / tarea cancelada) mientras esperábamos: no es una negativa del usuario
-              if (signal.aborted) { closePendingCalls('(no ejecutada: ejecución detenida)'); break; }
-              try { habits.observe('confirm', { approved: false, tool: tc.function.name }); } catch {}
-              const text = 'El usuario DENEGÓ esta acción. No la repitas; continúa con la tarea por otra vía o pregunta qué prefiere hacer.';
-              answered.add(tc.id);
-              messages.push({ role: 'tool', tool_call_id: tc.id, name: tc.function.name, content: text });
-              this.history.push({ role: 'tool', tool_call_id: tc.id, name: tc.function.name, content: text });
-              this.emit({ type: 'tool_result', name: tc.function.name, result: 'Denegado por el usuario', ok: false, durationMs: Date.now() - toolT0 });
-              continue;
-            }
-            try { habits.observe('confirm', { approved: true, tool: tc.function.name }); } catch {}
-            this.guardrails.approve(decision.signature);
-          }
 
-          let result;
-          try {
-            if (tc.function.name === 'delegate') {
-              const spec = subagents.SUBAGENTS[String(args.agent || '')];
-              if (!spec) {
-                result = `Error: subagente desconocido "${args.agent}". Disponibles: ${subagents.SUBAGENT_KEYS.join(', ')}.`;
-              } else {
-                result = await this._delegate(spec, args, { settings, screenshotFn: this.screenshotFn, browser: this.browser });
-              }
-            } else {
-            result = await executeTool(tc.function.name, args, {
-              emit: (e) => this.emit(e),
-              screenshotFn: this.screenshotFn,
-              browser: this.browser,
-              settings,
-              home: os.homedir(),
-              workspace: (settings.settings && settings.settings.workspace) || path.join(os.homedir(), 'Desktop', 'Sagitari'),
-              registerKillable: (k) => { this.runningTool = k; }   // para poder matar el comando al Detener
-            });
-            }
-          } catch (e) { result = 'Error: ' + e.message; }
-          this.runningTool = null;
-          this.meta.toolCalls++;
-          const images = result && typeof result === 'object' ? result.images : undefined;
-          const text = result && typeof result === 'object' ? result.text : String(result);
-          const failed = typeof text === 'string' && text.startsWith('Error');
+          if (r.confirmed) { try { habits.observe('confirm', { approved: true, tool: tc.function.name }); } catch {} }
+          const { text, images, failed } = r;
           // v2.0: observar hábitos del usuario (hechos de uso, no conversación)
-          try { habits.observe('tool', { name: tc.function.name, args }); } catch {}
+          try { habits.observe('tool', { name: tc.function.name, args: r.args }); } catch {}
           runlog.log({
             agent: 'sagitari', task: taskId, event: 'tool', tool: tc.function.name,
-            args, durationMs: Date.now() - toolT0,
+            args: r.args, durationMs: Date.now() - toolT0,
             success: !failed,
             error: failed ? String(text).slice(0, 200) : undefined,
           });
@@ -604,9 +561,7 @@ class Agent {
           const toolContent = images && cfg.vision !== false
             ? [{ type: 'text', text }, ...images.map(u => ({ type: 'image_url', image_url: { url: u } }))]
             : text;
-          answered.add(tc.id);
-          messages.push({ role: 'tool', tool_call_id: tc.id, name: tc.function.name, content: toolContent });
-          this.history.push({ role: 'tool', tool_call_id: tc.id, name: tc.function.name, content: text });
+          guardar(text, toolContent);
           // v2.0: la tarjeta del chat muestra el resultado completo posible, su
           // duración real y si falló, para que ver y entender sea lo mismo
           this.emit({ type: 'tool_result', name: tc.function.name, result: String(text).slice(0, 1200), ok: !failed, durationMs: Date.now() - toolT0 });
@@ -640,6 +595,110 @@ class Agent {
     Agent.CONFIRM_ROUTES.delete(cid);
     try { a.resolveConfirm(cid, approved); } catch {}
     return true;
+  }
+
+  /**
+   * Prepara y ejecuta UNA tool_call: argumentos, límites, permisos, confirmación,
+   * delegación y ejecución.
+   *
+   * Es el ÚNICO camino por el que se ejecuta una herramienta — lo usan el bucle
+   * principal y el de subagentes — así que cualquier corrección (permisos,
+   * límites, errores de formato) vale para los dos. Antes eran dos copias con
+   * divergencias silenciosas y cada arreglo había que hacerlo dos veces.
+   *
+   * ctx: { signal, settings, tools?, noDelegate?, task?, onStatus? }
+   *   tools: definiciones permitidas (los subagentes las filtran por spec)
+   *   task:  checkpoint de la tarea en curso (solo el bucle interactivo)
+   * Devuelve { action, text, images?, failed?, args?, reason?, pattern?, confirmed? }
+   * con action ∈ ok | denied | bad-args | not-allowed | unknown | limit | loop | aborted.
+   * En limit/loop/aborted la llamada queda SIN responder: el llamante decide cerrar
+   * las pendientes y salir.
+   */
+  async _runToolCall(tc, ctx = {}) {
+    const { signal, settings, tools, task, onStatus } = ctx;
+    const name = tc.function.name;
+    let args = {};
+    let argsError = null;
+    try { args = JSON.parse(tc.function.arguments || '{}'); }
+    catch { argsError = 'Error: los argumentos de la herramienta no son JSON válido. Reenvía la llamada con argumentos correctos (objeto JSON).'; }
+    this.emit({ type: 'tool', name, args });
+    if (onStatus) onStatus(statusFor(name, args));
+
+    // Argumentos ilegibles: NO se ejecuta nada (antes se ejecutaba con {} y
+    // write_file acababa escribiendo en el workspace por un `path` vacío)
+    if (argsError) return { action: 'bad-args', text: argsError, failed: true, args };
+    // Alcance: los subagentes solo usan sus herramientas… y una herramienta
+    // inexistente (alucinada) no debe llegar a pedir permiso al usuario
+    if (tools && !tools.some(d => d.function && d.function.name === name)) {
+      return {
+        action: 'not-allowed', failed: true, args,
+        text: ctx.noDelegate && name === 'delegate'
+          ? 'Error: un subagente no puede delegar a otro.'
+          : `Error: la herramienta «${name}» no está disponible para este subagente. Solo puedes usar: ${tools.map(d => d.function.name).join(', ')}.`,
+      };
+    }
+    if (!tools && !toolDefs.some(d => d.function && d.function.name === name)) {
+      return { action: 'unknown', failed: true, args, text: `Error: herramienta desconocida «${name}».` };
+    }
+
+    const callCheck = this.guardrails.checkToolCall();
+    if (!callCheck.ok) return { action: 'limit', reason: callCheck.reason, args };
+    const loop = this.guardrails.isLoop(name, args);
+    if (loop.loop) return { action: 'loop', pattern: loop.pattern, args };
+
+    // ---- permisos: safe → ejecuta; confirm → pregunta; restricted → bloquea ----
+    const decision = this.guardrails.decide(name, args);
+    let confirmed = false;
+    // decide() devuelve {action:'deny'} para las restringidas: al unificar los dos
+    // bucles esta comparación se escribió mal y una herramienta bloqueada por el
+    // usuario llegaba a ejecutarse (lo cazó un test de regresión)
+    if (decision.action === 'deny') return { action: 'denied', reason: 'restricted', text: decision.reason, failed: true, args };
+    if (decision.action === 'confirm') {
+      const cid = newConfirmId('c');
+      Agent.CONFIRM_ROUTES.set(cid, this);
+      this.emit({
+        type: 'confirm_request', id: cid, tool: name,
+        description: decision.description, summary: decision.summary, sensitive: decision.sensitive,
+        runId: (task && !task.closed) ? task.runId : undefined,
+      });
+      const approved = await this._awaitConfirm(cid, signal);
+      Agent.CONFIRM_ROUTES.delete(cid);
+      // abortado (Detener / tarea cancelada) mientras esperábamos: no es una negativa
+      if (signal.aborted) return { action: 'aborted', args };
+      if (!approved) {
+        return {
+          action: 'denied', reason: 'user', failed: true, args,
+          text: 'El usuario DENEGÓ esta acción. No la repitas; continúa con la tarea por otra vía o pregunta qué prefiere hacer.',
+        };
+      }
+      confirmed = true;
+      this.guardrails.approve(decision.signature);
+    }
+
+    let result;
+    try {
+      if (name === 'delegate') {
+        const spec = subagents.SUBAGENTS[String(args.agent || '')];
+        result = spec
+          ? await this._delegate(spec, args, { settings, signal, screenshotFn: this.screenshotFn, browser: this.browser })
+          : `Error: subagente desconocido "${args.agent}". Disponibles: ${subagents.SUBAGENT_KEYS.join(', ')}.`;
+      } else {
+        result = await executeTool(name, args, {
+          emit: (e) => this.emit(e),
+          screenshotFn: this.screenshotFn,
+          browser: this.browser,
+          settings,
+          home: os.homedir(),
+          workspace: (settings.settings && settings.settings.workspace) || path.join(os.homedir(), 'Desktop', 'Sagitari'),
+          registerKillable: (k) => { this.runningTool = k; },   // para poder matar el comando al Detener
+        });
+      }
+    } catch (e) { result = 'Error: ' + e.message; }
+    this.runningTool = null;
+    this.meta.toolCalls++;
+    const images = result && typeof result === 'object' ? result.images : undefined;
+    const text = result && typeof result === 'object' ? result.text : String(result);
+    return { action: 'ok', text, images, failed: typeof text === 'string' && text.startsWith('Error'), args, confirmed };
   }
 
   /**
@@ -726,71 +785,21 @@ class Agent {
       };
       for (const tc of res.toolCalls) {
         if (signal.aborted) { closePending('(no ejecutada: ejecución detenida)'); break; }
-        let args = {};
-        let argsError = null;
-        try { args = JSON.parse(tc.function.arguments || '{}'); }
-        catch { argsError = 'Error: los argumentos de la herramienta no son JSON válido. Reenvía la llamada con argumentos correctos.'; }
-        if (argsError) {
-          answered.add(tc.id);
-          messages.push({ role: 'tool', tool_call_id: tc.id, name: tc.function.name, content: argsError });
-          continue;
-        }
-        if (tc.function.name === 'delegate') {
-          answered.add(tc.id);
-          messages.push({ role: 'tool', tool_call_id: tc.id, name: tc.function.name, content: 'Error: un subagente no puede delegar a otro.' });
-          continue;
-        }
-        // el alcance de herramientas no puede ser sólo cosmético: filtrar lo que
-        // se le ENVÍA al modelo no impide que responda con otra herramienta
-        // (alucinación o inyección desde la web que acaba de leer)
-        if (!tools.some(d => d.function && d.function.name === tc.function.name)) {
-          answered.add(tc.id);
-          messages.push({
-            role: 'tool',
-            tool_call_id: tc.id,
-            name: tc.function.name,
-            content: `Error: la herramienta «${tc.function.name}» no está disponible para este subagente. Solo puedes usar: ${tools.map(d => d.function.name).join(', ')}.`,
-          });
-          continue;
-        }
-        this.emit({ type: 'tool', name: tc.function.name, args });
-        if (!this.guardrails.checkToolCall().ok) { closePending('(no ejecutada: límite de llamadas alcanzado)'); break; }
-        if (this.guardrails.isLoop(tc.function.name, args).loop) { closePending('(no ejecutada: bucle detectado)'); break; }
-        const decision = this.guardrails.decide(tc.function.name, args);
-        let approved = decision.action === 'allow';
-        if (decision.action === 'confirm') {
-          const cid = newConfirmId('s');
-          Agent.CONFIRM_ROUTES.set(cid, this);
-          this.emit({ type: 'confirm_request', id: cid, tool: tc.function.name, description: decision.description, summary: decision.summary });
-          approved = await this._awaitConfirm(cid, signal);
-          Agent.CONFIRM_ROUTES.delete(cid);
-        }
-        if (signal.aborted) { closePending('(no ejecutada: ejecución detenida)'); break; }
-        let text;
-        if (decision.action === 'deny') text = decision.reason;
-        else if (!approved) text = 'El usuario DENEGÓ esta acción. Continúa por otra vía o indícalo en el resultado.';
-        else {
-          try {
-            const r = await executeTool(tc.function.name, args, {
-              emit: (e) => this.emit(e),
-              screenshotFn: this.screenshotFn,
-              browser: this.browser,
-              settings,
-              home: os.homedir(),
-              workspace: (settings.settings && settings.settings.workspace) || path.join(os.homedir(), 'Desktop', 'Sagitari'),
-              registerKillable: (k) => { this.runningTool = k; },
-            });
-            const images = r && typeof r === 'object' ? r.images : undefined;
-            text = r && typeof r === 'object' ? r.text : String(r);
-            if (images && cfg.vision !== false) {
-              answered.add(tc.id);
-              messages.push({ role: 'tool', tool_call_id: tc.id, name: tc.function.name, content: [{ type: 'text', text }, ...images.map(u => ({ type: 'image_url', image_url: { url: u } }))] });
-              continue;
-            }
-          } catch (e) { text = 'Error: ' + e.message; }
-        }
+        // Mismo camino de ejecución que el bucle principal: antes esto era una
+        // copia que iba por detrás (sin alcance real de herramientas, sin marcar
+        // sensibilidad en la confirmación y sin los arreglos del otro bucle).
+        const r = await this._runToolCall(tc, {
+          signal, settings, tools, noDelegate: true,
+          onStatus: null,   // los pasos del subagente los resume el orquestador
+        });
+        if (r.action === 'limit') { closePending('(no ejecutada: límite de llamadas alcanzado)'); break; }
+        if (r.action === 'loop') { closePending('(no ejecutada: bucle detectado)'); break; }
+        if (r.action === 'aborted') { closePending('(no ejecutada: ejecución detenida)'); break; }
         answered.add(tc.id);
-        messages.push({ role: 'tool', tool_call_id: tc.id, name: tc.function.name, content: text });
+        const content = r.action === 'ok' && r.images && cfg.vision !== false
+          ? [{ type: 'text', text: r.text }, ...r.images.map(u => ({ type: 'image_url', image_url: { url: u } }))]
+          : r.text;
+        messages.push({ role: 'tool', tool_call_id: tc.id, name: tc.function.name, content });
       }
     }
     // si el bucle terminó por límite/abort, entrega lo último que dijo el subagente
