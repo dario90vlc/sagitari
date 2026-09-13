@@ -986,7 +986,7 @@ ipcMain.handle('update:check', async () => {
     publishedAt: r.publishedAt || null,
     notes: r.notes || null,
     kind: updater.hostKind({ isPackaged: app.isPackaged }),
-    ready: updateReady ? { name: updateReady.name, version: updateReady.version, verified: updateReady.verified } : null,
+    ready: updateReady ? { name: updateReady.name, version: updateReady.version, verified: updateReady.verified, signed: updateReady.signed, signer: updateReady.signer } : null,
   };
 });
 
@@ -1024,9 +1024,20 @@ ipcMain.handle('update:download', async () => {
         : 'no se pudo verificar la descarga (la release no publica latest.yml): descartada' };
     }
     updateReady = { path: target.path, name: asset.name, verified, expected, version: r.latest, kind };
+    // firma Authenticode: se consulta para poder decírselo al usuario. El hash
+    // demuestra integridad, no autenticidad: si el repo se compromete, el binario
+    // y su hash cambian a la vez. Con un binario sin firmar, el usuario debe saberlo.
+    try {
+      const sig = await updater.signatureOf(target.path);
+      if (sig) {
+        updateReady.signed = sig.status === 'Valid';
+        updateReady.signer = sig.signer;
+        runlog.log({ agent: 'sagitari', event: 'update_signature', version: r.latest, status: sig.status, signer: sig.signer });
+      }
+    } catch {}
     runlog.log({ agent: 'sagitari', event: 'update_downloaded', version: r.latest, verified });
-    sendUpdate({ type: 'downloaded', version: r.latest, name: asset.name, verified });
-    return { ok: true, path: target.path, name: asset.name, version: r.latest, verified, kind };
+    sendUpdate({ type: 'downloaded', version: r.latest, name: asset.name, verified, signed: updateReady.signed, signer: updateReady.signer });
+    return { ok: true, path: target.path, name: asset.name, version: r.latest, verified, signed: updateReady.signed, kind };
   } catch (e) {
     sendUpdate({ type: 'error', message: e.message });
     return { ok: false, error: e.message };

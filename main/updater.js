@@ -19,6 +19,7 @@ const fs = require('fs');
 const path = require('path');
 const os = require('os');
 const crypto = require('crypto');
+const { spawn } = require('child_process');
 
 const REPO = 'dario90vlc/sagitari';
 const API_LATEST = `https://api.github.com/repos/${REPO}/releases/latest`;
@@ -200,6 +201,44 @@ async function downloadTo(url, dest, { fetchFn = fetch, onProgress = null, timeo
   }
 }
 
+/* ---------- firma Authenticode ---------- */
+
+/**
+ * Firma digital del binario descargado (status + firmante), según Windows.
+ * El SHA-512 publicado en la misma release demuestra integridad, pero no
+ * autenticidad: si el repositorio se compromete, el binario y su hash lo hacen
+ * a la vez. La firma Authenticode ancla la confianza en una autoridad externa.
+ * Se informa al usuario; con `NotSigned` se lo decimos en vez de callarlo.
+ * Devuelve null si no se pudo consultar (no es Windows, sin PowerShell…).
+ */
+function signatureOf(file, { spawnFn = spawn, env = process.env, timeoutMs = 8000 } = {}) {
+  return new Promise((resolve) => {
+    try {
+      if (process.platform !== 'win32') return resolve(null);
+      // La ruta va por entorno: no se interpola en la línea de comandos.
+      const ps = 'Get-AuthenticodeSignature -LiteralPath $env:SAGITARI_SIG_FILE | '
+        + 'ForEach-Object { [pscustomobject]@{ status = "$($_.Status)"; signer = "$($_.SignerCertificate.Subject)" } } '
+        + '| ConvertTo-Json -Compress';
+      const p = spawnFn('powershell.exe', ['-NoProfile', '-NonInteractive', '-Command', ps], {
+        windowsHide: true, env: { ...env, SAGITARI_SIG_FILE: file },
+      });
+      let out = '';
+      let done = false;
+      const finish = (v) => { if (!done) { done = true; try { p.kill(); } catch {} resolve(v); } };
+      const timer = setTimeout(() => finish(null), timeoutMs);
+      p.stdout.on('data', (d) => { out += d; });
+      p.stdout.on('end', () => {
+        clearTimeout(timer);
+        try {
+          const r = JSON.parse(out.trim());
+          finish(r && r.status ? { status: String(r.status), signer: String(r.signer || '') || null } : null);
+        } catch { finish(null); }
+      });
+      p.on('error', () => { clearTimeout(timer); finish(null); });
+    } catch { resolve(null); }
+  });
+}
+
 /* ---------- modo de ejecución ---------- */
 
 /** Cómo está corriendo la app: instalada, portable o desde el código. */
@@ -208,4 +247,4 @@ function hostKind({ isPackaged, env = process.env } = {}) {
   return env.PORTABLE_EXECUTABLE_DIR ? 'portable' : 'nsis';
 }
 
-module.exports = { REPO, API_LATEST, parseVersion, compareVersions, pickAssets, assetFor, parseLatestYml, sha512Of, checkForUpdate, downloadTarget, downloadTo, hostKind };
+module.exports = { REPO, API_LATEST, parseVersion, compareVersions, pickAssets, assetFor, parseLatestYml, sha512Of, checkForUpdate, downloadTarget, downloadTo, hostKind, signatureOf };

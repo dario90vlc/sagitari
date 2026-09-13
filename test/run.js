@@ -2013,6 +2013,18 @@ test('herramientas: las que lanzan un proceso registran su cancelación', () => 
   ok(/sendVK\(vk, ctx\.registerKillable\)/.test(src), 'media_control también pasa la cancelación');
 });
 
+test('updater: informa de la firma digital del binario descargado', async () => {
+  /* El hash publicado en la release demuestra integridad, no autenticidad: si el
+     repo se compromete, el binario y su hash cambian juntos. La firma Authenticode
+     es el único anclaje externo, así que el usuario tiene que ver si falta. */
+  const firmado = await updater.signatureOf(path.join(process.env.SystemRoot || 'C:/Windows', 'System32', 'notepad.exe'));
+  ok(firmado, 'un binario de sistema tiene firma consultable');
+  eq(firmado.status, 'Valid');
+  ok(/Microsoft/.test(firmado.signer || ''), 'y se informa de quién lo firma (' + firmado.signer + ')');
+  const inexistente = await updater.signatureOf(path.join(tmpDir('sagi-sig-'), 'no-existe.exe'));
+  eq(inexistente, null, 'si no se puede consultar, no se inventa un estado');
+});
+
 /* Los tests async registrados más arriba (la descarga del actualizador) todavía
    no han terminado: hay que esperarlos ANTES de borrar sus temporales. */
 while (pendingAsync.length) await Promise.all(pendingAsync.splice(0));

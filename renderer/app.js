@@ -2185,6 +2185,8 @@ function renderUpdate(state) {
   const notes = [];
   if (s.kind === 'dev') notes.push('Estás ejecutando desde el código fuente; para actualizarte, compila o usa el instalador.');
   if (ready) {
+    if (ready.signed === false) notes.push('Esta actualización no está firmada digitalmente: se instala solo con la verificación SHA-512 publicada en la release.');
+    else if (ready.signed === true && ready.signer) notes.push('Firmada digitalmente por ' + ready.signer + '.');
     if (s.kind === 'nsis') notes.push('La app se cerrará para instalarse. Vuelve a abrirla cuando termine.');
     if (s.kind === 'portable') notes.push('Cierra la app y ejecuta el archivo nuevo desde la carpeta que se abrirá.');
   }
@@ -2310,7 +2312,7 @@ if (window.sagitari.onUpdate) window.sagitari.onUpdate((ev) => {
     return;
   }
   if (ev.type === 'downloaded') {
-    updState.ready = { name: ev.name, version: ev.version, verified: ev.verified };
+    updState.ready = { name: ev.name, version: ev.version, verified: ev.verified, signed: ev.signed, signer: ev.signer };
     updState.status = 'ready';
     updState.progress = null;
     renderUpdate(updState);
