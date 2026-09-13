@@ -148,37 +148,56 @@ function downloadTarget({ kind, assetName, env = process.env }) {
  * Descarga con progreso y devuelve el sha512 (base64) del archivo descargado.
  * Escribe primero a `.part` y renombra al terminar: un corte no deja un .exe a medias.
  */
-async function downloadTo(url, dest, { fetchFn = fetch, onProgress = null, timeoutMs = 0 } = {}) {
-  const res = await fetchFn(url, {
-    headers: { 'User-Agent': UA, Accept: 'application/octet-stream' },
-    ...(timeoutMs ? { signal: AbortSignal.timeout(timeoutMs) } : {}),
-  });
-  if (!res.ok) throw new Error('la descarga respondió ' + res.status);
-  const total = Number(res.headers && res.headers.get ? res.headers.get('content-length') : 0) || 0;
-  const part = dest + '.part';
-  await fs.promises.mkdir(path.dirname(dest), { recursive: true });
-  const hash = crypto.createHash('sha512');
-  const fh = await fs.promises.open(part, 'w');
-  let received = 0;
-  let lastTick = 0;
+async function downloadTo(url, dest, { fetchFn = fetch, onProgress = null, timeoutMs = 0, idleTimeoutMs = 60000 } = {}) {
+  // Un servidor que acepta la conexión y deja de enviar datos dejaría la
+  // descarga (y el .part) vivos para siempre: el vigilante de inactividad corta
+  // si pasan `idleTimeoutMs` sin recibir un solo chunk. `timeoutMs` sigue siendo
+  // el tope global opcional.
+  const ac = new AbortController();
+  let idle = null;
+  const bump = () => {
+    if (!(idleTimeoutMs > 0)) return;
+    clearTimeout(idle);
+    idle = setTimeout(() => ac.abort(new Error('la descarga se quedó sin datos')), idleTimeoutMs);
+  };
+  const deadline = timeoutMs > 0 ? setTimeout(() => ac.abort(new Error('la descarga tardó demasiado')), timeoutMs) : null;
+  const clearWatchdogs = () => { clearTimeout(idle); clearTimeout(deadline); };
   try {
-    for await (const chunk of res.body) {
-      hash.update(chunk);
-      received += chunk.length;
-      await fh.write(chunk);
-      if (onProgress && Date.now() - lastTick > 250) {
-        lastTick = Date.now();
-        onProgress({ received, total, pct: total ? Math.min(99, Math.round((received / total) * 100)) : null });
+    const res = await fetchFn(url, {
+      headers: { 'User-Agent': UA, Accept: 'application/octet-stream' },
+      signal: ac.signal,
+    });
+    if (!res.ok) throw new Error('la descarga respondió ' + res.status);
+    const total = Number(res.headers && res.headers.get ? res.headers.get('content-length') : 0) || 0;
+    const part = dest + '.part';
+    await fs.promises.mkdir(path.dirname(dest), { recursive: true });
+    const hash = crypto.createHash('sha512');
+    const fh = await fs.promises.open(part, 'w');
+    let received = 0;
+    let lastTick = 0;
+    try {
+      bump();
+      for await (const chunk of res.body) {
+        bump();
+        hash.update(chunk);
+        received += chunk.length;
+        await fh.write(chunk);
+        if (onProgress && Date.now() - lastTick > 250) {
+          lastTick = Date.now();
+          onProgress({ received, total, pct: total ? Math.min(99, Math.round((received / total) * 100)) : null });
+        }
       }
+    } catch (e) {
+      await fh.close().catch(() => {});
+      await fs.promises.rm(part, { force: true }).catch(() => {});
+      throw e;
     }
-  } catch (e) {
-    await fh.close().catch(() => {});
-    await fs.promises.rm(part, { force: true }).catch(() => {});
-    throw e;
+    await fh.close();
+    await fs.promises.rename(part, dest);
+    return { path: dest, bytes: received, sha512: hash.digest('base64') };
+  } finally {
+    clearWatchdogs();
   }
-  await fh.close();
-  await fs.promises.rename(part, dest);
-  return { path: dest, bytes: received, sha512: hash.digest('base64') };
 }
 
 /* ---------- modo de ejecución ---------- */

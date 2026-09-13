@@ -146,7 +146,6 @@ function persistConfig() {
 // ---------- windows ----------
 const INDEX_HTML = path.join(__dirname, '..', 'renderer', 'index.html');
 let win = null;        // chat
-let closing = false;
 
 function createChatWindow() {
   const { width, height } = screen.getPrimaryDisplay().workAreaSize;
@@ -231,7 +230,7 @@ function createTray() {
       { label: 'Mostrar SAGITARI', click: () => showWindow() },
       { label: 'Ocultar ventana', click: () => { if (win && !win.isDestroyed()) win.hide(); } },
       { type: 'separator' },
-      { label: 'Salir', click: () => { closing = true; app.quit(); } },
+      { label: 'Salir', click: () => app.quit() },
     ]));
     tray.on('click', () => showWindow());
     tray.on('double-click', () => showWindow());
@@ -439,9 +438,10 @@ ipcMain.handle('provider:save', (e, p) => {
 ipcMain.handle('provider:delete', (e, id) => {
   config.providers = config.providers.filter(x => x.id !== id);
   // el proveedor activo puede no llevar providerId (el renderer no siempre lo
-  // manda): se compara también por id/baseUrl para que borrarlo lo desactive
+  // manda), así que se compara también por id. Comparar una baseUrl con un id
+  // (como se hacía antes) podía desactivar el proveedor equivocado.
   const a = config.active;
-  if (a && (a.providerId === id || a.id === id || (a.baseUrl && id && String(a.baseUrl) === String(id)))) config.active = null;
+  if (a && (a.providerId === id || a.id === id)) config.active = null;
   return persistConfig();
 });
 
@@ -463,12 +463,17 @@ ipcMain.handle('provider:activate', (e, cfg) => {
 });
 
 ipcMain.handle('settings:set', (e, patch) => {
-  config.settings = { ...config.settings, ...patch };
+  const clean = { ...(patch || {}) };
+  // El idioma del dictado llega a voice.ps1 como argumento y allí se usa como
+  // comodín (`-like ($Lang + '*')`), así que un `*`/`?` seleccionaría el
+  // reconocedor equivocado. Solo se acepta la forma xx-XX; lo demás se ignora.
+  if ('voiceLang' in clean && !/^[a-z]{2}-[A-Z]{2}$/.test(String(clean.voiceLang || ''))) delete clean.voiceLang;
+  config.settings = { ...config.settings, ...clean };
   const saved = persistConfig();
-  if ('glowEnabled' in patch && !patch.glowEnabled) glow('off');
+  if ('glowEnabled' in clean && !clean.glowEnabled) glow('off');
   // si cambió la apariencia, el renderer repinta el tema; si el glow está
   // activo, relanzamos el estado actual para que el nuevo color se vea al momento
-  if ('uiColor' in patch || 'glowColor' in patch || 'glowStrength' in patch) {
+  if ('uiColor' in clean || 'glowColor' in clean || 'glowStrength' in clean) {
     try { if (win && !win.isDestroyed()) win.webContents.send('theme:changed', { uiColor: config.settings.uiColor, glowColor: config.settings.glowColor, glowStrength: config.settings.glowStrength }); } catch {}
     if (config.settings.glowEnabled && !HEADLESS) glow('pulse');
   }
@@ -524,7 +529,6 @@ ipcMain.handle('memory:add', (e, item) => memory.add({
   importance: Number((item && item.importance) ?? 0.5),
   confidence: 0.8,
 }));
-ipcMain.handle('memory:addText', (e, text) => memory.add({ text, source: 'user', importance: 0.5 }));
 ipcMain.handle('memory:update', (e, { id, patch }) => memory.update(String(id), patch || {}));
 ipcMain.handle('memory:remove', (e, id) => memory.remove(String(id)));
 
@@ -620,6 +624,9 @@ ipcMain.handle('conv:del', (e, id) => {
 });
 
 ipcMain.handle('chat:send', async (e, { text, imageDataUrl, attachments }) => {
+  // el renderer manda string, pero un bug suyo no puede reventar el handler:
+  // `body.slice(0,48)` asumía string y un texto no-string rompía el turno
+  if (typeof text !== 'string') text = '';
   if (!agent) wireAgent();
   const c = ensureConv();
   if (agent) agent.useSession(c.id);   // sesión estable por conversación (OpenCode Go)
@@ -666,6 +673,8 @@ ipcMain.handle('chat:send', async (e, { text, imageDataUrl, attachments }) => {
 // regenerar: descarta la última respuesta y vuelve a pedírsela al modelo
 ipcMain.handle('chat:retry', async () => {
   if (!agent) return { ok: false, error: 'sin agente' };
+  // regenerar durante un turno en curso lo pisaría: exigimos que esté libre
+  if (agent.isBusy()) return { ok: false, error: 'hay un turno en curso; deténlo antes de regenerar' };
   const c = currentConv();
   // quita la última respuesta del historial guardado (y solo esa)
   if (c && c.messages.length) {
@@ -708,7 +717,9 @@ ipcMain.handle('sec:resolve', (e, { id, approved, runId }) => {
   // v1.4: confirmaciones de SUBAGENTES (instancias sin registrar en main)
   const { Agent } = require('../agent/agent');
   if (Agent.routeConfirm(String(id || ''), approved)) return { ok: true };
-  return { ok: true };
+  // ninguna confirmación viva con ese id: antes se respondía ok y el renderer no
+  // podía distinguir «resuelta» de «ya no existe»
+  return { ok: false, error: 'la confirmación ya no está pendiente' };
 });
 ipcMain.handle('sec:setToolPerm', (e, { tool, level }) => {
   if (!config.security) config.security = { permissions: {}, guardrails: securityDefaults.guardrails };
@@ -841,7 +852,7 @@ $v.Speak([Console]::In.ReadToEnd())`;
 });
 
 // ---- misc ----
-ipcMain.handle('app:quit', () => { closing = true; app.quit(); });
+ipcMain.handle('app:quit', () => app.quit());
 ipcMain.handle('app:minimize', () => win && win.minimize());   // minimizado real: sigue en la barra de tareas
 ipcMain.handle('app:openExternal', (e, url) => {
   if (typeof url === 'string' && /^https?:\/\//i.test(url)) shell.openExternal(url);
@@ -850,7 +861,6 @@ ipcMain.handle('app:maximize', () => {
   if (!win) return;
   win.isMaximized() ? win.unmaximize() : win.maximize();
 });
-ipcMain.handle('app:version', () => app.getVersion());
 ipcMain.handle('app:openDataDir', async () => {
   try { await fsp.mkdir(CONFIG_DIR, { recursive: true }); } catch {}
   const err = await shell.openPath(CONFIG_DIR);
@@ -957,14 +967,21 @@ ipcMain.handle('update:download', async () => {
         expected = (parsed.files.find(f => f.url === asset.name) || {}).sha512 || parsed.sha512 || null;
       } catch {}
     }
-    const verified = expected ? expected === dl.sha512 : null;
-    if (verified === false) {
+    // Sin hash publicado no hay verificación posible: se descarta igual que si
+    // no cuadrara. Antes `expected === null` dejaba `verified` en null y el
+    // binario se marcaba como listo para ejecutarse SIN comprobar nada.
+    const verified = expected ? expected === dl.sha512 : false;
+    if (verified !== true) {
       await fsp.rm(target.path, { force: true }).catch(() => {});
-      runlog.log({ agent: 'sagitari', event: 'update_verify_failed', version: r.latest });
-      sendUpdate({ type: 'error', message: 'La descarga no coincide con la firma publicada; se ha descartado.' });
-      return { ok: false, error: 'la verificación sha512 falló: el archivo se ha descartado' };
+      runlog.log({ agent: 'sagitari', event: 'update_verify_failed', version: r.latest, reason: expected ? 'hash' : 'sin hash publicado' });
+      sendUpdate({ type: 'error', message: expected
+        ? 'La descarga no coincide con la firma publicada; se ha descartado.'
+        : 'La release no publica la firma sha512 del binario; se ha descartado por seguridad.' });
+      return { ok: false, error: expected
+        ? 'la verificación sha512 falló: el archivo se ha descartado'
+        : 'no se pudo verificar la descarga (la release no publica latest.yml): descartada' };
     }
-    updateReady = { path: target.path, name: asset.name, verified, version: r.latest, kind };
+    updateReady = { path: target.path, name: asset.name, verified, expected, version: r.latest, kind };
     runlog.log({ agent: 'sagitari', event: 'update_downloaded', version: r.latest, verified });
     sendUpdate({ type: 'downloaded', version: r.latest, name: asset.name, verified });
     return { ok: true, path: target.path, name: asset.name, version: r.latest, verified, kind };
@@ -985,10 +1002,28 @@ ipcMain.handle('update:install', async () => {
     return { ok: true, manual: true, name: d.name, path: d.path };
   }
   if (d.kind === 'dev') return { ok: false, error: 'estás ejecutando desde el código fuente: instala con el instalador' };
+  // Un binario sin verificar no se ejecuta nunca. Y el fichero vive en %TEMP%,
+  // que cualquier proceso del usuario puede escribir: se vuelve a comprobar el
+  // hash justo antes de lanzarlo para cerrar esa ventana (TOCTOU).
+  if (d.verified !== true || !d.expected) return { ok: false, error: 'esta actualización no está verificada; descártala y vuelve a intentarlo' };
+  try {
+    if (updater.sha512Of(d.path) !== d.expected) {
+      await fsp.rm(d.path, { force: true }).catch(() => {});
+      updateReady = null;
+      runlog.log({ agent: 'sagitari', event: 'update_verify_failed', version: d.version, reason: 'hash cambiado antes de instalar' });
+      sendUpdate({ type: 'error', message: 'El archivo descargado cambió después de verificarlo; se ha borrado.' });
+      return { ok: false, error: 'el instalador ya no coincide con la firma: descartado' };
+    }
+  } catch (e) { return { ok: false, error: 'no se pudo verificar el instalador: ' + e.message }; }
   try {
     // el instalador no debe arrancar con la app aún viva: se lanza con dos
-    // segundos de margen y la app se cierra para que pueda reemplazar archivos
-    spawn('cmd.exe', ['/c', `timeout /t 2 /nobreak >nul & start "" "${d.path}" /S`], { detached: true, stdio: 'ignore', windowsHide: true }).unref();
+    // segundos de margen y la app se cierra para que pueda reemplazar archivos.
+    // La ruta va por entorno, no interpolada en la línea de comandos: así ni un
+    // `&`/`%`/`^` en el nombre de usuario de %TEMP% puede alterar el comando.
+    spawn('cmd.exe', ['/d', '/c', 'timeout /t 2 /nobreak >nul & start "" "%SAGITARI_UPDATE%" /S'], {
+      detached: true, stdio: 'ignore', windowsHide: true,
+      env: { ...process.env, SAGITARI_UPDATE: d.path },
+    }).unref();
   } catch (e) { return { ok: false, error: e.message }; }
   runlog.log({ agent: 'sagitari', event: 'update_install', version: d.version });
   // cierre ordenado (cierra Chrome, procesos de voz, tareas) y con margen de 2 s
@@ -1048,12 +1083,12 @@ app.whenReady().then(() => {
 
 app.on('window-all-closed', () => app.quit());
 app.on('before-quit', () => {
-  closing = true;
   globalShortcut.unregisterAll();
   if (tray) { try { tray.destroy(); } catch {} tray = null; }
   if (taskManager) { try { taskManager.stopAll(); } catch {} }      // tareas en background → interrupted
   if (agent && agent.isBusy()) { try { agent.stop(); } catch {} }   // chat en curso
   if (whisper) { try { whisper.kill(); } catch {} }            // dictado en marcha
+  if (ttsProc) { try { ttsProc.kill(); } catch {} ttsProc = null; }  // voz en curso: si no, quedaba huérfana
   try { browser.ws && browser.send('Browser.close'); } catch {} // Chrome/Edge lanzado por CDP
   try { runlog.close(); } catch {}                              // logs de sesión
 });
