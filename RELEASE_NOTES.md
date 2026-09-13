@@ -1,63 +1,60 @@
-# SAGITARI 2.2.1
+# SAGITARI 2.2.2
 
-Actualización breve: **la app ya se actualiza sola, con tu permiso**. Además, la página de
-release ahora se publica con sus notas y sus hashes, sin editarla a mano.
-
-Short update: **the app now updates itself, with your permission**. The release page is also
-published with its notes and hashes, no more manual editing.
+**Minor fixes / Correcciones menores:** el icono de SAGITARI ya se ve correctamente en la barra
+de tareas de Windows. / **Minor fixes:** SAGITARI's icon now shows correctly in the Windows
+taskbar.
 
 ## Descargas / Downloads
 
 | Archivo / File | Descripción / Description |
 |---|---|
-| `SAGITARI-Setup-2.2.1.exe` | **Instalador / Installer** (NSIS): accesos directos, desinstalador / shortcuts, uninstaller |
-| `SAGITARI-Portable-2.2.1.exe` | **Portable**: un solo ejecutable, sin instalación / single executable, no install |
+| `SAGITARI-Setup-2.2.2.exe` | **Instalador / Installer** (NSIS): accesos directos, desinstalador / shortcuts, uninstaller |
+| `SAGITARI-Portable-2.2.2.exe` | **Portable**: un solo ejecutable, sin instalación / single executable, no install |
 | `Source code (zip/tar.gz)` | Código fuente / Source code |
 
 > Binario sin firmar: Windows SmartScreen puede avisar en la primera ejecución (*Más información → Ejecutar de todas formas*). / Unsigned binary: SmartScreen may warn on first run (*More info → Run anyway*).
 
-## Novedades / What's new
+## Correcciones / Fixes
 
-**Actualizador dentro de la app / In-app updater**
+- **Icono de la barra de tareas.** SAGITARI identifica su ventana con el mismo *AppUserModelID*
+  (`com.sagitari.app`) que usa el instalador, desde el arranque y también al ejecutar desde el
+  código fuente. Antes, en desarrollo, Windows tomaba el proceso por `electron.exe` y mostraba
+  el logo de Electron en lugar del de la app. / **Taskbar icon.** SAGITARI now identifies its
+  window with the same *AppUserModelID* (`com.sagitari.app`) used by the installer, from
+  startup and also when running from source. Previously, in development, Windows took the
+  process for `electron.exe` and showed Electron's logo instead of the app's.
+- **Tamaños pequeños del icono en formato clásico.** Los tamaños 64, 48, 32 y 16 px vuelven a
+  guardarse como BMP dentro del `.ico` en vez de PNG comprimido. El shell de Windows no pinta
+  las entradas PNG por debajo de 256 px, así que la barra de tareas y el explorador caían al
+  icono genérico. El dibujo es idéntico, pixel a pixel; solo cambia el formato de esas
+  entradas. / **Small icon sizes in classic format.** The 64, 48, 32 and 16 px sizes are stored
+  as BMP inside the `.ico` again instead of compressed PNG. The Windows shell does not render
+  PNG entries below 256 px, so the taskbar and Explorer fell back to a generic icon. The
+  artwork is identical, pixel for pixel; only the storage format of those entries changed.
 
-- **Aviso discreto:** SAGITARI comprueba al arrancar si hay una versión nueva y, si la hay,
-  muestra **un solo aviso** y un punto en *Ajustes*. Nada de ventanas que interrumpan y nada
-  se descarga por su cuenta. / **Discreet notice:** a single toast and a dot on *Settings*.
-- **Tú decides:** en *Ajustes → Acerca de* están tu versión instalada, el botón para buscar
-  actualizaciones, la descarga con su progreso y el botón de instalar. / **Your call:**
-  *Settings → About* holds your version, the check, the download progress and the install button.
-- **Verificado antes de ejecutarse:** el instalador descargado se comprueba contra el
-  **sha512** que publica el CI; si no coincide, se descarta. / **Checked before running:**
-  the download is verified against the SHA-512 published by CI.
-- **Según cómo la tengas / Depending on how you run it:**
-  - *Instalada* → descarga el Setup, lo lanza en silencio y cierra la app para instalarse. /
-    *Installed* → downloads the Setup, runs it silently and closes the app to install.
-  - *Portable* → deja el nuevo portable **junto al que estás usando** y abre la carpeta (un
-    portable no puede reemplazarse a sí mismo mientras corre). / *Portable* → puts the new one
-    next to the current file and opens the folder.
-  - *Desde el código fuente* → te avisa de que para actualizarte hay que compilar o usar el
-    instalador. / *From source* → tells you to build or use the installer.
+Ambas correcciones vienen incluidas en el instalador, en el portable y al arrancar desde el
+código fuente. / Both fixes are included in the installer, the portable build and when running
+from source.
 
-## Notas / Notes
+## Actualizaciones / Updates
 
-- **Quien tenga la 2.2.0 tiene que actualizar a mano una última vez**, porque el actualizador
-  llega justo en esta versión. A partir de aquí, los avisos ya llegan solos. / **Anyone on
-  2.2.0 must update manually one last time**, since the updater ships in this version. From
-  here on the notices arrive on their own.
-- La página de cada release se genera ahora desde estas notas con el bloque **SHA-256** de los
-  ejecutables, así que ya no hay que escribirla ni pegar hashes. / Each release page is now
-  generated from these notes with the executables' **SHA-256** block.
+El actualizador integrado sigue disponible: comprueba si hay una versión nueva, avisa sin
+interrumpir, verifica la descarga con **SHA-512** y solo instala cuando tú lo pides. Si tienes
+la 2.2.0 o la 2.2.1, esta versión te llega con el aviso habitual. / The in-app updater is still
+there: it checks for a new version, notifies discreetly, verifies the download with
+**SHA-512** and installs only when you ask it to. If you are on 2.2.0 or 2.2.1, this version
+reaches you through the usual notice.
 
 ## Verificación / Verification
 
-- **129 tests en verde** (`npm test`) y **25 comprobaciones sobre la app real**
-  (`npm run uicheck`), incluidas las del actualizador: comparación de versiones, elección del
-  binario correcto, descarga con progreso y descarte de un archivo que no supera la
-  verificación. / **129 unit tests green** and **25 real-app UI checks**, including the
-  updater's own: version comparison, correct binary selection, download progress and
-  discarding a file that fails verification.
+- `npm test`: **129 tests en verde** / **129 tests passing**.
+- `node --check main/main.js`: sintaxis correcta / syntax valid.
+- Instalador NSIS y portable compilados desde el mismo código fuente; los tamaños pequeños del
+  `.ico` verificados pixel a pixel contra el icono anterior (idénticos). / NSIS installer and
+  portable built from the same source; the `.ico` small sizes verified pixel by pixel against
+  the previous icon (identical).
 - SHA-256 de los ejecutables calculado automáticamente por el workflow de CI al publicar. /
-  Executable SHA-256 hashes computed automatically by the CI workflow on release.
+  Executable SHA-256 hashes computed automatically by the CI workflow when publishing.
 
 ## Requisitos / Requirements
 

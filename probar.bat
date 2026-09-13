@@ -5,7 +5,7 @@ cd /d "%~dp0"
 
 echo.
 echo ==================================================
-echo   SAGITARI v2.2.1  -  PRUEBA PREVIA A COMPILAR
+echo   SAGITARI v2.2.2  -  PRUEBA PREVIA A COMPILAR
 echo ==================================================
 echo.
 

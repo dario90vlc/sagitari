@@ -32,6 +32,13 @@ const HEADLESS = SMOKE || process.argv.includes('--hidden') || process.argv.incl
 // en los arranques ocultos. En uso normal no está definida y no cambia nada.
 const UPDATE_API = process.env.SAGITARI_UPDATE_API || '';
 
+// Windows usa este identificador para asociar la ventana con su icono y agruparla
+// en la barra de tareas. Debe coincidir con el `appId` de electron-builder y se
+// fija antes de crear el bloqueo de instancia, incluido el modo desarrollo;
+// de lo contrario Windows identifica el proceso como electron.exe.
+const APP_USER_MODEL_ID = 'com.sagitari.app';
+if (process.platform === 'win32') app.setAppUserModelId(APP_USER_MODEL_ID);
+
 // Los arranques de prueba usan SU PROPIO directorio de datos. El bloqueo de
 // instancia única va ligado al userData: si lo compartieran con la app real,
 // una prueba que tardara en morir retenía el bloqueo y el lanzamiento final de
@@ -997,13 +1004,6 @@ ipcMain.handle('update:page', async () => {
 
 app.whenReady().then(() => {
   if (!gotLock) return;
-  // Windows: el icono de la barra de tareas se resuelve por el AppUserModelID.
-  //   - Empaquetada: tiene que COINCIDIR con el del acceso directo que crea el
-  //     instalador (el appId de electron-builder) o Windows no lo asocia.
-  //   - Desde el código fuente: NO se fija. No hay ningún acceso directo con ese
-  //     id, y Windows cae entonces al icono del ejecutable… que en desarrollo es
-  //     electron.exe, es decir, el logo de Electron en la barra inferior.
-  if (process.platform === 'win32' && app.isPackaged) app.setAppUserModelId('com.sagitari.app');
   loadConfig();
   seedStarterSkills();
   // v1.3 recuperación: las 'running' de un crash/cierre pasan a 'interrupted' y el
