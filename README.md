@@ -56,8 +56,8 @@ Most desktop AI assistants stop at the chat bubble. SAGITARI is built as an **ag
   browser automation and system tasks run for real, with every step visible in the UI.
 - **Bring your own model** — any OpenAI-compatible endpoint: cloud (OpenRouter, Groq, OpenAI…)
   or fully local (Ollama, LM Studio). Your keys never leave your machine.
-- **It costs what it must, no more** — skills load on demand, and the *Ponytail* pack keeps
-  answers compact and engineering-focused.
+- **It costs what it must, no more** — skills load on demand: the prompt only carries the
+  index, so the cost grows with what you actually ask for, not with what you installed.
 - **It looks like it works** — a hand-crafted holographic UI, no frameworks, no bloat:
   Electron + vanilla JS and a single runtime dependency.
 
@@ -72,8 +72,9 @@ Most desktop AI assistants stop at the chat bubble. SAGITARI is built as an **ag
   Switch in one click from the chat composer (or `Alt+M`).
 - **Skills engine (SKILL.md format):** specialized instruction packs the agent loads on demand —
   the prompt only carries the index, so token cost stays minimal. Import any GitHub repo with
-  a `SKILL.md` (e.g. `anthropics/skills` → 20 verified skills) and force one from chat by
-  typing `/`.
+  a `SKILL.md` and force one from chat by typing `/`; the Marketplace ships a curated list of
+  6 highlighted entries from `anthropics/skills` (the multipack plus its docx, pdf, xlsx,
+  artifacts-builder and webapp-testing sub-packs).
 - **Persistent memory** injected into context across conversations.
 
 **Control**
@@ -150,13 +151,15 @@ cd sagitari
 npm install
 
 npm start              # development mode
-npm test               # unit tests (guardrails, skills parsing)
+npm test               # unit tests: guardrails, skills, memory, checkpoints,
+                       # task manager, subagents, models, provider protocols,
+                       # updater, ChatKit, .ico generation
 npm run dist           # NSIS installer + portable in dist/
 npm run dist:installer # installer only
 npm run dist:portable  # portable only
 ```
 
-Requirements: Node.js 18+ and Windows 10/11.
+Requirements: Node.js 20+ and Windows 10/11.
 
 Pushing a `v*` tag triggers the GitHub Actions release workflow: tests, build of installer +
 portable, SHA-256 computation and automatic release publication.

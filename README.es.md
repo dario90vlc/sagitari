@@ -58,8 +58,8 @@ construido como un **agente con manos**:
   visible en la interfaz.
 - **Trae tu propio modelo** — cualquier endpoint compatible con OpenAI: nube (OpenRouter, Groq,
   OpenAI…) o 100% local (Ollama, LM Studio). Tus claves nunca salen de tu máquina.
-- **Cuesta lo que debe, y no más** — las skills se cargan bajo demanda, y el pack *Ponytail*
-  mantiene las respuestas compactas y enfocadas a ingeniería.
+- **Cuesta lo que debe, y no más** — las skills se cargan bajo demanda: el prompt solo lleva
+  el índice, así que el coste crece con lo que pides, no con lo que tienes instalado.
 - **Parece lo que es** — una interfaz holográfica hecha a mano, sin frameworks, sin bloat:
   Electron + JS vanilla y una única dependencia en runtime.
 
@@ -74,8 +74,9 @@ construido como un **agente con manos**:
   directa. Se cambian con un clic desde el compositor del chat (o `Alt+M`).
 - **Motor de skills (formato SKILL.md):** packs de instrucciones especializadas que el agente
   carga bajo demanda — el prompt solo lleva el índice, así el coste en tokens es mínimo.
-  Importa cualquier repo de GitHub con `SKILL.md` (ej. `anthropics/skills` → 20 skills
-  verificadas) y fuerza una desde el chat escribiendo `/`.
+  Importa cualquier repo de GitHub con `SKILL.md` y fuerza una desde el chat escribiendo `/`;
+  el Marketplace trae una lista curada de 6 entradas destacadas de `anthropics/skills` (el
+  multipack más sus subpacks docx, pdf, xlsx, artifacts-builder y webapp-testing).
 - **Memoria persistente** inyectada en el contexto entre conversaciones.
 
 **Control**
@@ -156,13 +157,15 @@ cd sagitari
 npm install
 
 npm start              # modo desarrollo
-npm test               # tests unitarios (guardarraíles, parseo de skills)
+npm test               # tests unitarios: guardarraíles, skills, memoria,
+                       # checkpoints, gestor de tareas, subagentes, modelos,
+                       # protocolos de proveedor, updater, ChatKit, .ico
 npm run dist           # instalador NSIS + portable en dist/
 npm run dist:installer # solo instalador
 npm run dist:portable  # solo portable
 ```
 
-Requisitos: Node.js 18+ y Windows 10/11.
+Requisitos: Node.js 20+ y Windows 10/11.
 
 Al empujar un tag `v*` se dispara el workflow de release en GitHub Actions: tests, compilación
 de instalador + portable, cálculo de SHA-256 y publicación automática de la release.
@@ -180,7 +183,12 @@ sagitari/
 │   ├── agent.js    # loop streaming + tool calling + delegación en subagentes
 │   ├── tools.js    # definiciones de herramientas
 │   ├── executors.js
-│   ├── skills.js   # motor de skills (SKILL.md)
+│   ├── guardrails.js # límites de pasos/tiempo/coste, detección de bucles
+│   ├── checkpoints.js # pausar/reanudar/recuperar tareas largas
+│   ├── memory.js   # memoria persistente + hábitos
+│   ├── skills.js   # motor de skills (SKILL.md) + marketplace
+│   ├── subagents.js # agentes especialistas (investigación, navegador, código…)
+│   ├── tasks.js    # tareas en segundo plano
 │   └── browser.js  # Chrome/Edge vía CDP (sin puppeteer)
 ├── renderer/       # UI holográfica
 │   ├── index.html / app.js / styles.css

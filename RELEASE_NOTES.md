@@ -47,7 +47,7 @@ reaches you through the usual notice.
 
 ## Verificación / Verification
 
-- `npm test`: **129 tests en verde** / **129 tests passing**.
+- `npm test`: **145 tests en verde** / **145 tests passing**.
 - `node --check main/main.js`: sintaxis correcta / syntax valid.
 - Instalador NSIS y portable compilados desde el mismo código fuente; los tamaños pequeños del
   `.ico` verificados pixel a pixel contra el icono anterior (idénticos). / NSIS installer and
@@ -56,7 +56,60 @@ reaches you through the usual notice.
 - SHA-256 de los ejecutables calculado automáticamente por el workflow de CI al publicar. /
   Executable SHA-256 hashes computed automatically by the CI workflow when publishing.
 
+## Correcciones posteriores a 2.2.2 / Post-2.2.2 fixes
+
+> Todavía **no** incluidas en ningún binario publicado: están en el código fuente y entrarán en
+> la próxima versión. / **Not** yet part of any published binary: they live in the source tree
+> and will ship with the next version.
+
+**Seguridad / Security**
+
+- Los ids de skill se validan resolviendo la ruta: `deleteSkill('..')` podía borrar todo el
+  directorio de datos (claves de API y conversaciones incluidas). / Skill ids are validated by
+  resolving the path: `deleteSkill('..')` could wipe the whole data directory (API keys and
+  conversations included).
+- `open_url` solo abre `http(s)`: en Windows `shell.openExternal` invoca el manejador del
+  sistema, así que `file://` o `ms-msdt:` abrían cualquier cosa sin confirmación. / `open_url`
+  only opens `http(s)`: on Windows `shell.openExternal` invokes the OS handler, so `file://` or
+  `ms-msdt:` would open anything without asking.
+- Leer el portapapeles y ejecutar JS en la página piden confirmación siempre, y un subagente ya
+  no puede usar herramientas fuera de su lista. / Reading the clipboard and running JS in the
+  page always ask first, and a subagent can no longer use tools outside its list.
+- Los triggers de una skill importada se tratan como texto, no como expresión regular (un
+  patrón remoto podía congelar la app). / Triggers from an imported skill are treated as plain
+  text, not as a regular expression (a remote pattern could freeze the app).
+- El actualizador **descarta** cualquier descarga sin firma SHA-512 publicada y vuelve a
+  comprobar el hash justo antes de ejecutar el instalador. / The updater **discards** any
+  download without a published SHA-512 and re-checks the hash right before running the
+  installer.
+
+**Corrección / Correctness**
+
+- Pausar durante el stream guarda el punto de control (antes la tarea quedaba interrumpida y se
+  perdía la reanudación). / Pausing mid-stream saves the checkpoint (previously the task was
+  marked interrupted and resumption was lost).
+- El panel de salud por modelo muestra el coste real (publicaba siempre 0,0000). / The per-model
+  health panel shows the real cost (it always published 0.0000).
+- Esperar tu decisión en una tarjeta de confirmación ya no agota el límite de duración. /
+  Waiting for your answer on a confirmation card no longer eats the duration limit.
+- Argumentos JSON inválidos devuelven un error en vez de ejecutar la herramienta con `{}`. /
+  Invalid JSON arguments return an error instead of running the tool with `{}`.
+- El navegador se recupera tras un cierre brusco de SAGITARI (lee el puerto que dejó Chrome en
+  el perfil) y una descarga atascada se corta sola. / The browser recovers after a hard exit
+  (it reads the port Chrome left in the profile) and a stalled download now times out.
+
+**Interfaz / Interface**
+
+- Las confirmaciones ya no se quedan colgadas ni se pisan entre tareas en background. /
+  Confirmations no longer hang or overwrite each other across background tasks.
+- Los puntos de estado (tareas falladas, salud del modelo) vuelven a verse: faltaba su regla
+  CSS. / Status dots (failed tasks, model health) are visible again: their CSS rule was missing.
+- La búsqueda de Ajustes cuenta solo el panel visible, el plan no reinicia su progreso al
+  repintarse y un fallo de IPC muestra un aviso en vez de una burbuja roja. / Settings search
+  only counts the visible panel, the plan no longer resets its progress when repainted, and an
+  IPC failure shows a notice instead of a red bubble.
+
 ## Requisitos / Requirements
 
 - Windows 10/11 · Proveedor de IA compatible (OpenCode Go, OpenRouter, Groq, OpenAI,
-  Anthropic, Ollama local, LM Studio…) · Node.js 18+ solo para compilar desde fuente.
+  Anthropic, Ollama local, LM Studio…) · Node.js 20+ solo para compilar desde fuente.

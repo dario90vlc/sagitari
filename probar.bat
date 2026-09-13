@@ -3,18 +3,21 @@ setlocal
 title SAGITARI - probar y testear
 cd /d "%~dp0"
 
-echo.
-echo ==================================================
-echo   SAGITARI v2.2.2  -  PRUEBA PREVIA A COMPILAR
-echo ==================================================
-echo.
-
 where node >nul 2>nul
 if errorlevel 1 (
     echo [ERROR] Node.js no esta en el PATH. Instalalo desde https://nodejs.org
     pause
     exit /b 1
 )
+
+rem La version se lee de package.json: el banner no puede mentir.
+for /f "delims=" %%v in ('node -p "require('./package.json').version"') do set VERSION=%%v
+
+echo.
+echo ==================================================
+echo   SAGITARI v%VERSION%  -  PRUEBA PREVIA A COMPILAR
+echo ==================================================
+echo.
 
 if not exist "node_modules\electron" (
     echo [..] Primera vez: instalando dependencias con npm install...
@@ -28,7 +31,7 @@ if not exist "node_modules\electron" (
 
 echo [1/5] Comprobando sintaxis de todos los modulos...
 set SYNTAX_OK=1
-for %%f in (main\*.js agent\*.js renderer\app.js test\*.js scripts\*.js) do (
+for %%f in (main\*.js agent\*.js renderer\*.js test\*.js scripts\*.js) do (
     node --check "%%f" >nul 2>nul
     if errorlevel 1 (
         echo    [ERROR] Sintaxis invalida: %%f

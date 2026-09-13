@@ -3,25 +3,55 @@ name: Release
 on:
   push:
     tags: ['v*']
+  # Manual: el tag es obligatorio. Sin el, la accion publicaba la release
+  # colgando de main (tag equivocado) en vez de abortar.
   workflow_dispatch:
+    inputs:
+      tag:
+        description: 'Tag a publicar (ej. v2.2.2). Debe existir y coincidir con la version de package.json.'
+        required: true
+        type: string
 
 permissions:
   contents: write
 
 concurrency:
-  group: release-${{ github.ref }}
-  cancel-in-progress: true
+  group: release-${{ github.event.inputs.tag || github.ref }}
+  # Nunca cancel-in-progress: cortar a mitad de subida dejaba la release con
+  # los assets a medias.
+  cancel-in-progress: false
 
 jobs:
   release:
     runs-on: windows-latest
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4.4.0
+        with:
+          ref: ${{ github.event.inputs.tag || github.ref }}
 
-      - uses: actions/setup-node@v4
+      - uses: actions/setup-node@49933ea5288caeca8642d1e84afbd3f7d6820020 # v4.4.0
         with:
           node-version: 20
           cache: npm
+
+      - name: Gate del tag contra package.json
+        shell: bash
+        env:
+          INPUT_TAG: ${{ github.event.inputs.tag }}
+        run: |
+          set -euo pipefail
+          # En push de tag manda GITHUB_REF_NAME; en workflow_dispatch, el input.
+          if [ -n "${INPUT_TAG}" ]; then
+            TAG="${INPUT_TAG}"
+          else
+            TAG="${GITHUB_REF_NAME}"
+          fi
+          VERSION="$(node -p "require('./package.json').version")"
+          echo "tag=${TAG} version=${VERSION}"
+          if [ "${TAG}" != "v${VERSION}" ]; then
+            echo "::error::El tag '${TAG}' no coincide con la version de package.json ('v${VERSION}'). No se publica nada: crea el tag v${VERSION} o sube la version en package.json antes de reetiquetar."
+            exit 1
+          fi
 
       - name: Install dependencies
         run: npm ci
@@ -35,15 +65,37 @@ jobs:
         # los assets, así que la página quedaba sin notas. Publica la acción.
         run: npm run dist -- --publish never
 
+      - name: Verificar artefactos antes de publicar
+        shell: bash
+        run: |
+          set -euo pipefail
+          missing=0
+          for f in dist/SAGITARI-Setup-*.exe dist/SAGITARI-Portable-*.exe dist/latest.yml; do
+            if [ ! -s "$f" ]; then
+              echo "::error::Falta '${f}' o esta vacio: la release no se publica."
+              missing=1
+            else
+              echo "OK $(wc -c < "$f") bytes  ${f}"
+            fi
+          done
+          exit ${missing}
+
       - name: Build release body (notes + SHA-256)
         shell: bash
         run: |
+          set -euo pipefail
+          shopt -s nullglob
+          files=(dist/SAGITARI-*.exe)
+          if [ ${#files[@]} -eq 0 ]; then
+            echo "::error::No hay ningun .exe en dist/: imposible calcular el SHA-256."
+            exit 1
+          fi
           {
             cat RELEASE_NOTES.md
             echo
             echo '## SHA-256'
             echo '```'
-            for f in dist/SAGITARI-*.exe; do
+            for f in "${files[@]}"; do
               echo "$(sha256sum "$f" | cut -d' ' -f1)  $(basename "$f")"
             done
             echo '```'
@@ -52,9 +104,13 @@ jobs:
           cat release-body.md
 
       - name: Release
-        uses: softprops/action-gh-release@v2
+        uses: softprops/action-gh-release@3bb12739c298aeb8a4eeaf626c5b8d85266b0e65 # v2.6.2
         with:
+          # En workflow_dispatch el tag viene del input, no de github.ref (main).
+          tag_name: ${{ github.event.inputs.tag || github.ref_name }}
           body_path: release-body.md
+          # Si un patron no casa con nada, la release no se publica a medias.
+          fail_on_unmatched_files: true
           files: |
             dist/SAGITARI-Setup-*.exe
             dist/SAGITARI-Portable-*.exe

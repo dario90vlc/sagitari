@@ -2,6 +2,16 @@
 node_modules/
 dist/
 release/
+build/
+
+# Cuerpo de la release (lo crea .github/workflows/release.yml)
+release-body.md
+
+# Temporales de scripts/prepare-logo.ps1
+scripts/tmp_ico/
+
+# Anuncio: video/audio (~9 MB) sin rastrear, no debe entrar en el historial
+anuncio/
 
 # Logs
 *.log

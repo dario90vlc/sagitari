@@ -6,13 +6,18 @@ on:
   pull_request:
   workflow_dispatch:
 
+# El job no necesita escribir nada en el repo: sin esto hereda el default del
+# repo, que puede ser read-write.
+permissions:
+  contents: read
+
 jobs:
   test:
     runs-on: windows-latest
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4.4.0
 
-      - uses: actions/setup-node@v4
+      - uses: actions/setup-node@49933ea5288caeca8642d1e84afbd3f7d6820020 # v4.4.0
         with:
           node-version: 20
           cache: npm
@@ -24,19 +29,26 @@ jobs:
         shell: bash
         run: |
           status=0
-          for f in main/*.js agent/*.js renderer/app.js test/*.js scripts/*.js; do
+          for f in main/*.js agent/*.js renderer/*.js test/*.js scripts/*.js; do
             node --check "$f" || status=1
           done
           exit $status
 
       - name: Unit tests
-        run: npm test
+        shell: bash
+        # tee guarda la salida completa para el artefacto de fallo; pipefail
+        # evita que el exito de tee tape el fallo de los tests.
+        run: |
+          set -o pipefail
+          npm test 2>&1 | tee test-output.log
+
+      - name: Smoke test (la app arranca de verdad)
+        run: npm run smoke
 
       - name: Upload artifact on failure
         if: failure()
-        uses: actions/upload-artifact@v4
+        uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4.6.2
         with:
           name: ci-failure-context
-          path: |
-            npm-debug.log*
+          path: test-output.log
           if-no-files-found: ignore
