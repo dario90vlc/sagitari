@@ -131,8 +131,8 @@ Descarga el artefacto que prefieras de la [página de releases](../../releases):
 
 | Artefacto | Qué es |
 |---|---|
-| `SAGITARI-Setup-2.2.0.exe` | Instalador Windows (NSIS): accesos directos, desinstalador |
-| `SAGITARI-Portable-2.2.0.exe` | Portable: un solo ejecutable, sin instalación |
+| `SAGITARI-Setup-2.2.1.exe` | Instalador Windows (NSIS): accesos directos, desinstalador |
+| `SAGITARI-Portable-2.2.1.exe` | Portable: un solo ejecutable, sin instalación |
 | `Source code (zip)` | Código fuente |
 
 > Windows SmartScreen puede avisar en la primera ejecución (binario sin firma). Pulsa

@@ -79,5 +79,10 @@ contextBridge.exposeInMainWorld('sagitari', {
   secSetToolPerm: (tool, level) => ipcRenderer.invoke('sec:setToolPerm', { tool, level }),
   secSetGuardrail: (patch) => ipcRenderer.invoke('sec:setGuardrail', patch),
   metaGet: () => ipcRenderer.invoke('meta:get'),
-  logsRecent: (n) => ipcRenderer.invoke('logs:recent', n)
+  logsRecent: (n) => ipcRenderer.invoke('logs:recent', n),
+  updateCheck: () => ipcRenderer.invoke('update:check'),
+  updateDownload: () => ipcRenderer.invoke('update:download'),
+  updateInstall: () => ipcRenderer.invoke('update:install'),
+  updatePage: () => ipcRenderer.invoke('update:page'),
+  onUpdate: (cb) => ipcRenderer.on('update:event', (e, ev) => cb(ev))
 });

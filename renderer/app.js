@@ -70,7 +70,7 @@ function goto(view, opts) {
   if (view === 'skills') { renderMarket(); renderSkills(); }
   if (view === 'projects') window.sagitari.workspaceGet().then(w => { $('#projPath').value = w; });
   if (view === 'history') renderHistory();
-  if (view === 'settings') { showSetTab(setTabName); initDataPanel(); }
+  if (view === 'settings') { showSetTab(setTabName); initDataPanel(); initAboutPanel(); }
   polishSwitches();   // los interruptores creados dinámicamente también deben ser accesibles
   syncChatBadge();
   setSideActive();
@@ -1879,7 +1879,7 @@ $('#devModeSw').onclick = async (e) => {
 
 /* ============ Ajustes: pestañas, búsqueda y utilidades ============ */
 
-const SET_TABS = ['model', 'prefs', 'security', 'agent', 'data'];
+const SET_TABS = ['model', 'prefs', 'security', 'agent', 'data', 'about'];
 let setTabName = 'model';
 try { const t = localStorage.getItem('sagi.setTab'); if (SET_TABS.includes(t)) setTabName = t; } catch {}
 
@@ -1900,6 +1900,9 @@ function showSetTab(panel) {
   }
   const wrap = $('#setWrap');
   if (wrap) wrap.querySelectorAll('.setpanel').forEach(p => p.classList.toggle('on', p.dataset.panel === name));
+  // la pestaña «Acerca de» ya enseña el aviso: el punto del sidebar sobra
+  // (solo si Ajustes está a la vista: fillSettings llama aquí al arrancar)
+  if (name === 'about' && $('#view-settings').classList.contains('on')) setBadge('#nbUpdate', 0);
 }
 if ($('#setTabs')) $('#setTabs').querySelectorAll('.settab').forEach(b => {
   b.onclick = () => {
@@ -2007,6 +2010,242 @@ if ($('#openDataDirBtn')) $('#openDataDirBtn').onclick = async () => {
   const r = await window.sagitari.openDataDir();
   if (r && r.ok === false) showToast(r.error || 'No se pudo abrir la carpeta');
 };
+
+/* ============ Acerca de: actualizaciones (aviso discreto) ============
+   El motor vive en main/updater.js (comprobar, descargar, verificar el sha512 y
+   lanzar el instalador): aquí solo se pinta el estado y se pide la acción.
+   Nada se descarga ni se instala sin un clic del usuario. */
+let updState = { kind: null, current: null, latest: null, available: false, ready: null, status: 'idle', error: null, progress: null };
+let updInitDone = false;   // la comprobación al abrir Ajustes se hace UNA vez, no en cada render
+let updNotified = false;   // el toast de «nueva versión» no se repite en toda la sesión
+
+/** «2.3.0» → «v2.3.0»; sin versión conocida, un guion. */
+function updVer(v) { return v ? 'v' + String(v).replace(/^v/i, '') : '—'; }
+
+/** Tamaño legible («12,4 MB») para la nota de progreso. */
+function updSize(n) {
+  const v = Number(n) || 0;
+  if (v >= 1048576) return (v / 1048576).toFixed(1).replace('.', ',') + ' MB';
+  if (v >= 1024) return Math.round(v / 1024) + ' KB';
+  return v + ' B';
+}
+
+/** Mensaje de la tarjeta (vacío lo limpia). */
+function updMsg(text) { const el = $('#updMsg'); if (el) el.textContent = text || ''; }
+
+/** Pinta la tarjeta «Actualizaciones». GLOBAL para poder comprobarla desde fuera.
+    `state = { kind, current, latest, available, ready, status, error, progress }`
+    con `status` ∈ 'idle' | 'checking' | 'downloading' | 'ready'. */
+function renderUpdate(state) {
+  const v = state || {};
+  const s = {
+    kind: v.kind || null, current: v.current || null, latest: v.latest || null,
+    available: !!v.available, ready: v.ready || null, status: v.status || 'idle',
+    error: v.error || null, progress: v.progress || null
+  };
+  // un archivo con verificación fallida no existe: main ya lo descartó
+  const ready = s.ready && s.ready.verified !== false ? s.ready : null;
+
+  const ver = updVer(s.current);
+  const cur = $('#updCurrent'); if (cur) cur.textContent = ver;
+  const app = $('#aboutVersion'); if (app) app.textContent = ver;
+
+  const st = $('#updState');
+  if (st) {
+    if (s.status === 'checking') st.textContent = 'Buscando actualizaciones…';
+    else if (s.status === 'downloading') st.textContent = 'Descargando la versión ' + (s.latest || '') + '…';
+    else if (s.error) st.textContent = 'No se pudo comprobar: ' + s.error;
+    else if (s.available) st.textContent = 'Nueva versión ' + (s.latest || '') + ' disponible';
+    else if (s.current || s.latest) st.textContent = 'Estás al día';
+    else st.textContent = 'Aún no se ha comprobado.';
+  }
+
+  const busy = s.status === 'checking' || s.status === 'downloading';
+  const check = $('#updCheckBtn');
+  if (check) {
+    check.disabled = busy;
+    const lbl = $('#updCheckLabel');
+    if (lbl) lbl.textContent = s.status === 'checking' ? 'Buscando…' : 'Buscar actualizaciones';
+  }
+  const dl = $('#updDownloadBtn');
+  if (dl) {
+    // en modo 'dev' también se puede descargar (el instalador); lo imposible es instalar
+    dl.hidden = !(s.available && !ready && s.status !== 'downloading');
+    dl.disabled = busy;
+  }
+  const inst = $('#updInstallBtn');
+  if (inst) {
+    const puede = !!ready && s.kind !== 'dev';
+    inst.hidden = !puede;
+    if (puede) {
+      const portable = s.kind === 'portable';
+      const lbl = $('#updInstallLabel');
+      if (lbl) lbl.textContent = portable ? 'Abrir carpeta' : 'Instalar y cerrar';
+      inst.setAttribute('aria-label', portable
+        ? 'Abrir la carpeta con el archivo descargado'
+        : 'Instalar la actualización; Sagitari se cerrará para instalarse');
+    }
+    inst.disabled = busy;
+  }
+
+  // progreso: pct + bytes, con aria-valuenow para los lectores de pantalla
+  const downloading = s.status === 'downloading';
+  const pct = Math.max(0, Math.min(100, Math.round(Number(s.progress && s.progress.pct) || 0)));
+  const prow = $('#updProgressRow'); if (prow) prow.classList.toggle('on', downloading);
+  const bar = $('#updBar'); if (bar) bar.setAttribute('aria-valuenow', String(pct));
+  const fill = $('#updBarFill'); if (fill) fill.style.width = pct + '%';
+  const bnote = $('#updBarNote');
+  if (bnote && downloading) {
+    const total = s.progress && s.progress.total;
+    bnote.textContent = 'Descargando… ' + pct + ' %'
+      + (total ? ' (' + updSize(s.progress.received) + ' de ' + updSize(total) + ')' : '');
+  }
+
+  // notas: modo de ejecución, firma y qué pasará exactamente al instalar
+  const notes = [];
+  if (s.kind === 'dev') notes.push('Estás ejecutando desde el código fuente; para actualizarte, compila o usa el instalador.');
+  if (ready) {
+    if (ready.verified === null) notes.push('No había firma publicada para comparar, así que el archivo se descargó sin verificar.');
+    if (s.kind === 'nsis') notes.push('La app se cerrará para instalarse. Vuelve a abrirla cuando termine.');
+    if (s.kind === 'portable') notes.push('Cierra la app y ejecuta el archivo nuevo desde la carpeta que se abrirá.');
+  }
+  const note = $('#updNote');
+  if (note) { note.textContent = notes.join(' '); note.hidden = !notes.length; }
+}
+
+/** Comprueba si hay versión nueva y refresca la tarjeta. Quita el punto del sidebar. */
+async function refreshUpdate() {
+  updState.status = 'checking';
+  updState.error = null;
+  updState.progress = null;
+  setBadge('#nbUpdate', 0);
+  updMsg('');
+  renderUpdate(updState);
+  try {
+    const r = await window.sagitari.updateCheck();
+    if (!r) throw new Error('respuesta vacía del actualizador');
+    updState.current = r.current || updState.current;
+    updState.latest = r.latest || null;
+    updState.available = !!r.available;
+    updState.kind = r.kind || updState.kind;
+    updState.ready = r.ready || updState.ready;
+    updState.error = r.ok === false ? (r.error || 'error desconocido') : null;
+  } catch (e) {
+    updState.error = String((e && e.message) || e || 'error desconocido');
+  }
+  updState.status = updState.ready ? 'ready' : 'idle';
+  renderUpdate(updState);
+}
+
+/** Al entrar en Ajustes: pinta lo que ya sepamos y comprueba una sola vez. */
+function initAboutPanel() {
+  renderUpdate(updState);
+  if (updInitDone) return;
+  updInitDone = true;
+  refreshUpdate();
+}
+
+if ($('#updCheckBtn')) $('#updCheckBtn').onclick = () => refreshUpdate();
+
+if ($('#updDownloadBtn')) $('#updDownloadBtn').onclick = async () => {
+  const btn = $('#updDownloadBtn');
+  if (btn.disabled) return;
+  updState.status = 'downloading';
+  updState.progress = { pct: 0, received: 0, total: 0 };
+  updMsg('');
+  renderUpdate(updState);
+  try {
+    const r = await window.sagitari.updateDownload();
+    if (!r || r.ok === false) {
+      updState.status = updState.ready ? 'ready' : 'idle';
+      updState.progress = null;
+      renderUpdate(updState);
+      updMsg('No se pudo descargar: ' + ((r && r.error) || 'error desconocido'));
+      return;
+    }
+    updState.ready = { name: r.name, version: r.version, verified: r.verified };
+    updState.kind = r.kind || updState.kind;
+    updState.status = 'ready';
+    updState.progress = null;
+    renderUpdate(updState);
+  } catch (e) {
+    updState.status = updState.ready ? 'ready' : 'idle';
+    updState.progress = null;
+    renderUpdate(updState);
+    updMsg('No se pudo descargar: ' + ((e && e.message) || 'error desconocido'));
+  }
+};
+
+if ($('#updInstallBtn')) $('#updInstallBtn').onclick = async () => {
+  const btn = $('#updInstallBtn');
+  if (btn.disabled) return;
+  btn.disabled = true;
+  try {
+    const r = await window.sagitari.updateInstall();
+    if (!r || r.ok === false) { updMsg('No se pudo instalar: ' + ((r && r.error) || 'error desconocido')); return; }
+    updMsg(r.manual
+      ? 'Archivo listo: ejecútalo desde la carpeta que se acaba de abrir.'
+      : 'Instalando… la app se cerrará para instalarse.');
+  } catch (e) {
+    updMsg('No se pudo instalar: ' + ((e && e.message) || 'error desconocido'));
+  } finally {
+    btn.disabled = false;   // si la instalación arranca, la app se cierra antes de llegar aquí
+  }
+};
+
+if ($('#updPageBtn')) $('#updPageBtn').onclick = async () => {
+  const r = await window.sagitari.updatePage();
+  if (r && r.ok === false) updMsg('No se pudo abrir la página: ' + (r.error || 'error desconocido'));
+};
+if ($('#aboutRelBtn')) $('#aboutRelBtn').onclick = () => window.sagitari.updatePage();
+if ($('#aboutRepoBtn')) $('#aboutRepoBtn').onclick = () => window.sagitari.openExternal('https://github.com/dario90vlc/sagitari');
+
+/* Eventos del motor. El aviso es discreto: un punto en Ajustes y UN solo toast
+   (nada de modales ni de descargas automáticas). */
+if (window.sagitari.onUpdate) window.sagitari.onUpdate((ev) => {
+  if (!ev || !ev.type) return;
+  if (ev.type === 'available') {
+    if (ev.current) updState.current = ev.current;   // la tarjeta ya sabe qué tienes instalado
+    updState.latest = ev.version || updState.latest;
+    updState.available = true;
+    if (updState.status !== 'downloading') updState.status = updState.ready ? 'ready' : 'idle';
+    setBadge('#nbUpdate', 1, { hot: true });
+    if (!updNotified) {
+      updNotified = true;
+      showToast('Nueva versión ' + (ev.version || '') + ' disponible · Ajustes → Acerca de');
+    }
+    renderUpdate(updState);
+    return;
+  }
+  if (ev.type === 'up-to-date') {
+    updState.available = false;
+    updState.latest = ev.version || updState.latest;
+    updState.status = updState.ready ? 'ready' : 'idle';
+    renderUpdate(updState);
+    return;
+  }
+  if (ev.type === 'progress') {
+    updState.status = 'downloading';
+    updState.progress = { pct: ev.pct, received: ev.received, total: ev.total };
+    renderUpdate(updState);
+    return;
+  }
+  if (ev.type === 'downloaded') {
+    updState.ready = { name: ev.name, version: ev.version, verified: ev.verified };
+    updState.status = 'ready';
+    updState.progress = null;
+    renderUpdate(updState);
+    return;
+  }
+  if (ev.type === 'error') {
+    const descargando = updState.status === 'downloading';
+    updState.progress = null;
+    updState.status = updState.ready ? 'ready' : 'idle';
+    if (descargando) updMsg('No se pudo descargar: ' + (ev.message || 'error desconocido'));
+    else updState.error = ev.message || 'error desconocido';
+    renderUpdate(updState);
+  }
+});
 
 /** Interruptores: teclado + estado ARIA, sin tocar sus handlers ya definidos. */
 function polishSwitches() {

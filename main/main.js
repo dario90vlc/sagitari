@@ -15,6 +15,7 @@ const { DEFAULT_RISK } = require('../agent/guardrails');
 const { Browser } = require('../agent/browser');
 const { TaskManager } = require('../agent/tasks');
 const { PRESETS, listModels } = require('./providers');
+const updater = require('./updater');
 const skills = require('../agent/skills');
 const marketplace = require('../agent/marketplace');
 const models = require('../agent/models');
@@ -26,6 +27,10 @@ const SMOKE = process.argv.includes('--smoke');
 // ventana: hasta ahora la ventana se abría y se cerraba sola dos veces durante
 // probar.bat, y eso se ve exactamente igual que «la app se cierra sola».
 const HEADLESS = SMOKE || process.argv.includes('--hidden') || process.argv.includes('--test');
+// Solo para probar el actualizador: apunta la comprobación a otra API de releases
+// (p. ej. un JSON local con una versión inventada) y hace que también se compruebe
+// en los arranques ocultos. En uso normal no está definida y no cambia nada.
+const UPDATE_API = process.env.SAGITARI_UPDATE_API || '';
 
 // Los arranques de prueba usan SU PROPIO directorio de datos. El bloqueo de
 // instancia única va ligado al userData: si lo compartieran con la app real,
@@ -886,6 +891,110 @@ function seedStarterSkills() {
   } catch (e) { console.error('seedStarterSkills', e.message); }
 }
 
+/* ---------- actualizaciones (releases de GitHub) ----------
+   Sin dependencias: se consulta la API pública, se descarga el binario de esta
+   plataforma y se verifica su sha512 contra el `latest.yml` que publica el CI
+   antes de ejecutarlo. El aviso al usuario es discreto: un toast y un punto en
+   Ajustes; nada se descarga ni se instala sin que él lo pida. */
+let lastUpdate = null;        // último resultado de la comprobación
+let updateReady = null;       // binario ya descargado y verificado
+
+function sendUpdate(ev) {
+  try { if (win && !win.isDestroyed()) win.webContents.send('update:event', ev); } catch {}
+}
+
+async function checkUpdates({ announce = false } = {}) {
+  const r = await updater.checkForUpdate({ currentVersion: app.getVersion(), ...(UPDATE_API ? { api: UPDATE_API } : {}) });
+  lastUpdate = r;
+  if (r.available) {
+    runlog.log({ agent: 'sagitari', event: 'update_available', version: r.latest });
+    if (announce) sendUpdate({ type: 'available', version: r.latest, current: r.current, url: r.url });
+  } else if (announce) {
+    sendUpdate({ type: r.ok ? 'up-to-date' : 'error', version: r.latest, current: r.current, message: r.error || null });
+  }
+  return r;
+}
+
+ipcMain.handle('update:check', async () => {
+  const r = await checkUpdates();
+  return {
+    ok: r.ok,
+    error: r.error || null,
+    current: r.current || app.getVersion(),
+    latest: r.latest || null,
+    available: !!r.available,
+    url: r.url || `https://github.com/${updater.REPO}/releases`,
+    publishedAt: r.publishedAt || null,
+    notes: r.notes || null,
+    kind: updater.hostKind({ isPackaged: app.isPackaged }),
+    ready: updateReady ? { name: updateReady.name, version: updateReady.version, verified: updateReady.verified } : null,
+  };
+});
+
+ipcMain.handle('update:download', async () => {
+  const r = (lastUpdate && lastUpdate.available) ? lastUpdate : await checkUpdates();
+  if (!r.available) return { ok: false, error: 'no hay ninguna actualización disponible' };
+  const kind = updater.hostKind({ isPackaged: app.isPackaged });
+  const asset = updater.assetFor(kind, r.assets);
+  if (!asset) return { ok: false, error: 'esta release no trae binarios para Windows' };
+  const target = updater.downloadTarget({ kind, assetName: asset.name });
+  runlog.log({ agent: 'sagitari', event: 'update_download_start', version: r.latest, asset: asset.name });
+  try {
+    const dl = await updater.downloadTo(asset.url, target.path, { onProgress: (p) => sendUpdate({ type: 'progress', ...p }) });
+    // el sha512 publicado manda: si no cuadra, ese archivo no se ejecuta
+    let expected = null;
+    if (r.assets && r.assets.yml) {
+      try {
+        const y = await (await fetch(r.assets.yml.url, { headers: { 'User-Agent': 'SAGITARI-updater' } })).text();
+        const parsed = updater.parseLatestYml(y);
+        expected = (parsed.files.find(f => f.url === asset.name) || {}).sha512 || parsed.sha512 || null;
+      } catch {}
+    }
+    const verified = expected ? expected === dl.sha512 : null;
+    if (verified === false) {
+      await fsp.rm(target.path, { force: true }).catch(() => {});
+      runlog.log({ agent: 'sagitari', event: 'update_verify_failed', version: r.latest });
+      sendUpdate({ type: 'error', message: 'La descarga no coincide con la firma publicada; se ha descartado.' });
+      return { ok: false, error: 'la verificación sha512 falló: el archivo se ha descartado' };
+    }
+    updateReady = { path: target.path, name: asset.name, verified, version: r.latest, kind };
+    runlog.log({ agent: 'sagitari', event: 'update_downloaded', version: r.latest, verified });
+    sendUpdate({ type: 'downloaded', version: r.latest, name: asset.name, verified });
+    return { ok: true, path: target.path, name: asset.name, version: r.latest, verified, kind };
+  } catch (e) {
+    sendUpdate({ type: 'error', message: e.message });
+    return { ok: false, error: e.message };
+  }
+});
+
+ipcMain.handle('update:install', async () => {
+  const d = updateReady;
+  if (!d) return { ok: false, error: 'todavía no hay ninguna actualización descargada' };
+  if (!fs.existsSync(d.path)) return { ok: false, error: 'el archivo descargado ya no está en su sitio' };
+  if (d.kind === 'portable') {
+    // un portable no puede reemplazarse a sí mismo mientras se ejecuta:
+    // se deja al lado y se le enseña al usuario dónde está
+    try { shell.showItemInFolder(d.path); } catch {}
+    return { ok: true, manual: true, name: d.name, path: d.path };
+  }
+  if (d.kind === 'dev') return { ok: false, error: 'estás ejecutando desde el código fuente: instala con el instalador' };
+  try {
+    // el instalador no debe arrancar con la app aún viva: se lanza con dos
+    // segundos de margen y la app se cierra para que pueda reemplazar archivos
+    spawn('cmd.exe', ['/c', `timeout /t 2 /nobreak >nul & start "" "${d.path}" /S`], { detached: true, stdio: 'ignore', windowsHide: true }).unref();
+  } catch (e) { return { ok: false, error: e.message }; }
+  runlog.log({ agent: 'sagitari', event: 'update_install', version: d.version });
+  // cierre ordenado (cierra Chrome, procesos de voz, tareas) y con margen de 2 s
+  // para que el instalador no encuentre archivos en uso
+  setTimeout(() => { try { app.quit(); } catch {} }, 500);
+  return { ok: true, manual: false };
+});
+
+ipcMain.handle('update:page', async () => {
+  const url = (lastUpdate && lastUpdate.url) || `https://github.com/${updater.REPO}/releases`;
+  try { await shell.openExternal(url); return { ok: true }; } catch (e) { return { ok: false, error: e.message }; }
+});
+
 app.whenReady().then(() => {
   if (!gotLock) return;
   if (process.platform === 'win32') {
@@ -908,6 +1017,11 @@ app.whenReady().then(() => {
   runlog.log({ agent: 'sagitari', event: 'app_boot', version: app.getVersion() });
   createChatWindow();
   createTray();
+
+  // comprobación silenciosa 12 s después de arrancar: si hay versión nueva, el
+  // renderer muestra un aviso discreto y el botón queda en Ajustes. Nunca
+  // interrumpe ni descarga nada por su cuenta (y no corre en los modos de prueba).
+  if (!HEADLESS || UPDATE_API) setTimeout(() => { checkUpdates({ announce: true }).catch(() => {}); }, 12000);
 
   // Alt+Espacio era el atajo para ocultar la ventana, pero es el menú de sistema
   // de Windows: robarlo a nivel global con la app oculta y sin bandeja dejaba

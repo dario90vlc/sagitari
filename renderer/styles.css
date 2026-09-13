@@ -454,6 +454,13 @@ input::placeholder, textarea::placeholder { color: var(--dim); }
 .btn.ghost { background: transparent; }
 .btn:disabled { opacity: .5; }
 .saving { font-size: 12.5px; color: var(--cyan); min-height: 18px; margin-bottom: 8px; }
+/* ===== v2.2: Acerca de — progreso de la descarga =====
+   La fila de progreso se oculta con clase (no con [hidden]): el buscador de
+   Ajustes reescribe el atributo hidden de cada .srow en cada búsqueda. */
+.updprog { display: none; }
+.updprog.on { display: block; }
+.updbar { height: 8px; border-radius: 999px; background: rgba(255,255,255,0.07); border: 1px solid var(--line2); overflow: hidden; }
+.updbar > span { display: block; height: 100%; width: 0; border-radius: 999px; background: linear-gradient(90deg, #22d3ee, #8b5cf6); transition: width .2s ease; }
 .provlist { border-top: 1px dashed var(--line); margin-top: 10px; padding-top: 12px; }
 .sub2 { font-size: 11px; letter-spacing: 2px; color: var(--dim); margin-bottom: 8px; font-family: 'Sora'; }
 .subnote { color: var(--dim); font-size: 12.5px; margin-top: 10px; line-height: 1.5; }
@@ -482,7 +489,7 @@ input::placeholder, textarea::placeholder { color: var(--dim); }
 .settab {
   display: inline-flex; align-items: center; gap: 8px; padding: 9px 14px; border-radius: 11px;
   border: 1px solid transparent; background: transparent; color: var(--dim);
-  font: 600 13px 'Space Grotesk'; cursor: pointer; transition: all .15s;
+  font: 600 13px 'Space Grotesk'; cursor: pointer; transition: all .15s; white-space: nowrap;
 }
 .settab:hover { color: var(--txt); background: rgba(var(--acc2-rgb), 0.10); }
 .settab.on { color: #fff; background: linear-gradient(135deg, rgba(var(--acc2-rgb), 0.28), rgba(var(--acc3-rgb), 0.18)); border-color: var(--line); box-shadow: 0 0 16px rgba(var(--acc2-rgb), 0.22); }

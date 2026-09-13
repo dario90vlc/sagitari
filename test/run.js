@@ -1497,6 +1497,108 @@ test('adjuntos: UI completa — botón, drag&drop, pegar, chips y miniaturas', (
 // si no, el resumen se imprime antes de que terminen y sus fallos no cuentan
 while (pendingAsync.length) await Promise.all(pendingAsync.splice(0));
 
+/* ---------- actualizador: versiones, assets, descarga y verificación ---------- */
+const updater = require('../main/updater');
+
+test('updater: compara versiones como semver', () => {
+  eq(updater.compareVersions('2.2.0', '2.2.1'), -1);
+  eq(updater.compareVersions('2.2.1', '2.2.1'), 0);
+  eq(updater.compareVersions('2.10.0', '2.9.9'), 1, 'los números se comparan como números, no como texto');
+  eq(updater.compareVersions('v2.3.0', '2.2.9'), 1, 'admite el prefijo v');
+  eq(updater.compareVersions('3.0.0', '2.99.99'), 1);
+  eq(updater.compareVersions('2.0.0', '2.0.0-beta.1'), 1, 'una estable es más nueva que su beta');
+  eq(updater.compareVersions('2.0.0-beta.1', '2.0.0'), -1);
+  eq(updater.compareVersions('', '2.0.0'), 0, 'una versión desconocida no se declara más nueva');
+});
+
+const RELEASE = {
+  tag_name: 'v2.3.0', name: '2.3.0', draft: false, prerelease: false,
+  html_url: 'https://github.com/dario90vlc/sagitari/releases/tag/v2.3.0',
+  published_at: '2026-10-01T10:00:00Z', body: 'Notas de la versión',
+  assets: [
+    { name: 'latest.yml', browser_download_url: 'https://x/latest.yml', size: 300 },
+    { name: 'SAGITARI-Portable-2.3.0.exe', browser_download_url: 'https://x/p.exe', size: 2 },
+    { name: 'SAGITARI-Setup-2.3.0.exe', browser_download_url: 'https://x/s.exe', size: 3 },
+    { name: 'SAGITARI-Setup-2.3.0.exe.blockmap', browser_download_url: 'https://x/s.blockmap', size: 4 },
+  ],
+};
+
+test('updater: elige los binarios correctos de la release', () => {
+  const a = updater.pickAssets(RELEASE);
+  eq(a.setup.name, 'SAGITARI-Setup-2.3.0.exe', 'no debe confundirse con el .blockmap');
+  eq(a.portable.name, 'SAGITARI-Portable-2.3.0.exe');
+  eq(a.yml.name, 'latest.yml');
+  eq(updater.assetFor('nsis', a).name, 'SAGITARI-Setup-2.3.0.exe');
+  eq(updater.assetFor('portable', a).name, 'SAGITARI-Portable-2.3.0.exe');
+  eq(updater.assetFor('nsis', { portable: a.portable }).name, 'SAGITARI-Portable-2.3.0.exe', 'si falta el Setup, usa el portable');
+  eq(updater.assetFor('nsis', {}), null);
+});
+
+test('updater: lee el sha512 del latest.yml del CI', () => {
+  const yml = ['version: 2.3.0', 'files:', '  - url: SAGITARI-Setup-2.3.0.exe', '    sha512: ABC123==', '    size: 117000000', 'path: SAGITARI-Setup-2.3.0.exe', 'sha512: ABC123==', 'releaseDate: 2026-10-01'].join('\n');
+  const y = updater.parseLatestYml(yml);
+  eq(y.version, '2.3.0');
+  eq(y.sha512, 'ABC123==');
+  eq(y.files.length, 1);
+  eq(y.files[0].url, 'SAGITARI-Setup-2.3.0.exe');
+  eq(y.files[0].sha512, 'ABC123==');
+});
+
+test('updater: detecta la actualización y descarta prereleases y errores', async () => {
+  const fake = (rel) => async () => new Response(JSON.stringify(rel), { status: 200, headers: { 'content-type': 'application/json' } });
+  let r = await updater.checkForUpdate({ currentVersion: '2.2.0', fetchFn: fake(RELEASE) });
+  eq(r.ok, true); eq(r.available, true); eq(r.latest, '2.3.0'); ok(r.assets.setup, 'trae los assets');
+  r = await updater.checkForUpdate({ currentVersion: '2.3.0', fetchFn: fake(RELEASE) });
+  eq(r.available, false, 'la misma versión no es una actualización');
+  r = await updater.checkForUpdate({ currentVersion: '2.2.0', fetchFn: fake({ ...RELEASE, prerelease: true }) });
+  eq(r.available, false, 'una prerelease no cuenta como actualización');
+  r = await updater.checkForUpdate({ currentVersion: '2.2.0', fetchFn: async () => new Response('{}', { status: 404 }) });
+  eq(r.ok, true); eq(r.available, false); ok(/sin releases/.test(r.error));
+  r = await updater.checkForUpdate({ currentVersion: '2.2.0', fetchFn: async () => { throw new Error('ENOTFOUND'); } });
+  eq(r.ok, false); ok(/ENOTFOUND/.test(r.error), 'un fallo de red se comunica, no se traga');
+});
+
+test('updater: descarga, informa del progreso y devuelve el sha512', async () => {
+  const dir = tmpDir('sagi-upd-');
+  const dest = path.join(dir, 'bin.exe');
+  const chunks = ['abc', 'def'];
+  const fetchFn = async () => new Response(new ReadableStream({ start(c) { for (const ch of chunks) c.enqueue(new Uint8Array(Buffer.from(ch))); c.close(); } }), { status: 200, headers: { 'content-length': '6' } });
+  const ticks = [];
+  const r = await updater.downloadTo('https://x/bin.exe', dest, { fetchFn, onProgress: (p) => ticks.push(p) });
+  eq(fs.readFileSync(dest, 'utf8'), 'abcdef', 'el archivo llega completo');
+  eq(r.bytes, 6);
+  eq(r.sha512, require('crypto').createHash('sha512').update('abcdef').digest('base64'), 'el sha512 corresponde al contenido');
+  ok(ticks.length >= 1 && typeof ticks[0].total === 'number', 'la descarga informa del progreso con su total');
+  eq(fs.existsSync(dest + '.part'), false, 'no deja el .part tirado');
+});
+
+test('updater: una descarga cortada no deja un instalador a medias', async () => {
+  const dir = tmpDir('sagi-upd2-');
+  const dest = path.join(dir, 'bin.exe');
+  const fetchFn = async () => new Response(new ReadableStream({ start(c) { c.enqueue(new Uint8Array(Buffer.from('ab'))); c.error(new Error('corte de red')); } }), { status: 200 });
+  let fallo = false;
+  try { await updater.downloadTo('https://x/bin.exe', dest, { fetchFn }); } catch { fallo = true; }
+  eq(fallo, true, 'el corte debe propagarse');
+  eq(fs.existsSync(dest), false, 'no puede quedar un .exe incompleto en el destino');
+  eq(fs.existsSync(dest + '.part'), false, 'ni el temporal');
+});
+
+test('updater: cada modo guarda el binario donde toca', () => {
+  eq(updater.hostKind({ isPackaged: false }), 'dev');
+  eq(updater.hostKind({ isPackaged: true, env: {} }), 'nsis');
+  eq(updater.hostKind({ isPackaged: true, env: { PORTABLE_EXECUTABLE_DIR: 'C:/apps' } }), 'portable');
+  const t = updater.downloadTarget({ kind: 'nsis', assetName: 'SAGITARI-Setup-2.3.0.exe' });
+  ok(t.path.includes('sagitari-update'), 'los instaladores van a su carpeta temporal');
+  const p = updater.downloadTarget({ kind: 'portable', assetName: 'SAGITARI-Portable-2.3.0.exe', env: { PORTABLE_EXECUTABLE_DIR: 'C:/apps' } });
+  eq(p.path, path.join('C:/apps', 'SAGITARI-Portable-2.3.0.exe'), 'el portable se deja junto al que se está ejecutando');
+  const evil = updater.downloadTarget({ kind: 'nsis', assetName: '../../evil name.exe' });
+  eq(path.basename(evil.path), '.._.._evil_name.exe', 'el nombre no puede escapar de la carpeta');
+});
+
+/* Los tests async registrados más arriba (la descarga del actualizador) todavía
+   no han terminado: hay que esperarlos ANTES de borrar sus temporales. */
+while (pendingAsync.length) await Promise.all(pendingAsync.splice(0));
+
 // limpieza: la suite no debe dejar basura en %TEMP%
 for (const d of TMP_DIRS) { try { fs.rmSync(d, { recursive: true, force: true }); } catch {} }
 

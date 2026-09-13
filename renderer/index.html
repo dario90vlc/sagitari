@@ -53,7 +53,7 @@
 
         <div class="navgroup" data-label="Sistema">
           <button class="navitem" data-view="history" title="Historial (Alt+8)"><span class="ni"><i data-i="history"></i></span><span class="nl">Historial</span></button>
-          <button class="navitem" data-view="settings" title="Ajustes (Alt+9)"><span class="ni"><i data-i="settings"></i></span><span class="nl">Ajustes</span></button>
+          <button class="navitem" data-view="settings" title="Ajustes (Alt+9)"><span class="ni"><i data-i="settings"></i></span><span class="nl">Ajustes</span><span class="nb" id="nbUpdate" hidden>1</span></button>
         </div>
       </nav>
 
@@ -292,6 +292,7 @@
           <button class="settab" data-set="security"><i data-i="key"></i> Seguridad</button>
           <button class="settab" data-set="agent"><i data-i="agents"></i> Agente</button>
           <button class="settab" data-set="data"><i data-i="history"></i> Datos y atajos</button>
+          <button class="settab" data-set="about"><i data-i="spark"></i> Acerca de</button>
         </div>
 
         <div class="setwrap" id="setWrap">
@@ -491,6 +492,41 @@
               <div class="swrow srow" data-keys="carpeta datos copia seguridad ruta backup abrir"><span class="st"><b>Ubicación</b><small id="dataDirPath">—</small></span>
                 <button class="btn ghost" id="openDataDirBtn"><span class="bi"><i data-i="external"></i></span> Abrir</button></div>
               <div class="subnote">Copia esta carpeta para respaldar tu configuración, tu memoria y tus skills.</div>
+            </div>
+          </div>
+
+          <!-- ===== ACERCA DE ===== -->
+          <div class="setpanel" data-panel="about">
+            <div class="setcard">
+              <div class="sc-head"><b>Actualizaciones</b><span class="sc-hint">Desde GitHub, y solo cuando tú lo pidas</span></div>
+              <div class="swrow srow" data-keys="actualizacion actualizar version update ultima comprobar estado">
+                <span class="st"><b>Versión instalada</b><small id="updState">Aún no se ha comprobado.</small></span>
+                <span class="kbd" id="updCurrent">—</span>
+              </div>
+              <div class="srow updprog" id="updProgressRow" data-keys="actualizacion actualizar version update descargar progreso porcentaje">
+                <div class="updbar" id="updBar" role="progressbar" aria-valuemin="0" aria-valuemax="100" aria-valuenow="0" aria-label="Progreso de la descarga"><span id="updBarFill"></span></div>
+                <div class="subnote" id="updBarNote">Descargando…</div>
+              </div>
+              <div class="btnrow">
+                <button class="btn" id="updCheckBtn" aria-label="Buscar actualizaciones publicadas en GitHub"><span class="bi"><i data-i="refresh"></i></span><span id="updCheckLabel">Buscar actualizaciones</span></button>
+                <button class="btn primary" id="updDownloadBtn" hidden aria-label="Descargar la actualización disponible"><span class="bi"><i data-i="download"></i></span> Descargar</button>
+                <button class="btn primary" id="updInstallBtn" hidden aria-label="Instalar la actualización; Sagitari se cerrará para instalarse"><span class="bi"><i data-i="download"></i></span><span id="updInstallLabel">Instalar y cerrar</span></button>
+                <button class="btn ghost" id="updPageBtn" aria-label="Ver las novedades de la versión en GitHub"><span class="bi"><i data-i="external"></i></span> Ver novedades</button>
+              </div>
+              <div class="subnote" id="updNote" hidden></div>
+              <div class="saving" id="updMsg"></div>
+            </div>
+
+            <div class="setcard">
+              <div class="sc-head"><b>Aplicación</b><span class="sc-hint">Sagitari, tu asistente agéntico</span></div>
+              <div class="swrow srow" data-keys="aplicacion about acerca sagitari version actual repositorio releases">
+                <span class="st"><b>SAGITARI</b><small>Asistente agéntico de escritorio para tu equipo.</small></span>
+                <span class="kbd" id="aboutVersion">—</span>
+              </div>
+              <div class="btnrow" style="margin:12px 0 0">
+                <button class="btn ghost" id="aboutRepoBtn" aria-label="Abrir el repositorio de Sagitari en GitHub"><span class="bi"><i data-i="code"></i></span> Repositorio</button>
+                <button class="btn ghost" id="aboutRelBtn" aria-label="Abrir la página de versiones en GitHub"><span class="bi"><i data-i="external"></i></span> Releases</button>
+              </div>
             </div>
           </div>
 
