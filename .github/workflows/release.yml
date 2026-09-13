@@ -30,9 +30,10 @@ jobs:
         run: npm test
 
       - name: Build installer + portable
-        run: npm run dist
-        env:
-          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        # --publish never: electron-builder NO publica. Si ve GH_TOKEN crea la
+        # release por su cuenta (sin descripción) y luego la acción solo le sube
+        # los assets, así que la página quedaba sin notas. Publica la acción.
+        run: npm run dist -- --publish never
 
       - name: Build release body (notes + SHA-256)
         shell: bash
@@ -57,3 +58,5 @@ jobs:
           files: |
             dist/SAGITARI-Setup-*.exe
             dist/SAGITARI-Portable-*.exe
+            dist/latest.yml
+            dist/SAGITARI-Setup-*.exe.blockmap
