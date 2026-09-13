@@ -3,7 +3,7 @@
 // SAGITARI — Electron main process
 // Chat window + click-through screen-edge glow overlay + agent + voice + settings.
 
-const { app, BrowserWindow, ipcMain, desktopCapturer, screen, globalShortcut, shell, dialog, Tray, Menu } = require('electron');
+const { app, BrowserWindow, ipcMain, desktopCapturer, screen, globalShortcut, shell, dialog, Tray, Menu, safeStorage } = require('electron');
 const path = require('path');
 const { pathToFileURL } = require('url');
 const fs = require('fs');
@@ -86,8 +86,43 @@ const securityDefaults = {
 };
 let providersChanged = false;
 
+/* ---------- claves de API en disco ----------
+   Las claves se guardan cifradas con el almacén del sistema (DPAPI en Windows vía
+   safeStorage): un config.json copiado, sincronizado o leído por otro programa ya
+   no expone las credenciales. En memoria siempre están en claro porque el agente
+   las necesita para llamar al proveedor. Si el sistema no ofrece cifrado, se
+   guarda en claro y queda constancia en el log: antes se hacía siempre. */
+const KEY_PREFIX = 'enc:v1:';
+function encryptionAvailable() {
+  try { return safeStorage.isEncryptionAvailable(); } catch { return false; }
+}
+function protectKey(k) {
+  if (typeof k !== 'string' || !k) return k;
+  if (k.startsWith(KEY_PREFIX)) return k;                 // ya estaba cifrada
+  if (!encryptionAvailable()) return k;
+  try { return KEY_PREFIX + safeStorage.encryptString(k).toString('base64'); } catch { return k; }
+}
+function revealKey(k) {
+  if (typeof k !== 'string' || !k.startsWith(KEY_PREFIX)) return k;
+  try { return safeStorage.decryptString(Buffer.from(k.slice(KEY_PREFIX.length), 'base64')); } catch { return ''; }
+}
+/** Copia del config con las claves cifradas, tal y como va a disco. */
+function configParaDisco() {
+  const paint = (p) => (p && typeof p === 'object' ? { ...p, apiKey: protectKey(p.apiKey) } : p);
+  return { ...config, providers: (config.providers || []).map(paint), active: paint(config.active) };
+}
+/** Alguna clave sin cifrar en memoria → hay que reescribir el fichero. */
+function needsKeyEncryption() {
+  if (!encryptionAvailable()) return false;
+  const sinCifrar = (p) => !!(p && typeof p.apiKey === 'string' && p.apiKey && !p.apiKey.startsWith(KEY_PREFIX));
+  return sinCifrar(config.active) || (config.providers || []).some(sinCifrar);
+}
+
 function applyConfig(raw) {
   config = { ...config, ...raw, settings: { ...config.settings, ...(raw.settings || {}) } };
+  // de disco llegan cifradas: en memoria el agente necesita el valor real
+  if (config.active && config.active.apiKey) config.active = { ...config.active, apiKey: revealKey(config.active.apiKey) };
+  config.providers = (config.providers || []).map(p => (p && p.apiKey ? { ...p, apiKey: revealKey(p.apiKey) } : p));
   config.security = {
     permissions: { ...(raw.security && raw.security.permissions || {}) },
     guardrails: { ...securityDefaults.guardrails, ...(raw.security && raw.security.guardrails || {}) },
@@ -127,7 +162,7 @@ function writeJsonAtomic(file, data) {
 }
 function saveConfig() {
   try {
-    writeJsonAtomic(CONFIG_FILE, JSON.stringify(config, null, 2));
+    writeJsonAtomic(CONFIG_FILE, JSON.stringify(configParaDisco(), null, 2));
     return { ok: true };
   } catch (e) {
     console.error('saveConfig', e.message);
@@ -1047,6 +1082,14 @@ ipcMain.handle('update:page', async () => {
 app.whenReady().then(() => {
   if (!gotLock) return;
   loadConfig();
+  // migración: un config.json de una versión anterior trae las claves en claro;
+  // se reescribe cifrado en cuanto arranca (el .bak conserva la copia previa)
+  if (needsKeyEncryption()) {
+    const r = saveConfig();
+    if (r.ok) console.log('[SAGITARI] claves de API cifradas con el almacén del sistema (' + CONFIG_FILE + ')');
+  } else if (!encryptionAvailable() && ((config.providers || []).some(p => p && p.apiKey))) {
+    console.warn('[SAGITARI] el sistema no ofrece cifrado: las claves se guardan en claro en config.json');
+  }
   seedStarterSkills();
   // v1.3 recuperación: las 'running' de un crash/cierre pasan a 'interrupted' y el
   // TaskManager las re-encola automáticamente (respetando autoResumeTasks)
