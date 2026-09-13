@@ -59,7 +59,10 @@ if (!gotLock) {
 app.on('second-instance', () => showWindow());
 
 // ---------- config ----------
-const CONFIG_DIR = path.join(app.getPath('appData'), 'SagitariAI');
+// Los arranques de prueba escriben en SU PROPIO directorio de datos: ui-check
+// navega la interfaz de verdad y acaba guardando ajustes y conversaciones, y no
+// puede tocar las claves, las conversaciones ni la memoria reales del usuario.
+const CONFIG_DIR = path.join(app.getPath('appData'), HEADLESS ? 'SagitariAI-test' : 'SagitariAI');
 const LEGACY_CONFIG = path.join(app.getPath('appData'), 'JarvisAI', 'config.json');
 const CONFIG_FILE = path.join(CONFIG_DIR, 'config.json');
 let config = {
@@ -99,13 +102,17 @@ function loadConfig() {
       console.error('config.json ilegible, recuperado desde config.json.bak:', e.message);
       return;
     } catch {}
-    try {
-      applyConfig(JSON.parse(fs.readFileSync(LEGACY_CONFIG, 'utf8')));
-      config.security = { permissions: {}, guardrails: { ...securityDefaults.guardrails } };
-      saveConfig();
-    } catch {
-      config.security = { permissions: {}, guardrails: { ...securityDefaults.guardrails } };
+    // migración desde la app anterior (JarvisAI → SAGITARI); nunca en los modos
+    // de prueba, que no deben leer la configuración real del usuario
+    if (!HEADLESS) {
+      try {
+        applyConfig(JSON.parse(fs.readFileSync(LEGACY_CONFIG, 'utf8')));
+        config.security = { permissions: {}, guardrails: { ...securityDefaults.guardrails } };
+        saveConfig();
+        return;
+      } catch {}
     }
+    config.security = { permissions: {}, guardrails: { ...securityDefaults.guardrails } };
   }
 }
 /* Guardado atómico: se escribe en <archivo>.tmp y se renombra encima, y antes de

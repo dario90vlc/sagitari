@@ -19,11 +19,31 @@ const { spawn } = require('child_process');
 const http = require('http');
 const net = require('net');
 const path = require('path');
+const fs = require('fs');
+const os = require('os');
 const WebSocket = require('ws');
 
 const electron = require('electron');   // en un proceso Node normal: la ruta del binario
 const APP_DIR = path.join(__dirname, '..');
 const TIMEOUT_MS = 25000;
+
+/* La app de prueba vive en su propio directorio de datos (main.js lo deriva de
+   --hidden/--test). Se le deja un config mínimo para que la interfaz se vea como
+   una instalación configurada: sin proveedor activo la app arranca con la
+   bienvenida «ve a Ajustes» y el estado vacío no está visible, que es justo lo
+   que se comprueba aquí. No lleva ninguna credencial: el endpoint apunta a un
+   puerto local cerrado, así que cualquier llamada al modelo falla al instante
+   sin tocar la red ni las claves reales. */
+const TEST_DATA_DIR = path.join(process.env.APPDATA || path.join(os.homedir(), 'AppData', 'Roaming'), 'SagitariAI-test');
+function seedTestConfig() {
+  const file = path.join(TEST_DATA_DIR, 'config.json');
+  if (fs.existsSync(file)) return;
+  const dummy = { providerId: 'ui-check', name: 'Prueba (sin conexión)', baseUrl: 'http://127.0.0.1:9/v1', apiKey: '', model: 'test-model', vision: false };
+  try {
+    fs.mkdirSync(TEST_DATA_DIR, { recursive: true });
+    fs.writeFileSync(file, JSON.stringify({ providers: [{ ...dummy, id: 'ui-check', models: ['test-model'] }], active: dummy }, null, 2), 'utf8');
+  } catch {}
+}
 
 const get = (url) => new Promise((res, rej) => {
   http.get(url, (r) => { let d = ''; r.on('data', (c) => d += c); r.on('end', () => res(d)); }).on('error', rej);
@@ -66,6 +86,7 @@ const AFTER = {
 };
 
 (async () => {
+  seedTestConfig();
   const port = await freePort();
   // --hidden: la ventana NO se muestra. Antes se abría y se cerraba sola durante
   // probar.bat, y eso se ve idéntico a «la app se cierra sola».

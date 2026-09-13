@@ -59,6 +59,12 @@ jobs:
       - name: Unit tests
         run: npm test
 
+      - name: Smoke test (la app arranca de verdad)
+        run: npm run smoke
+
+      - name: UI check (la interfaz responde de verdad)
+        run: npm run uicheck
+
       - name: Build installer + portable
         # --publish never: electron-builder NO publica. Si ve GH_TOKEN crea la
         # release por su cuenta (sin descripción) y luego la acción solo le sube
