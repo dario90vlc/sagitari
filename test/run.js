@@ -1809,6 +1809,116 @@ test('updater: una descarga que deja de recibir datos se corta sola', async () =
   eq(fs.existsSync(dest + '.part'), false, 'no puede quedar un temporal a medias');
 });
 
+/* ---------- navegador y logs: cobertura que faltaba ---------- */
+const { Browser } = require('../agent/browser');
+const profiles = require('../agent/browser-profiles');
+const runlog = require('../agent/runlog');
+
+const PROF_TMP = tmpDir('sagi-profiles-');
+profiles.__test._resetForTests(PROF_TMP);   // nunca escribir en %APPDATA% real
+
+test('perfiles: cada nombre tiene su carpeta y la migración conserva los logins', () => {
+  ok(profiles.profileDirFor('Mi Work!').startsWith(PROF_TMP), 'la carpeta vive en la base de perfiles');
+  ok(profiles.profileId('mi perfil') !== profiles.profileId('mi_perfil'), 'nombres parecidos no colapsan');
+  const legacy = profiles.legacyDirFor('trabajo');
+  fs.mkdirSync(legacy, { recursive: true });
+  fs.writeFileSync(path.join(legacy, 'Cookies'), 'sesión guardada');
+  const dir = profiles.ensureProfileDir('trabajo');
+  eq(fs.readFileSync(path.join(dir, 'Cookies'), 'utf8'), 'sesión guardada', 'los logins sobreviven a la actualización');
+  eq(fs.existsSync(legacy), false, 'la carpeta antigua se traslada, no se duplica');
+});
+
+test('perfiles: ensureProfileDir no pisa lo que ya había', () => {
+  const a = profiles.ensureProfileDir('dos');
+  fs.mkdirSync(a, { recursive: true });   // la carpeta la crea el navegador al arrancar
+  fs.writeFileSync(path.join(a, 'Cookies'), 'x');
+  eq(profiles.ensureProfileDir('dos'), a, 'misma carpeta en la segunda llamada');
+  eq(fs.readFileSync(path.join(a, 'Cookies'), 'utf8'), 'x');
+});
+
+test('browser: el puerto CDP se recupera del perfil', () => {
+  const b = new Browser();
+  b.profileDir = tmpDir('sagi-prof-');
+  const file = path.join(b.profileDir, 'DevToolsActivePort');
+  eq(b._portFromProfile(), 0, 'sin fichero no hay puerto');
+  fs.writeFileSync(file, 'abc\n/devtools/browser/x\n');
+  eq(b._portFromProfile(), 0, 'contenido ilegible → 0');
+  fs.writeFileSync(file, '70000\n');
+  eq(b._portFromProfile(), 0, 'puerto fuera de rango → 0');
+  fs.writeFileSync(file, '9333\n/devtools/browser/abc\n');
+  eq(b._portFromProfile(), 9333, 'lee el puerto que dejó Chrome en el perfil');
+});
+
+test('browser: una acción desconocida no lanza un navegador', async () => {
+  const b = new Browser();
+  b.profileDir = tmpDir('sagi-prof2-');
+  const r = await b.handle({ action: 'clik' });   // errata típica del modelo
+  ok(/Acción desconocida/.test(r), 'debe rechazarla');
+  eq(b.ws, null, 'sin abrir conexión');
+  eq(b.browserPid, null, 'sin lanzar ningún proceso');
+});
+
+test('browser: cambiar de perfil olvida el estado del anterior', async () => {
+  const b = new Browser();
+  b.port = 9333;
+  b.browserPid = 4242;              // pid ficticio: no debe poder matarse después
+  b.activeId = 'tab1';
+  b._lastElements = [{ x: 1, y: 1 }];
+  b._sessions.set('tab1', 's1');
+  const r = await b.switchProfile('otro');
+  ok(/perfil activo/.test(r), 'confirma el cambio');
+  eq(b.port, 0, 'el puerto del perfil anterior no vale');
+  eq(b.browserPid, null, 'ni su PID: Windows reutiliza los números');
+  eq(b._lastElements, null, 'ni el inventario de la página anterior');
+  eq(b._sessions.size, 0);
+  ok(b.profileDir.startsWith(PROF_TMP), 'y el perfil nuevo usa su propia carpeta');
+});
+
+test('browser: kill deja el estado limpio y se puede repetir', () => {
+  const b = new Browser();
+  b.profileDir = tmpDir('sagi-prof3-');
+  b.port = 9333; b.activeId = 'tab1'; b._sessions.set('tab1', 's1');
+  b.kill();
+  eq(b.ws, null); eq(b.activeId, null); eq(b._sessions.size, 0);
+  b.kill();   // sin navegador abierto no puede lanzar ningún taskkill
+});
+
+test('runlog: escribe, se lee y rota por bytes reales', async () => {
+  const dir = tmpDir('sagi-logs-');
+  runlog.__test._resetForTests({ dir, maxBytes: 400, maxLogs: 3 });
+  let streams = 0;
+  const abrir = fs.createWriteStream;
+  fs.createWriteStream = (...a) => { streams++; return abrir(...a); };
+  for (let i = 0; i < 200; i++) runlog.log({ agent: 'test', event: 'e', text: 'ñ'.repeat(60) + i });
+  fs.createWriteStream = abrir;
+  runlog.close();
+  ok(streams > 1, 'el tope por archivo fuerza rotación (' + streams + ' ficheros abiertos)');
+  // la poda corre unos cientos de ms después de la última rotación y reintenta:
+  // en Windows el fichero anterior puede seguir con el handle cerrándose
+  await new Promise(r => setTimeout(r, 1200));
+  const files = fs.readdirSync(dir).filter(f => f.endsWith('.jsonl'));
+  ok(files.length <= 3, 'no se conservan más ficheros de los permitidos (' + files.length + ')');
+  /* El tope es de BYTES: contando caracteres UTF-16 cada línea de 60 «ñ» pesa la
+     mitad de lo que ocupa en disco, así que el fichero se pasaba del tope al
+     doble. Aquí cada línea son ~190 bytes y el tope 400. */
+  for (const f of files) {
+    const bytes = fs.statSync(path.join(dir, f)).size;
+    ok(bytes <= 600, f + ' ocupa ' + bytes + ' bytes y el tope es 400');
+  }
+  /* Cada línea tiene que ser un evento completo: una rotación a mitad de línea
+     dejaría JSON partido (y el tope se cumple sin cortar nada). */
+  for (const f of files) {
+    const lines = fs.readFileSync(path.join(dir, f), 'utf8').split('\n').filter(Boolean);
+    ok(lines.length > 0, f + ' no puede quedar vacío');
+    for (const l of lines) eq(JSON.parse(l).agent, 'test', 'línea completa en ' + f);
+  }
+  const recent = runlog.readRecent(3);
+  ok(recent.length === 3, 'readRecent devuelve los últimos eventos');
+  ok(recent.every(e => e.agent === 'test' && e.ts), 'cada evento con su origen y su marca de tiempo');
+  ok(/^run-\d+(-\d+)?\.jsonl$/.test(path.basename(runlog.currentLogFile() || '')), 'el fichero de sesión se nombra run-<ts>.jsonl');
+  runlog.__test._resetForTests({});
+});
+
 /* Los tests async registrados más arriba (la descarga del actualizador) todavía
    no han terminado: hay que esperarlos ANTES de borrar sus temporales. */
 while (pendingAsync.length) await Promise.all(pendingAsync.splice(0));

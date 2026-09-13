@@ -7,7 +7,8 @@
 const path = require('path');
 const fs = require('fs');
 
-const PROFILE_BASE = path.join(process.env.APPDATA || require('os').homedir(), 'SagitariAI', 'browser-profiles');
+const PROFILE_BASE_DEFAULT = path.join(process.env.APPDATA || require('os').homedir(), 'SagitariAI', 'browser-profiles');
+let PROFILE_BASE = PROFILE_BASE_DEFAULT;
 
 /* FNV-1a de 32 bits: hash corto, estable y sin dependencias. */
 function shortHash(s) {
@@ -54,4 +55,4 @@ function ensureProfileDir(profile) {
   return dir;
 }
 
-module.exports = { PROFILE_BASE, profileDirFor, profileId, ensureProfileDir, legacyDirFor };
+module.exports = { PROFILE_BASE, profileDirFor, profileId, ensureProfileDir, legacyDirFor, __test: { _resetForTests: (dir) => { PROFILE_BASE = dir || PROFILE_BASE_DEFAULT; } } };

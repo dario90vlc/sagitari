@@ -9,25 +9,63 @@
 const fs = require('fs');
 const path = require('path');
 
-const LOG_DIR = path.join(process.env.APPDATA || require('os').homedir(), 'SagitariAI', 'logs');
-const MAX_LOGS = 20;
-const MAX_BYTES = 8 * 1024 * 1024;   // tope por archivo: una sesión larga no crece sin límite
+const LOG_DIR_DEFAULT = path.join(process.env.APPDATA || require('os').homedir(), 'SagitariAI', 'logs');
+let LOG_DIR = LOG_DIR_DEFAULT;
+let MAX_LOGS = 20;
+let MAX_BYTES = 8 * 1024 * 1024;   // tope por archivo: una sesión larga no crece sin límite
 
 let stream = null;
 let currentFile = null;
 let written = 0;   // bytes escritos en el archivo actual
 
+let pruneTimer = null;
+const nombresUsados = new Set();   // nombres abiertos en esta sesión (unicidad en memoria)
+
+/**
+ * Borra los ficheros sobrantes dejando MAX_LOGS (el de la sesión incluido).
+ *
+ * Se hace DESPUÉS de abrir el nuevo y con reintentos, no antes: `readdirSync`
+ * ejecutado en el instante de rotar puede no ver todavía los ficheros recién
+ * creados (el handle se abre de forma asíncrona) y, en Windows, un fichero con
+ * el handle cerrándose a medias tampoco se puede borrar. Podando antes, la
+ * carpeta de logs crecía sin límite en sesiones largas.
+ */
+function pruneOldLogs() {
+  clearTimeout(pruneTimer);
+  pruneTimer = setTimeout(() => {
+    let files = [];
+    try { files = fs.readdirSync(LOG_DIR).filter(f => f.endsWith('.jsonl')).sort(); } catch { return; }
+    const activo = currentFile && path.basename(currentFile);
+    const otros = files.filter(f => f !== activo);
+    let pendientes = otros.slice(0, Math.max(0, otros.length - (MAX_LOGS - 1)));
+    const paso = (intento) => {
+      pendientes = pendientes.filter((f) => {
+        try { fs.unlinkSync(path.join(LOG_DIR, f)); nombresUsados.delete(f); return false; }
+        catch (e) { return e.code !== 'ENOENT'; }        // ENOENT: ya no está
+      });
+      if (pendientes.length && intento < 4) setTimeout(() => paso(intento + 1), 200);
+    };
+    paso(1);
+  }, 200);
+  if (pruneTimer.unref) pruneTimer.unref();
+}
+
 function openStream() {
   fs.mkdirSync(LOG_DIR, { recursive: true });
-  // rotate: keep newest MAX_LOGS-1, this session opens a new one
-  const files = fs.readdirSync(LOG_DIR).filter(f => f.endsWith('.jsonl')).sort();
-  while (files.length >= MAX_LOGS) {
-    try { fs.unlinkSync(path.join(LOG_DIR, files.shift())); } catch {}
-  }
-  currentFile = path.join(LOG_DIR, 'run-' + Date.now() + '.jsonl');
+  // Nombre de sesión único. Comprobar solo con existsSync no basta: el fichero
+  // que se acaba de abrir puede no estar todavía en disco (el handle se abre de
+  // forma asíncrona), así que dos rotaciones dentro del mismo milisegundo
+  // reutilizaban el nombre, el contador de bytes volvía a cero y el archivo
+  // seguía creciendo con flags 'a' muy por encima del tope.
+  const base = 'run-' + Date.now();
+  let name = base + '.jsonl';
+  for (let i = 1; nombresUsados.has(name) || fs.existsSync(path.join(LOG_DIR, name)); i++) name = base + '-' + i + '.jsonl';
+  nombresUsados.add(name);
+  currentFile = path.join(LOG_DIR, name);
   written = 0;
   stream = fs.createWriteStream(currentFile, { flags: 'a' });
   stream.on('error', () => { stream = null; });
+  pruneOldLogs();
   return stream;
 }
 
@@ -90,4 +128,17 @@ function readRecent(n = 200) {
 
 function close() { try { stream && stream.end(); } catch {} stream = null; }
 
-module.exports = { log, readRecent, currentLogFile, close, LOG_DIR };
+module.exports = {
+  log, readRecent, currentLogFile, close, LOG_DIR,
+  /* Redirige el almacén y los topes para poder probar rotación y tamaño sin
+     escribir 8 MB ni tocar los logs reales del usuario. */
+  __test: {
+    _resetForTests: ({ dir, maxBytes, maxLogs } = {}) => {
+      try { stream && stream.end(); } catch {}
+      stream = null; currentFile = null; written = 0;
+      LOG_DIR = dir || LOG_DIR_DEFAULT;
+      MAX_BYTES = maxBytes || 8 * 1024 * 1024;
+      MAX_LOGS = maxLogs || 20;
+    },
+  },
+};

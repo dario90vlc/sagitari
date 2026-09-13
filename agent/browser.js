@@ -32,6 +32,12 @@ function getJSON(url, timeoutMs = 2500) {
   });
 }
 
+/* Acciones válidas de browser_control. Se valida ANTES de la autocuración: un
+   nombre mal escrito (o alucinado por el modelo) llegaba al `if (!this.ws)` y
+   acababa lanzando un Chrome nuevo para luego responder «acción desconocida». */
+const ACTIONS = new Set(['launch', 'profile', 'close', 'navigate', 'new_tab', 'select_tab', 'close_tab',
+  'elements', 'click_index', 'click', 'type', 'press', 'scroll', 'wait', 'content', 'eval', 'screenshot', 'tabs']);
+
 const sleep = (ms) => new Promise((r) => setTimeout(r, ms));
 
 /* v1.5: perfiles de navegador — cada perfil tiene SU propia carpeta de datos
@@ -61,14 +67,16 @@ class Browser {
     if (this.ws) {
       try { await this.send('Browser.close'); } catch {}
       try { this.ws.close(); } catch {}
-      this.ws = null; this.activeId = null; this.port = 0;
-      this._sessions.clear();
-      this._lastElements = null;
-      // el PID del navegador anterior ya no vale: matar por un PID reciclado por
-      // Windows podría llevarse por delante un árbol de procesos ajeno
-      this.browserPid = null;
       this._rejectPending('Cambiando de perfil.');
     }
+    // El estado del navegador anterior se olvida SIEMPRE, haya socket vivo o no:
+    // su puerto y su PID no valen para el perfil nuevo. (Antes solo se limpiaban
+    // con el socket abierto, así que un cambio de perfil tras un cierre brusco
+    // dejaba un PID viejo que kill() podía disparar contra otro proceso.)
+    this.ws = null; this.activeId = null; this.port = 0;
+    this._sessions.clear();
+    this._lastElements = null;
+    this.browserPid = null;
     this.profile = id;
     this.profileDir = ensureProfileDir(profile);   // el dir se deriva del nombre original, no del id ya hasheado
     return `OK: perfil activo → «${label}». Se abrirá (con sus propias cookies y sesiones) en el próximo launch.`;
@@ -574,6 +582,7 @@ Usa action=click_index con estos índices, o selector/text como antes.`;
 
   async handle(args) {
     const a = args.action;
+    if (!ACTIONS.has(a)) return `Acción desconocida: ${a}. Válidas: ${[...ACTIONS].join(', ')}.`;
     let retried = false;
     try {
       if (a === 'launch') return await this.launch(args.browser, args.url);
