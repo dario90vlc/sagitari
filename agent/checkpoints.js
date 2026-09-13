@@ -77,7 +77,10 @@ function newRun({ goal, mode, step, status = 'running', scheduledAt = null, orig
   return {
     runId: newRunId(),
     status: ALL_STATUS.includes(status) ? status : 'running',
-    goal: String(goal || '').slice(0, 400),
+    // El objetivo se guarda entero: el prompt de reanudación se construye desde
+    // aquí, así que recortarlo hacía que una tarea larga se retomara con el
+    // enunciado mutilado. Solo se acota para no escribir un fichero absurdo.
+    goal: String(goal || '').slice(0, 4000),
     mode: mode || 'act',
     step: step || 'EXECUTE',
     scheduledAt: scheduledAt || null,   // ISO: tarea programada (v1.3)

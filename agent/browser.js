@@ -42,7 +42,6 @@ class Browser {
   constructor() {
     this.ws = null;
     this.port = 0;
-    this.browserExe = null;
     this.activeId = null;      // targetId of the tab every action targets
     this.profile = profileId('default');  // v1.5: id canónico del perfil activo
     this._id = 0;
@@ -64,6 +63,10 @@ class Browser {
       try { this.ws.close(); } catch {}
       this.ws = null; this.activeId = null; this.port = 0;
       this._sessions.clear();
+      this._lastElements = null;
+      // el PID del navegador anterior ya no vale: matar por un PID reciclado por
+      // Windows podría llevarse por delante un árbol de procesos ajeno
+      this.browserPid = null;
       this._rejectPending('Cambiando de perfil.');
     }
     this.profile = id;
@@ -72,6 +75,19 @@ class Browser {
   }
 
   // ---------- discovery / connection ----------
+
+  /**
+   * Puerto CDP que Chrome dejó escrito en el perfil (`DevToolsActivePort`).
+   * Sobrevive a un cierre brusco de SAGITARI, así que es la única forma de
+   * recuperar un navegador huérfano que sigue usando nuestro perfil.
+   */
+  _portFromProfile() {
+    try {
+      const raw = fs.readFileSync(path.join(this.profileDir, 'DevToolsActivePort'), 'utf8');
+      const n = Number(String(raw).split(/\r?\n/)[0].trim());
+      return Number.isInteger(n) && n > 0 && n < 65536 ? n : 0;
+    } catch { return 0; }
+  }
 
   async alive() {
     // A debugged browser on our port answers /json quickly.
@@ -136,11 +152,15 @@ class Browser {
     return new Promise((resolve, reject) => {
       if (!this.ws) return reject(new Error('Navegador no iniciado. Usa browser_control action=launch.'));
       const id = ++this._id;
-      this._pending.set(id, { resolve, reject });
+      // el temporizador se cancela al resolverse: si no, cada comando CDP dejaba
+      // un timer vivo 30 s más (cientos en una sesión de automatización larga)
+      let timer = null;
+      const wrap = (fn) => (v) => { clearTimeout(timer); fn(v); };
+      this._pending.set(id, { resolve: wrap(resolve), reject: wrap(reject) });
       const payload = sessionId ? { id, method, params, sessionId } : { id, method, params };
       try { this.ws.send(JSON.stringify(payload)); }
-      catch (e) { this._pending.delete(id); return reject(e); }
-      setTimeout(() => { if (this._pending.has(id)) { this._pending.delete(id); reject(new Error('CDP timeout: ' + method)); } }, 30000);
+      catch (e) { this._pending.delete(id); clearTimeout(timer); return reject(e); }
+      timer = setTimeout(() => { if (this._pending.has(id)) { this._pending.delete(id); reject(new Error('CDP timeout: ' + method)); } }, 30000);
     });
   }
 
@@ -237,6 +257,26 @@ class Browser {
       }
     }
 
+    // 2b) Un navegador huérfano (Electron murió sin cerrarlo) sigue vivo con
+    //     nuestro perfil bloqueado: al reabrir, Chrome delega en esa instancia y
+    //     NO abre puerto nuevo, así que el arranque acababa en «no respondió al
+    //     puerto de depuración» con el zombie inalcanzable. Chrome deja el puerto
+    //     en DevToolsActivePort dentro del perfil: se lee y se reconecta.
+    if (!this.port) {
+      const discovered = this._portFromProfile();
+      if (discovered) {
+        this.port = discovered;
+        if (await this.alive()) {
+          await this.connect();
+          const pg = (await this.pages()).find((x) => x.type === 'page');
+          if (pg) this.activeId = pg.id;
+          if (url) return this.navigate(url);
+          return `OK: reconectado al navegador que ya estaba abierto (puerto CDP ${this.port}).`;
+        }
+        this.port = 0;
+      }
+    }
+
     // 3) Fresh spawn (the only case where a new window appears).
     const find = (b) => {
       const cands = b === 'edge'
@@ -265,7 +305,6 @@ class Browser {
     const child = spawn(exe, args, { windowsHide: true, stdio: 'ignore' });
     child.on('error', () => {});   // nunca dejar una excepción no capturada
     this.browserPid = child.pid;
-    this.browserExe = exe;
     this.activeId = null;
 
     // Sondeo corto de condición (el puerto CDP responde) con timeout de ~9 s.
@@ -361,6 +400,8 @@ class Browser {
       return 'Error al navegar: ' + e.message;
     }
     const loaded = await this.waitReady(sessionId);
+    // el inventario de elements() ya no vale: sus coordenadas son de otra página
+    this._lastElements = null;
     let title = '';
     try { title = (await this.evalJs('document.title', sessionId)) || ''; } catch {}
     return `OK: en «${title || u}»${loaded ? '' : ' (la página sigue cargando)'}\nURL: ${u}`;
@@ -450,6 +491,9 @@ Usa action=click_index con estos índices, o selector/text como antes.`;
       await sleep(40);
     }
     await this.settle(sessionId, 1200);   // deja reaccionar (menús, modales, navegación)
+    // la página puede haber cambiado: los índices anteriores ya no son fiables
+    // (pulsar «el de antes» con coordenadas viejas es peor que volver a inventariar)
+    this._lastElements = null;
     return `OK: clic por índice ${idx} en «${el.text || el.tag}» (${el.x},${el.y})`;
   }
 
@@ -521,6 +565,7 @@ Usa action=click_index con estos índices, o selector/text como antes.`;
       await this.send('Input.dispatchKeyEvent', { type: 'keyUp', windowsVirtualKeyCode: 13, code: 'Enter', key: 'Enter' }, sessionId);
       await this.settle(sessionId, 1500);
       await this.waitReady(sessionId, 6000);
+      this._lastElements = null;   // enviar puede haber cambiado la página
     }
     return `OK: texto escrito en ${selector}${submit ? ' y Enter pulsado' : ''}`;
   }
@@ -529,6 +574,7 @@ Usa action=click_index con estos índices, o selector/text como antes.`;
 
   async handle(args) {
     const a = args.action;
+    let retried = false;
     try {
       if (a === 'launch') return await this.launch(args.browser, args.url);
       if (a === 'profile') return await this.switchProfile(args.profile);
@@ -671,6 +717,15 @@ Usa action=click_index con estos índices, o selector/text como antes.`;
           return `Acción desconocida: ${a}`;
       }
     } catch (e) {
+      // La sesión CDP cacheada de una pestaña puede dejar de existir (el usuario
+      // la cerró a mano, o recargó el target). Antes se devolvía el error crudo
+      // «Session with given id not found»; ahora se invalida la caché y se
+      // reintenta UNA vez, que es lo que la autocuración promete.
+      if (!retried && /session with given id/i.test(String(e && e.message))) {
+        retried = true;
+        this._sessions.clear();
+        return this.handle(args);
+      }
       return 'Error: ' + e.message;
     }
   }

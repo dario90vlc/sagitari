@@ -117,7 +117,17 @@ let _cache = null;
 
 function _load() {
   if (_cache) return _cache;
-  try { _cache = JSON.parse(fs.readFileSync(HEALTH_FILE, 'utf8')); } catch { _cache = {}; }
+  try {
+    _cache = JSON.parse(fs.readFileSync(HEALTH_FILE, 'utf8'));
+  } catch (e) {
+    // Un fichero ilegible no puede acabar pisado por un almacén vacío: se aparta
+    // con marca de tiempo (mismo criterio que memory.js y habits.js) para no
+    // perder el histórico de salud de los modelos.
+    if (e && e.code !== 'ENOENT') {
+      try { fs.renameSync(HEALTH_FILE, HEALTH_FILE + '.corrupt-' + Date.now()); } catch {}
+    }
+    _cache = {};
+  }
   return _cache;
 }
 
@@ -132,12 +142,15 @@ function _save(data) {
 }
 
 /** Registra una llamada a un modelo. ok=false con error cuenta como fallo. */
-function record(model, { ok, durationMs, tokens, error, fallbackFrom }) {
+function record(model, { ok, durationMs, tokens, error, fallbackFrom, costUsd }) {
   const data = _load();
   const m = data[model] || { calls: 0, errors: 0, totalLatencyMs: 0, tokensIn: 0, tokensOut: 0, costUsd: 0, fallbacks: 0, lastError: null, lastUsed: null };
   m.calls++;
   if (durationMs) m.totalLatencyMs += durationMs;
   if (tokens) { m.tokensIn += tokens.prompt_tokens || 0; m.tokensOut += tokens.completion_tokens || 0; }
+  // el coste por modelo sólo se calculaba por ejecución y en memoria: el panel
+  // Model Health publicaba siempre $0.0000
+  if (costUsd) m.costUsd = (Number(m.costUsd) || 0) + Number(costUsd);
   if (!ok) {
     m.errors++;
     m.lastError = String(error || 'error').slice(0, 300);

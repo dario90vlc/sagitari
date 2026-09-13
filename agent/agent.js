@@ -173,6 +173,9 @@ class Agent {
    * plano) dejaba la promesa esperando para siempre y el agente colgado.
    */
   _awaitConfirm(id, signal) {
+    // el reloj de maxDurationMs se para aquí: esperar a que el usuario decida
+    // no es tiempo de ejecución (antes, tardar en responder mataba la tarea)
+    this.guardrails.pauseClock();
     return new Promise((resolve) => {
       let settled = false;
       const onAbort = () => finish(false);
@@ -181,6 +184,7 @@ class Agent {
         settled = true;
         signal.removeEventListener('abort', onAbort);
         if (this.pendingConfirm && this.pendingConfirm.id === id) this.pendingConfirm = null;
+        this.guardrails.resumeClock();
         resolve(v);
       };
       this.pendingConfirm = { id, resolve: finish };
@@ -428,13 +432,9 @@ class Agent {
         return;
       }
       const t0 = Date.now();
-      let res;
-      try {
-        res = await this._streamWithFallback(chain, messages, signal);
-      } catch (e) {
-        if (this.stopRequested || e.name === 'AbortError') throw e;
-        throw e;
-      }
+      // si el stream falla (o lo aborta el usuario) la excepción sube tal cual:
+      // el salto entre modelos ya lo resuelve _streamWithFallback
+      const res = await this._streamWithFallback(chain, messages, signal);
       this.meta.llmCalls++;
       this.meta.lastLatencyMs = Date.now() - t0;
       if (res.usage) {
@@ -450,7 +450,19 @@ class Agent {
           return;
         }
       }
-      if (res.aborted) { this._pushAssistant(assistantSaidSomething ? { role: 'assistant', content: res.text || '(interrumpido)' } : null); this.emit({ type: 'stopped' }); return; }
+      if (res.aborted) {
+        // el abort puede llegar a mitad del stream, y entonces esta rama es la
+        // única que se ejecuta: sin guardar aquí el checkpoint, la pausa perdía
+        // la reanudación y la tarea quedaba marcada como interrumpida
+        if (task && !task.closed && this.pauseRequested) {
+          checkpoints.pause(task);
+          this.meta.paused = true;
+          this.emit({ type: 'paused', runId: task.runId, goal: task.goal });
+        }
+        this._pushAssistant(assistantSaidSomething ? { role: 'assistant', content: res.text || '(interrumpido)' } : null);
+        this.emit({ type: 'stopped' });
+        return;
+      }
 
       // ---- guardrail v1.2: detección de ausencia de progreso ----
       const stall = this.guardrails.checkStall({ toolName: res.toolCalls?.[0]?.function?.name || null, assistantText: res.text });
@@ -485,11 +497,23 @@ class Agent {
         for (const tc of res.toolCalls) {
           if (signal.aborted) { closePendingCalls('(no ejecutada: ejecución detenida por el usuario)'); break; }
           let args = {};
-          try { args = JSON.parse(tc.function.arguments || '{}'); } catch {}
+          let argsError = null;
+          try { args = JSON.parse(tc.function.arguments || '{}'); }
+          catch { argsError = 'Error: los argumentos de la herramienta no son JSON válido. Reenvía la llamada con argumentos correctos (objeto JSON).'; }
           this.emit({ type: 'tool', name: tc.function.name, args });
           this.emit({ type: 'status', text: statusFor(tc.function.name, args) });
           const tf = this.toolsFired.get(tc.function.name) || { count: 0, lastAt: 0 };
           this.toolsFired.set(tc.function.name, { count: tf.count + 1, lastAt: Date.now() });
+
+          // Argumentos ilegibles: NO se ejecuta nada (antes se ejecutaba con {}
+          // y write_file acababa escribiendo en el workspace por un `path` vacío)
+          if (argsError) {
+            answered.add(tc.id);
+            messages.push({ role: 'tool', tool_call_id: tc.id, name: tc.function.name, content: argsError });
+            this.history.push({ role: 'tool', tool_call_id: tc.id, name: tc.function.name, content: argsError });
+            this.emit({ type: 'tool_result', name: tc.function.name, result: argsError, ok: false, durationMs: Date.now() - toolT0 });
+            continue;
+          }
 
           // ---- guardrail: límite de llamadas + detección de bucles ----
           const callCheck = this.guardrails.checkToolCall();
@@ -703,10 +727,30 @@ class Agent {
       for (const tc of res.toolCalls) {
         if (signal.aborted) { closePending('(no ejecutada: ejecución detenida)'); break; }
         let args = {};
-        try { args = JSON.parse(tc.function.arguments || '{}'); } catch {}
+        let argsError = null;
+        try { args = JSON.parse(tc.function.arguments || '{}'); }
+        catch { argsError = 'Error: los argumentos de la herramienta no son JSON válido. Reenvía la llamada con argumentos correctos.'; }
+        if (argsError) {
+          answered.add(tc.id);
+          messages.push({ role: 'tool', tool_call_id: tc.id, name: tc.function.name, content: argsError });
+          continue;
+        }
         if (tc.function.name === 'delegate') {
           answered.add(tc.id);
           messages.push({ role: 'tool', tool_call_id: tc.id, name: tc.function.name, content: 'Error: un subagente no puede delegar a otro.' });
+          continue;
+        }
+        // el alcance de herramientas no puede ser sólo cosmético: filtrar lo que
+        // se le ENVÍA al modelo no impide que responda con otra herramienta
+        // (alucinación o inyección desde la web que acaba de leer)
+        if (!tools.some(d => d.function && d.function.name === tc.function.name)) {
+          answered.add(tc.id);
+          messages.push({
+            role: 'tool',
+            tool_call_id: tc.id,
+            name: tc.function.name,
+            content: `Error: la herramienta «${tc.function.name}» no está disponible para este subagente. Solo puedes usar: ${tools.map(d => d.function.name).join(', ')}.`,
+          });
           continue;
         }
         this.emit({ type: 'tool', name: tc.function.name, args });
@@ -763,8 +807,17 @@ class Agent {
       const cfg = { ...entry, format: entry.format || protocols.detectFormat(entry) };
       try {
         const res = await this._streamOnce(cfg, messages, signal);
-        models.record(entry.model, { ok: !res.aborted, durationMs: Date.now() - t0, tokens: res.usage });
+        models.record(entry.model, {
+          ok: !res.aborted,
+          durationMs: Date.now() - t0,
+          tokens: res.usage,
+          costUsd: this.guardrails.turnCostFor(entry.model, res.usage),
+        });
         this.meta.model = entry.model || this.meta.model;
+        // el coste se tarifa con el modelo que REALMENTE responde: si el
+        // primario falla y contesta otro más caro (o más barato), el límite de
+        // coste y el panel deben reflejarlo
+        if (entry.model) this.guardrails.model = entry.model;
         if (entry.role !== 'primary') this.emit({ type: 'status', text: `Modelo «${entry.model}» (${cfg.format}) respondiendo…` });
         return res;
       } catch (e) {

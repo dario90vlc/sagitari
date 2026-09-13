@@ -42,14 +42,18 @@ function log(event) {
   if (!s) return;
   try {
     const line = JSON.stringify({ ts: new Date().toISOString(), ...event }) + '\n';
+    // El tope se mide en BYTES, no en caracteres: con acentos y eñes (y emojis)
+    // un `line.length` en UTF-16 subestima el tamaño real hasta 3-4×, así que el
+    // fichero crecía muy por encima de MAX_BYTES antes de rotar.
+    const size = Buffer.byteLength(line, 'utf8');
     // el tope también se aplica dentro de la sesión, no solo al arrancar
-    if (written + line.length > MAX_BYTES) {
+    if (written + size > MAX_BYTES) {
       try { stream && stream.end(); } catch {}
       stream = null;
       s = ensureStream();
       if (!s) return;
     }
-    written += line.length;
+    written += size;
     s.write(line);
   } catch {}
 }
