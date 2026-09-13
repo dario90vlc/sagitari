@@ -14,6 +14,12 @@
 
 const LEVELS = ['safe', 'confirm', 'restricted'];
 
+/* Niveles de riesgo por defecto: la tabla vive en tools.js (donde se declaran
+   las herramientas) y aquí sólo se consume. Tener dos copias ya provocó que
+   edit_file faltara en una y que la otra declarara 'clipboard_read', una
+   herramienta que no existe. El override del usuario siempre gana. */
+const { RISK: DEFAULT_RISK } = require('./tools');
+
 /* Coste por 1M tokens (USD) — estimación para el límite de coste. Claves por
    familia de modelo; lo no reconocido usa el default. El override del usuario
    (config.security.modelPricing) siempre gana. */
@@ -39,29 +45,6 @@ function pricingFor(model, override) {
   }
   return MODEL_PRICING.__default;
 }
-
-/* Default risk per tool. The registry (tools.js) declares intent; a user
-   override in settings always wins over these defaults. */
-const DEFAULT_RISK = {
-  run_command: 'confirm',
-  write_file: 'confirm',
-  browser_control: 'confirm',
-  open_app: 'confirm',
-  open_url: 'safe',
-  read_file: 'safe',
-  list_dir: 'safe',
-  search_files: 'safe',
-  screenshot: 'safe',
-  clipboard_read: 'confirm',
-  clipboard: 'safe',
-  notify: 'safe',
-  media_control: 'safe',
-  window_manage: 'confirm',
-  system_info: 'safe',
-  use_skill: 'safe',
-  remember: 'safe',
-  delegate: 'safe',   // delegar no pide permiso; las herramientas del subagente sí, con los mismos niveles
-};
 
 /* Arg summaries shown to the user in the confirmation card. */
 function summarizeArgs(name, args = {}) {
@@ -117,13 +100,39 @@ function canonical(v) {
   return v;
 }
 
-function isSensitiveBrowserAction(name, args = {}) {
-  if (name !== 'browser_control') return false;
+/**
+ * Motivo por el que una llamada exige confirmación SIEMPRE, aunque su
+ * herramienta esté configurada en 'safe' — la seguridad gana a la comodidad.
+ * Devuelve la frase que se le enseña al usuario, o null si no es forzada.
+ */
+function forcedConfirmReason(name, args = {}) {
   const a = args || {};
-  if (!['click', 'type', 'press'].includes(a.action)) return false;
-  if (SENSITIVE_BROWSER_RX.test(String(a.text || '') + ' ' + String(a.selector || ''))) return true;
-  if (a.action === 'type' && SENSITIVE_FIELD_RX.test(String(a.selector || '') + ' ' + String(a.name || '') + ' ' + String(a.id || ''))) return true;
-  return false;
+  // el portapapeles puede llevar contraseñas, códigos de un solo uso o datos
+  // bancarios: leerlo nunca es automático (escribir en él sí es inocuo)
+  if (name === 'clipboard') return a.action === 'write' ? null : 'Leer el portapapeles (puede contener contraseñas o códigos)';
+  if (name !== 'browser_control') return null;
+
+  // `eval` ejecuta JavaScript arbitrario dentro de la página y `profile` cambia
+  // de perfil de cookies/sesiones: ninguna de las dos es una acción «normal»
+  if (a.action === 'eval') return 'Ejecutar JavaScript arbitrario dentro de la página';
+  if (a.action === 'profile') return 'Cambiar el perfil del navegador (cookies y sesiones)';
+  if (!['click', 'type', 'press'].includes(a.action)) return null;
+
+  const what = a.action === 'click' ? 'hacer clic en «' + (a.text || a.selector || '') + '»'
+    : a.action === 'type' ? 'escribir en «' + (a.selector || '') + '»'
+      : 'pulsar ' + (a.key || '');
+  if (SENSITIVE_BROWSER_RX.test(String(a.text || '') + ' ' + String(a.selector || ''))) {
+    return 'ACCIÓN SENSIBLE en la web: ' + what + ' — parece una compra/pago/eliminación/publicación';
+  }
+  if (a.action === 'type' && SENSITIVE_FIELD_RX.test(String(a.selector || '') + ' ' + String(a.name || '') + ' ' + String(a.id || ''))) {
+    return 'ACCIÓN SENSIBLE en la web: ' + what + ' — parece un campo de datos sensibles';
+  }
+  return null;
+}
+
+/** Predicado histórico (sólo navegador), conservado para el prompt y los tests. */
+function isSensitiveBrowserAction(name, args = {}) {
+  return name === 'browser_control' && Boolean(forcedConfirmReason(name, args));
 }
 
 class Guardrails {
@@ -147,6 +156,7 @@ class Guardrails {
       },
     };
     this.startedAt = 0;
+    this._pausedAt = 0;          // instante en que el reloj se paró (espera al usuario)
     this.steps = 0;
     this.toolCalls = 0;
     this.tokensUsed = 0;
@@ -169,6 +179,7 @@ class Guardrails {
   /* ---------- run lifecycle ---------- */
   beginRun() {
     this.startedAt = Date.now();
+    this._pausedAt = 0;
     this.steps = 0;
     this.toolCalls = 0;
     this.tokensUsed = 0;
@@ -204,9 +215,15 @@ class Guardrails {
   }
 
   /** Coste estimado (USD) del último turno según tokens y modelo. */
-  _turnCost(promptTokens, completionTokens) {
-    const p = pricingFor(this.model, this.policy.modelPricing);
+  _turnCost(promptTokens, completionTokens, model = this.model) {
+    const p = pricingFor(model, this.policy.modelPricing);
     return (promptTokens / 1e6) * p.in + (completionTokens / 1e6) * p.out;
+  }
+
+  /** Coste de un uso concreto con el precio de ESE modelo (para la salud por modelo). */
+  turnCostFor(model, usage) {
+    if (!usage) return 0;
+    return this._turnCost(usage.prompt_tokens || 0, usage.completion_tokens || 0, model);
   }
 
   /**
@@ -233,6 +250,23 @@ class Guardrails {
 
   /** Para el panel: coste estimado de la ejecución en curso. */
   getCost() { return this.costUsd; }
+
+  /**
+   * Parar/reanudar el reloj de `maxDurationMs`. El tiempo que el turno pasa
+   * esperando a que el usuario responda una tarjeta de confirmación no es
+   * tiempo de ejecución: sin esto, pensar cinco minutos en una acción sensible
+   * agotaba el límite y mataba la tarea con «Límite de seguridad alcanzado».
+   */
+  pauseClock() {
+    if (this._pausedAt) return;
+    this._pausedAt = Date.now();
+  }
+
+  resumeClock() {
+    if (!this._pausedAt) return;
+    this.startedAt += Date.now() - this._pausedAt;
+    this._pausedAt = 0;
+  }
 
   /**
    * Suma el consumo de otro Guardrails (un subagente) al presupuesto propio: el
@@ -340,15 +374,15 @@ class Guardrails {
    * usuario tenga browser_control en 'safe' (la seguridad gana a la comodidad).
    */
   decide(name, args = {}) {
-    if (isSensitiveBrowserAction(name, args)) {
+    const forced = forcedConfirmReason(name, args);
+    if (forced) {
       const sig = this.signature(name, args);
       const memo = this.approvals.get(sig);
       if (!(memo && memo > Date.now())) {
-        const a = args || {};
         return {
           action: 'confirm',
           tool: name,
-          description: 'ACCIÓN SENSIBLE en la web: ' + (a.action === 'click' ? 'hacer clic en «' + (a.text || a.selector || '') + '»' : a.action === 'type' ? 'escribir en «' + (a.selector || '') + '»' : 'pulsar ' + (a.key || '')) + ' — parece una compra/pago/eliminación/publicación',
+          description: forced,
           summary: summarizeArgs(name, args),
           signature: sig,
           sensitive: true,
@@ -386,4 +420,4 @@ class Guardrails {
   }
 }
 
-module.exports = { Guardrails, DEFAULT_RISK, LEVELS, describeAction, summarizeArgs, pricingFor, MODEL_PRICING, isSensitiveBrowserAction, SENSITIVE_BROWSER_RX, SENSITIVE_FIELD_RX };
+module.exports = { Guardrails, DEFAULT_RISK, LEVELS, describeAction, summarizeArgs, pricingFor, MODEL_PRICING, isSensitiveBrowserAction, forcedConfirmReason, SENSITIVE_BROWSER_RX, SENSITIVE_FIELD_RX };

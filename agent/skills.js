@@ -61,6 +61,32 @@ function parseFrontMatter(raw) {
 
 function skillsDir() { fs.mkdirSync(SKILLS_DIR, { recursive: true }); return SKILLS_DIR; }
 
+/**
+ * Resuelve la carpeta de una skill validando SIEMPRE el id (única vía para
+ * construir rutas con ids que vienen de la UI o de un repo remoto).
+ * Rechaza ".", "..", separadores, NUL, caracteres raros y cualquier resultado
+ * que no quede DENTRO de skillsDir(). Lanza 'id de skill inválido'.
+ */
+function safeSkillDir(id) {
+  if (typeof id !== 'string' || !id || id !== id.trim()) throw new Error('id de skill inválido');
+  // "." , ".." y cualquier id formado solo por puntos: en Windows un componente
+  // con puntos finales se normaliza (C:\skills\... → C:\skills), así que borrar
+  // «...» podía llevarse por delante el almacén entero
+  if (/^\.+$/.test(id)) throw new Error('id de skill inválido');
+  if (/[\/\\\0]/.test(id)) throw new Error('id de skill inválido');
+  if (!/^[\w.-]+$/.test(id)) throw new Error('id de skill inválido');
+  const base = skillsDir();
+  const dest = path.resolve(base, id);
+  if (!dest.startsWith(base + path.sep)) throw new Error('id de skill inválido');
+  return dest;
+}
+
+/** Sanea un nombre a un id de skill seguro ('SKILL.md' o '.' → ''). */
+function slugifyId(name) {
+  const s = String(name || '').replace(/[^\w.-]+/g, '_').replace(/^[^\w]+|[^\w]+$/g, '').slice(0, 64);
+  return /\w/.test(s) ? s : '';
+}
+
 /** Lista todas las skills instaladas. */
 async function listSkills() {
   const dir = skillsDir();
@@ -153,7 +179,9 @@ async function suggestSkillsFor(text) {
   const hits = [];
   for (const s of all) {
     const triggers = (s.triggers || []).filter(Boolean);
-    if (triggers.some(tr => { try { return new RegExp(tr, 'i').test(t); } catch { return t.includes(tr.toLowerCase()); } })) { hits.push(s); continue; }
+    // los triggers vienen de SKILL.md de repos ajenos: se tratan como TEXTO LITERAL
+    // (nunca se compilan como RegExp → sin ReDoS en el hilo principal)
+    if (triggers.some(tr => t.includes(String(tr).toLowerCase()))) { hits.push(s); continue; }
     const hay = `${s.name} ${s.description}`.toLowerCase();
     const words = hay.split(/[^a-z0-9áéíóúñü]+/).filter(w => w.length >= 4);
     if (words.some(w => t.includes(w) && w.length >= 5)) hits.push(s);
@@ -165,26 +193,26 @@ async function suggestSkillsFor(text) {
 
 /** Guarda el origen de una skill importada (repo + path) para poder actualizarla. */
 async function writeSource(id, source) {
+  const dir = safeSkillDir(id); // id inválido → lanza y no se toca el disco
   try {
-    await fsp.mkdir(path.join(skillsDir(), id), { recursive: true });
-    await fsp.writeFile(path.join(skillsDir(), id, 'source.json'), JSON.stringify(source, null, 2), 'utf8');
+    await fsp.mkdir(dir, { recursive: true });
+    await fsp.writeFile(path.join(dir, 'source.json'), JSON.stringify(source, null, 2), 'utf8');
   } catch {}
 }
 
 /** Re-importa una skill desde su repo de origen. Devuelve {ok, changed}. */
 async function updateSkill(id) {
+  const dir = safeSkillDir(id);
   const s = await getSkill(id);
   if (!s || !s.source || !s.source.repo) throw new Error('La skill no tiene origen registrado (no es importada).');
   const { repo, path: repoPath } = s.source;
   const { files } = await resolveRepoSkills(repo + (repoPath ? '/' + repoPath.split('/SKILL.md')[0] : ''));
   const f = files.find(x => (repoPath && x.path === repoPath) || (!repoPath && x.path.includes('/' + id + '/')));
   if (!f) throw new Error('No se encontró la skill en el repo de origen.');
-  const res = await fetch(f.url, { headers: { 'User-Agent': 'Sagitari' } });
-  if (!res.ok) throw new Error('GitHub ' + res.status);
-  const raw = await res.text();
+  const raw = await fetchSkillMarkdown(f.url);
   const fm = parseFrontMatter(raw);
   const changed = !fm || fm.meta.version !== s.version || fm.body !== s.body;
-  if (changed) await fsp.writeFile(path.join(skillsDir(), id, 'SKILL.md'), raw, 'utf8');
+  if (changed) await fsp.writeFile(path.join(dir, 'SKILL.md'), raw, 'utf8');
   return { ok: true, changed, version: fm ? fm.meta.version : '' };
 }
 
@@ -201,12 +229,26 @@ async function updateAll() {
 }
 
 async function setEnabled(id, enabled) {
-  const dir = path.join(skillsDir(), id);
+  const dir = safeSkillDir(id); // lanza 'id de skill inválido' ante traversal
   await fsp.mkdir(dir, { recursive: true });
   await fsp.writeFile(path.join(dir, 'enabled.json'), JSON.stringify({ enabled: !!enabled }), 'utf8');
 }
 
 /* ---------- importación desde GitHub (sin git ni unzip) ---------- */
+
+/** Tope de tamaño de un SKILL.md descargado (512 KB). */
+const MAX_SKILL_BYTES = 512 * 1024;
+
+/** Descarga un SKILL.md con tope de tamaño (evita reventar memoria/contexto). */
+async function fetchSkillMarkdown(url) {
+  const res = await fetch(url, { headers: { 'User-Agent': 'Sagitari' } });
+  if (!res.ok) throw new Error('GitHub ' + res.status);
+  const declared = Number(res.headers.get('content-length') || 0);
+  if (declared && declared > MAX_SKILL_BYTES) throw new Error('SKILL.md demasiado grande (máx. 512 KB).');
+  const raw = await res.text();
+  if (Buffer.byteLength(raw, 'utf8') > MAX_SKILL_BYTES) throw new Error('SKILL.md demasiado grande (máx. 512 KB).');
+  return raw;
+}
 
 async function ghJson(url) {
   const res = await fetch(url, { headers: { 'User-Agent': 'Sagitari', 'Accept': 'application/vnd.github+json' } });
@@ -230,40 +272,59 @@ async function resolveRepoSkills(repo) {
   return { files, repo: `${owner}/${name}` };
 }
 
-/** Importa skills desde un repo de GitHub. Devuelve lista de instaladas. */
+/** Importa skills desde un repo de GitHub. Devuelve lista de instaladas (+ omitidas). */
 async function importFromGitHub(repo) {
   const { files, repo: repoName } = await resolveRepoSkills(repo);
   const installed = [];
+  const skipped = [];
   const seen = new Set();
   for (const f of files) {
-    const res = await fetch(f.url, { headers: { 'User-Agent': 'Sagitari' } });
-    if (!res.ok) continue;
-    const raw = await res.text();
+    let raw;
+    try { raw = await fetchSkillMarkdown(f.url); } catch (e) {
+      skipped.push({ id: '', name: f.path, from: repoName, skipped: true, reason: e.message });
+      continue;
+    }
     const fm = parseFrontMatter(raw);
     if (!fm || !fm.meta.name) continue;
-    // id = última carpeta antes de SKILL.md, saneado y SIN sufijo "SKILL.md"
-    const segs = f.path.replace(/\/SKILL\.md$/i, '').split('/');
-    const id = (segs[segs.length - 1] || fm.meta.name || 'skill')
-      .replace(/[-_. ]*skill\.md$/i, '')
-      .replace(/[^\w.-]+/g, '_');
+    // id = carpeta que contiene el SKILL.md, saneado y SIN el sufijo "SKILL.md"
+    const dirPart = f.path.replace(/(^|\/)SKILL\.md$/i, '');
+    const segs = dirPart.split('/');
+    const last = segs[segs.length - 1] || '';
+    // un SKILL.md en la raíz del repo no tiene carpeta: se cae al name del front-matter
+    const id = slugifyId(last) || slugifyId(fm.meta.name) || 'skill';
     // el mismo repo suele duplicar skills en varias rutas (skills/, .claude/, plugins/):
     // primera aparición gana, el resto se ignora
     if (seen.has(id)) continue;
     seen.add(id);
-    const dest = path.join(skillsDir(), id);
+    const dest = safeSkillDir(id);
+    let prev = null;
+    try { prev = JSON.parse(await fsp.readFile(path.join(dest, 'source.json'), 'utf8')); } catch {}
+    let exists = false;
+    try { await fsp.access(path.join(dest, 'SKILL.md')); exists = true; } catch {}
+    // nunca se pisa una skill existente que no venga del MISMO repo+path
+    if (exists && !(prev && prev.repo === repoName && prev.path === f.path)) {
+      skipped.push({
+        id,
+        name: fm.meta.name,
+        from: repoName,
+        skipped: true,
+        reason: `Ya existe una skill con el id «${id}»${prev && prev.repo ? ` (importada de ${prev.repo})` : ''}; no se ha sobrescrito.`
+      });
+      continue;
+    }
     await fsp.mkdir(dest, { recursive: true });
     await fsp.writeFile(path.join(dest, 'SKILL.md'), raw, 'utf8');
     await writeSource(id, { repo: repoName, path: f.path, installedAt: new Date().toISOString() });
     installed.push({ id, name: fm.meta.name, from: repoName });
   }
-  if (!installed.length) throw new Error('Los SKILL.md encontrados no tienen front-matter válido (name/description).');
-  return installed;
+  if (!installed.length && !skipped.length) throw new Error('Los SKILL.md encontrados no tienen front-matter válido (name/description).');
+  return installed.concat(skipped);
 }
 
 /** Crea una skill nueva desde el formulario de la UI. */
 async function createSkill({ name, description, body }) {
-  const slug = String(name || '').toLowerCase().replace(/[^\w-]+/g, '-').replace(/^-+|-+$/g, '') || 'skill';
-  const dest = path.join(skillsDir(), slug);
+  const slug = slugifyId(String(name || '').toLowerCase().replace(/[^\w-]+/g, '-').replace(/^-+|-+$/g, '')) || 'skill';
+  const dest = safeSkillDir(slug);
   await fsp.mkdir(dest, { recursive: true });
   const md = `---\nname: ${slug}\ndescription: ${description || 'Skill personalizada'}\n---\n\n${body || ''}\n`;
   await fsp.writeFile(path.join(dest, 'SKILL.md'), md, 'utf8');
@@ -271,8 +332,8 @@ async function createSkill({ name, description, body }) {
 }
 
 async function deleteSkill(id) {
-  if (!/^[\w.-]+$/.test(id)) throw new Error('id inválido');
-  await fsp.rm(path.join(skillsDir(), id), { recursive: true, force: true });
+  const dir = safeSkillDir(id); // '..' o '.' ya no pueden resolver a la carpeta padre
+  await fsp.rm(dir, { recursive: true, force: true });
 }
 
 module.exports = { listSkills, promptIndex, promptIndexSync, getSkill, setEnabled, importFromGitHub, createSkill, deleteSkill, searchSkills, suggestSkillsFor, updateSkill, updateAll, writeSource, skillsDir, __test: { parseFrontMatter, _resetForTests: (dir) => { SKILLS_DIR = dir; } } };

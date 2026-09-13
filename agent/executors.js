@@ -26,6 +26,17 @@ function decodeOut(buf) {
   return out;
 }
 
+/* open_url acaba en shell.openExternal, que en Windows invoca el handler del
+   SISTEMA, no el navegador: file://, ms-msdt:, search-ms: o cualquier otro
+   protocolo registrado se abrirían sin que el usuario lo vea. Solo http(s) es
+   una dirección de navegador, así que es lo único que se acepta. */
+function openUrlAllowed(url) {
+  try {
+    const p = new URL(String(url || '').trim()).protocol.toLowerCase();
+    return p === 'http:' || p === 'https:';
+  } catch { return false; }
+}
+
 // En Windows, matar el hijo directo deja nietos huérfanos: taskkill /T /F elimina
 // todo el árbol de procesos. Se usa tanto al pulsar Detener como al expirar el timeout.
 function killTree(child) {
@@ -238,6 +249,9 @@ async function executeTool(name, args, ctx) {
     }
     case 'open_url': {
       const { shell } = require('electron');
+      if (!openUrlAllowed(args.url)) {
+        return 'Error: open_url solo abre direcciones http(s). Para ejecutar algo del equipo usa open_app, y para abrir una página local usa browser_control con action=navigate.';
+      }
       await shell.openExternal(args.url);
       return `OK: ${args.url} abierta en el navegador por defecto`;
     }
@@ -266,6 +280,11 @@ async function executeTool(name, args, ctx) {
       return `OK: ${args.action}`;
     }
     case 'window_manage': {
+      // el enum de la herramienta solo tiene estas dos: cualquier otra acción se
+      // rechaza en vez de ejecutar MinimizeAll por defecto (silenciosamente)
+      if (args.action !== 'show_desktop' && args.action !== 'minimize_all') {
+        return `Error: acción de ventanas no soportada: ${args.action}. Usa minimize_all o show_desktop.`;
+      }
       const cmd = args.action === 'show_desktop'
         ? `powershell -NoProfile -Command "(New-Object -ComObject Shell.Application).ToggleDesktop()"`
         : `powershell -NoProfile -Command "(New-Object -ComObject Shell.Application).MinimizeAll()"`;
@@ -291,4 +310,4 @@ async function executeTool(name, args, ctx) {
   }
 }
 
-module.exports = { executeTool };
+module.exports = { executeTool, openUrlAllowed };

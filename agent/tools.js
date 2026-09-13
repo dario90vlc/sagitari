@@ -4,14 +4,22 @@
    permission engine in guardrails.js; user overrides in Settings win):
      safe       → runs automatically
      confirm    → asks the user before running
-     restricted → blocked unless explicitly allowed */
+     restricted → blocked unless explicitly allowed
+
+   ESTA tabla es la ÚNICA fuente de niveles por defecto: guardrails.js la
+   importa (y la reexporta como DEFAULT_RISK para el resto de la app). Antes
+   existían dos tablas copiadas que ya habían divergido (edit_file faltaba en
+   una, y la otra declaraba una herramienta inexistente). */
 const { delegateToolDef } = require('./subagents');
 const RISK = {
   run_command: 'confirm',
   write_file: 'confirm',
   edit_file: 'confirm',
   open_app: 'confirm',
-  open_url: 'safe',
+  // open_url pide confirmación: en Windows shell.openExternal invoca el handler
+  // del sistema, no sólo http(s) — file://, ms-msdt:, search-ms: y cualquier
+  // protocolo registrado se abrirían sin que el usuario lo vea
+  open_url: 'confirm',
   read_file: 'safe',
   list_dir: 'safe',
   search_files: 'safe',
@@ -22,6 +30,7 @@ const RISK = {
   media_control: 'safe',
   window_manage: 'confirm',
   system_info: 'safe',
+  remember: 'safe',   // guardar un recuerdo no toca el sistema: no pide permiso
   use_skill: 'safe',
   delegate: 'safe',   // v1.4: la delegación no pide permiso; las herramientas del SUBAGENTE sí (con los mismos niveles)
 };
@@ -224,7 +233,7 @@ const defs = [
     type: 'function',
     function: {
       name: 'window_manage',
-      description: 'Gestiona ventanas: minimize_all (minimiza todo), show_desktop (Win+D), close_active_windows (cierra ventanas activas).',
+      description: 'Gestiona ventanas: minimize_all (minimiza todas) o show_desktop (Win+D, mostrar el escritorio).',
       parameters: {
         type: 'object',
         properties: { action: { type: 'string', enum: ['minimize_all', 'show_desktop'] } },
