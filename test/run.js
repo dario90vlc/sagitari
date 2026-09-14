@@ -1160,6 +1160,37 @@ test('mcp: transporte stdio completo contra un servidor real', async () => {
   ok(tr.pid > 0, 'el proceso tuvo pid (se mató entero)');
 });
 
+test('mcp: un .cmd recibe entero un argumento con espacios', async () => {
+  if (process.platform !== 'win32') return;   // el producto es Windows-only
+  const dir = tmpDir('sagi-cmd-');
+  const bat = path.join(dir, 'probe.cmd');
+  fs.writeFileSync(bat, '@echo off\r\necho %~1> "%~dp0salida.txt"\r\n', 'utf8');
+  const tr = mcpTransport.createStdioTransport({ command: bat, args: ['con espacios'], cwd: dir });
+  const salida = path.join(dir, 'salida.txt');
+  let txt = '';
+  // sondeo con deadline: el .cmd tarda lo suyo en arrancar
+  for (let i = 0; i < 40 && !txt; i++) {
+    await new Promise(r => setTimeout(r, 50));
+    try { txt = fs.readFileSync(salida, 'utf8'); } catch {}
+  }
+  tr.kill();
+  eq(txt.trim(), 'con espacios', 'el argumento llega entero: si Node recita por su cuenta, cmd.exe lo parte');
+});
+
+test('mcp: escribir a un servidor ya muerto no tumba el proceso', async () => {
+  const dir = tmpDir('sagi-epipe-');
+  const muere = path.join(dir, 'muere.js');
+  fs.writeFileSync(muere, 'process.exit(0)\n', 'utf8');
+  const tr = mcpTransport.createStdioTransport({ command: process.execPath, args: [muere], cwd: dir });
+  await new Promise(r => setTimeout(r, 300));
+  tr.kill();
+  tr.rpc.notify('notifications/initialized', {});   // stdin ya cerrado: EPIPE
+  await new Promise(r => setTimeout(r, 200));
+  // Lo que se comprueba es que la SUITE siga viva: sin el listener de 'error' en
+  // stdin, ese EPIPE es un error no capturado y mata el proceso del runner.
+  ok(tr.pid > 0, 'el transporte sigue en pie tras escribir a un servidor muerto');
+});
+
 test('agent: la cadena elige el protocolo del modelo (Qwen en Go → /messages)', async () => {
   const { Agent } = require('../agent/agent');
   const seen = [];

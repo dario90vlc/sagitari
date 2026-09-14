@@ -118,25 +118,32 @@ function resolveCommand(command, args) {
   if (!cmd) throw new Error('Falta el comando del servidor MCP.');
   if (needsShell(cmd) || /^(npx|npm|yarn|pnpm)$/i.test(cmd)) {
     const com = process.env.ComSpec || 'cmd.exe';
-    return { file: com, argv: ['/d', '/s', '/c', buildCmdLine(cmd, args)] };
+    // `verbatim` es imprescindible: si Node vuelve a citar por su cuenta, escapa las
+    // comillas internas con \" y cmd.exe no entiende ese escape, así que un argumento
+    // con espacios llegaba partido. cmd.exe espera /d /s /c "<línea>" tal cual.
+    return { file: com, argv: ['/d', '/s', '/c', `"${buildCmdLine(cmd, args)}"`], verbatim: true };
   }
-  return { file: cmd, argv: args.map(String) };
+  return { file: cmd, argv: args.map(String), verbatim: false };
 }
 
 /**
  * Servidor MCP local por stdio. `stderr` se guarda en un bucle (los últimos 8 KB)
  * porque es donde los servidores explican por qué no arrancan.
  */
-function createStdioTransport({ command, args = [], cwd, env = {}, defaultTimeoutMs }) {
-  const { file, argv } = resolveCommand(command, args);
+function createStdioTransport({ command, args = [], cwd, env = {}, defaultTimeoutMs, onNotice }) {
+  const { file, argv, verbatim } = resolveCommand(command, args);
   const child = spawn(file, argv, {
     cwd: cwd || undefined,
     env: { ...process.env, ...env },
     windowsHide: true,
+    windowsVerbatimArguments: verbatim,
     stdio: ['pipe', 'pipe', 'pipe'],
   });
   let stderr = '';
   child.stderr.on('data', (d) => { stderr = (stderr + d.toString('utf8')).slice(-8192); });
+  // stdin de un servidor que acaba de morir: sin este listener, el EPIPE del write
+  // es un error no capturado y se lleva por delante el proceso principal.
+  child.stdin.on('error', () => {});
   const exitHandlers = [];
   let exited = false;
   // `rpc` se declara ANTES de los listeners que lo usan: `const rpc =` más abajo
@@ -155,6 +162,7 @@ function createStdioTransport({ command, args = [], cwd, env = {}, defaultTimeou
   child.stdout.on('data', feed);
   rpc = new Rpc({
     send: (text) => { if (!child.stdin.destroyed) child.stdin.write(text + '\n'); },
+    onNotice,
     defaultTimeoutMs,
   });
   // cerrar stdin sin destruirlo a lo bruto: el servidor ve el final del flujo
