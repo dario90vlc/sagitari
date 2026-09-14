@@ -627,6 +627,24 @@ test('pickModelFor prefers adequate models per category', () => {
   eq(modelsMod.pickModelFor([], 'coding'), null);
 });
 
+test('fallbackChain respects the user-chosen model (no silent category re-pick)', () => {
+  // Caso real del usuario: modelo elegido mimo-v2.5 en Ajustes; una petición
+  // «simple» hacía que el router reeligiera deepseek-flash por coincidir con
+  // /flash/, y ese modelo era el que fallaba.
+  const cfg = {
+    providers: [
+      { id: 'go', name: 'OpenCode Go', baseUrl: 'https://opencode.ai/zen/go/v1', apiKey: 'k',
+        models: ['deepseek-flash', 'deepseek-v4.1-flash', 'mimo-v2.5'], activeModel: 'mimo-v2.5' },
+    ],
+    active: { providerId: 'go', name: 'OpenCode Go', baseUrl: 'https://opencode.ai/zen/go/v1', apiKey: 'k', model: 'mimo-v2.5' },
+    fallbackChain: [],
+  };
+  for (const cat of ['simple', 'coding', 'research', 'browser']) {
+    const chain = modelsMod.fallbackChain(cfg, cat);
+    eq(chain[0].model, 'mimo-v2.5', `categoría ${cat}: respeta el modelo elegido`);
+  }
+});
+
 test('health record accumulates and summarizes', () => {
   modelsMod.record('gpt-5', { ok: true, durationMs: 500, tokens: { prompt_tokens: 100, completion_tokens: 50 } });
   modelsMod.record('gpt-5', { ok: false, durationMs: 200, error: 'HTTP 502', fallbackFrom: true });
@@ -933,6 +951,44 @@ test('agent: stop() corta la ejecución aunque el stream se quede mudo', async (
   ]);
   ok(events.some(e => e.type === 'stopped'), 'emitió stopped');
   ok(!agent.isBusy(), 'el agente quedó libre');
+});
+
+test('agent: un stream mudo muere solo con llmTimeoutMs y el turno queda libre', async () => {
+  const { Agent } = require('../agent/agent');
+  const events = [];
+  const enc = new TextEncoder();
+  // envía UN evento y deja el stream abierto para siempre: es el fallo real del
+  // proveedor que dejaba el chat «ocupado» eternamente sin decir nada
+  const body = new ReadableStream({ start(c) { c.enqueue(enc.encode(evData({ choices: [{ delta: { content: 'x' } }] }))); } });
+  const agent = new Agent({
+    fetchFn: async () => new Response(body, { headers: { 'content-type': 'text/event-stream' } }),
+    emit: (e) => events.push(e),
+    screenshotFn: async () => ({ dataUrl: 'data:image/png;base64,AA', w: 1, h: 1 }),
+  });
+  const settings = { active: { name: 'x', baseUrl: 'https://api.openai.com/v1', apiKey: 'k', model: 'gpt-4o' }, settings: { mode: 'act', modelRouting: false, llmTimeoutMs: 120 } };
+  const run = agent.chat('hola', settings);
+  await Promise.race([
+    run,
+    new Promise((_, rej) => setTimeout(() => rej(new Error('el turno sigue colgado: el timeout de silencio no disparó')), 5000)),
+  ]);
+  ok(!agent.isBusy(), 'el agente quedó libre');
+  ok(events.some(e => e.type === 'error'), 'el usuario ve un error explicado, no un turno eterno');
+});
+
+test('guardrails: checkDataFreshness detecta un run sin datos del modelo', () => {
+  const { Guardrails } = require('../agent/guardrails');
+  const g = new Guardrails({ guardrails: { maxDataGapMs: 5 * 60 * 1000 } });
+  g.beginRun();
+  ok(g.checkDataFreshness().ok, 'recién arrancado no está caducado');
+  g.lastDataAt = Date.now() - 6 * 60000;
+  ok(!g.checkDataFreshness().ok, '6 min sin datos: caducado, con motivo legible');
+  ok(g.checkDataFreshness().reason.includes('sin enviar datos'), 'el motivo lo entiende un humano');
+  g.touchData();
+  ok(g.checkDataFreshness().ok, 'touchData reabre la ventana');
+  const gOff = new Guardrails({ guardrails: { maxDataGapMs: 0 } });
+  gOff.beginRun();
+  gOff.lastDataAt = Date.now() - 60 * 60000;
+  ok(gOff.checkDataFreshness().ok, '0 = sin límite');
 });
 
 test('ajustes: cada pestaña tiene su panel, y la búsqueda tiene filas que filtrar', () => {

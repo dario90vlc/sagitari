@@ -1,3 +1,20 @@
+# SAGITARI 3.0.1
+
+**El router respeta tu modelo elegido y los proveedores mudos no cuelgan el chat.** La cadena de
+fallback reelegía modelo por categoría en cada turno: con mimo-v2.5 seleccionado, una petición
+«simple» viajaba a deepseek-flash y los fallos de ese modelo parecían «este modelo no funciona».
+Y un proveedor que aceptaba la conexión sin enviar datos dejaba el turno «ocupado» para siempre,
+ignorando todo lo que escribieras después. Ahora el modelo de Ajustes manda (el router solo rellena
+cuando no hay elección explícita), el silencio del proveedor se corta solo a los ~2 min con error
+legible y botón «Reintentar», y las tareas largas quedan recuperables si el modelo deja de mandar
+datos. / **The router respects your chosen model and silent providers no longer hang the chat.**
+The fallback chain re-picked a model per task category on every turn: with mimo-v2.5 selected, a
+"simple" request went to deepseek-flash and that model's failures looked like "this model doesn't
+work". And a provider that accepted the connection without sending data left the turn "busy"
+forever, ignoring everything you typed next. The Settings model now wins (the router only fills in
+when there is no explicit choice), provider silence cuts itself off after ~2 min with a readable
+error and a Retry button, and long tasks stay recoverable if the model stops sending data.
+
 # SAGITARI 3.0.0
 
 **Glow del marco corregido:** el aura vuelve a renderizarse de forma consistente, con un halo suave, visible y sin bloquear la interacción de la ventana. También se corrige la muestra de color del glow en Ajustes. / **Frame glow fixed:** the aura now renders consistently with a soft, visible halo without blocking window interaction. The glow color preview in Settings is fixed too.
@@ -54,6 +71,26 @@ browser becoming unusable after a hard exit.
 
 ## Correcciones / Fixes
 
+- **Si el proveedor deja de enviar datos, el turno se corta solo y te lo dice.** Antes, un modelo
+  que aceptaba la conexión y no mandaba nada dejaba el chat «ocupado» para siempre: lo que
+  escribías después se ignoraba con «SAGITARI está ocupado» y había que adivinar que tocaba
+  pulsar Detener. Ahora hay un límite de silencio configurable (Ajustes › Seguridad › «Sin
+  respuesta del modelo») y, si una tarea larga atraviesa un hueco sin datos, el guardarraíl la
+  detiene y queda recuperable en Tareas. / **If the provider stops sending data, the turn cuts
+  itself off and tells you.** A model that accepted the connection and then went silent used to
+  leave the chat "busy" forever: anything you typed next was ignored with "SAGITARI está ocupado"
+  and you had to guess that Stop was the way out. There is now a configurable silence limit
+  (Settings › Security › "No answer from the model"), and a long task crossing a data gap is
+  stopped by the guardrail and stays recoverable in Tasks.
+- **El router ya no cambia tu modelo elegido por otro en silencio.** La cadena de fallback
+  reelegía modelo por categoría en cada turno: con p. ej. mimo-v2.5 seleccionado, una petición
+  «simple» viajaba a deepseek-flash (coincidía con el patrón de modelos rápidos) y los fallos de
+  ese modelo parecían «este modelo no funciona». Ahora el modelo elegido en Ajustes manda y el
+  router solo rellena cuando no hay elección explícita. / **The router no longer swaps your
+  chosen model silently.** The fallback chain re-picked a model per task category on every turn:
+  with e.g. mimo-v2.5 selected, a "simple" request went to deepseek-flash (it matched the
+  fast-model pattern) and that model's failures looked like "this model doesn't work". The model
+  chosen in Settings now wins; the router only fills in when there is no explicit choice.
 - **La firma digital del binario se informa aunque abras la app desde PowerShell 7.** Windows
   PowerShell 5.1 heredaba de ahí su lista de módulos, dejaba de encontrar
   `Get-AuthenticodeSignature` y la firma se informaba como «no se pudo consultar», justo el dato

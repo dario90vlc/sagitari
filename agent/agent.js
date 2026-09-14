@@ -233,6 +233,11 @@ class Agent {
     this.stopRequested = false;
     this.pauseRequested = false;
     this.meta.paused = false;
+    // El modo y el límite de silencio viajan con la llamada: _run los consulta
+    // en cada intento de modelo (y las rellamadas internas los conservan).
+    this._mode = MODE_PROFILES[settings.settings?.mode] || MODE_PROFILES.act;
+    this._llmTimeoutMs = Number(settings.settings?.llmTimeoutMs);
+    if (!Number.isFinite(this._llmTimeoutMs) || this._llmTimeoutMs < 0) this._llmTimeoutMs = null;   // 0 = sin límite
     const controller = new AbortController();
     this.abort = controller;
     try {
@@ -317,8 +322,10 @@ class Agent {
       this.emit({ type: 'error', message: 'Configura un proveedor y modelo en Ajustes antes de hablar con Sagitari.' });
       return;
     }
-    const mode = MODE_PROFILES[settings.settings?.mode] || MODE_PROFILES.act;
+    const mode = this._mode || MODE_PROFILES[settings.settings?.mode] || MODE_PROFILES.act;
     this._mode = mode;
+    this._llmTimeoutMs = Number(settings.settings?.llmTimeoutMs);
+    if (!Number.isFinite(this._llmTimeoutMs) || this._llmTimeoutMs < 0) this._llmTimeoutMs = null;   // 0 = sin límite
     this.meta.model = cfg.model || this.meta.model;
     this.meta.startedAt = Date.now();
     this.meta.lastError = null;
@@ -406,6 +413,18 @@ class Agent {
     let assistantSaidSomething = false;
 
     while (true) {
+      // ---- guardrail: ¿el modelo sigue mandando datos? (peticiones mudas) ----
+      // Debe ir ANTES de la llamada al modelo: si la anterior se quedó colgada
+      // y esta vuelta nunca llega, nada más podría detectar el bloqueo.
+      const freshCheck = this.guardrails.checkDataFreshness();
+      if (!freshCheck.ok) {
+        this.emit({ type: 'status', text: 'Sin datos del modelo — detenido' });
+        this.emit({ type: 'guardrail', reason: freshCheck.reason });
+        runlog.log({ agent: 'sagitari', task: taskId, event: 'data_gap_stop', reason: freshCheck.reason });
+        if (task && !task.closed) checkpoints.interrupt(task);
+        this._pushAssistant(assistantSaidSomething ? { role: 'assistant', content: '(detenido: el proveedor dejó de responder)' } : null);
+        return;
+      }
       // ---- guardrail: límites de pasos / tiempo (configurables; 0 = sin límite) ----
       const stepCheck = this.guardrails.checkStep();
       if (!stepCheck.ok) {
@@ -437,6 +456,7 @@ class Agent {
       const res = await this._streamWithFallback(chain, messages, signal);
       this.meta.llmCalls++;
       this.meta.lastLatencyMs = Date.now() - t0;
+      this.guardrails.touchData();   // llegó respuesta: el run sigue vivo
       if (res.usage) {
         this.meta.tokensIn += res.usage.prompt_tokens || 0;
         this.meta.tokensOut += res.usage.completion_tokens || 0;
@@ -848,7 +868,7 @@ class Agent {
   async _streamOnce(cfg, messages, signal, toolsOverride = null) {
     const temperature = cfg.temperature ?? (this._mode ? this._mode.temperature : 0.4);
     return protocols.stream(
-      { ...cfg, temperature, sessionId: this.sessionId },
+      { ...cfg, temperature, sessionId: this.sessionId, silenceTimeoutMs: this._llmTimeoutMs ?? undefined },
       {
         fetchFn: this.fetchFn,
         messages,

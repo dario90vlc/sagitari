@@ -1367,7 +1367,8 @@ async function paintMeta() {
     line.hidden = false;
     line.textContent = (m.model || '—') + ' · turno: ' + (r.tokensIn || 0) + ' in / ' + (r.tokensOut || 0) + ' out tok · '
       + (r.llmCalls || 0) + ' llamadas · ' + (r.toolCalls || 0) + ' herramientas · ' + (r.lastLatencyMs || 0) + ' ms'
-      + ' · límites: ' + (gr.maxSteps || '∞') + ' pasos / ' + (gr.maxDurationMs ? Math.round(gr.maxDurationMs / 60000) + ' min' : '∞');
+      + ' · límites: ' + (gr.maxSteps || '∞') + ' pasos / ' + (gr.maxDurationMs ? Math.round(gr.maxDurationMs / 60000) + ' min' : '∞')
+      + ' / silencio ' + ((CFG.settings.llmTimeoutMs ?? 120000) ? Math.round((CFG.settings.llmTimeoutMs ?? 120000) / 1000) + ' s' : '∞');
   } catch { line.hidden = true; }
 }
 setInterval(paintMeta, 2000);
@@ -1961,6 +1962,7 @@ async function initSecurity() {
     $('#grLoop').value = g.loopThreshold ?? 3;
     if ($('#grCost')) $('#grCost').value = g.maxCostUsd ?? 0;
     if ($('#grStall')) $('#grStall').value = g.stallThreshold ?? 6;
+    if ($('#grLlmTimeout')) $('#grLlmTimeout').value = Math.round((CFG.settings.llmTimeoutMs ?? 120000) / 1000);
     if ($('#setMaxTasks')) $('#setMaxTasks').value = CFG.settings.maxConcurrentTasks ?? 1;
     if ($('#swAutoResume')) $('#swAutoResume').classList.toggle('on', CFG.settings.autoResumeTasks !== false);
     if (CFG.settings.devMode) { devMode = true; $('#devModeSw').classList.add('on'); paintMeta(); }
@@ -1987,6 +1989,11 @@ $('#grTokens').onchange = (e) => window.sagitari.secSetGuardrail({ maxTokens: cl
 $('#grLoop').onchange = (e) => window.sagitari.secSetGuardrail({ loopThreshold: clampGuardrail(e.target, 3) });
 if ($('#grCost')) $('#grCost').onchange = (e) => window.sagitari.secSetGuardrail({ maxCostUsd: clampGuardrail(e.target, 0) });
 if ($('#grStall')) $('#grStall').onchange = (e) => window.sagitari.secSetGuardrail({ stallThreshold: clampGuardrail(e.target, 0) });
+if ($('#grLlmTimeout')) $('#grLlmTimeout').onchange = async (e) => {
+  const v = clampGuardrail(e.target, 120);
+  await window.sagitari.setSettings({ llmTimeoutMs: v * 1000 });
+  showToast(v ? 'Sin respuesta del modelo: ' + v + ' s' : 'Sin límite de espera del modelo');
+};
 if ($('#setMaxTasks')) $('#setMaxTasks').onchange = async (e) => {
   const v = Math.max(1, Math.min(4, Number(e.target.value) || 1));
   e.target.value = v;

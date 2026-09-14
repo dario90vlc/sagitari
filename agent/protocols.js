@@ -140,15 +140,31 @@ function parseSSEBlock(raw) {
   return { event, data: data.join('\n') };
 }
 
+/* Silencio máximo del proveedor: si no llega NI UN byte en este tiempo, la
+   lectura se corta con error y la cadena de fallback puede probar otro modelo.
+   Era el fallo más traicionero: un proveedor que acepta la conexión y no envía
+   nada dejaba el turno «ocupado» para siempre y la app parecía muerta.
+   0 = sin límite (no recomendado); sin valor = el default de abajo. */
+const DEFAULT_SILENCE_MS = 120000;
+
 /**
  * Lee el cuerpo SSE de una respuesta y entrega cada evento ya parseado.
+ * opts.silenceTimeoutMs: ms sin recibir nada antes de abortar con error.
  * @returns {Promise<boolean>} true si se abortó a mitad
+ * @throws {Error} si el proveedor se queda mudo más de `silenceTimeoutMs`
  */
-async function readSSE(resp, signal, onEvent) {
+async function readSSE(resp, signal, onEvent, opts = {}) {
   const reader = resp.body.getReader();
   const decoder = new TextDecoder();
   let buf = '';
   let aborted = false;
+  let idleError = null;
+  let idleTimer = null;
+  let idleMs = DEFAULT_SILENCE_MS;
+  if (opts && 'silenceTimeoutMs' in opts) {
+    const v = Number(opts.silenceTimeoutMs);
+    idleMs = v > 0 ? v : 0;
+  }
   // El abort debe cortar la lectura AUNQUE el stream se haya quedado mudo: si el
   // proveedor no envía nada, `reader.read()` se quedaría esperando para siempre
   // y el botón Detener no haría nada. Cancelar el reader resuelve la lectura.
@@ -160,6 +176,22 @@ async function readSSE(resp, signal, onEvent) {
     if (signal.aborted) stop();
     else signal.addEventListener('abort', stop, { once: true });
   }
+  // Y el silencio también: cada chunk reinicia el reloj; si vence, cortamos la
+  // lectura y salimos con error en vez de colgar el turno eternamente.
+  const disarmIdle = () => { if (idleTimer) { clearTimeout(idleTimer); idleTimer = null; } };
+  const armIdle = () => {
+    disarmIdle();
+    if (!idleMs) return;
+    idleTimer = setTimeout(() => {
+      // si el usuario abortó justo en la ventana del timeout, gana el abort: no
+      // se reporta un timeout que en realidad fue una parada manual
+      if (signal && signal.aborted) return;
+      idleError = new Error(`timeout: el proveedor no envió datos durante ${Math.round(idleMs / 1000)} s (modelo saturado o bloqueado; prueba otro modelo en Ajustes).`);
+      aborted = true;
+      stop();
+    }, idleMs);
+  };
+  armIdle();
   try {
     while (!aborted) {
       let step;
@@ -167,6 +199,7 @@ async function readSSE(resp, signal, onEvent) {
       catch (e) { if (aborted || (signal && signal.aborted)) { aborted = true; break; } throw e; }
       const { done, value } = step;
       if (done) break;
+      armIdle();
       buf = (buf + decoder.decode(value, { stream: true })).replace(/\r/g, '');
       let idx;
       while ((idx = buf.indexOf('\n\n')) >= 0) {
@@ -177,8 +210,10 @@ async function readSSE(resp, signal, onEvent) {
       }
     }
   } finally {
+    disarmIdle();
     if (signal) signal.removeEventListener('abort', stop);
   }
+  if (idleError) throw idleError;
   if (!aborted) {
     const tail = parseSSEBlock(buf);
     if (tail) onEvent(tail);
@@ -239,7 +274,7 @@ async function streamOpenAI(cfg, { fetchFn, messages, tools, signal, onText }) {
       if (tc.function?.name) toolCalls[i].function.name += tc.function.name;
       if (tc.function?.arguments) toolCalls[i].function.arguments += tc.function.arguments;
     }
-  });
+  }, { silenceTimeoutMs: cfg.silenceTimeoutMs });
   return {
     text: text.trim(),
     toolCalls: toolCalls.filter(Boolean).filter(t => t.function.name),
@@ -399,7 +434,7 @@ async function streamAnthropic(cfg, { fetchFn, messages, tools, signal, onText }
         failure = new Error(`Anthropic: ${json.error?.message || 'error de streaming'}`);
         break;
     }
-  });
+  }, { silenceTimeoutMs: cfg.silenceTimeoutMs });
   if (failure) throw failure;
 
   if (usage) usage = { ...usage, total_tokens: (usage.prompt_tokens || 0) + (usage.completion_tokens || 0) };
@@ -513,7 +548,7 @@ async function streamResponses(cfg, { fetchFn, messages, tools, signal, onText }
         failure = new Error(`Responses: ${json.message || json.error?.message || 'error de streaming'}`);
         break;
     }
-  });
+  }, { silenceTimeoutMs: cfg.silenceTimeoutMs });
   if (failure) throw failure;
 
   return {
@@ -537,12 +572,15 @@ const ADAPTERS = { openai: streamOpenAI, anthropic: streamAnthropic, responses: 
 async function stream(cfg, opts) {
   const format = cfg.format || detectFormat(cfg);
   const run = ADAPTERS[format] || streamOpenAI;
-  const res = await run({ ...cfg, format }, opts);
+  // el límite de silencio viaja con la config efectiva: cada adaptador se lo pasa
+  // a readSSE, que corta con error si el proveedor no manda nada (y el fallback
+  // de _streamWithFallback puede probar el siguiente modelo)
+  const res = await run({ ...cfg, format, silenceTimeoutMs: cfg.silenceTimeoutMs ?? DEFAULT_SILENCE_MS }, opts);
   return { ...res, format };
 }
 
 module.exports = {
-  FORMATS, OPENCODE_MODEL_FORMAT, detectFormat, authHeaders,
+  FORMATS, OPENCODE_MODEL_FORMAT, DEFAULT_SILENCE_MS, detectFormat, authHeaders,
   buildBodyOpenAI, buildBodyAnthropic, buildBodyResponses,
   toAnthropicMessages, toResponsesInput, parseSSEBlock, textOf, imagesOf,
   stream,

@@ -76,7 +76,7 @@ const CONFIG_FILE = path.join(CONFIG_DIR, 'config.json');
 let config = {
   providers: [],                 // [{id, name, baseUrl, apiKey, models:[], activeModel}]
   active: null,                  // {providerId, name, baseUrl, apiKey, model, temperature, vision}
-  settings: { theme: 'violet', uiColor: 'violet', glowColor: 'match', glowStrength: 1, ttsEnabled: true, voiceLang: 'es-ES', glowEnabled: true, userName: 'Darío', mode: 'act', maxConcurrentTasks: 1, autoResumeTasks: true }
+  settings: { theme: 'violet', uiColor: 'violet', glowColor: 'match', glowStrength: 1, ttsEnabled: true, voiceLang: 'es-ES', glowEnabled: true, userName: 'Darío', mode: 'act', maxConcurrentTasks: 1, autoResumeTasks: true, llmTimeoutMs: 120000 }
 };
 
 /* ---- v1.1 seguridad: permisos por herramienta + guardarraíles (configurables) ---- */
@@ -90,6 +90,7 @@ const securityDefaults = {
     maxCostUsd: 0,               // 0 = sin límite (coste estimado en USD)
     loopThreshold: 3,            // llamadas idénticas seguidas antes de parar
     stallThreshold: 6,           // pasos sin progreso antes de parar (0 = sin límite)
+    maxDataGapMs: 5 * 60 * 1000, // ms sin datos del modelo antes de parar (0 = sin límite)
   },
 };
 let providersChanged = false;

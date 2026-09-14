@@ -54,7 +54,7 @@ The recommended option is the Windows installer:
 - **Think / Plan / Act** — reason deeply, prepare a plan before acting, or execute directly.
 - **Skills** — import specialized `SKILL.md` packs and load their instructions on demand instead of bloating every prompt.
 - **Memory and habits** — keep useful context across conversations, locally.
-- **Fallbacks and recovery** — model fallback, background tasks, checkpoints, pause/resume, and recovery after interruptions.
+- **Fallbacks and recovery** — model fallback, background tasks, checkpoints, pause/resume, and recovery after interruptions. If a provider accepts the connection but stops sending data, the turn cuts itself off (configurable limit in Settings › Security) and the error is explained in the chat. The model chosen in Settings wins: the router no longer swaps it silently.
 
 ### A UI that shows the work
 

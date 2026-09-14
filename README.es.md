@@ -54,7 +54,7 @@ La opción recomendada es el instalador de Windows:
 - **Think / Plan / Act** — razona en profundidad, prepara un plan antes de actuar o ejecuta directamente.
 - **Skills** — importa packs especializados `SKILL.md` y carga sus instrucciones bajo demanda.
 - **Memoria y hábitos** — conserva contexto útil entre conversaciones, siempre en local.
-- **Fallback y recuperación** — cambio automático de modelo, tareas en segundo plano, checkpoints, pausa/reanudación y recuperación tras interrupciones.
+- **Fallback y recuperación** — cambio automático de modelo, tareas en segundo plano, checkpoints, pausa/reanudación y recuperación tras interrupciones. Si el proveedor acepta la conexión pero deja de enviar datos, el turno se corta solo (límite configurable en Ajustes › Seguridad) y el error se explica en el chat. El modelo elegido en Ajustes manda: el router no lo cambia por otro en silencio.
 
 ### Una interfaz que muestra el trabajo
 

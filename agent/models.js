@@ -52,7 +52,12 @@ function fallbackChain(config, category) {
   const push = (p, role) => {
     if (!p || !p.baseUrl) return;
     if (out.some(x => x.providerId === p.id)) return;
-    const model = (category && p.models && pickModelFor(p.models, category)) || (p.activeModel && p.models && p.models.includes(p.activeModel) ? p.activeModel : (p.models && p.models[0]) || p.activeModel);
+    // El modelo ELEGIDO por el usuario manda (active.model / activeModel):
+    // pickModelFor solo rellena cuando el proveedor no tiene elección explícita.
+    // Antes se reelegía SIEMPRE por categoría y una petición «simple» cambiaba
+    // en silencio p. ej. mimo-v2.5 por deepseek-flash (coincidía con /flash/):
+    // el usuario probaba un modelo, la app pedía otro, y «ese modelo no va».
+    const model = (!p.activeModel && category && p.models && pickModelFor(p.models, category)) || (p.activeModel && p.models && p.models.includes(p.activeModel) ? p.activeModel : (p.models && p.models[0]) || p.activeModel);
     if (!model) return;
     // cada entrada viaja con su protocolo (chat/completions, messages o responses)
     const format = protocols.detectFormat({ baseUrl: p.baseUrl, providerId: p.id, model, format: p.format });

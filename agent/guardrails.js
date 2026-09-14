@@ -9,8 +9,11 @@
      restricted → blocked unless the user explicitly allows it in Settings
 
    Guardrails (per run): max steps, max tool calls, max duration, max tokens,
-   max estimated cost (USD), repeated-call / loop detection, and STALL detection
-   (N steps without any new tool call or assistant output = no progress). */
+   max estimated cost (USD), repeated-call / loop detection, STALL detection
+   (N steps without any new tool call or assistant output = no progress) and
+   DATA-FRESHNESS (the provider stopped sending data: no LLM event for N ms
+   while the run is alive — covers hangs that the stall counter cannot see,
+   like a request that never returns). */
 
 const LEVELS = ['safe', 'confirm', 'restricted'];
 
@@ -151,8 +154,9 @@ class Guardrails {
         maxDurationMs: policy.guardrails?.maxDurationMs ?? 15 * 60 * 1000,
         maxTokens: policy.guardrails?.maxTokens ?? 0,          // 0 = unlimited
         maxCostUsd: policy.guardrails?.maxCostUsd ?? 0,        // 0 = unlimited (estimación)
-        loopThreshold: policy.guardrails?.loopThreshold ?? 3,  // identical consecutive calls before loop
-        stallThreshold: policy.guardrails?.stallThreshold ?? 6, // pasos sin señal de progreso
+      loopThreshold: policy.guardrails?.loopThreshold ?? 3,  // identical consecutive calls before loop
+      stallThreshold: policy.guardrails?.stallThreshold ?? 6, // pasos sin señal de progreso
+      maxDataGapMs: policy.guardrails?.maxDataGapMs ?? 5 * 60 * 1000, // 0 = sin límite
       },
     };
     this.startedAt = 0;
@@ -167,6 +171,7 @@ class Guardrails {
     this.recentCalls = [];       // signatures of last N tool calls
     this.approvals = new Map();  // remembered confirmations: signature -> expiry
     this._stall = 0;             // pasos consecutivos sin progreso
+    this.lastDataAt = 0;         // última vez que el run recibió datos del modelo
   }
 
   /** Hot-reload policy from Settings without losing run counters. */
@@ -200,6 +205,28 @@ class Guardrails {
     }
     if (g.maxSteps > 0 && this.steps > g.maxSteps) {
       return { ok: false, reason: `Límite de pasos alcanzado (${g.maxSteps}). Auméntalo o quítalo en Ajustes → Seguridad.` };
+    }
+    return { ok: true };
+  }
+
+  /** Marca «ahora» como última señal de datos del modelo (delta/tool result). */
+  touchData() { this.lastDataAt = Date.now(); }
+
+  /**
+   * ¿El modelo sigue enviando datos? Comprueba que no haya pasado más de
+   * maxDataGapMs desde la última señal (texto, tool result o arranque del run).
+   * Es la red que atrapa lo que el stall counter no ve: una petición al
+   * proveedor que acepta la conexión y jamás responde dejaba el turno colgado
+   * hasta que el usuario pulsaba Detener — y sin saber que había que pulsarlo.
+   */
+  checkDataFreshness() {
+    const g = this.policy.guardrails;
+    if (!g.maxDataGapMs || g.maxDataGapMs <= 0) return { ok: true };
+    const ref = this.lastDataAt || this.startedAt;
+    if (!ref) return { ok: true };
+    if (Date.now() - ref > g.maxDataGapMs) {
+      const mins = Math.round(g.maxDataGapMs / 60000);
+      return { ok: false, reason: `El modelo lleva más de ${mins} min sin enviar datos (¿proveedor saturado?). Ejecución detenida.` };
     }
     return { ok: true };
   }
