@@ -306,35 +306,30 @@ const ChatKit = (function () {
   }
 
   /**
-   * Estado del proveedor para la píldora del sidebar, derivado de los datos reales
-   * (salud por modelo) y no de «hay un proveedor activo»: antes decía «Conectado»
-   * con punto verde mientras el panel registraba errores y fallbacks.
+   * Modelos entre los que el usuario puede cambiar: los que ofrece su API para el
+   * proveedor que tiene activo (la lista detectada al guardarlo) más, siempre, el
+   * que está en uso. `providers` viene de la configuración; se empareja por id y,
+   * si la activación no trajo id, por baseUrl.
    *
-   * Manda el resultado de la ÚLTIMA llamada al modelo activo, no el histórico: con
-   * los acumulados, un modelo que falló 100 veces se queda «Con errores» para
-   * siempre aunque hoy funcione. `row` es la fila de model-health del modelo activo
-   * y `ultimoOkAjeno` el `lastUsed` del modelo más reciente que sí respondió (para
-   * distinguir «este falló» de «este falló y otro contestó por él»).
+   * Devuelve { provider, models, current, known }: `known` distingue «la lista es
+   * la de tu API» de «solo sabemos el modelo activo porque el proveedor no tiene
+   * lista guardada», que es lo que la UI necesita para ofrecer detectarlos.
    */
-  function statusPill(active, row, ultimoOkAjeno) {
-    if (!active) return { label: 'Sin modelo', dot: 'off', title: 'Elige un proveedor y activa un modelo en Ajustes' };
-    if (!row || !row.calls) return { label: 'Sin usar', dot: 'ok', title: 'Modelo activo todavía sin llamadas' };
-    if (row.lastOk === false) {
-      const relevo = ultimoOkAjeno && row.lastUsed && ultimoOkAjeno > row.lastUsed;
-      if (relevo) {
-        return { label: 'Con otro modelo', dot: 'a-y', title: `Este modelo falló en su última llamada (${row.lastError ? String(row.lastError).slice(0, 80) : 'sin detalle'}) y respondió otro de la cadena` };
-      }
-      return { label: 'Con errores', dot: 'mag', title: row.lastError ? String(row.lastError).slice(0, 140) : `${row.errors} de ${row.calls} llamadas fallaron` };
+  function modelChoices(active, providers) {
+    const list = Array.isArray(providers) ? providers.filter(p => p && p.baseUrl) : [];
+    const prov = (active && list.find(p => (active.providerId && p.id === active.providerId) || p.baseUrl === active.baseUrl)) || null;
+    const current = (active && active.model) || null;
+    const seen = new Set();
+    const models = [];
+    for (const m of (prov && prov.models) || []) {
+      const id = String(m || '').trim();
+      if (!id || seen.has(id)) continue;
+      seen.add(id);
+      models.push(id);
     }
-    if (row.lastOk === true) {
-      const antes = row.errors ? ` · ${row.errors} fallos anteriores` : '';
-      return { label: 'Conectado', dot: 'ok', title: `Última llamada correcta · ${row.calls} llamadas${antes}` };
-    }
-    // datos anteriores a esta versión (sin lastOk): se mantiene el criterio acumulado
-    if (row.errorRate >= 0.3) return { label: 'Con errores', dot: 'mag', title: `${row.errors} de ${row.calls} llamadas fallaron` };
-    if (row.errors) return { label: 'Con avisos', dot: 'a-y', title: `${row.errors} de ${row.calls} llamadas fallaron` };
-    if (row.fallbacks) return { label: 'Con fallbacks', dot: 'a-y', title: `${row.fallbacks} llamadas necesitaron otro modelo` };
-    return { label: 'Conectado', dot: 'ok', title: `${row.calls} llamadas sin errores` };
+    // el activo siempre aparece, aunque se activara a mano y no esté en la lista
+    if (current && !seen.has(current)) models.unshift(current);
+    return { provider: prov ? { id: prov.id, name: prov.name || 'Proveedor' } : null, models, current, known: !!(prov && seen.size) };
   }
 
   return {
@@ -343,7 +338,7 @@ const ChatKit = (function () {
     clip, fmtDuration, toolCount, thousands,
     parsePlan, isPlanHeader, looksFailed, resultSummary,
     SUBAGENTS, subagent,
-    explainError, statusPill,
+    explainError, modelChoices,
   };
 })();
 

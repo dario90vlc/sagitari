@@ -58,13 +58,19 @@
       </nav>
 
       <div class="sidefoot">
-        <button class="side-status" id="sideStatusBtn" title="Configurar proveedor y modelo">
-          <span class="dot ok" id="stDot"></span>
-          <span class="ss-col">
-            <b id="stModel">sin modelo</b>
-            <small id="stConn">Desconectado</small>
-          </span>
-        </button>
+        <!-- La píldora ya no dicta un estado («Conectado», «Con errores»): enseña
+             qué modelo está en uso y abre la lista de los que ofrece tu API, para
+             cambiar sin pasar por Ajustes. -->
+        <div class="ssel">
+          <button class="side-status" id="sideStatusBtn" title="Cambiar de modelo" aria-haspopup="listbox" aria-expanded="false">
+            <span class="ss-col">
+              <b id="stModel">sin modelo</b>
+              <small id="stProv">sin proveedor</small>
+            </span>
+            <span class="ss-caret" aria-hidden="true">▾</span>
+          </button>
+          <div class="modelmenu" id="modelMenu" role="listbox" aria-label="Modelos disponibles" hidden></div>
+        </div>
         <button class="side-mode act" id="sideModeBtn" title="Cambiar de modo (Alt+M)"><span class="dot ok"></span><span id="sideModeLabel">ACT</span></button>
       </div>
     </aside>

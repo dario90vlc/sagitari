@@ -185,17 +185,43 @@ body.nofocus .shell::before { animation: none !important; }
 
 /* ---- pie de la barra: modelo activo + modo ---- */
 .sidefoot { margin-top: auto; padding: 11px 12px; display: flex; gap: 8px; align-items: stretch; border-top: 1px solid var(--line2); }
+/* el selector de modelo ocupa el hueco del pie y ancla su menú encima */
+.ssel { position: relative; flex: 1; min-width: 0; display: flex; }
 .side-status {
-  flex: 1; min-width: 0; display: flex; align-items: center; gap: 9px;
-  padding: 9px 11px; border: 1px solid var(--line2); border-radius: 12px;
+  flex: 1; min-width: 0; display: flex; align-items: center; gap: 7px;
+  padding: 9px 9px; border: 1px solid var(--line2); border-radius: 12px;
   background: var(--panel2); color: var(--txt); cursor: pointer; text-align: left; transition: all .16s;
 }
-.side-status:hover { border-color: var(--line); background: rgba(var(--acc2-rgb), 0.12); }
+.side-status:hover, .side-status[aria-expanded="true"] { border-color: var(--line); background: rgba(var(--acc2-rgb), 0.12); }
+.side-status:focus-visible { outline: 2px solid rgba(var(--acc2-rgb), 0.7); outline-offset: 2px; }
+.ss-caret { margin-left: auto; color: var(--dim); font-size: 11px; line-height: 1; flex-shrink: 0; }
 .ss-col { display: flex; flex-direction: column; gap: 2px; min-width: 0; }
 .ss-col b { font-size: 12px; font-weight: 600; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
-.ss-col small { font-size: 11px; color: var(--dim); white-space: nowrap; }
+.ss-col small { font-size: 11px; color: var(--dim); white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
 .side-status .dot, .side-mode .dot { margin: 0; flex-shrink: 0; }
 .dot.off { background: var(--dim); box-shadow: none; }
+
+/* lista de modelos que ofrece la API activa (mismo lenguaje que el menú de skills) */
+.modelmenu {
+  position: absolute; left: -10px; bottom: calc(100% + 8px); width: 236px;
+  background: linear-gradient(165deg, rgba(22,14,48,0.98), rgba(12,8,30,0.98));
+  border: 1px solid var(--line); border-radius: 14px;
+  box-shadow: 0 14px 44px rgba(0,0,0,0.5), 0 0 26px rgba(var(--acc2-rgb), 0.18);
+  max-height: 46vh; overflow-y: auto; z-index: 130;
+}
+.modelmenu::-webkit-scrollbar { width: 6px; }
+.modelmenu::-webkit-scrollbar-thumb { background: rgba(var(--acc2-rgb), 0.3); border-radius: 3px; }
+.modelmenu .sm-item .sm-name { font: 600 13px 'Space Grotesk'; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+.modelmenu .sm-item.on .sm-name { color: var(--vio2); }
+.modelmenu .mm-mark { margin-left: auto; color: var(--vio2); font-size: 12px; flex-shrink: 0; }
+.modelmenu .mm-hint { padding: 4px 14px 9px; color: var(--dim); font-size: 11px; line-height: 1.45; }
+/* las acciones no se pierden al final de una lista larga (37 modelos) */
+.modelmenu .mm-foot {
+  position: sticky; bottom: 0; margin-top: 4px;
+  background: linear-gradient(180deg, rgba(12,8,30,0.86), rgba(12,8,30,0.99) 42%);
+  border-top: 1px solid var(--line2); padding: 3px 0 4px;
+}
+.modelmenu .mm-foot .sm-item { padding: 8px 14px; }
 .side-mode {
   flex-shrink: 0; width: 58px; display: flex; flex-direction: column;
   align-items: center; justify-content: center; gap: 4px;

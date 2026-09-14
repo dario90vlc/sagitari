@@ -2062,7 +2062,7 @@ test('arranque: TODOS los módulos del agente respetan la raíz de datos de prue
   }
 });
 
-test('chat: el fallo se explica y la píldora sale de los datos reales', () => {
+test('chat: el fallo se explica y la píldora ofrece los modelos de tu API', () => {
   const K = ChatKit;
   // errores crudos del proveedor → causa legible + siguiente paso
   const casos = [
@@ -2080,25 +2080,32 @@ test('chat: el fallo se explica y la píldora sale de los datos reales', () => {
   // cualquier cosa desconocida sigue diciendo qué hacer en vez de pintarse cruda
   const raro = K.explainError('boom inesperado');
   ok(raro.texto && raro.pista, 'un error no listado también da texto y salida');
-  // La píldora: «Conectado» solo cuando los datos lo respaldan
-  eq(K.statusPill(null, null).label, 'Sin modelo');
-  eq(K.statusPill({ model: 'm' }, null).label, 'Sin usar');
-  eq(K.statusPill({ model: 'm' }, { calls: 5, errors: 0, fallbacks: 0 }).label, 'Conectado');
-  eq(K.statusPill({ model: 'm' }, { calls: 5, errors: 1, fallbacks: 0 }).label, 'Con avisos');
-  eq(K.statusPill({ model: 'm' }, { calls: 5, errors: 2, errorRate: 0.4 }).label, 'Con errores');
-  eq(K.statusPill({ model: 'm' }, { calls: 5, errors: 0, fallbacks: 2 }).label, 'Con fallbacks');
-  eq(K.statusPill({ model: 'm' }, { calls: 5, errors: 1, errorRate: 0.4 }).dot, 'mag', 'y el punto lo dice igual');
-  /* Manda la ÚLTIMA llamada, no el histórico: un modelo con 99 fallos antiguos que
-     acaba de responder bien no puede seguir diciendo «Con errores» para siempre. */
-  const viejo = { calls: 100, errors: 99, errorRate: 0.99, lastOk: false, lastUsed: '2026-09-14T01:00:50Z', lastError: 'HTTP 401 de OpenCode Go: Missing API key' };
-  eq(K.statusPill({ model: 'm' }, viejo).label, 'Con errores');
-  eq(K.statusPill({ model: 'm' }, viejo).dot, 'mag');
-  ok(/Missing API key/.test(K.statusPill({ model: 'm' }, viejo).title), 'el title lleva el error real');
-  // …y si otro modelo de la cadena respondió después, se dice así en vez de alarmar
-  eq(K.statusPill({ model: 'm' }, viejo, '2026-09-14T01:00:53Z').label, 'Con otro modelo');
-  eq(K.statusPill({ model: 'm' }, viejo, '2026-09-14T01:00:53Z').dot, 'a-y');
-  // un fallo viejo con respuesta buena posterior ya no condiciona la píldora
-  eq(K.statusPill({ model: 'm' }, { calls: 100, errors: 99, errorRate: 0.99, lastOk: true }).label, 'Conectado');
+  // La píldora ya no dicta estado: ofrece los modelos de la API del usuario
+  const prov = { id: 'prov_1', name: 'OpenCode Go', baseUrl: 'https://opencode.ai/zen/go/v1', models: ['deepseek-flash', 'deepseek-v4.1-flash', 'gpt-5.6-luna'] };
+  let c = K.modelChoices({ providerId: 'prov_1', baseUrl: prov.baseUrl, model: 'deepseek-v4.1-flash' }, [prov]);
+  eq(c.provider.name, 'OpenCode Go');
+  eq(c.models.join(','), 'deepseek-flash,deepseek-v4.1-flash,gpt-5.6-luna', 'los modelos son los de su API, en su orden');
+  eq(c.current, 'deepseek-v4.1-flash');
+  eq(c.known, true, 'la lista viene del proveedor guardado');
+  // sin providerId la activación se empareja por URL (es lo que guarda el renderer)
+  c = K.modelChoices({ baseUrl: prov.baseUrl, model: 'deepseek-flash' }, [prov]);
+  eq(c.provider.id, 'prov_1');
+  eq(c.current, 'deepseek-flash');
+  // un modelo activado a mano que no está en la lista sigue siendo elegible
+  c = K.modelChoices({ providerId: 'prov_1', baseUrl: prov.baseUrl, model: 'modelo-raro' }, [prov]);
+  eq(c.models[0], 'modelo-raro', 'el activo encabeza la lista si no venía en ella');
+  eq(c.models.length, 4);
+  // repetidos del proveedor y entradas vacías no ensucian el menú
+  c = K.modelChoices({ providerId: 'p', baseUrl: 'u', model: 'm' }, [{ id: 'p', baseUrl: 'u', models: ['m', 'm', '', '  ', 'x'] }]);
+  eq(c.models.join(','), 'm,x');
+  // sin proveedor guardado: solo el modelo activo y se avisa de que falta detectar
+  c = K.modelChoices({ baseUrl: 'https://x/v1', model: 'solo-este' }, []);
+  eq(c.provider, null); eq(c.known, false); eq(c.models.join(','), 'solo-este');
+  // sin modelo activo no hay nada que ofrecer (el menú manda a Ajustes)
+  c = K.modelChoices(null, [prov]);
+  eq(c.current, null); eq(c.models.length, 0); eq(c.known, false);
+  // y ya no existe la etiqueta de estado que dictaba «Conectado»/«Con errores»
+  eq(K.statusPill, undefined, 'la píldora de estado se retiró del kit');
 });
 
 /* Los tests async registrados más arriba (la descarga del actualizador) todavía

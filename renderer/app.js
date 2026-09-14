@@ -161,7 +161,7 @@ async function refreshSidebar() {
 }
 setInterval(refreshSidebar, 3000);
 
-$('#sideStatusBtn').onclick = () => goto('settings');
+// el pie abre el selector de modelo (#sideStatusBtn se cablea con el menú, más abajo)
 $('#sideModeBtn').onclick = () => setMode(MODE_ORDER[(MODE_ORDER.indexOf(mode) + 1) % MODE_ORDER.length]);
 window.addEventListener('keydown', (e) => {
   if (!e.altKey || e.ctrlKey || e.shiftKey) return;
@@ -1791,7 +1791,7 @@ $('#btnActivate').onclick = async () => {
   if (btn.disabled) return;
   const baseUrl = $('#pUrl').value.trim(), model = $('#modelSel').value;
   if (!baseUrl || !model) return smsg('Detecta modelos y elige uno.');
-  const vision = /(gpt-4|gpt-5|4o|vision|llava|claude|gemini|minimax|pixtral|qwen.*vl|vl-)/i.test(model);
+  const vision = looksVision(model);
   btn.disabled = true;
   try {
     const r = await window.sagitari.activateProvider({ name: $('#pName').value.trim() || 'Proveedor', baseUrl, apiKey: $('#pKey').value.trim(), model, vision, format: apiFormatValue() });
@@ -1820,7 +1820,7 @@ function renderProviderList() {
       const model = (p.models || [])[0];
       if (!model) return smsg('Este proveedor no tiene modelos: detecta primero.');
       // providerId: es lo que permite desactivarlo al borrarlo (main lo resuelve)
-      const r = await window.sagitari.activateProvider({ providerId: p.id, name: p.name, baseUrl: p.baseUrl, apiKey: p.apiKey, model, vision: /(gpt-4|4o|vision|llava|claude|gemini)/i.test(model), format: p.format });
+      const r = await window.sagitari.activateProvider({ providerId: p.id, name: p.name, baseUrl: p.baseUrl, apiKey: p.apiKey, model, vision: looksVision(model), format: p.format });
       if (r && r.ok === false) return smsg('Error: ' + (r.error || 'no se pudo activar'));
       CFG = await window.sagitari.getConfig();
       renderProviderList(); updateStatusLabels();
@@ -2976,27 +2976,15 @@ function showToast(text) {
   document.body.appendChild(t);
   setTimeout(() => t.remove(), 3200);
 }
-async function updateStatusLabels() {
+/** Texto del pie: qué modelo está en uso y de qué proveedor. Sin estados: la
+    píldora enseña la selección y abre la lista para cambiarla. */
+function updateStatusLabels() {
   const a = CFG.active;
   $('#stModel').textContent = a ? a.model : 'sin modelo';
-  {/* La píldora decía «Conectado» con punto verde solo por haber un proveedor
-      activo, aunque el panel de salud registrara errores y fallbacks. Ahora sale
-      de los datos reales del modelo activo. */}
-  let fila = null, ultimoOkAjeno = null;
-  try {
-    const filas = (await window.sagitari.healthGet()) || [];
-    fila = filas.find(r => r.model === (a && a.model)) || null;
-    // el modelo que respondió más recientemente (si no es el activo): distingue
-    // «este falló» de «este falló y otro contestó por él»
-    const otros = filas.filter(r => !a || r.model !== a.model).filter(r => r.lastOk === true && r.lastUsed);
-    ultimoOkAjeno = otros.length ? otros.map(r => r.lastUsed).sort().pop() : null;
-  } catch {}
-  const p = K.statusPill(a, fila, ultimoOkAjeno);
-  $('#stConn').textContent = p.label;
-  const dot = $('#stDot');
-  if (dot) { dot.className = 'dot ' + p.dot; dot.title = p.title; }
-  const conn = $('#stConn');
-  if (conn) conn.title = p.title;
+  $('#stProv').textContent = a ? (a.name || 'proveedor') : 'configura tu API';
+  $('#sideStatusBtn').title = a
+    ? `Modelo: ${a.model} — pulsa para cambiar entre los modelos de tu API`
+    : 'Configura un proveedor y un modelo';
   $('#chatModelLabel').textContent = a ? a.name + ' · ' + a.model : '';
   // tarjeta de estado de Ajustes
   const name = $('#activeModelName');
@@ -3017,7 +3005,104 @@ async function updateStatusLabels() {
   meta.textContent = bits.join(' · ');
   badge.textContent = 'activo';
   badge.classList.remove('off');
+  // si la lista está abierta (p. ej. acabas de activar algo en Ajustes), se repinta
+  const mm = document.getElementById('modelMenu');
+  if (mm && !mm.hidden) { mm.hidden = true; openModelMenu(); }
 }
+
+/* ---- selector de modelo del pie: cambia entre los modelos de tu API ---- */
+const modelMenu = $('#modelMenu');
+
+/** Modelos de la vista multimodal conocidos por nombre (los que sí ven imágenes). */
+function looksVision(model) {
+  return /(gpt-4|gpt-5|4o|vision|llava|claude|gemini|minimax|pixtral|qwen.*vl|vl-)/i.test(String(model || ''));
+}
+
+function closeModelMenu() {
+  if (!modelMenu || modelMenu.hidden) return;
+  modelMenu.hidden = true;
+  $('#sideStatusBtn').setAttribute('aria-expanded', 'false');
+}
+
+/** Pinta la lista de modelos acordes a la API del usuario y la abre. */
+function openModelMenu() {
+  if (!modelMenu) return;
+  if (!modelMenu.hidden) return closeModelMenu();
+  const c = K.modelChoices(CFG.active, CFG.providers);
+  if (!c.current && !c.provider) {
+    modelMenu.innerHTML = `<div class="sm-head">SIN MODELO</div>
+      <div class="mm-hint">Activa un proveedor y un modelo en Ajustes › Modelo.</div>
+      <div class="sm-item" data-act="settings"><span class="sm-name">Abrir Ajustes</span></div>`;
+  } else {
+    const head = c.provider ? `MODELOS · ${esc(c.provider.name)}` : 'MODELOS';
+    const items = c.models.map(m => {
+      const on = m === c.current;
+      return `<div class="sm-item${on ? ' on' : ''}" role="option" aria-selected="${on}" data-model="${esc(m)}" title="${esc(m)}">
+        <span class="sm-name">${esc(m)}</span>${on ? '<span class="mm-mark" aria-hidden="true">✓</span>' : ''}</div>`;
+    }).join('');
+    const nota = c.known
+      ? `<div class="mm-hint">${c.models.length} modelos de tu API${c.provider ? ' (' + esc(c.provider.name) + ')' : ''}.</div>`
+      : `<div class="mm-hint">Tu proveedor no tiene lista guardada: detecta los modelos para poder cambiar.</div>`;
+    modelMenu.innerHTML = `<div class="sm-head">${head}</div>${items}${nota}
+      <div class="mm-foot">
+        <div class="sm-item" data-act="detect"><span class="sm-name">Detectar modelos de nuevo</span></div>
+        <div class="sm-item" data-act="settings"><span class="sm-name">Ajustes de proveedores…</span></div>
+      </div>`;
+  }
+  modelMenu.hidden = false;
+  $('#sideStatusBtn').setAttribute('aria-expanded', 'true');
+  modelMenu.querySelector('.sm-item.on')?.scrollIntoView({ block: 'nearest' });
+}
+
+$('#sideStatusBtn').onclick = openModelMenu;
+document.addEventListener('keydown', (e) => { if (e.key === 'Escape') closeModelMenu(); });
+// clic fuera: cierra (el menú flota sobre la barra, no bloquea la app)
+document.addEventListener('mousedown', (e) => {
+  if (!modelMenu || modelMenu.hidden) return;
+  if (!modelMenu.contains(e.target) && !$('#sideStatusBtn').contains(e.target)) closeModelMenu();
+});
+
+if (modelMenu) modelMenu.onclick = async (e) => {
+  const row = e.target.closest('.sm-item');
+  if (!row) return;
+  if (row.dataset.act === 'settings') { closeModelMenu(); goto('settings'); showSetTab('model'); return; }
+  if (row.dataset.act === 'detect') {
+    const prov = K.modelChoices(CFG.active, CFG.providers).provider;
+    const cfg = (CFG.providers || []).find(p => prov && p.id === prov.id) || CFG.active;
+    if (!cfg || !cfg.baseUrl) return closeModelMenu();
+    row.classList.add('on');
+    row.querySelector('.sm-name').textContent = 'Detectando…';
+    const r = await window.sagitari.listModels(cfg.baseUrl, cfg.apiKey);
+    if (!r.ok) { showToast('No se pudieron detectar: ' + r.error); closeModelMenu(); return; }
+    // la lista detectada se guarda en el proveedor: es la que ofrece el menú
+    const saved = await window.sagitari.saveProvider({ id: cfg.id || 'prov_' + Date.now().toString(36), name: cfg.name || 'Proveedor', baseUrl: cfg.baseUrl, apiKey: cfg.apiKey, format: cfg.format, models: r.models });
+    if (saved && saved.ok === false) { showToast('Error guardando la lista: ' + saved.error); closeModelMenu(); return; }
+    CFG = await window.sagitari.getConfig();
+    renderProviderList();
+    closeModelMenu();
+    openModelMenu();
+    showToast(r.models.length + ' modelos detectados');
+    return;
+  }
+  const model = row.dataset.model;
+  if (!model || model === (CFG.active && CFG.active.model)) return closeModelMenu();
+  const c = K.modelChoices(CFG.active, CFG.providers);
+  // providerId + baseUrl: main resuelve la clave guardada (no viaja por aquí)
+  const r = await window.sagitari.activateProvider({
+    providerId: c.provider ? c.provider.id : (CFG.active && CFG.active.providerId),
+    name: c.provider ? c.provider.name : (CFG.active && CFG.active.name),
+    baseUrl: (CFG.active && CFG.active.baseUrl),
+    model,
+    vision: looksVision(model),
+    format: (CFG.active && CFG.active.format) || 'auto',
+  });
+  if (r && r.ok === false) { showToast('No se pudo cambiar: ' + r.error); return; }
+  CFG = await window.sagitari.getConfig();
+  closeModelMenu();
+  renderProviderList();
+  updateStatusLabels();
+  showToast('Modelo: ' + model);
+};
 
 // ============ frame glow: estados del agente en el marco de la app ============
 const shellEl = document.getElementById('shell');
