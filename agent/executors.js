@@ -7,6 +7,7 @@ const fsp = require('fs/promises');
 const path = require('path');
 const skills = require('./skills');
 const memory = require('./memory');
+const { killTree } = require('./proc');
 
 // cmd.exe y otras herramientas nativas emiten en la página de códigos OEM (CP850 en
 // Windows en español), no en UTF-8: si los bytes no forman UTF-8 válido los decodificamos
@@ -35,20 +36,6 @@ function openUrlAllowed(url) {
     const p = new URL(String(url || '').trim()).protocol.toLowerCase();
     return p === 'http:' || p === 'https:';
   } catch { return false; }
-}
-
-// En Windows, matar el hijo directo deja nietos huérfanos: taskkill /T /F elimina
-// todo el árbol de procesos. Se usa tanto al pulsar Detener como al expirar el timeout.
-function killTree(child) {
-  const pid = child && child.pid;
-  if (pid && process.platform === 'win32') {
-    // taskkill primero, con el padre aún vivo para poder enumerar el árbol; child.kill() como respaldo
-    try {
-      exec(`taskkill /PID ${pid} /T /F`, { windowsHide: true }, () => { try { child.kill(); } catch {} });
-      return;
-    } catch {}
-  }
-  try { child.kill(); } catch {}
 }
 
 function run(cmd, opts = {}) {
