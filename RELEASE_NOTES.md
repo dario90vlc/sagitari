@@ -54,6 +54,14 @@ browser becoming unusable after a hard exit.
 
 ## Correcciones / Fixes
 
+- **La firma digital del binario se informa aunque abras la app desde PowerShell 7.** Windows
+  PowerShell 5.1 heredaba de ahí su lista de módulos, dejaba de encontrar
+  `Get-AuthenticodeSignature` y la firma se informaba como «no se pudo consultar», justo el dato
+  que te dice si lo que vas a instalar está firmado. / **The binary's digital signature is
+  reported even if you open the app from PowerShell 7.** Windows PowerShell 5.1 inherited that
+  process's module list, could no longer find `Get-AuthenticodeSignature` and reported the
+  signature as "couldn't check" — the very fact that tells you whether what you are about to
+  install is signed.
 - **Pausar durante la respuesta guarda el punto de control.** Antes la tarea quedaba marcada como
   interrumpida y se perdía la reanudación. / **Pausing mid-answer saves the checkpoint.** The task
   used to be marked as interrupted and resumption was lost.

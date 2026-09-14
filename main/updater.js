@@ -219,8 +219,23 @@ function signatureOf(file, { spawnFn = spawn, env = process.env, timeoutMs = 800
       const ps = 'Get-AuthenticodeSignature -LiteralPath $env:SAGITARI_SIG_FILE | '
         + 'ForEach-Object { [pscustomobject]@{ status = "$($_.Status)"; signer = "$($_.SignerCertificate.Subject)" } } '
         + '| ConvertTo-Json -Compress';
+      // PowerShell 5.1 hereda el PSModulePath del proceso que la lanza. Si la app
+      // se lanzó desde PowerShell 7, delante van los módulos de la 7 y la 5.1
+      // intenta cargar Microsoft.PowerShell.Security desde ahí: es incompatible,
+      // la carga falla y Get-AuthenticodeSignature deja de existir. El resultado
+      // era informar "no se pudo consultar" en vez de la firma real. Se le da el
+      // valor de la propia 5.1, que es donde vive su módulo.
+      const psHome = path.join(env.SystemRoot || 'C:\\Windows', 'System32', 'WindowsPowerShell', 'v1.0');
+      const childEnv = {
+        ...env,
+        SAGITARI_SIG_FILE: file,
+        PSModulePath: [
+          path.join(psHome, 'Modules'),
+          path.join(env.ProgramFiles || 'C:\\Program Files', 'WindowsPowerShell', 'Modules'),
+        ].join(path.delimiter),
+      };
       const p = spawnFn('powershell.exe', ['-NoProfile', '-NonInteractive', '-Command', ps], {
-        windowsHide: true, env: { ...env, SAGITARI_SIG_FILE: file },
+        windowsHide: true, env: childEnv,
       });
       let out = '';
       let done = false;

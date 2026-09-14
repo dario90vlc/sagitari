@@ -42,6 +42,15 @@ jobs:
           set -o pipefail
           npm test 2>&1 | tee test-output.log
 
+      - name: Unit tests (shell por defecto, como el release)
+        # El release ejecuta los tests sin `shell:` —en Windows, pwsh— y aquí con
+        # bash, así que el entorno del proceso no es el mismo. Esa diferencia
+        # ocultó que signatureOf no encontraba Get-AuthenticodeSignature cuando
+        # heredaba el PSModulePath de PowerShell 7: pasaba en el release y no en
+        # la CI. Correrlos también con el shell por defecto cubre el entorno del
+        # release antes de etiquetar.
+        run: npm test
+
       - name: Smoke test (la app arranca de verdad)
         run: npm run smoke
 
