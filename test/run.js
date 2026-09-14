@@ -1433,8 +1433,17 @@ test('apariencia: el CSS tematiza por triplets RGB y el glow escala con intensid
   ok(/#view-chat\[data-mode="plan"\]\s*\{[^}]*167,139,250/.test(css), 'PLAN mantiene su violeta');
   ok(/#view-chat\[data-mode="think"\]\s*\{[^}]*125,180,255/.test(css), 'THINK mantiene su azul');
   ok(/#view-chat, #view-chat\[data-mode="act"\]/.test(css), 'ACT mantiene su verde');
-  // glow al hablar: animación propia y clase
-  ok(/\.shell\.glow-speak::before\s*\{[^}]*frame-speak/.test(css), 'el estado speak debe tener animación propia');
+  /* Glow: el contrato es un trabajo por capa —el anillo dice «estoy aquí», la
+     respiración «estoy haciendo algo» con su ritmo por estado, y la luz que viaja
+     «voy por aquí»— y un camino de movimiento reducido. Se comprueba eso y no un
+     selector concreto, que es detalle de implementación. */
+  for (const estado of ['think', 'work', 'listen', 'speak']) {
+    ok(new RegExp('\\.shell\\.glow-' + estado + '\\s*\\{[^}]*--energy').test(css), 'el estado ' + estado + ' debe tener su energía');
+    ok(new RegExp('\\.shell\\.glow-' + estado + '\\s+\\.glow::before\\s*\\{[^}]*animation:\\s*frame-').test(css), 'el estado ' + estado + ' debe tener su propio ritmo');
+  }
+  for (const k of ['frame-breathe', 'frame-work', 'frame-listen', 'frame-speak', 'frame-travel']) ok(css.includes('@keyframes ' + k), 'falta el keyframe ' + k);
+  ok(/offset-path:\s*border-box/.test(css), 'la luz que viaja recorre el perímetro del marco');
+  ok(/@media \(prefers-reduced-motion: reduce\)[\s\S]{0,700}?animation: none !important/.test(css), 'el movimiento reducido debe parar el latido y el viaje');
   ok(/input\[type="range"\]\.glowslider/.test(css), 'debe existir el estilo del slider de intensidad');
 });
 

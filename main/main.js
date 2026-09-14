@@ -15,7 +15,11 @@ const SMOKE = process.argv.includes('--smoke');
 // Las comprobaciones automáticas (smoke, ui-check) abren la app SIN mostrar
 // ventana: hasta ahora la ventana se abría y se cerraba sola dos veces durante
 // probar.bat, y eso se ve exactamente igual que «la app se cierra sola».
-const HEADLESS = SMOKE || process.argv.includes('--hidden') || process.argv.includes('--test');
+const HEADLESS = SMOKE || process.argv.includes('--hidden') || process.argv.includes('--test') || process.argv.includes('--test-visible');
+// Y aparte de eso, si la ventana se muestra o no. `--test-visible` usa el perfil de
+// pruebas CON ventana: una ventana oculta no compone ni ejecuta requestAnimationFrame,
+// así que el movimiento (el glow) no se puede medir ni capturar sin verla.
+const HIDDEN = HEADLESS && !process.argv.includes('--test-visible');
 // Raíz de datos de la app. Se fija AQUÍ (antes de cargar los módulos de agent/)
 // porque cada uno resuelve su ruta al cargarse: es la única forma de que los
 // arranques de prueba no escriban en los skills, logs, memoria, hábitos,
@@ -222,7 +226,7 @@ function createChatWindow() {
       spellcheck: false
     },
     icon: path.join(__dirname, '..', 'renderer', 'assets', 'sagitari.ico'),
-    show: !HEADLESS
+    show: !HIDDEN
   });
   win.loadFile(INDEX_HTML);
   // La ventana no navega fuera de su index.html local: si un enlace o un script
@@ -537,7 +541,7 @@ ipcMain.handle('settings:set', (e, patch) => {
   // activo, relanzamos el estado actual para que el nuevo color se vea al momento
   if ('uiColor' in clean || 'glowColor' in clean || 'glowStrength' in clean) {
     try { if (win && !win.isDestroyed()) win.webContents.send('theme:changed', { uiColor: config.settings.uiColor, glowColor: config.settings.glowColor, glowStrength: config.settings.glowStrength }); } catch {}
-    if (config.settings.glowEnabled && !HEADLESS) glow('pulse');
+    if (config.settings.glowEnabled && !HIDDEN) glow('pulse');
   }
   // el renderer sigue recibiendo los ajustes; si el disco falló, se lo decimos
   // además por el mismo canal (y ya ha recibido el toast de persistConfig)

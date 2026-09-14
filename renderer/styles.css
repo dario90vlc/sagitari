@@ -132,17 +132,64 @@ body { font-family: var(--font-ui), 'Segoe UI', sans-serif; font-size: 13px; col
 .shell.maximized { border-radius: 0; }
 .shell.maximized::before { border-radius: 0; }
 
-.shell.glow-think::before { animation: frame-breathe 3s ease-in-out infinite; }
-.shell.glow-work::before  { animation: frame-work 1.4s ease-in-out infinite; }
-.shell.glow-listen::before{ animation: frame-breathe 2s ease-in-out infinite; }
-.shell.glow-speak::before { animation: frame-speak 1.1s ease-in-out infinite; }
+/* ===== glow: el marco es un tubo de luz =====
+   El color lo pone el usuario (--glow-rgb) y la intensidad también (--glow-str); lo que
+   cambia en cada estado es la ENERGÍA, nunca el tono. Tres capas, un trabajo cada una:
+     · el ANILLO (.shell::before) dice «estoy aquí» y no se mueve;
+     · la RESPIRACIÓN (.glow::before) dice «estoy haciendo algo», con el ritmo del estado;
+     · la LUZ QUE VIAJA (.glow::after) dice «voy por aquí»: mientras el agente ejecuta,
+       un tramo de luz recorre el perímetro del marco, como el avance de la máquina. */
+.shell { --energy: 1; }
+.shell.glow-think  { --energy: .85; }
+.shell.glow-work   { --energy: 1.15; }
+.shell.glow-listen { --energy: .6; }
+.shell.glow-speak  { --energy: .95; }
+.glow { position: absolute; inset: 0; border-radius: inherit; pointer-events: none; z-index: 401; }
+.glow::before {
+  content: ''; position: absolute; inset: 0; border-radius: inherit;
+  border: 1px solid rgba(var(--glow-rgb), calc(0.30 * var(--glow-str) * var(--energy)));
+  box-shadow:
+    inset 0 0 14px rgba(var(--glow-rgb), calc(0.30 * var(--glow-str) * var(--energy))),
+    inset 0 0 42px rgba(var(--glow-rgb), calc(0.20 * var(--glow-str) * var(--energy))),
+    inset 0 0 96px rgba(var(--acc3-rgb), calc(0.12 * var(--glow-str) * var(--energy)));
+  /* sin estado activo la respiración se apaga con transición: cambiar de estado ya no
+     reinicia la animación desde su primer fotograma, se cruza de una a otra */
+  opacity: 0; transition: opacity .5s cubic-bezier(0.16, 1, 0.3, 1);
+}
+.glow::after {
+  content: ''; position: absolute; left: 0; top: 0; width: 150px; height: 3px; border-radius: 999px;
+  background: linear-gradient(90deg, rgba(var(--glow-rgb), 0), rgba(var(--glow-rgb), calc(0.95 * var(--glow-str))));
+  offset-path: border-box; offset-rotate: 0deg; offset-distance: 0%;
+  opacity: 0; filter: blur(0.6px); transition: opacity .5s cubic-bezier(0.16, 1, 0.3, 1);
+}
+@keyframes frame-breathe { 0%, 100% { opacity: .55; } 50% { opacity: 1; } }
+@keyframes frame-work    { 0%, 100% { opacity: .7; } 50% { opacity: 1; } }
+@keyframes frame-listen  { 0%, 100% { opacity: .18; } 38%, 62% { opacity: .52; } }
+@keyframes frame-speak   { 0%, 100% { opacity: .45; } 50% { opacity: .95; } }
+@keyframes frame-travel  { to { offset-distance: 100%; } }
+.shell.glow-think  .glow::before { animation: frame-breathe 3.2s cubic-bezier(.45, 0, .55, 1) infinite; }
+.shell.glow-work   .glow::before { animation: frame-work    1.5s cubic-bezier(.45, 0, .55, 1) infinite; }
+.shell.glow-listen .glow::before { animation: frame-listen  2.8s cubic-bezier(.45, 0, .55, 1) infinite; }
+.shell.glow-speak  .glow::before { animation: frame-speak   1s   cubic-bezier(.45, 0, .55, 1) infinite; }
+.shell.glow-work .glow::after { opacity: 1; animation: frame-travel 3.2s linear infinite; }
+.shell.glow-pulse .glow::after { opacity: 1; animation: frame-travel 1.2s linear 1; }
+.shell.glow-think .glow::before, .shell.glow-work .glow::before, .shell.glow-listen .glow::before, .shell.glow-speak .glow::before { will-change: opacity; }
+.shell.glow-work .glow::after, .shell.glow-pulse .glow::after { will-change: offset-distance; }
+/* Menos movimiento, no menos información: sin viaje ni latido, pero cada estado se
+   sigue distinguiendo por cuánta luz tiene el marco. */
+@media (prefers-reduced-motion: reduce) {
+  .glow::before, .glow::after { animation: none !important; }
+  .glow::after { opacity: 0 !important; }
+  .shell.glow-think  .glow::before { opacity: .3; }
+  .shell.glow-work   .glow::before { opacity: .5; }
+  .shell.glow-listen .glow::before { opacity: .22; }
+  .shell.glow-speak  .glow::before { opacity: .4; }
+}
 /* ventana en segundo plano: el glow no se ve, pero su animación seguiría
    repintando el marco. app.js pone/quita .nofocus en <body> al perder/recuperar
    el foco de la ventana. */
 body.nofocus .shell::before { animation: none !important; }
-@keyframes frame-breathe { 0%, 100% { opacity: .75; } 50% { opacity: 1; } }
-@keyframes frame-work { 0%, 100% { opacity: .85; } 50% { opacity: 1; filter: brightness(1.35); } }
-@keyframes frame-speak { 0%, 100% { opacity: .8; } 50% { opacity: 1; filter: brightness(1.25); } }
+/* (los ritmos viven junto a la capa del glow, más arriba) */
 
 /* sin padding en el grid: cada columna llega hasta la esquina superior (fondo
    continuo) y se separa del titlebar con su PROPIO padding superior interno */

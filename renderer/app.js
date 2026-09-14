@@ -3289,9 +3289,11 @@ window.sagitari.onGlow(({ mode }) => {
   ['think', 'work', 'listen', 'speak', 'pulse'].forEach(m => shellEl.classList.remove('glow-' + m));
   clearTimeout(frameGlowTimer);
   if (mode === 'off') return;   // sin clases = resplandor calmado por defecto
-  const anim = { think: 'think', work: 'work', listen: 'listen', speak: 'speak', pulse: 'work' }[mode] || 'think';
+  // `pulse` ya no reutiliza el estado de trabajo: es un pase de luz (una vuelta), que es
+  // lo que significa «acuso recibo» y no «estoy trabajando».
+  const anim = { think: 'think', work: 'work', listen: 'listen', speak: 'speak', pulse: 'pulse' }[mode] || 'think';
   shellEl.classList.add('glow-' + anim);
-  if (mode === 'pulse') frameGlowTimer = setTimeout(() => shellEl.classList.remove('glow-work'), 2600);
+  if (mode === 'pulse') frameGlowTimer = setTimeout(() => shellEl.classList.remove('glow-pulse'), 1400);
 });
 
 /* ============ tema: acento de la UI + color e intensidad del glow ============
