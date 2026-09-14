@@ -64,18 +64,24 @@
 ```js
 'use strict';
 
-const { spawn } = require('child_process');
+const { exec } = require('child_process');
 
-/* En Windows, matar el hijo directo deja nietos huérfanos: taskkill /T /F elimina
-   todo el árbol de procesos. Se usa al pulsar Detener, al expirar un timeout y al
-   cerrar un servidor MCP por stdin. Vivía en executors.js y el transporte stdio
-   también lo necesita: una sola implementación. */
+// En Windows, matar el hijo directo deja nietos huérfanos: taskkill /T /F elimina
+// todo el árbol de procesos. Se usa tanto al pulsar Detener como al expirar el
+// timeout. OJO: taskkill se lanza con el padre AÚN VIVO (el child.kill() va en su
+// callback) porque si el hijo muere antes, taskkill no encuentra el árbol y los
+// nietos quedan huérfanos. Vive aquí porque el transporte stdio de MCP también
+// necesita matar el árbol de un servidor: una sola implementación.
 function killTree(child) {
   const pid = child && child.pid;
   if (pid && process.platform === 'win32') {
-    try { spawn('taskkill', ['/PID', String(pid), '/T', '/F'], { windowsHide: true, stdio: 'ignore' }); } catch {}
+    // taskkill primero, con el padre aún vivo para poder enumerar el árbol; child.kill() como respaldo
+    try {
+      exec(`taskkill /PID ${pid} /T /F`, { windowsHide: true }, () => { try { child.kill(); } catch {} });
+      return;
+    } catch {}
   }
-  try { child.kill('SIGKILL'); } catch {}
+  try { child.kill(); } catch {}
 }
 
 module.exports = { killTree };
@@ -190,6 +196,7 @@ const DEFAULT_TIMEOUT_MS = 60000;
  */
 function createLineReader(onMessage) {
   let buf = '';
+  let noise = 0;   // líneas descartadas hasta ahora (banners, avisos sueltos)
   return (chunk) => {
     buf += typeof chunk === 'string' ? chunk : chunk.toString('utf8');
     let idx;
@@ -198,8 +205,8 @@ function createLineReader(onMessage) {
       buf = buf.slice(idx + 1);
       if (!line.trim()) continue;
       let msg = null;
-      try { msg = JSON.parse(line); } catch { onMessage(null, 1); continue; }
-      onMessage(msg, 0);
+      try { msg = JSON.parse(line); } catch { noise++; continue; }   // ruido: se cuenta y NO se entrega
+      onMessage(msg, noise);
     }
   };
 }
@@ -426,18 +433,21 @@ function createStdioTransport({ command, args = [], cwd, env = {}, defaultTimeou
   child.stderr.on('data', (d) => { stderr = (stderr + d.toString('utf8')).slice(-8192); });
   const exitHandlers = [];
   let exited = false;
+  // `rpc` se declara ANTES de los listeners que lo usan: `const rpc =` más abajo
+  // dejaría a esos callbacks cerrando sobre una variable en zona muerta temporal.
+  let rpc = null;
   const avisarSalida = (code) => {
     if (exited) return;
     exited = true;
-    rpc.fail(`el servidor MCP terminó (código ${code === null || code === undefined ? 'desconocido' : code}).` + (stderr ? '\n' + stderr.trim().split('\n').slice(-4).join('\n') : ''));
+    if (rpc) rpc.fail(`el servidor MCP terminó (código ${code === null || code === undefined ? 'desconocido' : code}).` + (stderr ? '\n' + stderr.trim().split('\n').slice(-4).join('\n') : ''));
     for (const h of exitHandlers) { try { h(code); } catch {} }
   };
   child.on('error', (e) => avisarSalida('error: ' + e.message));
   child.on('exit', (code) => avisarSalida(code));
 
-  const feed = createLineReader((m, noise) => { if (m) rpc.handleMessage(m); });
+  const feed = createLineReader((m, noise) => { if (m && rpc) rpc.handleMessage(m); });
   child.stdout.on('data', feed);
-  const rpc = new Rpc({
+  rpc = new Rpc({
     send: (text) => { if (!child.stdin.destroyed) child.stdin.write(text + '\n'); },
     defaultTimeoutMs,
   });
