@@ -515,12 +515,13 @@ test('mcp: transporte http manda cabeceras, guarda la sesión y lee SSE', async 
         res.writeHead(200, { 'content-type': 'application/json', 'mcp-session-id': 'sess-1' });
         return res.end(JSON.stringify({ jsonrpc: '2.0', id: msg.id, result: { protocolVersion: '2025-06-18', capabilities: { tools: {} }, serverInfo: { name: 'remoto', version: '1' } } }));
       }
-      // el resto responde por SSE, con dos trozos para probar el troceado
+      // el resto responde por SSE: el JSON se parte en dos líneas `data:` del
+      // MISMO evento (que es lo que la spec SSE obliga a concatenar)
       res.writeHead(200, { 'content-type': 'text/event-stream' });
       const payload = JSON.stringify({ jsonrpc: '2.0', id: msg.id, result: { tools: [{ name: 'uno', description: 'x', inputSchema: { type: 'object' } }] } });
-      res.write('event: message\ndata: ' + payload.slice(0, 20) + '\n\n');
-      res.write('data: ' + '' + '\n\n');
-      res.write('event: message\ndata: ' + payload.slice(20) + '\n\n');
+      const mitad = Math.floor(payload.length / 2);
+      res.write('event: message\ndata: ' + payload.slice(0, mitad) + '\n');
+      res.write('data: ' + payload.slice(mitad) + '\n\n');
       res.end();
     });
   });
@@ -1269,12 +1270,15 @@ test('permisos: la tarjeta de confirmación nombra el servidor y la herramienta'
 });
 
 test('herramientas: una herramienta mcp sin gestor no se ejecuta y se explica', async () => {
-  const a = new AgentCls({ emit: () => {} });
   const toolsMod = require('../agent/tools');
   toolsMod.setDynamicToolProvider(() => ([{ type: 'function', function: { name: 'mcp__x__y', description: 'd', parameters: { type: 'object', properties: {} } } }]));
   try {
-    const r = await a._runToolCall(toolCall('mcp__x__y', {}), fakeCtx({ permissions: { 'mcp__x__y': 'safe' } }));
-    ok(r.action === 'ok' || r.text.includes('MCP'), JSON.stringify(r));
+    // el nivel se fija en la POLÍTICA del agente (no en el ctx): con el 'confirm'
+    // por defecto la llamada esperaría una confirmación que aquí no llega nunca
+    const a = new AgentCls({ emit: () => {}, guardrailsPolicy: { permissions: { 'mcp__x__y': 'safe' } } });
+    const r = await a._runToolCall(toolCall('mcp__x__y', {}), fakeCtx());
+    eq(r.action, 'ok', 'la llamada se resuelve (el ejecutor no lanza)');
+    ok(/MCP/.test(r.text), 'y explica que no hay servidores MCP: ' + r.text);
   } finally { toolsMod.setDynamicToolProvider(null); }
 });
 ```
@@ -1556,7 +1560,7 @@ module.exports = { validateServer, sanitizeList, rawId, mergeSecrets, parseMcpIm
   const servers = [];
   for (const s of mcpRaw) {
     const v = mcpConfig.validateServer(s);
-    if (v.ok) servers.push(decryptServer(v.value));
+    if (v.ok) servers.push(revealServerSecrets(v.value));
   }
   config.mcp = { enabled: raw.mcp ? raw.mcp.enabled !== false : true, servers };
 ```
@@ -1967,6 +1971,16 @@ $('#mcpPaste').onclick = async () => {
   renderMcp();
 };
 ```
+
+- [ ] **Step 2b: Mensaje del panel**
+
+`smsg()` escribe en `#saveMsg`, que es el aviso del formulario de proveedores: el panel MCP tiene el suyo (`#mcpMsg`). Añadir junto a `smsg`:
+
+```js
+/** Aviso del panel MCP (no reutiliza el del formulario de proveedores). */
+function mcpMsg(t) { const el = $('#mcpMsg'); if (el) el.textContent = t || ''; }
+```
+Y en todos los manejadores de MCP de este paso, usar `mcpMsg(...)` donde el código dice `smsg(...)`.
 
 - [ ] **Step 3: Añadir `'mcp'` a `SET_TABS` y renderizar al entrar**
 
