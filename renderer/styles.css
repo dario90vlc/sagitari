@@ -179,21 +179,20 @@ body { font-family: var(--font-ui), 'Segoe UI', sans-serif; font-size: 13px; col
    máximo hacia dentro y dejaba el borde flojo; la máscara blanda devolvía el charco. */
 .glowRing {
   position: absolute; inset: 0; border-radius: inherit;
-  /* Alfas calibradas: con 0,46/0,28/0,16/0,07 el marco inundaba la interfaz (medido 142 de
-     brillo en el borde frente a 22 dentro) y el interior dejaba de ser oscuro. Estos valores
-     dejan el borde en ~70 (unas 3,5 veces el interior) y el relleno alcanza ~70px. El slider
-     de Intensidad escala el conjunto desde Ajustes. */
-  box-shadow:
-    inset 0 0 0 18px rgba(var(--glow-a-rgb), calc(0.24 * var(--glow-str) * var(--energy))),
-    inset 0 0 0 38px rgba(var(--glow-b-rgb), calc(0.13 * var(--glow-str) * var(--energy))),
-    inset 0 0 0 60px rgba(var(--glow-c-rgb), calc(0.07 * var(--glow-str) * var(--energy))),
-    inset 0 0 0 86px rgba(var(--glow-b-rgb), calc(0.03 * var(--glow-str) * var(--energy)));
+  /* La rampa la genera app.js (marcos finos con alfa exponencial): cuatro escalones se veían
+     como bandas, dieciséis de 7px se leen como un degradado. El respaldo de aquí abajo vale
+     para el primer frame, antes de que corra el tema. */
+  box-shadow: var(--glow-frames,
+    inset 0 0 0 10px rgba(var(--glow-a-rgb), 0.12),
+    inset 0 0 0 26px rgba(var(--glow-b-rgb), 0.07),
+    inset 0 0 0 44px rgba(var(--glow-c-rgb), 0.04),
+    inset 0 0 0 64px rgba(var(--glow-b-rgb), 0.02));
 }
 .glow::before {
   content: ''; position: absolute; inset: 0; border-radius: inherit;
   box-shadow:
-    inset 0 0 0 6px rgba(var(--glow-c-rgb), calc(0.2 * var(--glow-str) * var(--energy))),
-    inset 0 0 0 15px rgba(var(--glow-a-rgb), calc(0.1 * var(--glow-str) * var(--energy)));
+    inset 0 0 0 5px rgba(var(--glow-c-rgb), calc(0.16 * var(--glow-str) * var(--energy))),
+    inset 0 0 0 13px rgba(var(--glow-a-rgb), calc(0.08 * var(--glow-str) * var(--energy)));
   opacity: 0; will-change: opacity;
 }
 
@@ -202,16 +201,19 @@ body { font-family: var(--font-ui), 'Segoe UI', sans-serif; font-size: 13px; col
 @keyframes frame-drift   { 0%, 100% { opacity: .78; } 58% { opacity: 1; } }
 @keyframes frame-bloom   { 0% { opacity: .1; } 20% { opacity: 1; } 100% { opacity: .8; } }
 /* Un periodo por capa y por estado, sin múltiplos comunes: la suma nunca se repite igual. */
-.shell.glow-think  .glow { opacity: 1; }
+/* La rampa de marcos la genera app.js con la intensidad del ajuste, así que la energía por
+   estado se aplica al CONJUNTO: el nivel de cada estado es la opacidad de la capa, y encima de
+   eso va el latido de cada banda. */
+.shell.glow-think  .glow { opacity: .82; }
 .shell.glow-think  .glow::before { animation: frame-breathe 4.6s cubic-bezier(.45, 0, .55, 1) infinite; }
 .shell.glow-think  .glowRing  { animation: frame-drift   6.4s cubic-bezier(.45, 0, .55, 1) infinite; }
 .shell.glow-work   .glow { opacity: 1; }
 .shell.glow-work   .glow::before { animation: frame-breathe 2.6s cubic-bezier(.45, 0, .55, 1) infinite; }
 .shell.glow-work   .glowRing  { animation: frame-drift   3.7s cubic-bezier(.45, 0, .55, 1) infinite; }
-.shell.glow-listen .glow { opacity: 1; }
+.shell.glow-listen .glow { opacity: .62; }
 .shell.glow-listen .glow::before { animation: frame-breathe 5.4s cubic-bezier(.45, 0, .55, 1) infinite; }
 .shell.glow-listen .glowRing  { animation: frame-drift   7.3s cubic-bezier(.45, 0, .55, 1) infinite; }
-.shell.glow-speak  .glow { opacity: 1; }
+.shell.glow-speak  .glow { opacity: .9; }
 .shell.glow-speak  .glow::before { animation: frame-breathe 2.2s cubic-bezier(.45, 0, .55, 1) infinite; }
 .shell.glow-speak  .glowRing  { animation: frame-drift   3.1s cubic-bezier(.45, 0, .55, 1) infinite; }
 /* acusar recibo: un destello del aura, no un estado sostenido */

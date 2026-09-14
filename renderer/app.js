@@ -3360,6 +3360,35 @@ function rampaDeSuperficies(acento) {
   }
   return (_rampas[clave] = out);
 }
+/**
+ * Marcos del aura para el `box-shadow`: N escalones FINOS cuya alfa sigue una exponencial.
+ * Con cuatro escalones se veían las bandas (el ojo lee tramos planos); con dieciséis de 6 px
+ * la suma es un degradado continuo. Y son marcos SÓLIDOS (`inset 0 0 0 Npx`), así que la luz
+ * es la misma en la esquina que en el centro del borde: ni acumulación ni desenfoque que
+ * desplace el brillo hacia dentro. La alfa escala con la intensidad del ajuste.
+ */
+function marcosDeAura(pal, factor) {
+  const tonos = [gh(pal, 13), gh(pal, 0), gh(pal, -12)];   // tres tonos vecinos, como antes
+  const out = [];
+  // Anchos en progresión geométrica: finos donde la curva cae deprisa (junto al borde) y anchos
+  // donde ya es plana. Con separación fija los primeros escalones daban saltos de 20 puntos y se
+  // veían las bandas; así cada escalón suma una cantidad parecida de luz y la caída es continua.
+  let w = 2;
+  while (w <= 104) {
+    const sig = Math.max(w + 1, Math.round(w * 1.22));
+    const a = 0.32 * (Math.exp(-w / 42) - Math.exp(-sig / 42)) * factor;
+    const t = tonos[Math.min(2, Math.floor(w / 36))];
+    out.push('inset 0 0 0 ' + w + 'px rgba(' + t + ', ' + a.toFixed(4) + ')');
+    w = sig;
+  }
+  return out.join(', ');
+}
+/** Un tono vecino del elegido, en grados de diferencia. */
+function gh(pal, giro) {
+  const [h, s, l] = _hsl(pal.acc2);
+  return _rgb(h + giro, Math.min(1, s * 1.02), Math.min(.78, l * 1.0)).join(
+);
+}
 function applyTheme() {
   const s = CFG.settings || {};
   const pal = PALETTES[s.uiColor] || PALETTES.violet;
@@ -3378,6 +3407,8 @@ function applyTheme() {
   r.setProperty('--glow-str', String(Math.min(1.4, Math.max(0.4, Number(s.glowStrength) || 1))));
   // los fondos también son del tema: si no, el color cambia solo en los acentos
   for (const [token, valor] of Object.entries(rampaDeSuperficies(pal.acc))) r.setProperty(token, valor);
+  // El glow: una rampa de marcos finos (continua, uniforme, sin desenfoque).
+  r.setProperty('--glow-frames', marcosDeAura(gpal, Math.min(1.4, Math.max(0.4, Number(s.glowStrength) || 1))));
   // refresca las muestras de color de Ajustes si están pintadas
   document.querySelectorAll('.colordot').forEach(d => { d.style.background = ''; });
 }
