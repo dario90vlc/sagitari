@@ -226,6 +226,11 @@ class Browser {
     if (cached) return cached;
     const { sessionId } = await this.send('Target.attachToTarget', { targetId, flatten: true });
     this._sessions.set(targetId, sessionId);
+    // Los eventos del dominio Page solo llegan si el dominio está habilitado, y
+    // waitReady() espera Page.loadEventFired: sin esto esa espera era código muerto
+    // y el único criterio real era el sondeo de readyState (que puede leer el
+    // documento ANTERIOR todavía en 'complete' justo tras navegar).
+    try { await this.send('Page.enable', {}, sessionId); } catch {}
     return sessionId;
   }
 
@@ -375,9 +380,13 @@ class Browser {
     const ev = this.waitEvent('Page.loadEventFired', timeoutMs, sessionId);
     let fired = false;
     ev.then((v) => { if (v) fired = true; });
+    // Margen para que la navegación se comprometa: recién enviado Page.navigate el
+    // documento ANTERIOR sigue en 'complete' y se respondía «OK» sin haber cargado
+    // la página nueva (y el siguiente elements/content leían la vieja).
+    await sleep(150);
     while (Date.now() < deadline) {
+      if (fired) return true;   // el evento manda: es la carga de la página nueva
       try { if (await this.evalJs('document.readyState', sessionId) === 'complete') return true; } catch {}
-      if (fired) return true;
       await Promise.race([ev, sleep(150)]);
     }
     return false;
