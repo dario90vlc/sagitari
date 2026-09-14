@@ -4,203 +4,162 @@
 
 # SAGITARI
 
-**An agentic AI assistant that lives on your desktop — and actually executes.**
+### Your desktop AI agent — with hands.
 
-Full control of your Windows PC from a holographic interface: chat, voice, browser and real system automation.
+**Ask in natural language. SAGITARI plans, acts, and reports back on your Windows PC.**
 
-![Platform](https://img.shields.io/badge/platform-Windows_10%2F11-0078D6?style=flat-square&logo=windows11&logoColor=white)
-![Release](https://img.shields.io/github/v/release/dario90vlc/sagitari?style=flat-square&label=release&color=00E5FF)
-![Downloads](https://img.shields.io/github/downloads/dario90vlc/sagitari/total?style=flat-square&label=downloads&color=37F5A8)
-![License](https://img.shields.io/badge/license-MIT-7C3AED?style=flat-square)
-![Electron](https://img.shields.io/badge/Electron-44-47848F?style=flat-square&logo=electron&logoColor=white)
+[![Release](https://img.shields.io/github/v/release/dario90vlc/sagitari?style=for-the-badge&color=00E5FF&label=latest)](https://github.com/dario90vlc/sagitari/releases)
+[![Downloads](https://img.shields.io/github/downloads/dario90vlc/sagitari/total?style=for-the-badge&color=37F5A8&label=downloads)](https://github.com/dario90vlc/sagitari/releases)
+[![Platform](https://img.shields.io/badge/Windows-10%20%2F%2011-0078D6?style=for-the-badge&logo=windows11&logoColor=white)](https://github.com/dario90vlc/sagitari/releases)
+[![License](https://img.shields.io/badge/license-MIT-7C3AED?style=for-the-badge)](LICENSE)
 
-**English** · [Español](./README.es.md)
+[Download](#download) · [Features](#what-it-does) · [Security](#safety-first) · [Build](#build-from-source) · [Español](./README.es.md)
 
 </div>
 
 ---
 
-<div align="center">
-<img src="docs/shot-chat.png" alt="SAGITARI chat view" width="86%">
-</div>
+## Why SAGITARI?
 
-> Type a request — or say it out loud. SAGITARI plans, uses the terminal, reads and writes files,
-> drives Chrome/Edge and reports back, with an energy glow that lights up the frame while it works.
+Most desktop AI assistants stop at the chat box. SAGITARI is built to **finish the job**: it can use your terminal, work with files, drive Chrome or Edge, open apps, manage windows, and keep you informed at every step.
+
+It is local-first by design. You choose the model and provider — cloud or local — while configuration, API keys, conversations, logs, memory, and browser profiles stay on your machine.
+
+> **Natural language in. Real work out.**
+
+## Download
+
+The recommended option is the Windows installer:
+
+| Package | Description |
+|---|---|
+| [**SAGITARI-Setup-3.0.0.exe**](https://github.com/dario90vlc/sagitari/releases/download/v3.0.0/SAGITARI-Setup-3.0.0.exe) | Installer with shortcuts and uninstaller |
+| [**SAGITARI-Portable-3.0.0.exe**](https://github.com/dario90vlc/sagitari/releases/download/v3.0.0/SAGITARI-Portable-3.0.0.exe) | Single executable, no installation |
+| [**Release notes**](https://github.com/dario90vlc/sagitari/releases/tag/v3.0.0) | Changes, security fixes, and SHA-256 hashes |
+
+> **Windows SmartScreen:** the binaries are currently unsigned, so Windows may show a warning on the first run. Choose *More info → Run anyway* if you trust the download. Verify the SHA-256 hash published in the release notes.
+
+## What it does
+
+### An agent that executes
+
+- **Terminal and files** — inspect, create, edit, and organize work in your filesystem.
+- **Browser automation** — control Chrome or Edge through DevTools Protocol: navigate, click, type, read, manage tabs, and capture screenshots.
+- **Desktop actions** — open applications and URLs, manage windows, clipboard, notifications, and multimedia.
+- **Vision and attachments** — attach images, code, documents, and text files; images can be sent to vision-capable models.
+
+### Flexible intelligence
+
+- **Bring your own model** — OpenCode Go, OpenRouter, OpenAI, Groq, Anthropic, Ollama, LM Studio, or any compatible endpoint.
+- **Think / Plan / Act** — reason deeply, prepare a plan before acting, or execute directly.
+- **Skills** — import specialized `SKILL.md` packs and load their instructions on demand instead of bloating every prompt.
+- **Memory and habits** — keep useful context across conversations, locally.
+- **Fallbacks and recovery** — model fallback, background tasks, checkpoints, pause/resume, and recovery after interruptions.
+
+### A UI that shows the work
+
+- Holographic interface built with vanilla HTML, CSS, and JavaScript.
+- Reactive frame glow while the agent thinks, works, listens, or speaks.
+- Six accent palettes plus live glow color and intensity controls.
+- Separate conversations, live agent telemetry, structured local run logs, and optional developer metrics.
+- Voice input through Windows speech recognition and text-to-speech output.
+
+## Safety first
+
+SAGITARI gives an agent real access to your computer, so safety is part of the product:
+
+- **Permission levels per tool** — safe actions can run automatically; sensitive actions ask first.
+- **Mandatory confirmation for sensitive browser operations** such as clipboard access, page JavaScript, and profile changes.
+- **Guardrails** for steps, tool calls, duration, tokens, cost, loops, and stalled work.
+- **Real stop control** — stopping a run also cancels the process behind it where possible.
+- **Restricted subagents** — each specialist receives only the tools it is allowed to use.
+- **Local data** — no account and no telemetry; API keys are stored using the Windows system keystore when available.
+- **Verified updates** — downloaded updates require the published SHA-512 and are checked again before installation.
+
+## Quick start
+
+1. Install SAGITARI or download the portable build.
+2. Open **Settings** and choose a provider preset.
+3. Enter your API key if that provider needs one, detect models, and activate a model.
+4. Return to **Chat** and ask for something real.
+
+Useful shortcuts:
+
+| Shortcut | Action |
+|---|---|
+| `Alt+1…9` | Switch sections |
+| `Ctrl+Alt+S` | Show or hide the panel |
+| `Alt+Shift+S` | Bring SAGITARI to the front |
+| `Ctrl+Shift+G` | Trigger a glow pulse |
+| `Alt+M` | Cycle ACT → PLAN → THINK |
+| `/` in chat | Open the skills palette |
 
 ## Screenshots
 
 <table>
   <tr>
-    <td width="50%"><img src="docs/shot-empty.png" alt="Chat welcome"></td>
-    <td width="50%"><img src="docs/shot-agents.png" alt="Agents"></td>
+    <td width="50%"><img src="docs/shot-chat.png" alt="SAGITARI chat"></td>
+    <td width="50%"><img src="docs/shot-empty.png" alt="SAGITARI empty chat"></td>
   </tr>
   <tr>
-    <td align="center"><sub><b>Chat</b> — pick a mode, attach files, just ask</sub></td>
-    <td align="center"><sub><b>Agents</b> — live telemetry of every run</sub></td>
+    <td align="center"><sub><b>Chat</b> — ask, attach, and execute</sub></td>
+    <td align="center"><sub><b>Modes</b> — choose Act, Plan, or Think</sub></td>
   </tr>
   <tr>
-    <td width="50%"><img src="docs/shot-tools.png" alt="Tools"></td>
-    <td width="50%"><img src="docs/shot-skills.png" alt="Skills"></td>
+    <td width="50%"><img src="docs/shot-agents.png" alt="SAGITARI agents view"></td>
+    <td width="50%"><img src="docs/shot-tools.png" alt="SAGITARI tools view"></td>
   </tr>
   <tr>
-    <td align="center"><sub><b>Tools</b> — everything the agent can touch</sub></td>
-    <td align="center"><sub><b>Skills</b> — importable SKILL.md packs</sub></td>
+    <td align="center"><sub><b>Agents</b> — follow every run</sub></td>
+    <td align="center"><sub><b>Tools</b> — understand what the agent can do</sub></td>
   </tr>
 </table>
 
-## Why SAGITARI
-
-Most desktop AI assistants stop at the chat bubble. SAGITARI is built as an **agent with hands**:
-
-- **It executes, not just suggests** — terminal commands, file operations, app launching,
-  browser automation and system tasks run for real, with every step visible in the UI.
-- **Bring your own model** — any OpenAI-compatible endpoint: cloud (OpenRouter, Groq, OpenAI…)
-  or fully local (Ollama, LM Studio). Your keys never leave your machine.
-- **It costs what it must, no more** — skills load on demand: the prompt only carries the
-  index, so the cost grows with what you actually ask for, not with what you installed.
-- **It looks like it works** — a hand-crafted holographic UI, no frameworks, no bloat:
-  Electron + vanilla JS and a single runtime dependency.
-
-## Features
-
-**Intelligence**
-
-- **Multi-provider (OpenAI-compatible):** OpenCode Go, OpenRouter, Ollama, LM Studio, Groq,
-  OpenAI or any custom endpoint. Paste your API key — it's stored locally and models are
-  detected automatically. With Ollama you don't even need a key (runs locally).
-- **Think / Plan / Act modes** — deep reasoning, plan-then-execute, or direct action.
-  Switch in one click from the chat composer (or `Alt+M`).
-- **Skills engine (SKILL.md format):** specialized instruction packs the agent loads on demand —
-  the prompt only carries the index, so token cost stays minimal. Import any GitHub repo with
-  a `SKILL.md` and force one from chat by typing `/`; the Marketplace ships a curated list of
-  6 highlighted entries from `anthropics/skills` (the multipack plus its docx, pdf, xlsx,
-  artifacts-builder and webapp-testing sub-packs).
-- **Persistent memory** injected into context across conversations.
-
-**Control**
-
-- **Full PC access:** terminal, files, open apps and URLs, clipboard, notifications,
-  multimedia and window management.
-- **Real browser automation:** controls Chrome/Edge over the DevTools Protocol (raw WebSocket,
-  no Puppeteer) — navigate, click by visible text, type, read content, capture screenshots,
-  manage tabs. One window, persistent profile, your logins survive.
-- **Screenshots the model can actually see** for visual tasks.
-
-**Safety**
-
-- **Permission system:** every tool has a risk level — safe tools run automatically, sensitive
-  ones (terminal, file writes, browser control…) ask first with a card showing exactly what the
-  agent is about to do. You can change each tool's level in Settings, or block it entirely.
-- **Guardrails:** configurable limits for steps, tool calls, duration and tokens — plus loop
-  detection that stops the agent when it repeats the same action without progressing.
-- **Stop anytime** kills the in-flight command, not just the text stream.
-- **Structured run logs** (JSONL, local) and an optional **developer mode** with live
-  token/latency metrics under the chat.
-
-**Interface**
-
-- **Holographic UI** hand-built in vanilla HTML/CSS — no UI frameworks.
-- **Reactive glow:** the frame lights up while the agent thinks, works or speaks —
-  color and intensity are yours to tune (Settings → Appearance).
-- **Voice both ways:** dictate with Windows speech engines, hear answers out loud (TTS).
-- **Attach anything:** drag & drop, paste or pick images, code and text files — images
-  travel as vision parts, text files are read for you (30+ formats).
-- **Conversation history** with separate threads, and a live Agents view showing every
-  run's steps as they happen.
-- **Themeable:** six UI accent palettes and a glow color/intensity slider, applied live.
-
-**Autonomy**
-
-- **Background tasks:** long jobs keep running while you keep chatting — pause, resume,
-  cancel, and get notified on completion.
-- **Specialist subagents:** the orchestrator delegates research, browser, coding, file or
-  vision work; every subagent brings its own tools and reports back.
-- **Checkpoints & recovery:** long tasks save progress; a crash or a closed window no
-  longer loses the work — SAGITARI resumes where it left off and shows what failed.
-- **Model fallback:** if a provider fails, the next one takes over automatically and the
-  task continues.
-
-## Installation
-
-Download your preferred artifact from the [releases page](../../releases):
-
-| Artifact | What it is |
-|---|---|
-| `SAGITARI-Setup-2.2.3.exe` | Windows installer (NSIS): shortcuts, uninstaller |
-| `SAGITARI-Portable-2.2.3.exe` | Portable: single executable, no install |
-| `Source code (zip)` | Source code |
-
-> Windows SmartScreen may warn on first run (unsigned binary). Click
-> *More info → Run anyway*.
-
-## Quick start
-
-1. Open SAGITARI → **Settings** → pick a preset (OpenRouter, Ollama, Groq, OpenAI…).
-2. Paste your API key → **Detect models** → choose one → **Activate**.
-3. Type or dictate your first request. With Ollama you don't even need an API key (local).
-
-**Shortcuts:** `Alt+1…9` switch sections · `Ctrl+Alt+S` show/hide panel ·
-`Alt+Shift+S` bring to front · `Ctrl+Shift+G` glow pulse · `Alt+M` cycle agent mode ·
-`/` in the input opens the skill palette.
-
 ## Build from source
+
+Requirements: **Windows 10/11** and **Node.js 20+**.
 
 ```bash
 git clone https://github.com/dario90vlc/sagitari.git
 cd sagitari
-npm install
+npm ci
 
-npm start              # development mode
-npm test               # unit tests: guardrails, skills, memory, checkpoints,
-                       # task manager, subagents, models, provider protocols,
-                       # updater, ChatKit, .ico generation
-npm run dist           # NSIS installer + portable in dist/
-npm run dist:installer # installer only
-npm run dist:portable  # portable only
+npm start                 # run the app
+npm test                  # unit and integration tests
+npm run smoke             # verify that Electron starts
+npm run uicheck           # exercise the live renderer
+npm run dist              # build NSIS installer + portable executable
 ```
 
-Requirements: Node.js 20+ and Windows 10/11.
-
-Pushing a `v*` tag triggers the GitHub Actions release workflow: tests, build of installer +
-portable, SHA-256 computation and automatic release publication.
+The release workflow runs syntax checks, tests, smoke, UI checks, builds both Windows artifacts, verifies the output, generates release notes, and publishes SHA-256 hashes. The release tag must match the version in `package.json` — for this release, `v3.0.0`.
 
 ## Project structure
 
-```
+```text
 sagitari/
-├── main/           # Electron process: windows, IPC, voice, providers
-│   ├── main.js
-│   ├── preload.js
-│   ├── providers.js
-│   └── voice.ps1   # offline dictation (Windows speech engines)
-├── agent/          # the agent's brain
-│   ├── agent.js    # streaming loop + tool calling + subagent delegation
-│   ├── tools.js    # tool definitions
-│   ├── executors.js
-│   ├── guardrails.js # step/time/cost limits, loop detection
-│   ├── checkpoints.js # pause/resume/recover long tasks
-│   ├── memory.js   # persistent memory + habits
-│   ├── skills.js   # SKILL.md engine + marketplace
-│   ├── subagents.js # specialist agents (research, browser, coding…)
-│   ├── tasks.js    # background tasks
-│   └── browser.js  # Chrome/Edge via CDP (no puppeteer)
-├── renderer/       # holographic UI
-│   ├── index.html / app.js / styles.css
-│   └── assets/     # logo, icons
-├── skills-starter/ # bundled skills
-├── scripts/        # diagnostics & capture utilities
-└── docs/           # README assets
+├── main/           Electron main process, windows, IPC, voice, providers
+├── agent/          Agent loop, tools, guardrails, memory, skills, tasks, browser
+├── renderer/       Vanilla HTML/CSS/JS interface
+├── skills-starter/ Bundled starter skills
+├── scripts/        Diagnostics, UI checks, and asset tools
+└── docs/           Screenshots and project artwork
 ```
 
-## Privacy & security
+## Privacy
 
-- Config and API keys are stored in `%APPDATA%\SagitariAI\` — **local only**, they never leave
-  your machine. Keys go directly from your settings to your chosen provider.
-- Dictation uses Windows' built-in speech recognizers; enable online speech recognition
-  (Settings → Privacy & security → Speech) and pick a good default microphone for best results.
-- The browser agent uses its own persistent profile; close it or disable the tool to go dark.
-- Renderer runs with `contextIsolation` on and `nodeIntegration` off.
+- Configuration, API keys, conversations, logs, memory, and browser profiles live under `%APPDATA%\SagitariAI\`.
+- Provider keys go directly from your local app to your selected provider.
+- Local providers such as Ollama can run without sending data to a cloud service.
+- The renderer uses `contextIsolation`, disables Node integration, and runs sandboxed.
 
 ## License
 
-[MIT](LICENSE)
+SAGITARI is free software released under the [MIT License](LICENSE).
+
+<div align="center">
+
+**Built for people who want an assistant that does more than talk.**
+
+[⬆ Back to top](#sagitari)
+
+</div>

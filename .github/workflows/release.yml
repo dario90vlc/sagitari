@@ -8,7 +8,7 @@ on:
   workflow_dispatch:
     inputs:
       tag:
-        description: 'Tag a publicar (ej. v2.2.2). Debe existir y coincidir con la version de package.json.'
+        description: 'Tag a publicar (ej. v3.0.0). Debe existir y coincidir con la version de package.json.'
         required: true
         type: string
 

@@ -1,4 +1,6 @@
-# SAGITARI 2.2.3
+# SAGITARI 3.0.0
+
+**Glow del marco corregido:** el aura vuelve a renderizarse de forma consistente, con un halo suave, visible y sin bloquear la interacción de la ventana. También se corrige la muestra de color del glow en Ajustes. / **Frame glow fixed:** the aura now renders consistently with a soft, visible halo without blocking window interaction. The glow color preview in Settings is fixed too.
 
 **Seguridad y fiabilidad / Security and reliability:** se cierran dos vías que podían costar
 caro (el borrado del directorio de datos desde una skill y la instalación de una actualización
@@ -14,8 +16,8 @@ browser becoming unusable after a hard exit.
 
 | Archivo / File | Descripción / Description |
 |---|---|
-| `SAGITARI-Setup-2.2.3.exe` | **Instalador / Installer** (NSIS): accesos directos, desinstalador / shortcuts, uninstaller |
-| `SAGITARI-Portable-2.2.3.exe` | **Portable**: un solo ejecutable, sin instalación / single executable, no install |
+| `SAGITARI-Setup-3.0.0.exe` | **Instalador / Installer** (NSIS): accesos directos, desinstalador / shortcuts, uninstaller |
+| `SAGITARI-Portable-3.0.0.exe` | **Portable**: un solo ejecutable, sin instalación / single executable, no install |
 | `Source code (zip/tar.gz)` | Código fuente / Source code |
 
 > Binario sin firmar: Windows SmartScreen puede avisar en la primera ejecución (*Más información → Ejecutar de todas formas*). La app te dice si la actualización que descarga está firmada o no. / Unsigned binary: SmartScreen may warn on first run (*More info → Run anyway*). The app tells you whether the update it downloads is signed.
@@ -96,11 +98,10 @@ also reports the binary's digital signature status and installs only when you as
 
 ## Verificación / Verification
 
-- `npm test`: **160 tests en verde** / **160 tests passing**, con regresiones para cada corrección
-  de esta versión. / with regressions for every fix in this release.
+- `npm test`: **163 tests en verde** / **163 tests passing**, con regresiones para cada corrección de esta versión. / with regressions for every fix in this release.
 - `npm run smoke`: la app arranca de verdad / the app really starts.
-- `npm run uicheck`: 25 comprobaciones sobre la interfaz viva (iconos, cableado, navegación, modo,
-  tamaño mínimo) — y ahora corre en la CI antes de publicar. / 25 checks against the live UI
+- `npm run uicheck`: 28 comprobaciones sobre la interfaz viva (iconos, cableado, navegación, modo,
+  tamaño mínimo) — y ahora corre en la CI antes de publicar. / 28 checks against the live UI
   (icons, wiring, navigation, mode, minimum size) — and it now runs in CI before publishing.
 - `node --check` de todos los módulos, y el tag de la release debe coincidir con la versión de
   `package.json` o el workflow aborta. / `node --check` on every module, and the release tag must
