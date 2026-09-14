@@ -3305,6 +3305,59 @@ const PALETTES = {
   amber:   { label: 'Ámbar',     acc: [252, 211, 77],  acc2: [245, 158, 11],  acc3: [251, 146, 60] },
   ice:     { label: 'Hielo',     acc: [147, 197, 253], acc2: [59, 130, 246],  acc3: [125, 180, 255] }
 };
+/* Escalones de superficie de la rampa violeta: son los fondos que la app tenía
+   escritos a mano. Cada paleta deriva los suyos con la MISMA luminancia relativa
+   (no la L de HSL, que no es brillo percibido) y el TONO del acento: cambiar el
+   color de la interfaz cambia también los fondos sin mover el contraste un punto. */
+const RAMPA_REF = {
+  '--bg0-rgb': [6, 4, 15], '--bg1-rgb': [16, 10, 38], '--bg2-rgb': [22, 14, 48],
+  '--deep-rgb': [12, 8, 30], '--field-rgb': [8, 5, 24], '--panel-rgb': [18, 12, 42],
+  '--panel2-rgb': [26, 18, 56], '--face-rgb': [30, 20, 64], '--face2-rgb': [38, 26, 76],
+};
+const _hsl = (c) => {
+  const r = c[0] / 255, g = c[1] / 255, b = c[2] / 255;
+  const max = Math.max(r, g, b), min = Math.min(r, g, b), l = (max + min) / 2;
+  let h = 0, s = 0;
+  if (max !== min) {
+    const d = max - min;
+    s = l > 0.5 ? d / (2 - max - min) : d / (max + min);
+    h = max === r ? (g - b) / d + (g < b ? 6 : 0) : max === g ? (b - r) / d + 2 : (r - g) / d + 4;
+    h *= 60;
+  }
+  return [h, s, l];
+};
+const _rgb = (h, s, l) => {
+  const f = (n) => { const k = (n + h / 30) % 12, a = s * Math.min(l, 1 - l); return Math.round(255 * (l - a * Math.max(-1, Math.min(k - 3, 9 - k, 1)))); };
+  return [f(0), f(8), f(4)];
+};
+const _lum = (c) => {
+  const f = (v) => { v /= 255; return v <= 0.03928 ? v / 12.92 : Math.pow((v + 0.055) / 1.055, 2.4); };
+  return 0.2126 * f(c[0]) + 0.7152 * f(c[1]) + 0.0722 * f(c[2]);
+};
+const _rampas = {};
+/** Superficies de una paleta: mismo brillo que la referencia, tono del acento. */
+function rampaDeSuperficies(acento) {
+  const clave = acento.join(',');
+  if (_rampas[clave]) return _rampas[clave];
+  const [h] = _hsl(acento);
+  const out = {};
+  for (const [token, baseRGB] of Object.entries(RAMPA_REF)) {
+    const [, s] = _hsl(baseRGB), objetivo = _lum(baseRGB);
+    // bisección: la luminancia crece con L, así que se busca la L que la iguala
+    let lo = 0, hi = 1;
+    for (let i = 0; i < 22; i++) { const medio = (lo + hi) / 2; if (_lum(_rgb(h, s, medio)) < objetivo) lo = medio; else hi = medio; }
+    out[token] = _rgb(h, s, (lo + hi) / 2).join(', ');
+  }
+  // SOLO la paleta de referencia se fija con sus literales, para que el tema por
+  // defecto quede idéntico. Aplicarlo siempre devolvía la rampa violeta a todas las
+  // paletas: el color de la interfaz cambiaba en los acentos y no en los fondos.
+  if (clave === '148,118,255') {
+    out['--bg0-rgb'] = '6, 4, 15'; out['--bg1-rgb'] = '16, 10, 38'; out['--bg2-rgb'] = '22, 14, 48';
+    out['--deep-rgb'] = '12, 8, 30'; out['--field-rgb'] = '8, 5, 24'; out['--panel-rgb'] = '18, 12, 42';
+    out['--panel2-rgb'] = '26, 18, 56'; out['--face-rgb'] = '30, 20, 64'; out['--face2-rgb'] = '38, 26, 76';
+  }
+  return (_rampas[clave] = out);
+}
 function applyTheme() {
   const s = CFG.settings || {};
   const pal = PALETTES[s.uiColor] || PALETTES.violet;
@@ -3315,6 +3368,8 @@ function applyTheme() {
   r.setProperty('--acc3-rgb', pal.acc3.join(','));
   r.setProperty('--glow-rgb', gpal.acc2.join(','));
   r.setProperty('--glow-str', String(Math.min(1.4, Math.max(0.4, Number(s.glowStrength) || 1))));
+  // los fondos también son del tema: si no, el color cambia solo en los acentos
+  for (const [token, valor] of Object.entries(rampaDeSuperficies(pal.acc))) r.setProperty(token, valor);
   // refresca las muestras de color de Ajustes si están pintadas
   document.querySelectorAll('.colordot').forEach(d => { d.style.background = ''; });
 }
