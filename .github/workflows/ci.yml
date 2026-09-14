@@ -25,6 +25,22 @@ jobs:
       - name: Install dependencies
         run: npm ci
 
+      - name: Binario de Electron (con reintentos)
+        # El paquete de Electron ya no trae el binario: lo descarga aparte y, en
+        # esta versión, lo hacía el primer `electron ...`. El CDN de GitHub
+        # devuelve 504 de vez en cuando, y sin binario el smoke test no arranca
+        # (pasó dos veces seguidas al publicar la 3.0.0). Se baja aquí, con
+        # reintentos, antes de que nadie lo necesite.
+        shell: bash
+        run: |
+          for intento in 1 2 3 4; do
+            if node node_modules/electron/install.js; then exit 0; fi
+            echo "intento ${intento} fallido; reintento en 15 s"
+            sleep 15
+          done
+          echo "::error::No se pudo descargar el binario de Electron (4 intentos)."
+          exit 1
+
       - name: Syntax check all modules
         shell: bash
         run: |
