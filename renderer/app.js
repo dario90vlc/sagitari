@@ -1731,6 +1731,7 @@ async function fillSettings() {
       $('#pKey').value = '';
       $('#modelSel').innerHTML = '<option value="">— detecta modelos primero —</option>';
       if ($('#apiFormat')) $('#apiFormat').value = p.format || 'auto';   // protocolo sugerido por el preset
+      hintStoredKey();   // si esa misma URL ya tiene clave guardada, se dice en el campo
     };
     sel.dispatchEvent(new Event('change'));
   }
@@ -1807,6 +1808,7 @@ $('#btnActivate').onclick = async () => {
 function renderProviderList() {
   const box = $('#provList');
   box.innerHTML = '';
+  hintStoredKey();   // la lista cambió (guardar/borrar/activar): el aviso del campo se recalcula
   if (!CFG.providers.length) { box.innerHTML = '<div class="subnote">Aún no hay proveedores guardados.</div>'; return; }
   for (const p of CFG.providers) {
     const item = document.createElement('div');
@@ -1836,6 +1838,20 @@ function renderProviderList() {
   }
 }
 function smsg(t) { $('#saveMsg').textContent = t; }
+
+/* El campo de la clave se vacía al elegir un preset (no se reescribe una credencial
+   en pantalla), y activar o detectar en ese momento parecía «sin clave»: el aviso
+   va en el propio campo. */
+function hintStoredKey() {
+  const el = $('#pKey');
+  if (!el) return;
+  const url = $('#pUrl').value.trim();
+  const guardado = (CFG.providers || []).find(p => p.baseUrl === url && p.apiKey);
+  el.placeholder = guardado
+    ? 'guardada en «' + guardado.name + '» — déjalo vacío para seguir usándola'
+    : 'sk-… (vacío para Ollama o LM Studio)';
+}
+if ($('#pUrl')) $('#pUrl').addEventListener('input', hintStoredKey);
 
 $('#swGlow').onclick = async (e) => { const on = !e.currentTarget.classList.contains('on'); e.currentTarget.classList.toggle('on', on); await window.sagitari.setSettings({ glowEnabled: on }); };
 // espacio de trabajo

@@ -492,7 +492,11 @@ ipcMain.handle('provider:delete', (e, id) => {
 });
 
 ipcMain.handle('provider:models', async (e, { baseUrl, apiKey }) => {
-  try { return { ok: true, models: await listModels(baseUrl, apiKey) }; }
+  // Igual que en activar: el campo de clave se vacía al cambiar de preset, así que
+  // si no llega clave se usa la del proveedor guardado con esa URL. Detectar
+  // modelos no puede fallar en 401 por una credencial que ya está guardada.
+  const key = String(apiKey || '').trim() || providerKeyFor({ baseUrl });
+  try { return { ok: true, models: await listModels(baseUrl, key) }; }
   catch (err) { return { ok: false, error: err.message }; }
 });
 
@@ -504,9 +508,21 @@ ipcMain.handle('provider:activate', (e, cfg) => {
   // id resuelto del catálogo: es lo que permite desactivarlo al borrarlo
   const prov = config.providers.find(p => p.baseUrl === cfg.baseUrl && p.model === cfg.model)
     || config.providers.find(p => p.baseUrl === cfg.baseUrl);
-  config.active = { ...cfg, providerId: cfg.providerId || cfg.id || (prov && prov.id) || null };
+  // El formulario manda `apiKey: $('#pKey').value`, y ese campo se vacía al
+  // cambiar de preset: activar con el campo vacío dejaba `config.active` SIN
+  // clave aunque el proveedor guardado la tuviera, y cada turno salía en 401
+  // («Missing API key») hasta caer al modelo de la cadena de fallback. Activar un
+  // modelo no puede vaciar una credencial que ya estaba guardada.
+  const apiKey = String(cfg.apiKey || '').trim() || providerKeyFor(cfg);
+  config.active = { ...cfg, apiKey, providerId: cfg.providerId || cfg.id || (prov && prov.id) || null };
   return persistConfig();
 });
+
+/** Clave del proveedor guardado al que corresponde una activación (por id o por URL). */
+function providerKeyFor({ providerId, id, baseUrl } = {}) {
+  const prov = (config.providers || []).find(p => (providerId && p.id === providerId) || (id && p.id === id) || (baseUrl && p.baseUrl === baseUrl));
+  return (prov && prov.apiKey) || '';
+}
 
 ipcMain.handle('settings:set', (e, patch) => {
   const clean = { ...(patch || {}) };
@@ -1104,6 +1120,18 @@ app.whenReady().then(() => {
     if (r.ok) console.log('[SAGITARI] claves de API cifradas con el almacén del sistema (' + CONFIG_FILE + ')');
   } else if (!encryptionAvailable() && ((config.providers || []).some(p => p && p.apiKey))) {
     console.warn('[SAGITARI] el sistema no ofrece cifrado: las claves se guardan en claro en config.json');
+  }
+  // Reparación: si el proveedor activo se quedó sin clave pero el proveedor
+  // guardado con la misma URL la tiene, se recupera. Una activación con el campo
+  // de clave vacío dejaba la app en 401 en cada turno sin que el usuario pudiera
+  // verlo en Ajustes (la clave sí estaba, pero en el proveedor, no en el activo).
+  if (config.active && !String(config.active.apiKey || '').trim()) {
+    const k = providerKeyFor(config.active);
+    if (k) {
+      config.active = { ...config.active, apiKey: k };
+      saveConfig();
+      console.log('[SAGITARI] la clave del proveedor activo se recuperó del proveedor guardado');
+    }
   }
   seedStarterSkills();
   // v1.3 recuperación: las 'running' de un crash/cierre pasan a 'interrupted' y el
