@@ -1179,16 +1179,32 @@ test('mcp: un .cmd recibe entero un argumento con espacios', async () => {
 
 test('mcp: escribir a un servidor ya muerto no tumba el proceso', async () => {
   const dir = tmpDir('sagi-epipe-');
-  const muere = path.join(dir, 'muere.js');
-  fs.writeFileSync(muere, 'process.exit(0)\n', 'utf8');
-  const tr = mcpTransport.createStdioTransport({ command: process.execPath, args: [muere], cwd: dir });
+  const vive = path.join(dir, 'vive.js');
+  // El hijo NO puede terminar solo: si ya hubiera salido, stdin estaría destruido y
+  // notify no llegaría a escribir (el test pasaría aunque faltara el listener, que es
+  // exactamente lo que comprobó la re-revisión). Con el hijo vivo, kill() cierra su
+  // lado del pipe y la escritura siguiente es un EPIPE.
+  fs.writeFileSync(vive, 'setInterval(() => {}, 1000);\n', 'utf8');
+  const tr = mcpTransport.createStdioTransport({ command: process.execPath, args: [vive], cwd: dir });
   await new Promise(r => setTimeout(r, 300));
   tr.kill();
-  tr.rpc.notify('notifications/initialized', {});   // stdin ya cerrado: EPIPE
+  tr.rpc.notify('notifications/initialized', {});   // escritura sobre stdin ya cerrado
   await new Promise(r => setTimeout(r, 200));
-  // Lo que se comprueba es que la SUITE siga viva: sin el listener de 'error' en
-  // stdin, ese EPIPE es un error no capturado y mata el proceso del runner.
+  // Sin `child.stdin.on('error', …)` ese EPIPE es un error no capturado y el runner
+  // muere aquí (Unhandled 'error' event). Que la suite llegue al final es la prueba.
   ok(tr.pid > 0, 'el transporte sigue en pie tras escribir a un servidor muerto');
+});
+
+test('mcp: una petición del servidor con un id que choca no se confunde con una respuesta', async () => {
+  const avisos = [];
+  const rpc = new mcpTransport.Rpc({ send: () => {}, onNotice: (m, p, id) => avisos.push({ m, id }) });
+  const p = rpc.request('tools/list', {}, { timeoutMs: 1000 });   // id 1 en vuelo
+  rpc.handleMessage({ jsonrpc: '2.0', id: 1, method: 'ping', params: {} });   // el servidor usa el mismo id
+  eq(avisos.length, 1, 'el ping llega a onNotice en vez de consumirse como respuesta');
+  eq(avisos[0].id, 1);
+  // y la respuesta de verdad sigue resolviendo su petición
+  rpc.handleMessage({ jsonrpc: '2.0', id: 1, result: { tools: [] } });
+  eq((await p).tools.length, 0);
 });
 
 test('agent: la cadena elige el protocolo del modelo (Qwen en Go → /messages)', async () => {

@@ -71,17 +71,23 @@ class Rpc {
     try { this.send(JSON.stringify({ jsonrpc: '2.0', method, params })); } catch {}
   }
 
-  /** Respuesta o notificación del servidor. */
+  /**
+   * Respuesta o mensaje del servidor.
+   * `onNotice(method, params, id)`: el tercer argumento es null en las
+   * notificaciones y no-null cuando el servidor espera respuesta.
+   */
   handleMessage(msg) {
     if (!msg || typeof msg !== 'object') return;
+    // Las peticiones del servidor se miran ANTES que las respuestas: una respuesta
+    // nunca lleva `method`, y un `ping` del servidor con un id que choque con una
+    // petición nuestra se consumía como si fuera su respuesta.
+    if (msg.method) { this.onNotice(msg.method, msg.params || {}, msg.id ?? null); return; }
     if (msg.id != null && this._pending.has(msg.id)) {
       const p = this._pending.get(msg.id);
       this._pending.delete(msg.id);
       if (msg.error) p.reject(new Error('servidor MCP: ' + (msg.error.message || JSON.stringify(msg.error))));
       else p.resolve(msg.result);
-      return;
     }
-    if (msg.method) this.onNotice(msg.method, msg.params || {}, msg.id ?? null);
   }
 
   /** El transporte murió: ninguna petición en vuelo puede quedarse esperando. */
