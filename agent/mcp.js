@@ -62,6 +62,22 @@ class McpManager {
       if ((!antes || clave(antes) !== clave(s) || !s.enabled) && st.transport) this._drop(s.id, 'configuración cambiada');
     }
     for (const id of [...this._state.keys()]) if (!this._servers.some(s => s.id === id)) this._drop(id);
+    this._rebuildExposed();
+  }
+
+  /**
+   * Reconstruye la tabla de nombres expuestos de TODOS los servidores listos, con un
+   * conjunto de nombres COMPARTIDO: así un cambio de allow/deny se aplica sin matar
+   * el proceso del servidor y dos servidores con el mismo prefijo saneado no pueden
+   * emitir el mismo nombre (el segundo sería inalcanzable).
+   */
+  _rebuildExposed() {
+    const usados = new Set();
+    for (const s of this._servers) {
+      const st = this._state.get(s.id);
+      if (!st || st.state !== 'ready') continue;
+      st.exposed = this._exposeTable(s.id, st.tools, usados);
+    }
   }
 
   _server(id) { return this._servers.find(s => s.id === id) || null; }
@@ -133,6 +149,7 @@ class McpManager {
         st.error = String(motivo || 'el servidor terminó');
         st.logTail = tr.stderrTail ? tr.stderrTail() : '';
         st.tools = [];
+        st.exposed = new Map();
       });
       const init = await tr.rpc.request('initialize', {
         protocolVersion: '2025-06-18',
@@ -143,8 +160,8 @@ class McpManager {
       const caps = (init && init.capabilities) || {};
       st.serverInfo = (init && init.serverInfo) || null;
       st.tools = caps.tools ? await this._listTools(tr, s, timeoutMs) : [];
-      st.exposed = this._exposeTable(s.id, st.tools);
       st.state = 'ready';
+      this._rebuildExposed();
       st.error = null;
       st.logTail = tr.stderrTail ? tr.stderrTail() : '';
       this.log({ agent: 'sagitari', event: 'mcp_ready', server: s.id, tools: st.tools.length });
@@ -155,6 +172,7 @@ class McpManager {
       st.logTail = st.transport && st.transport.stderrTail ? st.transport.stderrTail() : '';
       if (st.transport) { try { st.transport.kill(); } catch {} st.transport = null; }
       st.tools = [];
+      st.exposed = new Map();
       this.log({ agent: 'sagitari', event: 'mcp_error', server: s.id, message: e.message });
       return { ok: false, error: e.message };
     }
@@ -177,11 +195,10 @@ class McpManager {
   }
 
   /** Tabla nombre expuesto → herramienta real, resolviendo colisiones con sufijo. */
-  _exposeTable(serverId, tools) {
+  _exposeTable(serverId, tools, usados = new Set()) {
     const allow = this._server(serverId).tools && this._server(serverId).tools.allow;
     const deny = (this._server(serverId).tools && this._server(serverId).tools.deny) || [];
     const expuesta = new Map();
-    const usados = new Set();
     for (const t of tools) {
       if (deny.includes(t.name)) continue;
       if (Array.isArray(allow) && allow.length && !allow.includes(t.name)) continue;

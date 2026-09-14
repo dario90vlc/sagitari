@@ -1447,6 +1447,35 @@ test('mcp: un servidor que no arranca queda en error legible y no aporta herrami
   await mcp.shutdown();
 });
 
+test('mcp: cambiar allow/deny se aplica sin reconectar', async () => {
+  const tr = fakeTransport([
+    { name: 'ok', description: 'permitida', inputSchema: { type: 'object' } },
+    { name: 'secreta', description: 'prohibida', inputSchema: { type: 'object' } },
+  ]);
+  let muertes = 0;
+  const killReal = tr.kill; tr.kill = () => { muertes++; killReal(); };
+  const srv = { id: 'f', name: 'F', enabled: true, transport: 'stdio', command: 'node', args: [] };
+  const mcp = new McpManager({ servers: [srv], dataDir: tmpDir('sagi-mcp-'), clientVersion: 't', log: () => {}, makeTransport: () => tr });
+  await mcp.ensure('f');
+  eq(mcp.toolDefs().length, 2, 'las dos herramientas entran');
+  mcp.configure([{ ...srv, tools: { deny: ['secreta'] } }]);
+  eq(mcp.toolDefs().map(d => d.function.name).join(','), 'mcp__f__ok', 'el deny se aplica al guardar la configuración');
+  eq(muertes, 0, 'aplicar un filtro no tiene por qué matar el proceso del servidor');
+  await mcp.shutdown();
+});
+
+test('mcp: un servidor que muere deja de describir y de listar herramientas', async () => {
+  const tr = fakeTransport([{ name: 'tool', description: 'd', inputSchema: { type: 'object' } }]);
+  const mcp = new McpManager({ servers: [{ id: 'm', name: 'M', enabled: true, transport: 'stdio', command: 'node', args: [] }], dataDir: tmpDir('sagi-mcp-'), clientVersion: 't', log: () => {}, makeTransport: () => tr });
+  await mcp.ensure('m');
+  ok(mcp.describe('mcp__m__tool'), 'conectado, se describe');
+  for (const cb of tr.esperandoSalida) cb(1);   // el servidor se cae
+  eq(mcp.describe('mcp__m__tool'), null, 'muerto no puede seguir describiendo herramientas');
+  eq(mcp.status()[0].tools.length, 0, 'ni la UI puede listarlas como usables');
+  eq(mcp.status()[0].state, 'dead');
+  await mcp.shutdown();
+});
+
 test('agent: la cadena elige el protocolo del modelo (Qwen en Go → /messages)', async () => {
   const { Agent } = require('../agent/agent');
   const seen = [];
