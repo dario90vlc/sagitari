@@ -108,12 +108,14 @@ body { font-family: var(--font-ui), 'Segoe UI', sans-serif; font-size: 13px; col
      así se puede redimensionar agarrando el borde directamente.
      Las tres manchas de color siguen el acento elegido (degradado integrado). */
   position: fixed; inset: 0; border-radius: 10px; overflow: hidden;
-  /* La atmósfera de las esquinas también es del estado: en reposo queda un susurro y con el
-     agente en marcha florece. Es la misma idea que --energy, aplicada al fondo. */
+  /* Atmósfera del estado (en reposo un susurro, con el agente en marcha florece), en LUZ
+     DIRECCIONAL: degradados lineales desde tres lados, no radiales. Un radial tiene centro y
+     radio, así que su caída dibuja un disco y en la esquina se leía como una esfera; una luz
+     direccional no tiene contorno posible. */
   background:
-    radial-gradient(900px 500px at 12% -10%, rgba(var(--acc3-rgb), calc(0.20 * var(--ambient))), transparent 55%),
-    radial-gradient(1000px 620px at 108% 18%, rgba(var(--acc2-rgb), calc(0.22 * var(--ambient))), transparent 55%),
-    radial-gradient(800px 500px at 50% 118%, rgba(var(--acc-rgb), calc(0.10 * var(--ambient))), transparent 60%),
+    linear-gradient(148deg, rgba(var(--acc3-rgb), calc(0.34 * var(--ambient))), transparent 46%),
+    linear-gradient(212deg, rgba(var(--acc2-rgb), calc(0.30 * var(--ambient))), transparent 44%),
+    linear-gradient(0deg,   rgba(var(--acc-rgb),  calc(0.16 * var(--ambient))), transparent 38%),
     /* el lienzo también es del tema: tres escalones de la rampa, en orden de claridad */
     linear-gradient(155deg, rgb(var(--deep-rgb)) 0%, rgb(var(--bg1-rgb)) 40%, rgb(var(--bg2-rgb)) 100%);
 }
@@ -156,22 +158,20 @@ body { font-family: var(--font-ui), 'Segoe UI', sans-serif; font-size: 13px; col
 .glow {
   position: absolute; inset: 0; border-radius: inherit; pointer-events: none; z-index: 401;
   opacity: 0; transition: opacity .7s cubic-bezier(0.16, 1, 0.3, 1);
-  /* Dos luces desfasadas y de tono distinto: el brillo se concentra en esquinas opuestas,
-     así el marco no es un color plano. Nada de máscara ni desenfoque aquí: en CSS la máscara
-     se aplica DESPUÉS del filtro, así que recortaba la luz en seco (de ahí el corte recto) y
-     una sombra interior ya es un degradado suave por naturaleza. */
-  box-shadow:
-    inset 30px 22px 100px -26px rgba(var(--glow-a-rgb), calc(0.5 * var(--glow-str) * var(--energy))),
-    inset -30px -22px 100px -26px rgba(var(--glow-c-rgb), calc(0.5 * var(--glow-str) * var(--energy)));
+  /* Sombras CENTRADAS, sin desplazamiento ni spread: con desplazamiento, los rectángulos de
+     sombra se cruzan y en las esquinas aparecen arcos concéntricos (se veía como una esfera).
+     Centradas, cada capa es un degradado limpio desde los cuatro bordes hacia dentro. */
+  box-shadow: inset 0 0 130px rgba(var(--glow-a-rgb), calc(0.34 * var(--glow-str) * var(--energy)));
 }
 .glow::before,
 .glow::after { content: ''; position: absolute; inset: 0; border-radius: inherit; opacity: 0; will-change: opacity; }
 /* El filo de 1px sí usa máscara: ahí el corte es justo lo que se busca (una línea limpia)
    y el degradado es lo que le da el tono cambiante a lo largo del perímetro. */
 .glow::before {
-  box-shadow:
-    inset 0 0 70px -6px rgba(var(--glow-b-rgb), calc(0.44 * var(--glow-str) * var(--energy))),
-    inset -18px -12px 46px -20px rgba(var(--glow-c-rgb), calc(0.38 * var(--glow-str) * var(--energy)));
+  /* Esta capa va más ceñida al filo y con OTRO tono: como las dos son concéntricas, el color
+     cambia con la profundidad —el filo de un tono, el baño de otro—, que es la iridiscencia
+     del brillo de Apple Intelligence (radial, no dando vueltas). */
+  box-shadow: inset 0 0 58px rgba(var(--glow-b-rgb), calc(0.46 * var(--glow-str) * var(--energy)));
 }
 .glow::after {
   padding: 1px;
