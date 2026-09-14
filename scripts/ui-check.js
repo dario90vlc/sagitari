@@ -202,6 +202,12 @@ const AFTER = {
   await new Promise(r => setTimeout(r, 700));
   await judge('a 1000x620 el compositor sigue dentro de la ventana',
     '(function(){ var c = document.querySelector("#composer"); return !!c && c.getBoundingClientRect().bottom <= innerHeight + 1; })()');
+  /* Estar DENTRO de la ventana no basta: el mobiliario del compositor no encoge,
+     y en el ancho mínimo el campo de texto llegó a quedarse en 8px (0 útiles)
+     mientras el compositor seguía «dentro». Se mide el ancho ÚTIL real del campo,
+     que es lo que el usuario necesita para escribir. */
+  await judge('a 1000x620 el campo de texto conserva ancho útil',
+    '(function(){ var i = document.querySelector("#chatInput"); if (!i) return false; var r = i.getBoundingClientRect(); var cs = getComputedStyle(i); return r.width - parseFloat(cs.paddingLeft) - parseFloat(cs.paddingRight) >= 140; })()');
   await judge('a 1000x620 el chat no provoca scroll de página',
     '(function(){ return document.documentElement.scrollHeight <= innerHeight + 1; })()');
   await cmd('Emulation.clearDeviceMetricsOverride', {});

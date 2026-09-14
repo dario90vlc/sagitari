@@ -1013,8 +1013,12 @@ input[type="range"].glowslider::-webkit-slider-thumb:active { transform: scale(1
 .atchip.bin .ic { color: var(--warn); }
 /* la fila interior centra TODO en el mismo eje: segmento, input, botones y
    pausa quedan alineados aunque el textarea crezca al escribir */
-.compline { display: flex; align-items: center; gap: 8px; width: 100%; }
-.compline textarea { flex: 1 1 auto; min-width: 0; align-self: center; }
+.compline { display: flex; align-items: center; gap: 8px; width: 100%; flex-wrap: wrap; }
+/* El campo de texto es la tarea principal: nunca puede quedarse sin sitio.
+   El mobiliario (.modeseg, .cbtn) no encoge a propósito, así que el suelo del
+   textarea garantiza ancho útil y, si aun así no cabe, la fila se parte en dos
+   en vez de aplastar el input (antes cedía TODO y quedaba en 8px). */
+.compline textarea { flex: 1 1 220px; min-width: 150px; align-self: center; }
 .compline .cbtn, .compline .modeseg { flex-shrink: 0; align-self: center; }
 /* arrastrando ficheros sobre el chat: el compositor lo anuncia */
 #view-chat.dragging .composer { border-color: rgba(var(--acc2-rgb), 0.65); box-shadow: 0 0 0 3px rgba(var(--acc2-rgb), 0.18), 0 0 30px rgba(var(--acc2-rgb), 0.25); }
@@ -1043,4 +1047,33 @@ input[type="range"].glowslider::-webkit-slider-thumb:active { transform: scale(1
   .nb.live, .pulse-dot, .acard.on .adot, .ch-status .dot,
   .plancard li.now .pl-n, .typing i, .stream::after,
   .confirmbar .cb-dot { animation: none !important; }
+}
+
+/* ============ ventanas estrechas: el compositor ============
+   Bajo 1120px el mobiliario de la fila (segmento de modo + 4 botones) no cabía
+   junto al campo de texto y la fila se partía en dos o tres alturas, comiéndose
+   la ventana (137px de 620 = 22% en el mínimo). Aquí el segmento pasa a iconos
+   —el modo sigue leyéndose en la barra inferior y en el tinte de la vista— y los
+   botones se aprietan, así la fila entera cabe de nuevo en una sola línea. */
+@media (max-width: 1120px) {
+  .compline { gap: 6px; }
+  .compline .modeseg { padding: 2px; gap: 1px; }
+  .compline .modeseg button { padding: 5px 7px; }
+  .compline .modeseg button span { display: none; }
+  .compline .cbtn { width: 30px; height: 30px; }
+  .compline .cbtn .ic { width: 15px; height: 15px; }
+}
+
+/* En el ancho mínimo declarado (1000px) el rail de 300px se lleva el 30% de la
+   ventana para un panel que está vacío en 8 de las 9 vistas: se retira, la
+   rejilla pasa a dos columnas y el espacio vuelve a la tarea. El compositor deja
+   de necesitar recortes (el campo de texto recupera ~300px) y ninguna vista se
+   queda apretada. La actividad en vivo sigue en Agentes. */
+@media (max-width: 1040px) {
+  .app { grid-template-columns: 232px 1fr; }
+  .rail { display: none; }
+  .composer { padding: 10px 10px; }
+  .compline { gap: 6px; }
+  .compline .cbtn { width: 30px; height: 30px; }
+  .compline .cbtn .ic { width: 15px; height: 15px; }
 }
