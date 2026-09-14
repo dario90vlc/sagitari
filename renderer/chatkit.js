@@ -276,12 +276,57 @@ const ChatKit = (function () {
     return SUBAGENTS[String(key || '')] || null;
   }
 
+  /**
+   * Traduce el fallo crudo del proveedor a algo que se pueda leer y, sobre todo,
+   * que diga qué hacer. Antes el turno fallido mostraba «Error: fetch failed» tal
+   * cual, sin causa ni salida.
+   * Devuelve { texto, pista } — `pista` es la acción concreta.
+   */
+  function explainError(raw) {
+    const m = String(raw || '').toLowerCase();
+    if (/fetch failed|enotfound|econnrefused|network|socket hang up/.test(m)) {
+      return { texto: 'No se pudo conectar con el proveedor', pista: 'Comprueba tu conexión y la URL/clave en Ajustes › Modelo.' };
+    }
+    if (/401|403|unauthorized|invalid api key|incorrect api key/.test(m)) {
+      return { texto: 'El proveedor rechazó la credencial', pista: 'Revisa la clave de API en Ajustes › Modelo.' };
+    }
+    if (/429|rate limit|too many requests/.test(m)) {
+      return { texto: 'El proveedor está limitando las peticiones', pista: 'Espera un momento o cambia de modelo en Ajustes.' };
+    }
+    if (/timeout|timed out|aborted|tardó demasiado/.test(m)) {
+      return { texto: 'El proveedor dejó de responder', pista: 'Reintenta; si se repite, prueba otro modelo.' };
+    }
+    if (/context|token|maximum/.test(m)) {
+      return { texto: 'La conversación no cabe en el modelo', pista: 'Empieza una conversación nueva o usa un modelo con más contexto.' };
+    }
+    if (/404|not found|model/.test(m)) {
+      return { texto: 'El proveedor no reconoce ese modelo', pista: 'Elige otro en Ajustes › Modelo.' };
+    }
+    return { texto: 'El turno falló', pista: 'Vuelve a intentarlo; si sigue, revisa Ajustes › Modelo.' };
+  }
+
+  /**
+   * Estado del proveedor para la píldora del sidebar, derivado de los datos reales
+   * (salud por modelo) y no de «hay un proveedor activo»: antes decía «Conectado»
+   * con punto verde mientras el panel registraba errores y fallbacks.
+   * `row` es la fila de model-health del modelo activo (o null).
+   */
+  function statusPill(active, row) {
+    if (!active) return { label: 'Sin modelo', dot: 'off', title: 'Elige un proveedor y activa un modelo en Ajustes' };
+    if (!row || !row.calls) return { label: 'Sin usar', dot: 'ok', title: 'Modelo activo todavía sin llamadas' };
+    if (row.errorRate >= 0.3) return { label: 'Con errores', dot: 'mag', title: `${row.errors} de ${row.calls} llamadas fallaron` };
+    if (row.errors) return { label: 'Con avisos', dot: 'a-y', title: `${row.errors} de ${row.calls} llamadas fallaron` };
+    if (row.fallbacks) return { label: 'Con fallbacks', dot: 'a-y', title: `${row.fallbacks} llamadas necesitaron otro modelo` };
+    return { label: 'Conectado', dot: 'ok', title: `${row.calls} llamadas sin errores` };
+  }
+
   return {
     MODES, MODE_ORDER, mode, nextMode,
     TOOLS, tool, summarizeArgs, flatValue,
     clip, fmtDuration, toolCount, thousands,
     parsePlan, isPlanHeader, looksFailed, resultSummary,
     SUBAGENTS, subagent,
+    explainError, statusPill,
   };
 })();
 

@@ -2062,6 +2062,34 @@ test('arranque: TODOS los módulos del agente respetan la raíz de datos de prue
   }
 });
 
+test('chat: el fallo se explica y la píldora sale de los datos reales', () => {
+  const K = ChatKit;
+  // errores crudos del proveedor → causa legible + siguiente paso
+  const casos = [
+    ['fetch failed', /conectar con el proveedor/i, /conexión/i],
+    ['HTTP 401 Unauthorized', /credencial/i, /clave de API/i],
+    ['429 Too Many Requests', /limitando/i, /Espera/i],
+    ['The operation timed out', /dejó de responder/i, /Reintenta/i],
+    ['maximum context length exceeded', /no cabe/i, /conversación nueva/i],
+  ];
+  for (const [crudo, texto, pista] of casos) {
+    const r = K.explainError(crudo);
+    ok(texto.test(r.texto), crudo + ' → texto: ' + r.texto);
+    ok(pista.test(r.pista), crudo + ' → pista: ' + r.pista);
+  }
+  // cualquier cosa desconocida sigue diciendo qué hacer en vez de pintarse cruda
+  const raro = K.explainError('boom inesperado');
+  ok(raro.texto && raro.pista, 'un error no listado también da texto y salida');
+  // La píldora: «Conectado» solo cuando los datos lo respaldan
+  eq(K.statusPill(null, null).label, 'Sin modelo');
+  eq(K.statusPill({ model: 'm' }, null).label, 'Sin usar');
+  eq(K.statusPill({ model: 'm' }, { calls: 5, errors: 0, fallbacks: 0 }).label, 'Conectado');
+  eq(K.statusPill({ model: 'm' }, { calls: 5, errors: 1, fallbacks: 0 }).label, 'Con avisos');
+  eq(K.statusPill({ model: 'm' }, { calls: 5, errors: 2, errorRate: 0.4 }).label, 'Con errores');
+  eq(K.statusPill({ model: 'm' }, { calls: 5, errors: 0, fallbacks: 2 }).label, 'Con fallbacks');
+  eq(K.statusPill({ model: 'm' }, { calls: 5, errors: 1, errorRate: 0.4 }).dot, 'mag', 'y el punto lo dice igual');
+});
+
 /* Los tests async registrados más arriba (la descarga del actualizador) todavía
    no han terminado: hay que esperarlos ANTES de borrar sus temporales. */
 while (pendingAsync.length) await Promise.all(pendingAsync.splice(0));

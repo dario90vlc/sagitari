@@ -152,7 +152,7 @@ body.nofocus .shell::before { animation: none !important; }
   color: var(--dim); font: 500 15px 'Space Grotesk'; cursor: pointer; transition: all .16s;
 }
 .navitem:hover { color: var(--txt); background: rgba(var(--acc2-rgb), 0.10); }
-.navitem.on { color: #fff; background: linear-gradient(135deg, rgba(var(--acc2-rgb), 0.30), rgba(var(--acc3-rgb), 0.18)); border-color: var(--line); box-shadow: 0 0 18px rgba(var(--acc2-rgb), 0.22); }
+.navitem.on { color: #fff; background: linear-gradient(135deg, rgba(var(--acc2-rgb), 0.44), rgba(var(--acc3-rgb), 0.28)); border-color: var(--line); box-shadow: 0 0 18px rgba(var(--acc2-rgb), 0.22); }
 .ni { font-size: 15px; width: 18px; text-align: center; flex-shrink: 0; }
 .nl { white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
 .nb {
@@ -315,8 +315,10 @@ body.nofocus .shell::before { animation: none !important; }
 .msg.me .avatar { background: #2b2440; color: var(--vio2); border: 1px solid var(--line); }
 .bubble {
   padding: 11px 14px; border-radius: 15px; font-size: 15px; line-height: 1.5; white-space: pre-wrap; word-break: break-word;
-  background: linear-gradient(160deg, rgba(30,20,64,0.7), rgba(18,12,42,0.75));
-  border: 1px solid var(--line2);
+  /* el mensaje del agente es el contenido a leer: su superficie no puede ser la
+     que menos se separa del lienzo (medía 1,07:1) */
+  background: linear-gradient(160deg, rgba(38,26,76,0.88), rgba(24,16,52,0.9));
+  border: 1px solid rgba(var(--acc-rgb), 0.20);
 }
 .msg.me .bubble { background: linear-gradient(135deg, rgba(var(--acc3-rgb), 0.28), rgba(var(--acc2-rgb), 0.25)); border-color: var(--line); }
 .msg.ai .bubble { box-shadow: 0 0 22px rgba(var(--acc2-rgb), 0.10); }
@@ -635,7 +637,11 @@ i[data-i] { display: inline-flex; line-height: 0; }
 .btn.sq .ic { width: 14px; height: 14px; }
 .btn.danger { color: var(--danger); border-color: rgba(251,113,133,0.3); }
 .btn.danger:hover { box-shadow: 0 0 14px rgba(251,113,133,0.25); }
-.errmsg { color: var(--danger); display: inline-flex; align-items: center; gap: 8px; }
+.errmsg { color: var(--danger); display: inline-flex; align-items: center; gap: 8px; flex-wrap: wrap; }
+/* El fallo del turno explica la causa y ofrece salida: la pista en su línea y el
+   botón de reintento a mano. */
+.errmsg .errmsg-hint { display: block; flex-basis: 100%; margin-top: 3px; color: var(--dim); font-size: 12px; }
+.errmsg .btn { margin-top: 8px; }
 .errmsg .ic { width: 15px; height: 15px; }
 
 /* tool chips with icons */
@@ -672,7 +678,10 @@ i[data-i] { display: inline-flex; line-height: 0; }
 .toast .dot { margin: 0; }
 
 /* focus-visible polish */
-.navitem:focus-visible, .btn:focus-visible, .cbtn:focus-visible, .wb:focus-visible { outline: 2px solid rgba(var(--acc-rgb), 0.55); outline-offset: 2px; }
+/* El anillo de foco es un indicador de estado: la norma pide 3:1 contra el fondo
+   contiguo y el anterior (alfa 0,55) medía 1,99:1. Con 0,95 pasa de 4:1 sin
+depender del color de acento elegido. */
+.navitem:focus-visible, .btn:focus-visible, .cbtn:focus-visible, .wb:focus-visible { outline: 2px solid rgba(var(--acc-rgb), 0.95); outline-offset: 2px; }
 /* los botones conservan un indicador de foco propio (halo de acento) en vez del
    outline:none que lo borraba: navegable con teclado sin pulsar a ciegas. */
 .btn:focus-visible { outline-color: rgba(var(--acc-rgb), 0.75); box-shadow: 0 0 0 4px rgba(var(--acc2-rgb), 0.22), 0 0 16px rgba(var(--acc2-rgb), 0.35); }
@@ -733,7 +742,7 @@ i[data-i] { display: inline-flex; line-height: 0; }
 /* botón de mostrar/ocultar la API key cuando está revelada */
 .btn.sq.on { color: var(--cyan); border-color: rgba(34,211,238,0.45); }
 /* el interruptor también se maneja con teclado (role=switch) */
-.sw:focus-visible, .settabs .settab:focus-visible { outline: 2px solid rgba(var(--acc-rgb), 0.55); outline-offset: 2px; }
+.sw:focus-visible, .settabs .settab:focus-visible { outline: 2px solid rgba(var(--acc-rgb), 0.95); outline-offset: 2px; }
 
 /* ============================================================================
    CHAT — rediseño: identidad de modo, tarjetas de herramientas y respuestas
@@ -1035,7 +1044,9 @@ input[type="range"].glowslider::-webkit-slider-thumb:active { transform: scale(1
 .compline textarea { flex: 1 1 220px; min-width: 150px; align-self: center; }
 .compline .cbtn, .compline .modeseg { flex-shrink: 0; align-self: center; }
 /* arrastrando ficheros sobre el chat: el compositor lo anuncia */
-#view-chat.dragging .composer { border-color: rgba(var(--acc2-rgb), 0.65); box-shadow: 0 0 0 3px rgba(var(--acc2-rgb), 0.18), 0 0 30px rgba(var(--acc2-rgb), 0.25); }
+#view-chat.dragging /* el foco del compositor es la única señal de que el campo está activo (#chatInput
+   va sin outline): se refuerza hasta pasar 3:1 contra el lienzo */
+.composer { border-color: rgba(var(--acc-rgb), 0.95); box-shadow: 0 0 0 3px rgba(var(--acc-rgb), 0.45), 0 0 30px rgba(var(--acc2-rgb), 0.28); }
 #view-chat.dragging .composer::after { content: 'Suelta los archivos para adjuntarlos'; position: absolute; inset: auto 0 calc(100% + 8px) 0;
   text-align: center; font: 600 11px 'Space Grotesk'; letter-spacing: 0.6px; color: rgb(var(--acc2-rgb)); pointer-events: none; }
 

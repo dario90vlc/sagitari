@@ -1197,9 +1197,26 @@ window.sagitari.onAgentEvent((ev) => {
         const target = (hadTurn && lastAssistantEl) ? lastAssistantEl : bubble('ai');
         const em = document.createElement('span');
         em.className = 'errmsg';
-        em.innerHTML = `${ic('alert')} ${esc(ev.message)}`;
+        // el fallo crudo del proveedor no dice nada al usuario: se traduce a una
+        // causa legible y a un siguiente paso concreto
+        const ex = K.explainError(ev.message);
+        em.innerHTML = `${ic('alert')} <b>${esc(ex.texto)}</b>`;
+        const pista = document.createElement('span');
+        pista.className = 'errmsg-hint';
+        pista.textContent = ex.pista;
+        const reintentar = document.createElement('button');
+        reintentar.className = 'btn';
+        reintentar.textContent = 'Reintentar';
+        reintentar.onclick = () => { window.sagitari.retryChat(); };
+        em.appendChild(pista);
+        em.appendChild(reintentar);
         target.appendChild(em);
       }
+      // el estado del turno se queda pegado al último aviso («probando siguiente
+      // (primary)…») aunque el botón ya haya vuelto a «Enviar»: se limpia, y la
+      // píldora del sidebar se recalcula con el fallo recién registrado
+      setChatStatus('');
+      updateStatusLabels();
       refreshMsgActions();
       busy = false;
       setSendMode();
@@ -2941,10 +2958,23 @@ function showToast(text) {
   document.body.appendChild(t);
   setTimeout(() => t.remove(), 3200);
 }
-function updateStatusLabels() {
+async function updateStatusLabels() {
   const a = CFG.active;
   $('#stModel').textContent = a ? a.model : 'sin modelo';
-  $('#stConn').textContent = a ? 'Conectado' : 'Desconectado';
+  {/* La píldora decía «Conectado» con punto verde solo por haber un proveedor
+      activo, aunque el panel de salud registrara errores y fallbacks. Ahora sale
+      de los datos reales del modelo activo. */}
+  let fila = null;
+  try {
+    const filas = (await window.sagitari.healthGet()) || [];
+    fila = filas.find(r => r.model === (a && a.model)) || null;
+  } catch {}
+  const p = K.statusPill(a, fila);
+  $('#stConn').textContent = p.label;
+  const dot = $('#stDot');
+  if (dot) { dot.className = 'dot ' + p.dot; dot.title = p.title; }
+  const conn = $('#stConn');
+  if (conn) conn.title = p.title;
   $('#chatModelLabel').textContent = a ? a.name + ' · ' + a.model : '';
   // tarjeta de estado de Ajustes
   const name = $('#activeModelName');
