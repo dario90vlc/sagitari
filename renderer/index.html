@@ -41,7 +41,7 @@
 
         <div class="navgroup" data-label="Trabajo">
           <button class="navitem" data-view="tasks" title="Tareas (Alt+2)"><span class="ni"><i data-i="list"></i></span><span class="nl">Tareas</span><span class="nb" id="nbTasks" hidden>0</span></button>
-          <button class="navitem" data-view="projects" title="Proyectos (Alt+3)"><span class="ni"><i data-i="projects"></i></span><span class="nl">Proyectos</span></button>
+          <button class="navitem" data-view="projects" title="Espacio de trabajo (Alt+3)"><span class="ni"><i data-i="projects"></i></span><span class="nl">Espacio de trabajo</span></button>
           <button class="navitem" data-view="agents" title="Agentes (Alt+4)"><span class="ni"><i data-i="agents"></i></span><span class="nl">Agentes</span></button>
         </div>
 
@@ -204,7 +204,7 @@
 
       <!-- PROJECTS -->
       <section class="view" id="view-projects">
-        <div class="viewhead"><h2>Proyectos</h2></div>
+        <div class="viewhead"><h2>Espacio de trabajo</h2></div>
         <div class="projwrap">
           <div class="field"><label>ESPACIO DE TRABAJO ACTIVO</label>
             <input type="text" id="projPath" placeholder="C:\Users\tu-usuario\Desktop\mi-proyecto" />
@@ -417,12 +417,12 @@
           <div class="setpanel" data-panel="security">
             <div class="setcard">
               <div class="sc-head"><b>Permisos por herramienta</b><span class="sc-hint">Qué puede hacer el agente sin preguntarte</span></div>
-              <div class="srow" data-keys="permisos herramienta seguro confirmar bloqueado terminal archivos"><div id="permList"></div></div>
+              <div class="srow" data-keys="permisos herramienta permitir siempre seguro confirmar preguntar bloqueado terminal archivos"><div id="permList"></div></div>
               <div class="srow" data-keys="restablecer permisos recomendados defecto">
                 <div class="btnrow" style="margin:10px 0 0">
                   <button class="btn ghost" id="secResetPerms"><span class="bi"><i data-i="history"></i></span> Restablecer permisos recomendados</button>
                 </div>
-                <div class="subnote">«Por defecto» usa el nivel recomendado de cada herramienta (aparece indicado en cada fila). «Seguro» se ejecuta sin preguntar · «Confirmar» pide permiso antes de actuar · «Bloqueado» la impide por completo.</div>
+                <div class="subnote">«Por defecto» usa el nivel recomendado de cada herramienta (aparece indicado en cada fila). «Permitir siempre» se ejecuta sin preguntar · «Preguntar antes» pide permiso en cada uso · «Bloqueado» la impide por completo.</div>
               </div>
             </div>
 

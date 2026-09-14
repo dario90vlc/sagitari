@@ -1866,7 +1866,9 @@ const PERM_TOOLS = [
   { n: 'window_manage', d: 'Gestionar ventanas' },
   { n: 'clipboard', d: 'Portapapeles' },
 ];
-const RISK_LABEL = { safe: 'seguro', confirm: 'confirmar', restricted: 'bloqueado' };
+/* El nivel 'safe' se llamaba «Seguro», que se lee como «más protección» cuando en
+   realidad significa «se ejecuta SIN preguntar». El nombre dice ahora su efecto. */
+const RISK_LABEL = { safe: 'permitir siempre', confirm: 'confirmar', restricted: 'bloqueado' };
 
 async function renderSecurity() {
   let cfg = { permissions: {}, riskDefaults: {} };
@@ -1883,11 +1885,11 @@ async function renderSecurity() {
     const rec = RISK_LABEL[cfg.riskDefaults[t.n]] || 'confirmar';
     const row = document.createElement('div');
     row.className = 'permrow';
-    row.innerHTML = `<span class="mt"><b>${esc(t.n)}</b><br><small class="md">${esc(t.d)}</small><br><small class="pd">recomendado: ${rec}</small></span>
+    row.innerHTML = `<span class="mt"><b>${esc(K.tool(t.n).label)}</b> <small class="md">${esc(t.n)}</small><br><small class="md">${esc(t.d)}</small><br><small class="pd">recomendado: ${rec}</small></span>
       <select data-tool="${t.n}">
         <option value="default"${lvl === 'default' ? ' selected' : ''}>Por defecto (${rec})</option>
-        <option value="safe"${lvl === 'safe' ? ' selected' : ''}>Seguro</option>
-        <option value="confirm"${lvl === 'confirm' ? ' selected' : ''}>Confirmar</option>
+        <option value="safe"${lvl === 'safe' ? ' selected' : ''}>Permitir siempre</option>
+        <option value="confirm"${lvl === 'confirm' ? ' selected' : ''}>Preguntar antes</option>
         <option value="restricted"${lvl === 'restricted' ? ' selected' : ''}>Bloqueado</option>
       </select>`;
     row.querySelector('select').onchange = async (e) => {
@@ -2516,7 +2518,7 @@ function renderEmptyModes() {
     const M = K.MODES[k];
     return `<button class="ce-mode${k === mode ? ' on' : ''}" style="--mr:${M.rgb}" data-m="${k}" aria-pressed="${k === mode}">
       <span class="cm-top">${ic(M.icon)}<b>${M.name.toUpperCase()}</b></span>
-      <span class="cm-tag">${esc(M.tagline)}</span>
+      <span class="cm-tag">${esc(M.label)} · ${esc(M.tagline)}</span>
       <ul class="cm-bullets">${M.bullets.map(b => `<li>${esc(b)}</li>`).join('')}</ul>
     </button>`;
   }).join('');
@@ -2696,7 +2698,7 @@ const TOOL_INFO = [
   for (const [n, i, d] of TOOL_INFO) {
     const c = document.createElement('div');
     c.className = 'toolcard';
-    c.innerHTML = `<div class="tic">${ic(i)}</div><div><b>${n}</b><small>${d}</small></div>`;
+    c.innerHTML = `<div class="tic">${ic(i)}</div><div><b>${esc(K.tool(n).label)}</b> <small class="md">${esc(n)}</small><br><small>${d}</small></div>`;
     g.appendChild(c);
   }
 })();
