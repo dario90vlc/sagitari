@@ -1441,8 +1441,11 @@ test('apariencia: el CSS tematiza por triplets RGB y el glow escala con intensid
     ok(new RegExp('\\.shell\\.glow-' + estado + '\\s*\\{[^}]*--energy').test(css), 'el estado ' + estado + ' debe tener su energía');
     ok(new RegExp('\\.shell\\.glow-' + estado + '\\s+\\.glow::before\\s*\\{[^}]*animation:\\s*frame-').test(css), 'el estado ' + estado + ' debe tener su propio ritmo');
   }
-  for (const k of ['frame-breathe', 'frame-work', 'frame-listen', 'frame-speak', 'frame-travel']) ok(css.includes('@keyframes ' + k), 'falta el keyframe ' + k);
-  ok(/offset-path:\s*border-box/.test(css), 'la luz que viaja recorre el perímetro del marco');
+  for (const k of ['frame-breathe', 'frame-drift', 'frame-bloom']) ok(css.includes('@keyframes ' + k), 'falta el keyframe ' + k);
+  /* Aura iridiscente: tres capas con tonos vecinos del elegido. No hay recorrido: el glow no
+     viaja, respira. */
+  for (const token of ['--glow-a-rgb', '--glow-b-rgb', '--glow-c-rgb']) ok(css.includes(token + ':'), 'falta ' + token);
+  ok(!/offset-path/.test(css), 'el glow no debe recorrer el marco');
   ok(/@media \(prefers-reduced-motion: reduce\)[\s\S]{0,700}?animation: none !important/.test(css), 'el movimiento reducido debe parar el latido y el viaje');
   ok(/input\[type="range"\]\.glowslider/.test(css), 'debe existir el estilo del slider de intensidad');
 });
