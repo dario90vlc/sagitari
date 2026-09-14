@@ -3372,9 +3372,9 @@ function applyTheme() {
   // Aura iridiscente: tres tonos VECINOS del elegido (no un arcoíris), para que la luz
   // tenga variación de color como el brillo de Apple Intelligence sin dejar de ser tu color.
   const [gh, gs, gl] = _hsl(gpal.acc2);
-  r.setProperty('--glow-a-rgb', _rgb(gh + 32, Math.min(1, gs * 1.02), Math.min(.72, gl * .96)).join(', '));
+  r.setProperty('--glow-a-rgb', _rgb(gh + 13, Math.min(1, gs * 1.01), Math.min(.72, gl * .98)).join(', '));
   r.setProperty('--glow-b-rgb', _rgb(gh, gs, gl).join(', '));
-  r.setProperty('--glow-c-rgb', _rgb(gh - 28, Math.min(1, gs * 1.08), Math.min(.78, gl * 1.02)).join(', '));
+  r.setProperty('--glow-c-rgb', _rgb(gh - 12, Math.min(1, gs * 1.04), Math.min(.78, gl * 1.01)).join(', '));
   r.setProperty('--glow-str', String(Math.min(1.4, Math.max(0.4, Number(s.glowStrength) || 1))));
   // los fondos también son del tema: si no, el color cambia solo en los acentos
   for (const [token, valor] of Object.entries(rampaDeSuperficies(pal.acc))) r.setProperty(token, valor);

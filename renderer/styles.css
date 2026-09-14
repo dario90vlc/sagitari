@@ -108,14 +108,14 @@ body { font-family: var(--font-ui), 'Segoe UI', sans-serif; font-size: 13px; col
      así se puede redimensionar agarrando el borde directamente.
      Las tres manchas de color siguen el acento elegido (degradado integrado). */
   position: fixed; inset: 0; border-radius: 10px; overflow: hidden;
-  /* Atmósfera del estado (en reposo un susurro, con el agente en marcha florece), en LUZ
-     DIRECCIONAL: degradados lineales desde tres lados, no radiales. Un radial tiene centro y
-     radio, así que su caída dibuja un disco y en la esquina se leía como una esfera; una luz
-     direccional no tiene contorno posible. */
+  /* Atmósfera del estado, UNIFORME alrededor del marco. Ni radiales (tienen centro y radio:
+     su caída dibuja un disco y la esquina se leía como una esfera) ni degradados anclados a
+     una esquina (su valor varía a lo largo del borde, así que la luz se apila en ese lado).
+     La atmósfera va aquí como sombra interior centrada —igual por los cuatro lados— y la luz
+     la pone encima el aura, que también es uniforme a lo largo del borde. */
   background:
-    linear-gradient(148deg, rgba(var(--acc3-rgb), calc(0.34 * var(--ambient))), transparent 46%),
-    linear-gradient(212deg, rgba(var(--acc2-rgb), calc(0.30 * var(--ambient))), transparent 44%),
-    linear-gradient(0deg,   rgba(var(--acc-rgb),  calc(0.16 * var(--ambient))), transparent 38%),
+    linear-gradient(155deg, rgb(var(--deep-rgb)) 0%, rgb(var(--bg1-rgb)) 40%, rgb(var(--bg2-rgb)) 100%);
+  box-shadow: inset 0 0 170px rgba(var(--acc3-rgb), calc(0.10 * var(--ambient)));
     /* el lienzo también es del tema: tres escalones de la rampa, en orden de claridad */
     linear-gradient(155deg, rgb(var(--deep-rgb)) 0%, rgb(var(--bg1-rgb)) 40%, rgb(var(--bg2-rgb)) 100%);
 }
@@ -155,34 +155,41 @@ body { font-family: var(--font-ui), 'Segoe UI', sans-serif; font-size: 13px; col
    (La primera versión usaba una banda con máscara y desenfoque y salía un corte recto: en CSS
    la máscara se aplica después del filtro, de modo que recortaba la luz en seco.)
    El único sitio con máscara es el filo de 1px, donde el corte limpio es lo que se busca. */
+/* Una sola capa con el anillo dentro (.glowRing) y el DESENFOQUE EN LA DE FUERA: así el
+   recorte del anillo no corta la luz —primero se recorta la banda y luego se difumina—, que
+   era el corte recto de la primera versión. Un anillo con máscara es además UNIFORME a lo
+   largo del perímetro: las sombras interiores siempre se acumulan en la esquina (~20 %) y
+   ese punto caliente, con otro tono, se leía como una esfera. Aquí la luz del borde es la
+   misma de la esquina al centro, y el tono cambia A LO LARGO del marco, no por profundidad. */
 .glow {
   position: absolute; inset: 0; border-radius: inherit; pointer-events: none; z-index: 401;
   opacity: 0; transition: opacity .7s cubic-bezier(0.16, 1, 0.3, 1);
-  /* Sombras CENTRADAS, sin desplazamiento ni spread: con desplazamiento, los rectángulos de
-     sombra se cruzan y en las esquinas aparecen arcos concéntricos (se veía como una esfera).
-     Centradas, cada capa es un degradado limpio desde los cuatro bordes hacia dentro. */
-  box-shadow: inset 0 0 130px rgba(var(--glow-a-rgb), calc(0.34 * var(--glow-str) * var(--energy)));
+  filter: blur(26px);
 }
-.glow::before,
-.glow::after { content: ''; position: absolute; inset: 0; border-radius: inherit; opacity: 0; will-change: opacity; }
-/* El filo de 1px sí usa máscara: ahí el corte es justo lo que se busca (una línea limpia)
-   y el degradado es lo que le da el tono cambiante a lo largo del perímetro. */
-.glow::before {
-  /* Esta capa va más ceñida al filo y con OTRO tono: como las dos son concéntricas, el color
-     cambia con la profundidad —el filo de un tono, el baño de otro—, que es la iridiscencia
-     del brillo de Apple Intelligence (radial, no dando vueltas). */
-  box-shadow: inset 0 0 58px rgba(var(--glow-b-rgb), calc(0.46 * var(--glow-str) * var(--energy)));
-}
-.glow::after {
-  padding: 1px;
+.glowRing,
+.glow::before { content: ''; position: absolute; inset: 0; border-radius: inherit;
   -webkit-mask: linear-gradient(#000 0 0) content-box, linear-gradient(#000 0 0);
   mask: linear-gradient(#000 0 0) content-box, linear-gradient(#000 0 0);
-  -webkit-mask-composite: xor; mask-composite: exclude;
+  -webkit-mask-composite: xor; mask-composite: exclude; }
+.glowRing {
+  padding: 26px;
   background: linear-gradient(200deg,
-    rgba(var(--glow-c-rgb), calc(0.7 * var(--glow-str) * var(--energy))),
-    rgba(var(--glow-a-rgb), calc(0.7 * var(--glow-str) * var(--energy))) 55%,
-    rgba(var(--glow-b-rgb), calc(0.7 * var(--glow-str) * var(--energy))));
+    rgba(var(--glow-c-rgb), calc(0.72 * var(--glow-str) * var(--energy))),
+    rgba(var(--glow-b-rgb), calc(0.78 * var(--glow-str) * var(--energy))) 52%,
+    rgba(var(--glow-a-rgb), calc(0.72 * var(--glow-str) * var(--energy))));
 }
+.glow::before {
+  /* Segunda banda, más ceñida y de otro tono: dentro del mismo desenfoque suma profundidad
+     y su opacidad es la que respira con el estado. */
+  padding: 9px;
+  background: linear-gradient(20deg,
+    rgba(var(--glow-a-rgb), calc(0.62 * var(--glow-str) * var(--energy))),
+    rgba(var(--glow-c-rgb), calc(0.62 * var(--glow-str) * var(--energy))) 60%,
+    rgba(var(--glow-b-rgb), calc(0.62 * var(--glow-str) * var(--energy))));
+  opacity: 0; will-change: opacity;
+}
+
+
 /* Latido asimétrico: entra algo más rápido de lo que sale, como una respiración. */
 @keyframes frame-breathe { 0%, 100% { opacity: .36; } 38% { opacity: 1; } }
 @keyframes frame-drift   { 0%, 100% { opacity: .26; } 58% { opacity: .95; } }
@@ -190,20 +197,20 @@ body { font-family: var(--font-ui), 'Segoe UI', sans-serif; font-size: 13px; col
 /* Un periodo por capa y por estado, sin múltiplos comunes: la suma nunca se repite igual. */
 .shell.glow-think  .glow { opacity: 1; }
 .shell.glow-think  .glow::before { animation: frame-breathe 4.6s cubic-bezier(.45, 0, .55, 1) infinite; }
-.shell.glow-think  .glow::after  { animation: frame-drift   6.4s cubic-bezier(.45, 0, .55, 1) infinite; }
+.shell.glow-think  .glowRing  { animation: frame-drift   6.4s cubic-bezier(.45, 0, .55, 1) infinite; }
 .shell.glow-work   .glow { opacity: 1; }
 .shell.glow-work   .glow::before { animation: frame-breathe 2.6s cubic-bezier(.45, 0, .55, 1) infinite; }
-.shell.glow-work   .glow::after  { animation: frame-drift   3.7s cubic-bezier(.45, 0, .55, 1) infinite; }
+.shell.glow-work   .glowRing  { animation: frame-drift   3.7s cubic-bezier(.45, 0, .55, 1) infinite; }
 .shell.glow-listen .glow { opacity: 1; }
 .shell.glow-listen .glow::before { animation: frame-breathe 5.4s cubic-bezier(.45, 0, .55, 1) infinite; }
-.shell.glow-listen .glow::after  { animation: frame-drift   7.3s cubic-bezier(.45, 0, .55, 1) infinite; }
+.shell.glow-listen .glowRing  { animation: frame-drift   7.3s cubic-bezier(.45, 0, .55, 1) infinite; }
 .shell.glow-speak  .glow { opacity: 1; }
 .shell.glow-speak  .glow::before { animation: frame-breathe 2.2s cubic-bezier(.45, 0, .55, 1) infinite; }
-.shell.glow-speak  .glow::after  { animation: frame-drift   3.1s cubic-bezier(.45, 0, .55, 1) infinite; }
+.shell.glow-speak  .glowRing  { animation: frame-drift   3.1s cubic-bezier(.45, 0, .55, 1) infinite; }
 /* acusar recibo: un destello del aura, no un estado sostenido */
 .shell.glow-pulse  .glow { opacity: 1; }
 .shell.glow-pulse  .glow::before { animation: frame-bloom 1.1s ease-out 1; }
-.shell.glow-pulse  .glow::after  { animation: frame-bloom 1.3s ease-out 1; }
+.shell.glow-pulse  .glowRing  { animation: frame-bloom 1.3s ease-out 1; }
 /* Menos movimiento, no menos información: sin viaje ni latido, pero cada estado se
    sigue distinguiendo por cuánta luz tiene el marco. */
 /* ventana en segundo plano: el glow no se ve, pero su animación seguiría
@@ -1327,13 +1334,11 @@ input[type="range"].glowslider::-webkit-slider-thumb:active { transform: scale(1
    intensidad por estado—. Los selectores de estados del glow viven aquí, no en dos
    bloques: tenerlos repartidos ya dejó un !important obsoleto anulando el aura. */
 @media (prefers-reduced-motion: reduce) {
-  .glow::before, .glow::after { animation: none !important; }
+  .glow::before { animation: none !important; }
   .shell.glow-think  .glow::before { opacity: .42; }
-  .shell.glow-work   .glow::before { opacity: .62; }
+  .shell.glow-work   .glow::before { opacity: .58; }
   .shell.glow-listen .glow::before { opacity: .32; }
   .shell.glow-speak  .glow::before { opacity: .5; }
-  .shell.glow-think  .glow::after, .shell.glow-work .glow::after,
-  .shell.glow-listen .glow::after, .shell.glow-speak .glow::after { opacity: .45; }
   .shell::before,
   .nb.live, .pulse-dot, .acard.on .adot, .ch-status .dot,
   .plancard li.now .pl-n, .stream::after,
