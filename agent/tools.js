@@ -282,4 +282,10 @@ const defs = [
 // v1.4: la herramienta delegate se añade al final (definida en subagents.js)
 defs.push(delegateToolDef());
 
-module.exports = { toolDefs: defs, RISK };
+/* Herramientas que no vienen de la tabla: hoy, los servidores MCP del usuario.
+   El proveedor lo instala main.js; si no hay ninguno, el catálogo es el nativo. */
+let dynamicProvider = null;
+function setDynamicToolProvider(fn) { dynamicProvider = typeof fn === 'function' ? fn : null; }
+function allToolDefs() { return dynamicProvider ? defs.concat(dynamicProvider()) : defs; }
+
+module.exports = { toolDefs: defs, allToolDefs, setDynamicToolProvider, RISK };

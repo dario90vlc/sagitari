@@ -3,7 +3,7 @@
 const os = require('os');
 const fs = require('fs');
 const path = require('path');
-const { toolDefs } = require('./tools');
+const { allToolDefs } = require('./tools');
 const { executeTool } = require('./executors');
 const skills = require('./skills');
 const memory = require('./memory');
@@ -137,6 +137,7 @@ class Agent {
     this.emit = opts.emit;               // (event) => void  (to renderer)
     this.screenshotFn = opts.screenshotFn;
     this.browser = opts.browser;
+    this.mcp = opts.mcp || null;         // gestor de servidores MCP (Tools del usuario)
     this.history = [];                   // [{role, content, tool_calls?, tool_call_id?, name?, images?}]
     this.busy = false;
     this.abort = null;
@@ -673,7 +674,7 @@ class Agent {
           : `Error: la herramienta «${name}» no está disponible para este subagente. Solo puedes usar: ${tools.map(d => d.function.name).join(', ')}.`,
       };
     }
-    if (!tools && !toolDefs.some(d => d.function && d.function.name === name)) {
+    if (!tools && !allToolDefs().some(d => d.function && d.function.name === name)) {
       return { action: 'unknown', failed: true, args, text: `Error: herramienta desconocida «${name}».` };
     }
 
@@ -688,6 +689,13 @@ class Agent {
     // sensibles (comprar/pagar/eliminar) que sí exige el clic por texto.
     if (name === 'browser_control' && args.action === 'click_index' && this.browser && typeof this.browser.labelForIndex === 'function') {
       args = { ...args, _label: this.browser.labelForIndex(args.index) };
+    }
+    // Etiqueta real de una herramienta MCP (servidor y nombre tal cual los ve el
+    // usuario) para la tarjeta de confirmación y el rail: es informativa, no
+    // funcional — el ejecutor despacha sólo con el nombre.
+    if (String(name).startsWith('mcp__') && this.mcp) {
+      const info = this.mcp.describe(name);
+      if (info) args = { ...args, _mcp: { serverName: info.serverName, toolName: info.toolName } };
     }
     const decision = this.guardrails.decide(name, args);
     let confirmed = false;
@@ -734,6 +742,7 @@ class Agent {
           workspace: (settings.settings && settings.settings.workspace) || path.join(os.homedir(), 'Desktop', 'Sagitari'),
           registerKillable: (k) => { this.runningTool = k; },   // para poder matar el comando al Detener
           ownerId: this.sessionId,   // quién pide la acción (el navegador lo usa para no cruzar inventarios)
+          mcp: this.mcp,             // servidores MCP del usuario (herramientas mcp__*)
         });
       }
     } catch (e) { result = 'Error: ' + e.message; }
@@ -759,6 +768,7 @@ class Agent {
       emit: (e) => { try { this.emit({ ...e, subagent: spec.key }); } catch {} },
       screenshotFn: ctx.screenshotFn,
       browser: ctx.browser,
+      mcp: this.mcp,   // aunque su catálogo filtrado no incluya MCP, el ejecutor necesita el gestor
       guardrailsPolicy: {
         ...((ctx.settings && ctx.settings.security) || {}),
         guardrails: { ...((ctx.settings && ctx.settings.security && ctx.settings.security.guardrails) || {}), maxSteps: spec.maxSteps },
@@ -902,7 +912,7 @@ class Agent {
       {
         fetchFn: this.fetchFn,
         messages,
-        tools: toolsOverride || toolDefs,
+        tools: toolsOverride || allToolDefs(),
         signal,
         onText: (text) => this.emit({ type: 'delta', text }),
       }
@@ -911,6 +921,7 @@ class Agent {
 }
 
 function statusFor(name, args) {
+  if (String(name).startsWith('mcp__')) return 'MCP · ' + (args._mcp ? args._mcp.toolName : name.slice(5));
   switch (name) {
     case 'run_command': return 'Terminal — ' + (args.command || '').slice(0, 90);
     case 'read_file': return 'Leyendo ' + args.path;

@@ -60,7 +60,10 @@ function summarizeArgs(name, args = {}) {
     case 'open_url': return String(a.url || '');
     case 'clipboard': return a.action === 'write' ? 'escribir en el portapapeles' : 'leer el portapapeles';
     case 'window_manage': return String(a.action || '');
-    default: return Object.keys(a).length ? JSON.stringify(a).slice(0, 160) : '';
+    default: {
+      if (a._mcp) return `${a._mcp.serverName} → ${a._mcp.toolName}`;
+      return Object.keys(a).length ? JSON.stringify(a).slice(0, 160) : '';
+    }
   }
 }
 
@@ -79,7 +82,11 @@ function describeAction(name, args = {}) {
     case 'open_url': return 'Abrir una URL';
     case 'clipboard': return a.action === 'write' ? 'Escribir en el portapapeles' : 'Leer el portapapeles';
     case 'window_manage': return 'Gestionar ventanas';
-    default: return 'Usar herramienta ' + name;
+    default: {
+      if (a._mcp) return 'Usar la herramienta «' + a._mcp.toolName + '» del servidor MCP «' + a._mcp.serverName + '»';
+      if (String(name).startsWith('mcp__')) return 'Usar una herramienta MCP (' + name.slice(5).replace(/__/g, ' · ') + ')';
+      return 'Usar herramienta ' + name;
+    }
   }
 }
 
@@ -378,6 +385,13 @@ class Guardrails {
   levelFor(name) {
     const override = this.policy.permissions[name];
     if (LEVELS.includes(override)) return override;
+    // Comodín por servidor MCP (`mcp__github__*`): permite confiar en un servidor
+    // entero sin listar sus herramientas una a una. El override exacto sigue ganando.
+    const m = /^mcp__([a-z0-9_]+)__/.exec(String(name || ''));
+    if (m) {
+      const w = this.policy.permissions[`mcp__${m[1]}__*`];
+      if (LEVELS.includes(w)) return w;
+    }
     return DEFAULT_RISK[name] || 'confirm';
   }
 

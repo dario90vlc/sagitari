@@ -149,6 +149,17 @@ async function executeTool(name, args, ctx) {
     if (/^~(?=\/|\\|$)/.test(p)) return p.replace(/^~/, home);
     return path.isAbsolute(p) ? p : path.join(workspace, p);
   };
+  // Las herramientas MCP no están en la tabla nativa: se despachan por prefijo al
+  // gestor, que ya pasó por el motor de permisos en _runToolCall.
+  if (String(name).startsWith('mcp__')) {
+    if (!ctx.mcp) return 'Error: no hay servidores MCP en esta ejecución.';
+    // `_mcp` es la etiqueta interna de la tarjeta de confirmación (servidor y
+    // nombre reales): NO es un argumento de la herramienta, así que no puede
+    // viajar al servidor (uno estricto rechazaría el campo de más).
+    const { _mcp, ...rest } = args;
+    // onExit: Detener corta SOLO la llamada en vuelo (el gancho que expone callTool).
+    return ctx.mcp.callTool(name, rest, { onExit: ctx.registerKillable });
+  }
   switch (name) {
     case 'remember': {
       const m = memory.add({

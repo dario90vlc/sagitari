@@ -2728,6 +2728,39 @@ test('permisos: abrir una URL pide confirmación por defecto', () => {
   eq(g.decide('open_url', { url: 'https://github.com' }).action, 'confirm');
 });
 
+test('mcp: las herramientas dinamicas entran en el catalogo sin tocar la tabla nativa', () => {
+  const toolsMod = require('../agent/tools');
+  const antes = toolsMod.toolDefs.length;
+  const { RISK } = toolsMod;
+  toolsMod.setDynamicToolProvider(() => ([{ type: 'function', function: { name: 'mcp__eco__echo', description: 'x', parameters: { type: 'object', properties: {} } } }]));
+  try {
+    eq(toolsMod.allToolDefs().length, antes + 1, 'la dinamica se suma al catálogo nativo');
+    ok(toolsMod.allToolDefs().some(d => d.function.name === 'mcp__eco__echo'));
+    eq(toolsMod.toolDefs.length, antes, 'la tabla nativa no se toca (es la que valida el test de niveles)');
+    ok(!RISK['mcp__eco__echo'], 'y no se le inventa un nivel: sin override será confirm');
+  } finally { toolsMod.setDynamicToolProvider(null); }
+  eq(toolsMod.allToolDefs().length, antes, 'sin proveedor, el catálogo vuelve a ser el nativo');
+});
+
+test('permisos: el comodín de servidor MCP sube la confianza de todo un servidor', () => {
+  const g = new Guardrails({ permissions: { 'mcp__github__*': 'safe' } });
+  eq(g.levelFor('mcp__github__create_issue'), 'safe', 'el comodín del servidor vale para sus herramientas');
+  eq(g.decide('mcp__github__create_issue', {}).action, 'allow');
+  eq(g.decide('mcp__otro__x', {}).action, 'confirm', 'y solo para ese servidor');
+  // el override exacto sigue ganando al comodín
+  const g2 = new Guardrails({ permissions: { 'mcp__github__*': 'safe', 'mcp__github__borrar': 'restricted' } });
+  eq(g2.decide('mcp__github__borrar', {}).action, 'deny');
+  // y ninguna herramienta MCP entra en 'safe' por defecto
+  eq(new Guardrails().decide('mcp__loquesea__x', {}).action, 'confirm');
+});
+
+test('permisos: la tarjeta de confirmación nombra el servidor y la herramienta', () => {
+  ok(describeAction('mcp__github__create_issue', {}).includes('MCP'));
+  const d = describeAction('mcp__github__create_issue', { _mcp: { serverName: 'GitHub', toolName: 'create_issue' } });
+  ok(/GitHub/.test(d) && /create_issue/.test(d), 'con la etiqueta real: ' + d);
+  ok(summarizeArgs('mcp__github__create_issue', { title: 'x', _mcp: { serverName: 'GitHub', toolName: 'create_issue' } }).includes('GitHub'));
+});
+
 test('seguridad: open_url solo acepta http(s), no manejadores del sistema', () => {
   const { openUrlAllowed } = require('../agent/executors');
   ok(openUrlAllowed('https://github.com/dario90vlc/sagitari'));
@@ -2960,6 +2993,19 @@ const fakeCtx = (extra = {}) => ({
   ...extra,
 });
 const toolCall = (name, args) => ({ id: 't1', function: { name, arguments: typeof args === 'string' ? args : JSON.stringify(args || {}) } });
+
+test('herramientas: una herramienta mcp sin gestor no se ejecuta y se explica', async () => {
+  const toolsMod = require('../agent/tools');
+  toolsMod.setDynamicToolProvider(() => ([{ type: 'function', function: { name: 'mcp__x__y', description: 'd', parameters: { type: 'object', properties: {} } } }]));
+  try {
+    // el nivel se fija en la POLÍTICA del agente (no en el ctx): con el 'confirm'
+    // por defecto la llamada esperaría una confirmación que aquí no llega nunca
+    const a = new AgentCls({ emit: () => {}, guardrailsPolicy: { permissions: { 'mcp__x__y': 'safe' } } });
+    const r = await a._runToolCall(toolCall('mcp__x__y', {}), fakeCtx());
+    eq(r.action, 'ok', 'la llamada se resuelve (el ejecutor no lanza)');
+    ok(/MCP/.test(r.text), 'y explica que no hay servidores MCP: ' + r.text);
+  } finally { toolsMod.setDynamicToolProvider(null); }
+});
 
 test('herramientas: una inventada no llega a pedir permiso', async () => {
   const ev = [];
