@@ -1059,6 +1059,53 @@ test('protocols: los screenshots de una herramienta no se pierden en Anthropic/R
   ok(r.input.some(i => Array.isArray(i.content) && i.content.some(c => c.type === 'input_image')), 'imagen como entrada de usuario');
 });
 
+/* ---------- MCP: framing y JSON-RPC ---------- */
+const mcpTransport = require('../agent/mcp-transport');
+
+test('mcp: el lector entrega mensajes completos y descarta los banners', () => {
+  const vistos = [];
+  const feed = mcpTransport.createLineReader((m, noise) => vistos.push({ m, noise }));
+  // dos mensajes en un chunk, uno partido en dos y una línea de banner al principio
+  feed('Servidor MCP 1.0 listo\n{"jsonrpc":"2.0","id":1,"method":"a"}\n{"jsonrpc":"2.0","id":2,');
+  feed('"method":"b"}\n{"jsonrpc":"2.0","id":3,"method":"c"}\n');
+  eq(vistos.map(v => v.m.id).join(','), '1,2,3', 'los tres mensajes llegan, en orden');
+  eq(vistos[0].noise, 1, 'el banner se cuenta como ruido, no como mensaje');
+});
+
+test('mcp: las peticiones se emparejan por id y se resuelven fuera de orden', async () => {
+  const enviados = [];
+  const rpc = new mcpTransport.Rpc({ send: (text) => enviados.push(JSON.parse(text)) });
+  const p1 = rpc.request('tools/list', {});
+  const p2 = rpc.request('tools/call', { name: 'x' });
+  eq(enviados.length, 2, 'las dos salen a la vez');
+  ok(enviados[0].id !== enviados[1].id, 'cada una con su id');
+  rpc.handleMessage({ jsonrpc: '2.0', id: enviados[1].id, result: { ok: 'dos' } });
+  rpc.handleMessage({ jsonrpc: '2.0', id: enviados[0].id, result: { ok: 'uno' } });
+  eq((await p1).ok, 'uno', 'la primera responde a la primera');
+  eq((await p2).ok, 'dos');
+});
+
+test('mcp: el error JSON-RPC y el timeout se explican', async () => {
+  const rpc = new mcpTransport.Rpc({ send: () => {} });
+  const p = rpc.request('initialize', {}, { timeoutMs: 50 });
+  const [, err] = await p.then(() => [null, null], (e) => [null, e]);
+  ok(/no respondió|timeout/i.test(err.message), err.message);
+
+  const rpc2 = new mcpTransport.Rpc({ send: () => {} });
+  const p2 = rpc2.request('x', {}, { timeoutMs: 1000 });
+  rpc2.handleMessage({ jsonrpc: '2.0', id: 1, error: { code: -32601, message: 'método no soportado' } });
+  const [, err2] = await p2.then(() => [null, null], (e) => [null, e]);
+  ok(err2 && /método no soportado/.test(err2.message), 'el mensaje del servidor se propaga: ' + (err2 && err2.message));
+});
+
+test('mcp: si el transporte muere, las peticiones en vuelo se rechazan', async () => {
+  const rpc = new mcpTransport.Rpc({ send: () => {} });
+  const p = rpc.request('tools/list', {}, { timeoutMs: 5000 });
+  rpc.fail('el servidor se cayó');
+  const [, err] = await p.then(() => [null, null], (e) => [null, e]);
+  ok(/se cayó/.test(err.message), 'no se queda esperando para siempre');
+});
+
 test('agent: la cadena elige el protocolo del modelo (Qwen en Go → /messages)', async () => {
   const { Agent } = require('../agent/agent');
   const seen = [];
