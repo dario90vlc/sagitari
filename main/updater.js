@@ -94,6 +94,19 @@ function parseLatestYml(text) {
   return out;
 }
 
+/**
+ * Hash publicado del binario que vamos a ejecutar, o null si el yml no lo trae.
+ * El `sha512` de nivel superior corresponde al fichero que nombra `path` (el Setup:
+ * electron-builder no escribe info de actualización para el portable), así que
+ * devolverlo para cualquier otro archivo comparaba el binario EQUIVOCADO.
+ */
+function sha512For(parsed, assetName) {
+  if (!parsed || !assetName) return null;
+  const entry = (parsed.files || []).find(f => f.url === assetName);
+  if (entry && entry.sha512) return entry.sha512;
+  return parsed.path === assetName ? (parsed.sha512 || null) : null;
+}
+
 /** sha512 en base64 (el formato que usa latest.yml), o null si no se pudo leer. */
 function sha512Of(file) {
   try { return crypto.createHash('sha512').update(fs.readFileSync(file)).digest('base64'); } catch { return null; }
@@ -262,4 +275,4 @@ function hostKind({ isPackaged, env = process.env } = {}) {
   return env.PORTABLE_EXECUTABLE_DIR ? 'portable' : 'nsis';
 }
 
-module.exports = { REPO, API_LATEST, parseVersion, compareVersions, pickAssets, assetFor, parseLatestYml, sha512Of, checkForUpdate, downloadTarget, downloadTo, hostKind, signatureOf };
+module.exports = { REPO, API_LATEST, parseVersion, compareVersions, pickAssets, assetFor, parseLatestYml, sha512For, sha512Of, checkForUpdate, downloadTarget, downloadTo, hostKind, signatureOf };

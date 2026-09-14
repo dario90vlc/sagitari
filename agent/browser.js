@@ -55,6 +55,12 @@ class Browser {
     this._events = new Map();   // method -> esperadores de eventos CDP
     this._sessions = new Map(); // targetId -> sessionId (una sesión por pestaña)
     this.browserPid = null;     // pid del navegador lanzado (para matar el árbol)
+    // Inventario de `elements()` y de qué ejecución es: sus coordenadas son
+    // relativas al viewport de UNA página, así que un inventario viejo o de otra
+    // ejecución no puede servir para clicar.
+    this._lastElements = null;
+    this._invOwner = null;
+    this._queue = Promise.resolve();   // una acción de navegador a la vez (ver handle)
     // carpeta de datos del perfil activo (persistentes: los logins sobreviven)
     this.profileDir = ensureProfileDir('default');
   }
@@ -123,12 +129,18 @@ class Browser {
     this.ws = sock;
     try {
       await new Promise((res, rej) => {
-        const onOpen = () => { sock.off('error', onErr); res(); };
-        const onErr = (e) => { sock.off('open', onOpen); rej(e); };
+        // Con deadline propio: si el extremo acepta el TCP pero no completa el
+        // upgrade, 'open' no llega nunca y la herramienta se quedaba «cargando»
+        // para siempre (ws solo aplica timeout si se le pasa handshakeTimeout).
+        const timer = setTimeout(() => { cleanup(); rej(new Error('CDP: el navegador no completó la conexión en 15 s.')); }, 15000);
+        const cleanup = () => { clearTimeout(timer); sock.off('open', onOpen); sock.off('error', onErr); };
+        const onOpen = () => { cleanup(); res(); };
+        const onErr = (e) => { cleanup(); rej(e); };
         sock.once('open', onOpen);
         sock.once('error', onErr);
       });
     } catch (e) {
+      try { sock.close(); } catch {}
       if (this.ws === sock) this.ws = null;
       throw e;
     }
@@ -444,7 +456,7 @@ class Browser {
 
   /** Inventario clicable/legible de la página con índices estables y coordenadas:
       el modelo puede actuar con click_index sin selectores ni capturas a ciegas. */
-  async elements(sessionId) {
+  async elements(sessionId, ownerId) {
     const js = `
       (() => {
         const norm = s => (s||'').replace(/\\s+/g,' ').trim();
@@ -474,6 +486,7 @@ class Browser {
     try { data = JSON.parse(raw); } catch { return 'Error: no pude analizar la página.'; }
     if (!data.elements || !data.elements.length) return 'Sin elementos interactivos visibles. Prueba action=screenshot o action=content.';
     this._lastElements = data.elements;   // índices válidos hasta la próxima navegación
+    this._invOwner = ownerId || null;     // …y solo para la ejecución que los pidió
     const lines = data.elements.map((e, i) => {
       const bits = [`${i}: <${e.tag}>`];
       if (e.text) bits.push(`"${e.text}"`);
@@ -488,8 +501,22 @@ ${lines.join('\n')}
 Usa action=click_index con estos índices, o selector/text como antes.`;
   }
 
+  /** Etiqueta del elemento que ocupa ese índice en el último inventario.
+      La usa el motor de permisos: por índice no se sabe qué se está pulsando, y
+      un clic que compra o borra no puede depender de que el modelo lo diga. */
+  labelForIndex(idx) {
+    const el = (this._lastElements || [])[Number(idx)];
+    if (!el) return '';
+    return [el.text, el.id, el.name, el.href, el.tag].filter(Boolean).join(' ').slice(0, 160);
+  }
+
   /** Clic por índice del último inventory de elements(). */
-  async clickIndex(idx, sessionId) {
+  async clickIndex(idx, sessionId, ownerId) {
+    // El inventario es de una ejecución concreta: si es de otra, sus coordenadas
+    // apuntan a la página de la otra y el clic caería donde no debe.
+    if (this._invOwner && ownerId && this._invOwner !== ownerId) {
+      return 'Error: el inventario que tienes es de otra ejecución del agente. Ejecuta action=elements otra vez antes de clicar.';
+    }
     const el = (this._lastElements || [])[Number(idx)];
     if (!el) return `Error: índice ${idx} inválido. Ejecuta action=elements para ver los índices actuales.`;
     await this.send('Input.dispatchMouseEvent', { type: 'mouseMoved', x: el.x, y: el.y }, sessionId);
@@ -556,9 +583,13 @@ Usa action=click_index con estos índices, o selector/text como antes.`;
       el.focus();
       const tag = (el.tagName || '').toLowerCase();
       if (${clear} && (tag === 'input' || tag === 'textarea' || el.isContentEditable)) {
-        if (typeof el.select === 'function' && tag !== 'textarea' && !el.isContentEditable) el.select();
+        // select() también vale para textarea: la rama del Range no toca su
+        // selección interna, así que setRangeText('') no borraba nada y el texto
+        // nuevo se insertaba en el cursor dejando el viejo detrás
+        if (typeof el.select === 'function' && !el.isContentEditable) el.select();
         else { const d = document; const range = d.createRange(); range.selectNodeContents(el); const s = d.getSelection(); s.removeAllRanges(); s.addRange(range); }
         if (!el.isContentEditable && 'setRangeText' in el) { el.setRangeText(''); }
+        else if (!el.isContentEditable) { el.value = ''; }
         else { const d = document; const s = d.getSelection(); if (s && s.rangeCount) { el.dispatchEvent(new KeyboardEvent('keydown', { key: 'Delete', bubbles: true })); s.getRangeAt(0).deleteContents(); } }
         el.dispatchEvent(new Event('input', { bubbles: true }));
       }
@@ -580,7 +611,23 @@ Usa action=click_index con estos índices, o selector/text como antes.`;
 
   // ---------- dispatcher ----------
 
-  async handle(args) {
+  /**
+   * Punto de entrada de browser_control. `ownerId` identifica a la ejecución que
+   * pide la acción (el agente del chat o una tarea de background).
+   *
+   * Serializado a propósito: hay UN navegador para toda la app y el estado que
+   * decide dónde se hace clic (pestaña activa, inventario) es global. Sin la cola,
+   * dos agentes a la vez se pisaban: el elements() de uno invalidaba el del otro y
+   * su clic_index se despachaba contra la pestaña del otro.
+   */
+  async handle(args, ownerId) {
+    const run = () => this._handle(args, ownerId);
+    const next = this._queue.then(run, run);
+    this._queue = next.then(() => {}, () => {});   // un fallo no rompe la cola
+    return next;
+  }
+
+  async _handle(args, ownerId) {
     const a = args.action;
     if (!ACTIONS.has(a)) return `Acción desconocida: ${a}. Válidas: ${[...ACTIONS].join(', ')}.`;
     let retried = false;
@@ -605,6 +652,7 @@ Usa action=click_index con estos índices, o selector/text como antes.`;
           const { targetId } = await this.send('Target.createTarget', { url: args.url || 'about:blank' });
           if (this.activeId && this.activeId !== targetId) await this.detach(this.activeId);
           this.activeId = targetId;
+          this._lastElements = null; this._invOwner = null;   // otra pestaña: otros índices
           if (args.url) await this.waitReady(await this.attach(targetId));
           return `OK: nueva pestaña abierta${args.url ? ' en ' + args.url : ''} y seleccionada.`;
         }
@@ -623,6 +671,7 @@ Usa action=click_index con estos índices, o selector/text como antes.`;
           if (!page) return 'Error: no encontré esa pestaña («' + q + '»). Abiertas:\n' + list.map((t, i) => `${i + 1}. ${t.title} — ${t.url}`).join('\n');
           if (this.activeId && this.activeId !== page.id) await this.detach(this.activeId);
           this.activeId = page.id;
+          this._lastElements = null; this._invOwner = null;   // otra pestaña: otros índices
           return `OK: pestaña activa → «${page.title}» (${page.url}).`;
         }
 
@@ -640,13 +689,14 @@ Usa action=click_index con estos índices, o selector/text como antes.`;
           if (this.activeId === id) {
             const rest = await this.pages();
             this.activeId = rest.length ? rest[0].id : null;
+            this._lastElements = null; this._invOwner = null;   // otra pestaña: otros índices
           }
           return `OK: pestaña cerrada. Activas: ${(await this.pages()).length}.`;
         }
 
         case 'elements': {
           const { sessionId } = await this.currentSession();
-          const inv = await this.elements(sessionId);
+          const inv = await this.elements(sessionId, ownerId);
           // La captura solo se adjunta si el modelo la pide explícitamente
           // (screenshot:true): así no se paga una imagen en cada inventario.
           if (args.screenshot === true) {
@@ -658,7 +708,7 @@ Usa action=click_index con estos índices, o selector/text como antes.`;
           return inv;
         }
 
-        case 'click_index': return await this.clickIndex(args.index, await this.sessionIdOf());
+        case 'click_index': return await this.clickIndex(args.index, await this.sessionIdOf(), ownerId);
 
         case 'click': return await this.findAndClick(args.selector, args.text, await this.sessionIdOf());
 
@@ -670,6 +720,9 @@ Usa action=click_index con estos índices, o selector/text como antes.`;
           if (!winCode) return `Error: tecla no soportada: ${args.key}`;
           const def = { windowsVirtualKeyCode: winCode, code: args.key, key: args.key };
           if (args.key === 'Enter') def.text = '\r';
+          // sin `text` el navegador no ejecuta la acción de carácter: pulsar Space
+          // no insertaba el espacio ni activaba el botón con foco
+          if (args.key === 'Space') { def.key = ' '; def.text = ' '; }
           const { sessionId } = await this.currentSession();
           await this.send('Input.dispatchKeyEvent', { type: 'rawKeyDown', ...def }, sessionId);
           await this.send('Input.dispatchKeyEvent', { type: 'keyUp', ...def }, sessionId);
@@ -684,6 +737,9 @@ Usa action=click_index con estos índices, o selector/text como antes.`;
             type: 'mouseWheel', x: 500, y: 400, deltaX: 0, deltaY: dir * (args.amount || 600)
           }, sessionId);
           await sleep(250);
+          // las coordenadas del inventario son relativas al viewport: tras
+          // desplazar la página apuntan a otro sitio
+          this._lastElements = null; this._invOwner = null;
           return 'OK: scroll ' + (dir > 0 ? 'abajo' : 'arriba');
         }
 

@@ -95,6 +95,11 @@ Add-Type -Namespace J -Name K -MemberDefinition '[DllImport("user32.dll")] publi
 
 // ---- File helpers -------------------------------------------------------
 
+/** ¿Existe y es una carpeta? Para no confundir «vacío» con «no pude leerlo». */
+async function isDir(p) {
+  try { return (await fsp.stat(p)).isDirectory(); } catch { return false; }
+}
+
 async function walk(root, depth, maxDepth, out, budget) {
   if (depth > maxDepth || out.length >= budget.count) return;
   let entries;
@@ -114,7 +119,10 @@ async function walk(root, depth, maxDepth, out, budget) {
   }
 }
 
-async function searchIn(dir, regex, searchContent, out, budget) {
+async function searchIn(dir, regex, searchContent, out, budget, depth = 0, maxDepth = 12) {
+  // Tope de profundidad como en walk(): sin él, un árbol con un ciclo (junction)
+  // volvía a recorrer las mismas carpetas para siempre y colgaba la búsqueda.
+  if (depth > maxDepth) return;
   if (out.length >= budget.count || budget.files >= 20000) return;
   let entries;
   try { entries = await fsp.readdir(dir, { withFileTypes: true }); } catch { return; }
@@ -122,7 +130,7 @@ async function searchIn(dir, regex, searchContent, out, budget) {
     if (out.length >= budget.count || budget.files >= 20000) return;
     if (['node_modules', '.git', 'AppData'].includes(e.name)) continue;
     const full = path.join(dir, e.name);
-    if (e.isDirectory()) { await searchIn(full, regex, searchContent, out, budget); continue; }
+    if (e.isDirectory()) { await searchIn(full, regex, searchContent, out, budget, depth + 1, maxDepth); continue; }
     budget.files++;
     if (regex.test(e.name)) out.push(`NOMBRE: ${full}`);
     if (!searchContent || out.length >= budget.count) continue;
@@ -199,9 +207,20 @@ async function executeTool(name, args, ctx) {
     }
     case 'write_file': {
       const p = inWs(args.path);
+      const content = String(args.content ?? '');
       await fsp.mkdir(path.dirname(p), { recursive: true });
-      await fsp.writeFile(p, args.content, 'utf8');
-      return `OK: ${args.content.length} bytes escritos en ${p}`;
+      // tmp + rename: writeFile trunca el destino al abrirlo, así que un cierre o
+      // un disco lleno a mitad dejaba el fichero del usuario cortado y sin copia.
+      // Es el mismo patrón que ya usan checkpoints, memoria y hábitos.
+      const tmp = p + '.sagi-tmp';
+      try {
+        await fsp.writeFile(tmp, content, 'utf8');
+        await fsp.rename(tmp, p);
+      } catch (e) {
+        await fsp.rm(tmp, { force: true }).catch(() => {});
+        throw e;
+      }
+      return `OK: ${content.length} bytes escritos en ${p}`;
     }
     case 'edit_file': {
       const p = inWs(args.path);
@@ -213,6 +232,12 @@ async function executeTool(name, args, ctx) {
       catch (e) { return `Error: no pude leer ${p} (${e.code === 'ENOENT' ? 'no existe; para crear el archivo usa write_file' : (e.code || e.message)}).`; }
       if (buf.subarray(0, 8192).includes(0)) return `Error: ${p} es binario (no editable como texto).`;
       const text = buf.toString('utf8');
+      // Ida y vuelta: si el fichero no está en UTF-8 (un .txt/.csv guardado en
+      // ANSI/CP1252 por Notepad) la conversión ya ha metido U+FFFD en los acentos,
+      // y reescribirlo los destruiría sin vuelta atrás. Mejor no tocar nada.
+      if (!Buffer.from(text, 'utf8').equals(buf)) {
+        return `Error: ${p} no está en UTF-8 (probablemente ANSI/CP1252); editarlo corrompería los acentos. Conviértelo a UTF-8 antes, o usa write_file con el contenido completo.`;
+      }
       const count = text.split(oldStr).length - 1;
       if (count === 0) return `Error: old_string no encontrado en ${p}. Copia el texto exacto con read_file (respeta espacios y saltos de línea).`;
       if (count > 1 && !args.replace_all) return `Error: old_string aparece ${count} veces en ${p}; incluye más contexto para que sea único o usa replace_all: true.`;
@@ -224,6 +249,10 @@ async function executeTool(name, args, ctx) {
     }
     case 'list_dir': {
       const root = inWs(args.path);
+      // Antes un fallo de readdir se tragaba y la herramienta respondía
+      // «(directorio vacío)»: el agente creía que no había nada y podía
+      // sobrescribirlo. read_file sí distinguía ENOENT; esto lo iguala.
+      if (!(await isDir(root))) return `Error: no pude leer ${root} (no existe, no es una carpeta o no tengo permisos).`;
       const out = [];
       const budget = { count: 500 };
       await walk(root, 0, Math.min(Math.max(args.depth || 2, 1), 4), out, budget);
@@ -234,6 +263,7 @@ async function executeTool(name, args, ctx) {
       let regex;
       try { regex = new RegExp(args.pattern, 'i'); }
       catch { return 'Error: patrón de búsqueda inválido (no es una expresión regular válida). Simplifícalo: "informe", "config.*json", "function\\s+nombre"…'; }
+      if (!(await isDir(root))) return `Error: no pude buscar en ${root} (no existe, no es una carpeta o no tengo permisos).`;
       const out = [];
       const budget = { count: 60, files: 0 };
       await searchIn(root, regex, args.search_content !== false, out, budget);
@@ -256,7 +286,7 @@ async function executeTool(name, args, ctx) {
       return `OK: ${args.url} abierta en el navegador por defecto`;
     }
     case 'browser_control':
-      return browser.handle(args);
+      return browser.handle(args, ctx.ownerId);
     case 'screenshot': {
       const shot = await screenshotFn();
       emit({ type: 'image', role: 'tool', dataUrl: shot.dataUrl });

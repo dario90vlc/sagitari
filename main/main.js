@@ -90,7 +90,6 @@ const securityDefaults = {
     maxCostUsd: 0,               // 0 = sin límite (coste estimado en USD)
     loopThreshold: 3,            // llamadas idénticas seguidas antes de parar
     stallThreshold: 6,           // pasos sin progreso antes de parar (0 = sin límite)
-    maxDataGapMs: 5 * 60 * 1000, // ms sin datos del modelo antes de parar (0 = sin límite)
   },
 };
 let providersChanged = false;
@@ -113,7 +112,15 @@ function protectKey(k) {
 }
 function revealKey(k) {
   if (typeof k !== 'string' || !k.startsWith(KEY_PREFIX)) return k;
-  try { return safeStorage.decryptString(Buffer.from(k.slice(KEY_PREFIX.length), 'base64')); } catch { return ''; }
+  try { return safeStorage.decryptString(Buffer.from(k.slice(KEY_PREFIX.length), 'base64')); }
+  catch {
+    // No se pudo descifrar (config copiada de otro equipo o perfil, o clave
+    // maestra recreada). Se devuelve el CRIPTOGRAMA tal cual para que el
+    // siguiente guardado no lo pise con una cadena vacía: antes la credencial se
+    // destruía en silencio (el .bak incluido) y no había vuelta atrás.
+    registrarFallo('revealKey', new Error('no se pudo descifrar una clave guardada en este equipo; vuelve a escribirla en Ajustes'));
+    return k;
+  }
 }
 /** Copia del config con las claves cifradas, tal y como va a disco. */
 function configParaDisco() {
@@ -179,18 +186,28 @@ function saveConfig() {
   }
 }
 
+/** Aviso al usuario cuando un guardado en disco falla (configuración o
+    conversaciones): los controles ya lo dieron por bueno en pantalla, así que un
+    console.error silencioso le deja creyendo que se guardó algo que se perderá al
+    reiniciar. Se limita a un aviso cada 30 s: un disco lleno no debe inundar el chat. */
+let avisoDiscoAt = 0;
+function avisarDisco(mensaje) {
+  const now = Date.now();
+  if (now - avisoDiscoAt < 30000) return;
+  avisoDiscoAt = now;
+  try {
+    if (win && !win.isDestroyed()) {
+      win.webContents.send('agent:event', { type: 'toast', title: 'No se pudo guardar', message: mensaje });
+    }
+  } catch {}
+}
+
 /* Persiste y, si falla, avisa al usuario: los controles de Ajustes ya han
    confirmado el cambio en pantalla, así que un console.error silencioso deja al
    usuario creyendo que se guardó algo que se perderá al reiniciar. */
 function persistConfig() {
   const r = saveConfig();
-  if (!r.ok) {
-    try {
-      if (win && !win.isDestroyed()) {
-        win.webContents.send('agent:event', { type: 'toast', title: 'No se pudo guardar', message: 'La configuración no se pudo escribir en disco (' + r.error + ').' });
-      }
-    } catch {}
-  }
+  if (!r.ok) avisarDisco('La configuración no se pudo escribir en disco (' + r.error + ').');
   return r;
 }
 
@@ -626,9 +643,20 @@ function saveConvs() {
     // Antes se recortaba el array EN MEMORIA a 60 conversaciones en cada guardado:
     // pérdida de historial silenciosa. Ahora se guarda todo y solo se recorta al
     // escribir, y solo si de verdad hay un exceso enorme (con .bak del anterior).
-    const out = convs.length > MAX_CONVS ? convs.slice(0, MAX_CONVS) : convs;
+    let out = convs;
+    if (convs.length > MAX_CONVS) {
+      out = convs.slice(0, MAX_CONVS);
+      // La conversación abierta no puede quedarse fuera del fichero: el usuario
+      // seguiría viendo y respondiendo sus mensajes, y desaparecerían al reiniciar.
+      const cur = currentConv();
+      if (cur && !out.includes(cur)) out = [...out.slice(0, MAX_CONVS - 1), cur];
+    }
     writeJsonAtomic(CONV_FILE, JSON.stringify(out));
-  } catch (err) { console.error('saveConvs', err.message); }
+  } catch (err) {
+    console.error('saveConvs', err.message);
+    // el chat es el dato con más valor del usuario: si no se pudo escribir, se dice
+    avisarDisco('La conversación no se pudo escribir en disco (' + err.message + '). Los mensajes nuevos pueden perderse al cerrar la app.');
+  }
 }
 const currentConv = () => convs.find(c => c.id === currentConvId);
 function ensureConv() {
@@ -743,9 +771,16 @@ ipcMain.handle('chat:retry', async () => {
   // regenerar durante un turno en curso lo pisaría: exigimos que esté libre
   if (agent.isBusy()) return { ok: false, error: 'hay un turno en curso; deténlo antes de regenerar' };
   const c = currentConv();
-  // quita la última respuesta del historial guardado (y solo esa)
+  // quita la última respuesta del historial guardado (y solo esa). Se busca
+  // DESPUÉS del último mensaje del usuario: un turno que falló no llega a
+  // guardarse (el error no emite assistant_done), así que antes se borraba la
+  // respuesta de un turno anterior y el usuario perdía un mensaje por reintento.
   if (c && c.messages.length) {
+    let lastUser = -1;
     for (let i = c.messages.length - 1; i >= 0; i--) {
+      if (c.messages[i].role === 'user') { lastUser = i; break; }
+    }
+    for (let i = c.messages.length - 1; i > lastUser; i--) {
       if (c.messages[i].role === 'assistant') { c.messages.splice(i, 1); break; }
     }
     c.updatedAt = Date.now();
@@ -1029,9 +1064,12 @@ ipcMain.handle('update:download', async () => {
     let expected = null;
     if (r.assets && r.assets.yml) {
       try {
-        const y = await (await fetch(r.assets.yml.url, { headers: { 'User-Agent': 'SAGITARI-updater' } })).text();
+        const y = await (await fetch(r.assets.yml.url, { headers: { 'User-Agent': 'SAGITARI-updater' }, signal: AbortSignal.timeout(15000) })).text();
         const parsed = updater.parseLatestYml(y);
-        expected = (parsed.files.find(f => f.url === asset.name) || {}).sha512 || parsed.sha512 || null;
+        // El hash de nivel superior es el del fichero `path` del yml (el Setup): la
+        // edición portable no podía actualizarse nunca porque se comparaba contra
+        // el hash del Setup (updater.sha512For documenta la regla).
+        expected = updater.sha512For(parsed, asset.name);
       } catch {}
     }
     // Sin hash publicado no hay verificación posible: se descarta igual que si

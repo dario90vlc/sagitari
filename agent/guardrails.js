@@ -55,7 +55,7 @@ function summarizeArgs(name, args = {}) {
   switch (name) {
     case 'run_command': return String(a.command || '').slice(0, 200);
     case 'write_file': return String(a.path || '');
-    case 'browser_control': return `${a.action || ''}${a.url ? ' → ' + a.url : ''}${a.text ? ' («' + a.text + '»)' : ''}`;
+    case 'browser_control': return `${a.action || ''}${a.url ? ' → ' + a.url : ''}${a.text ? ' («' + a.text + '»)' : ''}${a.action === 'click_index' ? ' (' + (a._label ? '«' + String(a._label).slice(0, 80) + '»' : 'elemento sin identificar') + ')' : ''}`;
     case 'open_app': return String(a.name || '');
     case 'open_url': return String(a.url || '');
     case 'clipboard': return a.action === 'write' ? 'escribir en el portapapeles' : 'leer el portapapeles';
@@ -119,6 +119,18 @@ function forcedConfirmReason(name, args = {}) {
   // de perfil de cookies/sesiones: ninguna de las dos es una acción «normal»
   if (a.action === 'eval') return 'Ejecutar JavaScript arbitrario dentro de la página';
   if (a.action === 'profile') return 'Cambiar el perfil del navegador (cookies y sesiones)';
+  // Un clic por índice no dice a qué se está clicando: la etiqueta la resuelve el
+  // navegador con su inventario (agent.js la añade como `_label`). Sin ella —o si
+  // apunta a comprar/pagar/eliminar— se pregunta siempre; con ella mandan las
+  // mismas reglas que para el clic por texto.
+  if (a.action === 'click_index') {
+    const label = String(a._label || '').slice(0, 160);
+    if (!label) return 'Hacer clic por índice en la web (no se pudo comprobar qué elemento es)';
+    if (SENSITIVE_BROWSER_RX.test(label)) {
+      return 'ACCIÓN SENSIBLE en la web: hacer clic en «' + label + '» — parece una compra/pago/eliminación/publicación';
+    }
+    return null;
+  }
   if (!['click', 'type', 'press'].includes(a.action)) return null;
 
   const what = a.action === 'click' ? 'hacer clic en «' + (a.text || a.selector || '') + '»'
@@ -156,7 +168,6 @@ class Guardrails {
         maxCostUsd: policy.guardrails?.maxCostUsd ?? 0,        // 0 = unlimited (estimación)
       loopThreshold: policy.guardrails?.loopThreshold ?? 3,  // identical consecutive calls before loop
       stallThreshold: policy.guardrails?.stallThreshold ?? 6, // pasos sin señal de progreso
-      maxDataGapMs: policy.guardrails?.maxDataGapMs ?? 5 * 60 * 1000, // 0 = sin límite
       },
     };
     this.startedAt = 0;
@@ -171,7 +182,6 @@ class Guardrails {
     this.recentCalls = [];       // signatures of last N tool calls
     this.approvals = new Map();  // remembered confirmations: signature -> expiry
     this._stall = 0;             // pasos consecutivos sin progreso
-    this.lastDataAt = 0;         // última vez que el run recibió datos del modelo
   }
 
   /** Hot-reload policy from Settings without losing run counters. */
@@ -205,28 +215,6 @@ class Guardrails {
     }
     if (g.maxSteps > 0 && this.steps > g.maxSteps) {
       return { ok: false, reason: `Límite de pasos alcanzado (${g.maxSteps}). Auméntalo o quítalo en Ajustes → Seguridad.` };
-    }
-    return { ok: true };
-  }
-
-  /** Marca «ahora» como última señal de datos del modelo (delta/tool result). */
-  touchData() { this.lastDataAt = Date.now(); }
-
-  /**
-   * ¿El modelo sigue enviando datos? Comprueba que no haya pasado más de
-   * maxDataGapMs desde la última señal (texto, tool result o arranque del run).
-   * Es la red que atrapa lo que el stall counter no ve: una petición al
-   * proveedor que acepta la conexión y jamás responde dejaba el turno colgado
-   * hasta que el usuario pulsaba Detener — y sin saber que había que pulsarlo.
-   */
-  checkDataFreshness() {
-    const g = this.policy.guardrails;
-    if (!g.maxDataGapMs || g.maxDataGapMs <= 0) return { ok: true };
-    const ref = this.lastDataAt || this.startedAt;
-    if (!ref) return { ok: true };
-    if (Date.now() - ref > g.maxDataGapMs) {
-      const mins = Math.round(g.maxDataGapMs / 60000);
-      return { ok: false, reason: `El modelo lleva más de ${mins} min sin enviar datos (¿proveedor saturado?). Ejecución detenida.` };
     }
     return { ok: true };
   }

@@ -13,22 +13,14 @@ const tmpDir = (prefix) => { const d = fs.mkdtempSync(path.join(os.tmpdir(), pre
 
 let pass = 0, fail = 0;
 const failures = [];
-const pendingAsync = [];
+/* Los tests se ENCOLAN y se ejecutan al final, en orden de registro (ver el cierre
+   del fichero). Antes cada uno arrancaba al registrarse, así que las secciones se
+   solapaban entre sí: el estado global (directorio de tareas, memoria, hábitos…)
+   cambiaba mientras otro test estaba a mitad y aparecían fallos que dependían del
+   tiempo y del orden de registro. */
+const QUEUE = [];
 
-function test(name, fn) {
-  try {
-    const r = fn();
-    if (r && typeof r.then === 'function') {
-      pendingAsync.push(r.then(
-        () => { pass++; console.log('  ok  ' + name); },
-        (e) => { fail++; failures.push({ name, err: e.message }); console.error('FAIL  ' + name + ' — ' + e.message); }
-      ));
-      return;
-    }
-    pass++; console.log('  ok  ' + name);
-  }
-  catch (e) { fail++; failures.push({ name, err: e.message }); console.error('FAIL  ' + name + ' — ' + e.message); }
-}
+function test(name, fn) { QUEUE.push({ name, fn }); }
 function eq(a, b, msg) { if (a !== b) throw new Error((msg || 'eq') + `: esperado ${JSON.stringify(b)}, obtenido ${JSON.stringify(a)}`); }
 function ok(v, msg) { if (!v) throw new Error(msg || 'esperado verdadero'); }
 
@@ -375,8 +367,59 @@ test('read_file: lee por rango con cabecera y avisa de cómo seguir', async () =
   ok(/quedan 38 líneas/.test(out), 'debe indicar cómo continuar la lectura');
 });
 
+test('edit_file: un archivo que no está en UTF-8 no se toca', async () => {
+  const dir = tmpDir('sagi-ansi-');
+  const p = path.join(dir, 'notas.txt');
+  // lo típico en Windows: un .txt guardado en ANSI por Notepad
+  const original = Buffer.from('caf\xe9 con le\xf1a\nsegunda l\xednea\n', 'latin1');
+  fs.writeFileSync(p, original);
+  const out = await executeTool('edit_file', { path: 'notas.txt', old_string: 'segunda', new_string: 'otra' }, { workspace: dir });
+  ok(out.startsWith('Error'), 'debe negarse en vez de corromper los acentos: ' + out);
+  ok(/ANSI|UTF-8/.test(out), 'explica el motivo');
+  ok(fs.readFileSync(p).equals(original), 'el archivo queda intacto, byte a byte');
+  // y el mismo archivo en UTF-8 sí se edita
+  const p2 = path.join(dir, 'utf8.txt');
+  fs.writeFileSync(p2, 'café con leña\n', 'utf8');
+  const okEdit = await executeTool('edit_file', { path: 'utf8.txt', old_string: 'leña', new_string: 'azúcar' }, { workspace: dir });
+  ok(okEdit.startsWith('OK'), okEdit);
+  eq(fs.readFileSync(p2, 'utf8'), 'café con azúcar\n');
+});
+
+test('write_file: escribe el contenido y no deja temporales', async () => {
+  const dir = tmpDir('sagi-write-');
+  const out = await executeTool('write_file', { path: 'sub/x.txt', content: 'hola' }, { workspace: dir });
+  ok(out.startsWith('OK'), out);
+  eq(fs.readFileSync(path.join(dir, 'sub', 'x.txt'), 'utf8'), 'hola');
+  // sobrescribir tampoco deja restos del mecanismo atómico
+  await executeTool('write_file', { path: 'sub/x.txt', content: 'adiós' }, { workspace: dir });
+  eq(fs.readFileSync(path.join(dir, 'sub', 'x.txt'), 'utf8'), 'adiós');
+  eq(fs.readdirSync(path.join(dir, 'sub')).join(','), 'x.txt', 'sin ficheros .sagi-tmp colgando');
+});
+
+test('list_dir y search_files: una ruta que no existe se explica', async () => {
+  const dir = tmpDir('sagi-missing-');
+  const l = await executeTool('list_dir', { path: 'no-existe' }, { workspace: dir });
+  ok(l.startsWith('Error'), 'list_dir no puede responder «vacío» a una ruta inexistente: ' + l);
+  const s = await executeTool('search_files', { path: 'no-existe', pattern: 'x' }, { workspace: dir });
+  ok(s.startsWith('Error'), 'search_files tampoco: ' + s);
+  // y una ruta que sí existe sigue funcionando
+  fs.writeFileSync(path.join(dir, 'a.txt'), 'contenido', 'utf8');
+  const okList = await executeTool('list_dir', { path: '.' }, { workspace: dir });
+  ok(okList.includes('a.txt'), okList);
+});
+
+test('search_files: la profundidad está acotada (un ciclo no cuelga la búsqueda)', async () => {
+  const dir = tmpDir('sagi-deep-');
+  let deep = dir;
+  for (let i = 0; i < 15; i++) { deep = path.join(deep, 'n' + i); fs.mkdirSync(deep, { recursive: true }); }
+  fs.writeFileSync(path.join(deep, 'aguja.txt'), 'x', 'utf8');
+  const t0 = Date.now();
+  const out = await executeTool('search_files', { path: '.', pattern: 'aguja' }, { workspace: dir });
+  ok(Date.now() - t0 < 5000, 'termina en seguida');
+  eq(out, 'Sin resultados.', 'más allá del tope de profundidad no se busca (antes podía no terminar nunca)');
+});
+
 (async () => {
-  for (const p of pendingAsync) { try { await p; } catch {} }
   /* ---------- v1.3: TaskManager (cola, concurrencia, pausa, cancelar, programadas) ---------- */
 const { TaskManager } = require('../agent/tasks');
 const TASKS_TM = tmpDir('sagi-tm-');
@@ -975,20 +1018,145 @@ test('agent: un stream mudo muere solo con llmTimeoutMs y el turno queda libre',
   ok(events.some(e => e.type === 'error'), 'el usuario ve un error explicado, no un turno eterno');
 });
 
-test('guardrails: checkDataFreshness detecta un run sin datos del modelo', () => {
-  const { Guardrails } = require('../agent/guardrails');
-  const g = new Guardrails({ guardrails: { maxDataGapMs: 5 * 60 * 1000 } });
-  g.beginRun();
-  ok(g.checkDataFreshness().ok, 'recién arrancado no está caducado');
-  g.lastDataAt = Date.now() - 6 * 60000;
-  ok(!g.checkDataFreshness().ok, '6 min sin datos: caducado, con motivo legible');
-  ok(g.checkDataFreshness().reason.includes('sin enviar datos'), 'el motivo lo entiende un humano');
-  g.touchData();
-  ok(g.checkDataFreshness().ok, 'touchData reabre la ventana');
-  const gOff = new Guardrails({ guardrails: { maxDataGapMs: 0 } });
-  gOff.beginRun();
-  gOff.lastDataAt = Date.now() - 60 * 60000;
-  ok(gOff.checkDataFreshness().ok, '0 = sin límite');
+test('agent: un stream terminado en [DONE] no se descarta aunque el socket siga abierto', async () => {
+  const { Agent } = require('../agent/agent');
+  const events = [];
+  const enc = new TextEncoder();
+  let calls = 0;
+  // Un proxy con keep-alive (o un proveedor que no cierra) deja el socket abierto
+  // después de mandar la respuesta entera. Antes se tiraba esa respuesta y el
+  // fallback la reintentaba en OTRO modelo, pagándola dos veces.
+  const body = new ReadableStream({
+    start(c) {
+      c.enqueue(enc.encode(evData({ choices: [{ delta: { content: 'La respuesta completa' } }] })));
+      c.enqueue(enc.encode('data: [DONE]\n\n'));
+      // a propósito: nunca se cierra
+    },
+  });
+  const agent = new Agent({
+    fetchFn: async () => { calls++; return new Response(body, { headers: { 'content-type': 'text/event-stream' } }); },
+    emit: (e) => events.push(e),
+    screenshotFn: async () => ({ dataUrl: 'data:image/png;base64,AA', w: 1, h: 1 }),
+  });
+  const settings = { active: { name: 'x', baseUrl: 'https://api.openai.com/v1', apiKey: 'k', model: 'gpt-4o' }, settings: { mode: 'act', modelRouting: false, llmTimeoutMs: 3000 } };
+  await Promise.race([
+    agent.chat('hola', settings),
+    new Promise((_, rej) => setTimeout(() => rej(new Error('el terminador [DONE] no cerró la lectura')), 2500)),
+  ]);
+  eq(calls, 1, 'no se reintenta en otro modelo una respuesta ya recibida');
+  ok(!events.some(e => e.type === 'error'), 'no se reporta como fallo del proveedor');
+  const last = agent.history.filter(h => h.role === 'assistant').pop();
+  eq(last.content, 'La respuesta completa', 'el texto recibido llega al historial');
+});
+
+test('agent: un agente reutilizado atiende cada mensaje', async () => {
+  const { Agent } = require('../agent/agent');
+  const enc = new TextEncoder();
+  let calls = 0;
+  const agent = new Agent({
+    // política con un campo ajeno: una política de Ajustes no puede matar el turno
+    guardrailsPolicy: { guardrails: { maxDataGapMs: 30 } },
+    fetchFn: async () => {
+      calls++;
+      const body = new ReadableStream({
+        start(c) { c.enqueue(enc.encode(evData({ choices: [{ delta: { content: 'respuesta ' + calls } }] }))); c.close(); },
+      });
+      return new Response(body, { headers: { 'content-type': 'text/event-stream' } });
+    },
+    emit: () => {},
+    screenshotFn: async () => ({ dataUrl: 'data:image/png;base64,AA', w: 1, h: 1 }),
+  });
+  const settings = { active: { name: 'x', baseUrl: 'https://api.openai.com/v1', apiKey: 'k', model: 'gpt-4o' }, settings: { mode: 'act', modelRouting: false } };
+  await agent.chat('uno', settings);
+  // el chat de la app reutiliza el MISMO agente toda la sesión: entre mensajes
+  // puede pasar cualquier cosa (minutos, horas) y aun así cada uno llega al modelo
+  await new Promise(r => setTimeout(r, 60));
+  await agent.chat('dos', settings);
+  eq(calls, 2, 'el segundo mensaje de la sesión también llega al proveedor');
+  const assistant = agent.history.filter(h => h.role === 'assistant').map(h => h.content);
+  ok(assistant.some(t => t === 'respuesta 1') && assistant.some(t => t === 'respuesta 2'), 'las dos respuestas están en el hilo');
+  ok(!agent.isBusy(), 'el agente queda libre para el siguiente mensaje');
+});
+
+test('agent: el subagente respeta el límite de silencio del usuario', async () => {
+  const { Agent } = require('../agent/agent');
+  const enc = new TextEncoder();
+  // el proveedor manda un delta y se queda mudo (socket abierto): delegar no
+  // puede cortar a los 120 s por defecto cuando Ajustes dice otra cosa
+  const body = new ReadableStream({ start(c) { c.enqueue(enc.encode(evData({ choices: [{ delta: { content: 'x' } }] }))); } });
+  const agent = new Agent({
+    fetchFn: async () => new Response(body, { headers: { 'content-type': 'text/event-stream' } }),
+    emit: () => {},
+    screenshotFn: async () => ({ dataUrl: 'data:image/png;base64,AA', w: 1, h: 1 }),
+  });
+  const settings = { active: { name: 'x', baseUrl: 'https://api.openai.com/v1', apiKey: 'k', model: 'gpt-4o' }, settings: { mode: 'act', llmTimeoutMs: 100 } };
+  const t0 = Date.now();
+  let err = null;
+  try {
+    await agent._runWithSystem('sistema', settings, 'subtarea', [], new AbortController().signal, () => {});
+  } catch (e) { err = e; }
+  ok(err, 'el silencio corta el bucle del subagente en vez de dejarlo colgado');
+  ok(/no envió datos/.test(err.message), 'el motivo explica el silencio: ' + err.message);
+  ok(Date.now() - t0 < 5000, 'usa el límite del usuario (100 ms), no el default de 120 s');
+});
+
+test('tareas: un fallo de herramienta no archiva la tarea en curso', async () => {
+  const { Agent } = require('../agent/agent');
+  const checkpoints = require('../agent/checkpoints');
+  const enc = new TextEncoder();
+  const checks = [];
+  const fails = [];
+  let turn = 0;
+  // Se sustituyen las escrituras de checkpoint: este test comprueba que el bucle
+  // NO archiva la tarea viva, no cómo se persiste (que tiene sus propios tests).
+  const real = { save: checkpoints.save, record: checkpoints.record, complete: checkpoints.complete, fail: checkpoints.fail };
+  checkpoints.save = (r) => r;
+  checkpoints.record = (r) => r;
+  checkpoints.complete = (r) => { r.status = 'completed'; return r; };
+  checkpoints.fail = (r, info) => { fails.push(info); return r; };
+  // el modelo pide ficheros que no existen (fallo de herramienta) dos veces; la
+  // tarea debe seguir VIVA (pausable, cancelable), no archivada como fallida
+  const calls = ['{"path":"no-existe.txt"}', '{"path":"tampoco.txt"}'];
+  let run = null;
+  try {
+    const agent = new Agent({
+      fetchFn: async () => {
+        const i = turn++;
+        const body = new ReadableStream({
+          start(c) {
+            if (i < calls.length) {
+              c.enqueue(enc.encode(evData({ choices: [{ delta: { tool_calls: [{ index: 0, id: 'c' + i, function: { name: 'read_file', arguments: calls[i] } }] } }] })));
+            } else {
+              c.enqueue(enc.encode(evData({ choices: [{ delta: { content: 'No pude leerlos.' } }] })));
+            }
+            c.enqueue(enc.encode('data: [DONE]\n\n'));
+          },
+        });
+        return new Response(body, { headers: { 'content-type': 'text/event-stream' } });
+      },
+      emit: (e) => { if (e.type === 'tool_result' && run) checks.push(run.status); },
+      screenshotFn: async () => ({ dataUrl: 'data:image/png;base64,AA', w: 1, h: 1 }),
+    });
+    run = checkpoints.newRun({ goal: 'tarea de prueba', mode: 'act', status: 'running' });
+    const settings = { active: { name: 'x', baseUrl: 'https://api.openai.com/v1', apiKey: 'k', model: 'gpt-4o' }, settings: { mode: 'act', modelRouting: false } };
+    await agent.chat('analiza los informes', settings, undefined, { background: true, task: run });
+  } finally {
+    Object.assign(checkpoints, real);
+  }
+  eq(checks.join(','), 'running,running', 'una herramienta que falla NO archiva la tarea: sigue viva y cancelable');
+  eq(fails.length, 0, 'checkpoints.fail() solo se usa en los cierres reales, no a mitad de bucle');
+  ok(run.lastError && run.lastError.tool === 'read_file', 'el fallo queda anotado en la tarea');
+  eq(run.status, 'completed', 'al terminar de verdad se cierra');
+});
+
+test('tareas: Detener mata también el comando en curso de un subagente', async () => {
+  const { Agent } = require('../agent/agent');
+  const parent = new Agent({ emit: () => {} });
+  const killed = [];
+  parent.runningTool = { stop: () => killed.push('herramienta') };
+  parent.subagent = { stop: () => killed.push('subagente') };
+  parent.stop();
+  eq(killed.join(','), 'herramienta,subagente', 'sin esto el comando del subagente seguía vivo tras pulsar Detener');
 });
 
 test('ajustes: cada pestaña tiene su panel, y la búsqueda tiene filas que filtrar', () => {
@@ -1242,7 +1410,7 @@ test('agent: el resultado de una herramienta llega con duración y si falló', a
     emit: (e) => events.push(e),
     screenshotFn: async () => ({ dataUrl: 'data:image/png;base64,AA' }),
   });
-  const settings = { active: { name: 'x', baseUrl: 'https://api.openai.com/v1', apiKey: 'k', model: 'gpt-4o' }, settings: { mode: 'act', modelRouting: false } };
+  const settings = { active: { name: 'x', baseUrl: 'https://api.openai.com/v1', apiKey: 'k', model: 'gpt-4o' }, settings: { mode: 'act', modelRouting: false, workspace: tmpDir('sagi-ws-') } };
   await agent.chat('lista la carpeta', settings);
   const res = events.find(e => e.type === 'tool_result');
   ok(res, 'debe emitir tool_result');
@@ -1621,6 +1789,23 @@ test('ico: la entrada BMP lleva la cabecera y el orden de píxeles de Windows', 
   eq([dib[last], dib[last + 1], dib[last + 2], dib[last + 3]].join(','), '30,20,10,40', 'orden BGRA y volteo vertical');
 });
 
+test('updater: el hash del portable no se confunde con el del Setup', () => {
+  const updater = require('../main/updater');
+  // Un latest.yml real: electron-builder solo escribe info de actualización del
+  // Setup, así que `files:` lista el Setup y el sha512 de arriba es el suyo.
+  const yml = 'version: 9.9.9\npath: SAGITARI-Setup-9.9.9.exe\nsha512: HASH_SETUP\nfiles:\n  - url: SAGITARI-Setup-9.9.9.exe\n    sha512: HASH_SETUP\n';
+  const parsed = updater.parseLatestYml(yml);
+  eq(updater.sha512For(parsed, 'SAGITARI-Setup-9.9.9.exe'), 'HASH_SETUP', 'el Setup usa su hash');
+  eq(updater.sha512For(parsed, 'SAGITARI-Portable-9.9.9.exe'), null,
+    'el portable NO hereda el hash del Setup: esa comparación hacía imposible actualizarlo');
+  // Si el yml sí publica el hash de cada archivo, cada uno usa el suyo
+  const both = updater.parseLatestYml('version: 1\npath: Setup.exe\nsha512: HASH_SETUP\nfiles:\n  - url: Setup.exe\n    sha512: HASH_SETUP\n  - url: Portable.exe\n    sha512: HASH_PORTABLE\n');
+  eq(updater.sha512For(both, 'Portable.exe'), 'HASH_PORTABLE');
+  eq(updater.sha512For(both, 'Setup.exe'), 'HASH_SETUP');
+  // El de nivel superior SÍ vale cuando el yml nombra ese archivo en `path`
+  eq(updater.sha512For(updater.parseLatestYml('version: 1\npath: Portable.exe\nsha512: HASH_P\n'), 'Portable.exe'), 'HASH_P');
+});
+
 test('icono incluido: BMP en los tamaños pequeños (o Windows cae al icono genérico)', () => {
   const buf = fs.readFileSync(path.join(__dirname, '..', 'renderer', 'assets', 'sagitari.ico'));
   const icons = ico.parseIco(buf);
@@ -1648,10 +1833,6 @@ test('png-ops se puede importar sin ejecutar el pipeline', () => {
   // el pipeline lee y escribe ficheros: al importarlo solo debe exponer el toolkit
   ok(typeof pngOps.decodePNG === 'function' && typeof pngOps.encodePNG === 'function', 'debe exponer el toolkit');
 });
-
-// el recuento DEBE esperar a los tests async registrados dentro de este bloque:
-// si no, el resumen se imprime antes de que terminen y sus fallos no cuentan
-while (pendingAsync.length) await Promise.all(pendingAsync.splice(0));
 
 /* ---------- actualizador: versiones, assets, descarga y verificación ---------- */
 const updater = require('../main/updater');
@@ -1805,6 +1986,18 @@ test('permisos: leer el portapapeles y evaluar JS piden confirmación aunque el 
   eq(g.decide('clipboard', { action: 'write', text: 'hola' }).action, 'allow', 'escribir en el portapapeles es inocuo');
 });
 
+test('permisos: un clic por índice se juzga con la etiqueta del inventario', () => {
+  const g = new Guardrails({ permissions: { browser_control: 'safe' } });
+  // el navegador resuelve la etiqueta y viaja como `_label` (agent.js)
+  eq(g.decide('browser_control', { action: 'click_index', index: 3, _label: 'Aceptar cookies' }).action, 'allow',
+    'un clic inocuo sigue siendo automático si el usuario confía en el navegador');
+  eq(g.decide('browser_control', { action: 'click_index', index: 7, _label: 'Pagar ahora 49,90 €' }).action, 'confirm',
+    'comprar por índice también se confirma');
+  eq(g.decide('browser_control', { action: 'click_index', index: 7, _label: 'Eliminar cuenta' }).sensitive, true);
+  eq(g.decide('browser_control', { action: 'click_index', index: 1 }).action, 'confirm',
+    'sin etiqueta no se sabe qué se pulsa: se pregunta');
+});
+
 test('permisos: abrir una URL pide confirmación por defecto', () => {
   const g = new Guardrails();
   eq(g.decide('open_url', { url: 'https://github.com' }).action, 'confirm');
@@ -1940,6 +2133,37 @@ test('browser: una acción desconocida no lanza un navegador', async () => {
   eq(b.browserPid, null, 'sin lanzar ningún proceso');
 });
 
+test('browser: el inventario pertenece a la ejecución que lo pidió', async () => {
+  const b = new Browser();
+  b.profileDir = tmpDir('sagi-prof4-');
+  b._lastElements = [{ tag: 'button', text: 'Pagar', x: 10, y: 20, w: 30, h: 10 }];
+  b._invOwner = 'agente-A';
+  const r = await b.clickIndex(0, 'sess', 'agente-B');
+  ok(/otra ejecución/.test(r), 'la otra ejecución no puede clicar con coordenadas ajenas');
+  eq(b._lastElements.length, 1, 'no se consumió el inventario del dueño');
+  eq(b.labelForIndex(0), 'Pagar button', 'la etiqueta sirve para juzgar la acción');
+  eq(b.labelForIndex(9), '', 'un índice inexistente no inventa etiqueta');
+});
+
+test('browser: las acciones se ejecutan de una en una', async () => {
+  const b = new Browser();
+  const order = [];
+  b._handle = async (args) => {
+    order.push('inicio' + args.n);
+    await new Promise(r => setTimeout(r, 20));
+    if (args.n === 1) throw new Error('fallo simulado');
+    order.push('fin' + args.n);
+  };
+  // dos agentes a la vez (chat + tarea de background) comparten el navegador: sus
+  // acciones no pueden solaparse porque el estado de la pestaña es global
+  const p1 = b.handle({ n: 1 }).catch(e => 'error:' + e.message);
+  const p2 = b.handle({ n: 2 });
+  const p3 = b.handle({ n: 3 });
+  eq(await p1, 'error:fallo simulado', 'el fallo llega a quien lo pidió');
+  await Promise.all([p2, p3]);
+  eq(order.join(' '), 'inicio1 inicio2 fin2 inicio3 fin3', 'cada acción termina antes de la siguiente, y un fallo no atasca la cola');
+});
+
 test('browser: cambiar de perfil olvida el estado del anterior', async () => {
   const b = new Browser();
   b.port = 9333;
@@ -2027,6 +2251,19 @@ test('herramientas: argumentos ilegibles no ejecutan nada', async () => {
   eq(r.action, 'bad-args');
   ok(/no son JSON válido/.test(r.text), 'se lo dice al modelo para que reenvíe la llamada');
   eq(a.meta.toolCalls, 0);
+});
+
+test('herramientas: argumentos que no son objeto no tumban el turno', async () => {
+  const a = new AgentCls({ emit: () => {} });
+  // `arguments: "null"` es JSON válido: antes pasaba el parse y reventaba leyendo
+  // args.path, así que el usuario perdía la petición con un TypeError críptico
+  for (const raw of ['null', '[1,2]', '"texto"', '3']) {
+    const r = await a._runToolCall(toolCall('read_file', raw), fakeCtx());
+    eq(r.action, 'bad-args', 'con argumentos ' + raw);
+    ok(/objeto JSON/.test(r.text), 'se lo dice al modelo: ' + r.text);
+  }
+  eq(a.meta.toolCalls, 0, 'no se ejecutó nada');
+  eq(a.guardrails.steps, 0);
 });
 
 test('herramientas: una restringida se bloquea sin ejecutarse', async () => {
@@ -2196,9 +2433,17 @@ test('chat: el fallo se explica y la píldora ofrece los modelos de tu API', () 
   eq(K.statusPill, undefined, 'la píldora de estado se retiró del kit');
 });
 
-/* Los tests async registrados más arriba (la descarga del actualizador) todavía
-   no han terminado: hay que esperarlos ANTES de borrar sus temporales. */
-while (pendingAsync.length) await Promise.all(pendingAsync.splice(0));
+/* Cierre de la suite: se ejecutan TODOS los tests registrados, en orden, uno
+   detrás de otro, y solo entonces se imprime el resumen. */
+for (const t of QUEUE) {
+  try {
+    await t.fn();
+    pass++; console.log('  ok  ' + t.name);
+  } catch (e) {
+    fail++; failures.push({ name: t.name, err: e.message });
+    console.error('FAIL  ' + t.name + ' — ' + e.message);
+  }
+}
 
 // limpieza: la suite no debe dejar basura en %TEMP%
 for (const d of TMP_DIRS) { try { fs.rmSync(d, { recursive: true, force: true }); } catch {} }

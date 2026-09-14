@@ -143,8 +143,10 @@ class Agent {
     this.stopRequested = false;          // el usuario pulsó Detener en esta conversación
     this.pauseRequested = false;         // pausa solicitada (checkpoint + stop limpio)
     this.runningTool = null;             // { stop() } de la herramienta en ejecución
+    this.subagent = null;                // subagente en curso (para matar su comando al Detener)
     this.toolsFired = new Map();         // name -> {count, lastAt}
     this.guardrails = new Guardrails(opts.guardrailsPolicy || {});   // límites + permisos
+    this._llmTimeoutMs = null;           // ms sin datos del proveedor antes de cortar (null = default)
     this.pendingConfirm = null;          // {resolve, call} mientras el usuario decide
     this.currentRun = null;              // checkpoint de la tarea en curso (checkpoints.js)
     this.meta = { model: null, tokensIn: 0, tokensOut: 0, llmCalls: 0, toolCalls: 0, startedAt: null, lastLatencyMs: null, lastError: null, costUsd: 0, paused: false };
@@ -216,9 +218,7 @@ class Agent {
     this.pauseRequested = true;
     this.emit({ type: 'status', text: 'Pausando tarea — guardando checkpoint…' });
     if (this.abort) this.abort.abort();
-    if (this.runningTool && typeof this.runningTool.stop === 'function') {
-      try { this.runningTool.stop(); } catch {}
-    }
+    this._killRunning();
     return { ok: true };
   }  /** (v1.3) La reanudación vive en el TaskManager: agent/tasks.js orquesta
       la cola, la concurrencia y agentes dedicados por tarea. */
@@ -298,6 +298,18 @@ class Agent {
     return { ok: true, text };
   }
 
+  /** Mata lo que esté en vuelo: la herramienta actual y, si estamos delegando, el
+      subagente. Su comando se registra en el SUBagente (registerKillable es suyo),
+      así que sin esto el proceso sobrevivía a Detener hasta agotar su timeout. */
+  _killRunning() {
+    if (this.runningTool && typeof this.runningTool.stop === 'function') {
+      try { this.runningTool.stop(); } catch {}
+    }
+    if (this.subagent) {
+      try { this.subagent.stop(); } catch {}
+    }
+  }
+
   // Detener de verdad: aborta el fetch del modelo Y mata el comando/herramienta
   // en ejecución (terminal, navegador, etc.). Sin esto el botón solo toma efecto
   // cuando la herramienta actual terminara sola.
@@ -311,9 +323,7 @@ class Agent {
       try { pc.resolve(false); } catch {}
     }
     if (this.abort) this.abort.abort();
-    if (this.runningTool && typeof this.runningTool.stop === 'function') {
-      try { this.runningTool.stop(); } catch {}
-    }
+    this._killRunning();
   }
 
   async _run(userText, settings, imageDataUrl, signal, opts = {}) {
@@ -413,18 +423,6 @@ class Agent {
     let assistantSaidSomething = false;
 
     while (true) {
-      // ---- guardrail: ¿el modelo sigue mandando datos? (peticiones mudas) ----
-      // Debe ir ANTES de la llamada al modelo: si la anterior se quedó colgada
-      // y esta vuelta nunca llega, nada más podría detectar el bloqueo.
-      const freshCheck = this.guardrails.checkDataFreshness();
-      if (!freshCheck.ok) {
-        this.emit({ type: 'status', text: 'Sin datos del modelo — detenido' });
-        this.emit({ type: 'guardrail', reason: freshCheck.reason });
-        runlog.log({ agent: 'sagitari', task: taskId, event: 'data_gap_stop', reason: freshCheck.reason });
-        if (task && !task.closed) checkpoints.interrupt(task);
-        this._pushAssistant(assistantSaidSomething ? { role: 'assistant', content: '(detenido: el proveedor dejó de responder)' } : null);
-        return;
-      }
       // ---- guardrail: límites de pasos / tiempo (configurables; 0 = sin límite) ----
       const stepCheck = this.guardrails.checkStep();
       if (!stepCheck.ok) {
@@ -456,7 +454,6 @@ class Agent {
       const res = await this._streamWithFallback(chain, messages, signal);
       this.meta.llmCalls++;
       this.meta.lastLatencyMs = Date.now() - t0;
-      this.guardrails.touchData();   // llegó respuesta: el run sigue vivo
       if (res.usage) {
         this.meta.tokensIn += res.usage.prompt_tokens || 0;
         this.meta.tokensOut += res.usage.completion_tokens || 0;
@@ -575,7 +572,15 @@ class Agent {
           // ---- checkpoint: registrar el paso (éxito o fallo con su motivo) ----
           if (task && !task.closed) {
             checkpoints.record(task, { step: 'EXECUTE', tool: tc.function.name, ok: !failed, summary: String(text).slice(0, 160) });
-            if (failed) checkpoints.fail(task, { step: 'EXECUTE', tool: tc.function.name, message: String(text).slice(0, 300) });
+            // OJO: aquí NO va checkpoints.fail(). fail() archiva el run como
+            // 'failed' —lo saca de las tareas activas— y el bucle SIGUE ejecutando:
+            // la tarea quedaba impausable e incancelable, la vista la pintaba como
+            // fallida y «Reanudar» lanzaba una segunda ejecución del mismo run.
+            // Un fallo de herramienta se anota; el cierre lo deciden los finales.
+            if (failed) {
+              task.lastError = { step: 'EXECUTE', tool: tc.function.name, message: String(text).slice(0, 500), ts: new Date().toISOString() };
+              checkpoints.save(task);
+            }
           }
           // Feed vision inputs (screenshots) back to the model when supported
           const toolContent = images && cfg.vision !== false
@@ -641,6 +646,13 @@ class Agent {
     let argsError = null;
     try { args = JSON.parse(tc.function.arguments || '{}'); }
     catch { argsError = 'Error: los argumentos de la herramienta no son JSON válido. Reenvía la llamada con argumentos correctos (objeto JSON).'; }
+    // Un JSON válido que no es objeto (p. ej. "null") pasaba el parse y reventaba
+    // más abajo leyendo args.path: el turno se caía con un TypeError en vez de
+    // responderle al modelo que reenvíe la llamada.
+    if (!argsError && (!args || typeof args !== 'object' || Array.isArray(args))) {
+      args = {};
+      argsError = 'Error: los argumentos de la herramienta deben ser un objeto JSON. Reenvía la llamada con argumentos correctos.';
+    }
     this.emit({ type: 'tool', name, args });
     if (onStatus) onStatus(statusFor(name, args));
 
@@ -667,6 +679,12 @@ class Agent {
     if (loop.loop) return { action: 'loop', pattern: loop.pattern, args };
 
     // ---- permisos: safe → ejecuta; confirm → pregunta; restricted → bloquea ----
+    // Un clic por índice solo se puede juzgar con la etiqueta que guardó el
+    // inventario: sin esto, click_index esquivaba la confirmación de acciones
+    // sensibles (comprar/pagar/eliminar) que sí exige el clic por texto.
+    if (name === 'browser_control' && args.action === 'click_index' && this.browser && typeof this.browser.labelForIndex === 'function') {
+      args = { ...args, _label: this.browser.labelForIndex(args.index) };
+    }
     const decision = this.guardrails.decide(name, args);
     let confirmed = false;
     // decide() devuelve {action:'deny'} para las restringidas: al unificar los dos
@@ -711,6 +729,7 @@ class Agent {
           home: os.homedir(),
           workspace: (settings.settings && settings.settings.workspace) || path.join(os.homedir(), 'Desktop', 'Sagitari'),
           registerKillable: (k) => { this.runningTool = k; },   // para poder matar el comando al Detener
+          ownerId: this.sessionId,   // quién pide la acción (el navegador lo usa para no cruzar inventarios)
         });
       }
     } catch (e) { result = 'Error: ' + e.message; }
@@ -742,6 +761,7 @@ class Agent {
       },
     });
     const signal = (this.abort && this.abort.signal) || new AbortController().signal;
+    this.subagent = sub;   // para que Detener/Pausar maten también su comando en curso
     this.emit({ type: 'status', text: `${spec.emoji} ${spec.name}: ${taskText.slice(0, 80)}` });
     let finalText = '';
     try {
@@ -756,6 +776,7 @@ class Agent {
     } catch (e) {
       return `RESULT: delegación fallida (${e.message})\nSTATUS: FAILED`;
     } finally {
+      this.subagent = null;
       // el gasto del subagente cuenta para el presupuesto global del usuario:
       // sin esto una delegación podía multiplicar el coste sin tope
       const over = this.guardrails.absorb(sub.guardrails);
@@ -776,6 +797,11 @@ class Agent {
     const cfg = this.activeConfig(settings);
     if (!cfg || !cfg.baseUrl || !cfg.model) throw new Error('sin proveedor/modelo activo');
     this._mode = MODE_PROFILES.act;
+    // El límite de silencio del usuario vale también dentro de un subagente: sin
+    // esto, delegar ignoraba el ajuste (300 s o «sin límite») y cortaba a los 120 s
+    // por defecto, con un error que contradecía lo que dice Ajustes.
+    this._llmTimeoutMs = Number(settings.settings?.llmTimeoutMs);
+    if (!Number.isFinite(this._llmTimeoutMs) || this._llmTimeoutMs < 0) this._llmTimeoutMs = null;   // 0 = sin límite
     this.guardrails.model = cfg.model;
     this.guardrails.beginRun();
     const messages = [{ role: 'system', content: sys }, { role: 'user', content: userText }];

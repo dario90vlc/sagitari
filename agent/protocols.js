@@ -150,6 +150,8 @@ const DEFAULT_SILENCE_MS = 120000;
 /**
  * Lee el cuerpo SSE de una respuesta y entrega cada evento ya parseado.
  * opts.silenceTimeoutMs: ms sin recibir nada antes de abortar con error.
+ * Si `onEvent` devuelve false, la lectura termina ahí sin error: es la señal de
+ * que el adaptador ya tiene la respuesta entera (terminador visto).
  * @returns {Promise<boolean>} true si se abortó a mitad
  * @throws {Error} si el proveedor se queda mudo más de `silenceTimeoutMs`
  */
@@ -158,6 +160,7 @@ async function readSSE(resp, signal, onEvent, opts = {}) {
   const decoder = new TextDecoder();
   let buf = '';
   let aborted = false;
+  let complete = false;   // el adaptador avisó de que la respuesta ya está entera
   let idleError = null;
   let idleTimer = null;
   let idleMs = DEFAULT_SILENCE_MS;
@@ -193,7 +196,7 @@ async function readSSE(resp, signal, onEvent, opts = {}) {
   };
   armIdle();
   try {
-    while (!aborted) {
+    while (!aborted && !complete) {
       let step;
       try { step = await reader.read(); }
       catch (e) { if (aborted || (signal && signal.aborted)) { aborted = true; break; } throw e; }
@@ -206,15 +209,24 @@ async function readSSE(resp, signal, onEvent, opts = {}) {
         const block = buf.slice(0, idx);
         buf = buf.slice(idx + 2);
         const ev = parseSSEBlock(block);
-        if (ev) onEvent(ev);
+        // onEvent devuelve false al ver el terminador ([DONE], message_stop,
+        // response.completed). Sin esto, un proveedor (o un proxy con keep-alive)
+        // que deja el socket abierto tras la respuesta completa hacía esperar al
+        // temporizador de silencio: se tiraba una respuesta YA recibida y el
+        // fallback la reintentaba en otro modelo, pagándola dos veces.
+        if (ev && onEvent(ev) === false) { complete = true; break; }
       }
     }
   } finally {
     disarmIdle();
     if (signal) signal.removeEventListener('abort', stop);
   }
+  if (complete) {
+    // soltar la conexión aunque el proveedor no la cierre
+    try { reader.cancel().catch(() => {}); } catch {}
+  }
   if (idleError) throw idleError;
-  if (!aborted) {
+  if (!aborted && !complete) {
     const tail = parseSSEBlock(buf);
     if (tail) onEvent(tail);
   }
@@ -255,7 +267,7 @@ async function streamOpenAI(cfg, { fetchFn, messages, tools, signal, onText }) {
   let first = true;
   const toolCalls = [];
   const aborted = await readSSE(resp, signal, (ev) => {
-    if (ev.data === '[DONE]') return;
+    if (ev.data === '[DONE]') return false;   // respuesta completa: no esperar al cierre del socket
     let json;
     try { json = JSON.parse(ev.data); } catch { return; }
     if (json.usage) usage = json.usage;
@@ -430,6 +442,8 @@ async function streamAnthropic(cfg, { fetchFn, messages, tools, signal, onText }
           usage = { ...(usage || {}), completion_tokens: json.usage.output_tokens };
         }
         break;
+      case 'message_stop':
+        return false;   // respuesta completa: no esperar al cierre del socket
       case 'error':
         failure = new Error(`Anthropic: ${json.error?.message || 'error de streaming'}`);
         break;
@@ -539,7 +553,7 @@ async function streamResponses(cfg, { fetchFn, messages, tools, signal, onText }
       case 'response.incomplete': {
         const u = json.response?.usage;
         if (u) usage = { prompt_tokens: u.input_tokens || 0, completion_tokens: u.output_tokens || 0, total_tokens: u.total_tokens || ((u.input_tokens || 0) + (u.output_tokens || 0)) };
-        break;
+        return false;   // respuesta completa: no esperar al cierre del socket
       }
       case 'response.failed':
         failure = new Error(`Responses: ${json.response?.error?.message || 'la respuesta falló'}`);
