@@ -181,4 +181,82 @@ function createStdioTransport({ command, args = [], cwd, env = {}, defaultTimeou
   };
 }
 
-module.exports = { DEFAULT_TIMEOUT_MS, createLineReader, Rpc, buildCmdLine, resolveCommand, createStdioTransport };
+/** Solo https, o http si el destino es loopback (ahí el token no sale del equipo). */
+function httpUrlAllowed(raw) {
+  let u = null;
+  try { u = new URL(String(raw || '')); } catch { return false; }
+  if (u.protocol === 'https:') return true;
+  if (u.protocol !== 'http:') return false;
+  return ['localhost', '127.0.0.1', '::1', '[::1]'].includes(u.hostname);
+}
+
+/** Mensajes JSON de un cuerpo SSE (varias líneas `data:` se concatenan). */
+function parseSseText(text) {
+  const out = [];
+  for (const bloque of String(text || '').split(/\r?\n\r?\n/)) {
+    const datos = bloque.split(/\r?\n/).filter(l => l.startsWith('data:')).map(l => l.slice(5).trimStart());
+    if (!datos.length) continue;
+    // La spec SSE une las líneas `data:` con \n, pero hay emisores que parten el
+    // JSON en mitad de una cadena: ahí ese \n lo invalida, así que se reintenta con
+    // la concatenación cruda (que reproduce el JSON original tal cual).
+    let m;
+    try { m = JSON.parse(datos.join('\n')); }
+    catch { try { m = JSON.parse(datos.join('')); } catch { continue; } }
+    out.push(m);
+  }
+  return out;
+}
+
+/**
+ * Servidor MCP remoto: POST con JSON-RPC; la respuesta puede ser JSON directo o
+ * un flujo SSE (streamable HTTP). El id de sesión que devuelva `initialize` se
+ * reenvía en las peticiones siguientes.
+ */
+function createHttpTransport({ url, headers = {}, defaultTimeoutMs, fetchFn = fetch, onNotice }) {
+  if (!httpUrlAllowed(url)) throw new Error('La URL del servidor MCP debe ser https (o http en localhost).');
+  let session = null;
+  const exitHandlers = [];
+  let muerto = null;
+  const avisarMuerte = (motivo) => {
+    if (muerto) return;
+    muerto = motivo;
+    rpc.fail(motivo);
+    for (const h of exitHandlers) { try { h(motivo); } catch {} }
+  };
+  const rpc = new Rpc({
+    send: (text) => { void enviar(text); },
+    onNotice,
+    defaultTimeoutMs,
+  });
+  async function enviar(text) {
+    const cabeceras = { 'content-type': 'application/json', accept: 'application/json, text/event-stream', ...headers };
+    if (session) cabeceras['mcp-session-id'] = session;
+    try {
+      // El temporizador del Rpc acota la espera lógica; este signal acota la
+      // petición HTTP de verdad (si no, una petición colgada deja el socket vivo
+      // para siempre aunque la llamada ya haya fallado por timeout).
+      const res = await fetchFn(url, { method: 'POST', headers: cabeceras, body: text, signal: AbortSignal.timeout((defaultTimeoutMs || DEFAULT_TIMEOUT_MS) + 2000) });
+      const sid = res.headers.get('mcp-session-id');
+      if (sid) session = sid;
+      if (!res.ok) { avisarMuerte(`el servidor MCP respondió ${res.status}.`); return; }
+      const tipo = String(res.headers.get('content-type') || '');
+      const body = await res.text();
+      const mensajes = tipo.includes('text/event-stream') ? parseSseText(body) : [JSON.parse(body)];
+      for (const m of mensajes) rpc.handleMessage(m);
+    } catch (e) {
+      // Un abort causado por nuestro propio tope no significa que el servidor esté
+      // caído: el Rpc ya rechazó la petición con su mensaje de timeout, así que no
+      // se marca muerto (si lo estuviera, la siguiente llamada lo comprobaría).
+      if (e && e.name === 'AbortError') return;
+      avisarMuerte('no se pudo hablar con el servidor MCP: ' + e.message);
+    }
+  }
+  return {
+    rpc,
+    sessionId: () => session,
+    onExit: (cb) => { exitHandlers.push(cb); if (muerto) cb(muerto); },
+    kill: () => { session = null; },
+  };
+}
+
+module.exports = { DEFAULT_TIMEOUT_MS, createLineReader, Rpc, buildCmdLine, resolveCommand, createStdioTransport, httpUrlAllowed, parseSseText, createHttpTransport };

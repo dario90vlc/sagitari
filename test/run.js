@@ -1207,6 +1207,82 @@ test('mcp: una petición del servidor con un id que choca no se confunde con una
   eq((await p).tools.length, 0);
 });
 
+test('mcp: solo https (o http en loopback) para servidores remotos', () => {
+  ok(mcpTransport.httpUrlAllowed('https://mcp.ejemplo.com/mcp'));
+  ok(mcpTransport.httpUrlAllowed('http://127.0.0.1:3000/mcp'));
+  ok(mcpTransport.httpUrlAllowed('http://localhost:3000/mcp'));
+  ok(!mcpTransport.httpUrlAllowed('http://mcp.ejemplo.com/mcp'), 'http en internet queda fuera (va el token en claro)');
+  ok(!mcpTransport.httpUrlAllowed('file:///C:/x'), 'nada que no sea http(s)');
+  ok(!mcpTransport.httpUrlAllowed('no es una url'));
+});
+
+test('mcp: cuerpo SSE y cuerpo JSON se interpretan igual', () => {
+  const sse = 'event: message\ndata: {"jsonrpc":"2.0","id":1,"result":{"a":1}}\n\n';
+  eq(mcpTransport.parseSseText(sse)[0].result.a, 1);
+  // varias líneas data: del mismo evento se concatenan (spec SSE)
+  const multi = 'data: {"jsonrpc":"2.0","id":2,\ndata: "result":{"b":2}}\n\n';
+  eq(mcpTransport.parseSseText(multi)[0].result.b, 2);
+  eq(mcpTransport.parseSseText('no es sse').length, 0);
+});
+
+test('mcp: transporte http manda cabeceras, guarda la sesión y lee SSE', async () => {
+  const http = require('http');
+  const vistos = [];
+  const srv = http.createServer((req, res) => {
+    let body = '';
+    req.on('data', (c) => body += c);
+    req.on('end', () => {
+      const msg = JSON.parse(body);
+      vistos.push({ msg, auth: req.headers.authorization, accept: req.headers.accept, session: req.headers['mcp-session-id'] });
+      if (msg.method === 'initialize') {
+        res.writeHead(200, { 'content-type': 'application/json', 'mcp-session-id': 'sess-1' });
+        return res.end(JSON.stringify({ jsonrpc: '2.0', id: msg.id, result: { protocolVersion: '2025-06-18', capabilities: { tools: {} }, serverInfo: { name: 'remoto', version: '1' } } }));
+      }
+      // el resto responde por SSE: el JSON se parte en dos líneas `data:` del
+      // MISMO evento (que es lo que la spec SSE obliga a concatenar)
+      res.writeHead(200, { 'content-type': 'text/event-stream' });
+      const payload = JSON.stringify({ jsonrpc: '2.0', id: msg.id, result: { tools: [{ name: 'uno', description: 'x', inputSchema: { type: 'object' } }] } });
+      const mitad = Math.floor(payload.length / 2);
+      res.write('event: message\ndata: ' + payload.slice(0, mitad) + '\n');
+      res.write('data: ' + payload.slice(mitad) + '\n\n');
+      res.end();
+    });
+  });
+  await new Promise((r) => srv.listen(0, '127.0.0.1', r));
+  const url = 'http://127.0.0.1:' + srv.address().port + '/mcp';
+  try {
+    const tr = mcpTransport.createHttpTransport({ url, headers: { Authorization: 'Bearer tok' } });
+    const init = await tr.rpc.request('initialize', { clientInfo: { name: 'SAGITARI', version: '1' } }, { timeoutMs: 4000 });
+    eq(init.serverInfo.name, 'remoto');
+    eq(tr.sessionId(), 'sess-1', 'la sesión se guarda para las siguientes peticiones');
+    const list = await tr.rpc.request('tools/list', {}, { timeoutMs: 4000 });
+    eq(list.tools[0].name, 'uno', 'la respuesta partida en dos eventos SSE se reensambla');
+    eq(vistos[0].accept, 'application/json, text/event-stream');
+    eq(vistos[1].auth, 'Bearer tok', 'la cabecera de autorización viaja en cada petición');
+    eq(vistos[1].session, 'sess-1', 'y la sesión también');
+    tr.kill();
+  } finally { srv.closeAllConnections?.(); srv.close(); }
+});
+
+test('mcp: un servidor http que no responde corta por timeout', async () => {
+  const http = require('http');
+  const srv = http.createServer(() => { /* nunca responde */ });
+  await new Promise((r) => srv.listen(0, '127.0.0.1', r));
+  const url = 'http://127.0.0.1:' + srv.address().port + '/mcp';
+  try {
+    // defaultTimeoutMs corto: es el que acota la petición HTTP real (el Rpc corta
+    // antes por su propio timeout). Sin él, el socket contra un servidor mudo
+    // seguiría abierto los 60 s por defecto y la suite tardaría un minuto de más
+    // aunque los tests ya hubieran terminado.
+    const tr = mcpTransport.createHttpTransport({ url, defaultTimeoutMs: 1000 });
+    const t0 = Date.now();
+    let err = null;
+    try { await tr.rpc.request('initialize', {}, { timeoutMs: 300 }); } catch (e) { err = e; }
+    ok(err && /timeout/i.test(err.message), 'corta con timeout: ' + (err && err.message));
+    ok(Date.now() - t0 < 3000, 'no espera más de la cuenta');
+  } finally { srv.closeAllConnections?.(); srv.close(); }
+});
+
 test('agent: la cadena elige el protocolo del modelo (Qwen en Go → /messages)', async () => {
   const { Agent } = require('../agent/agent');
   const seen = [];
