@@ -112,8 +112,24 @@ jobs:
             echo "::error::No hay ningun .exe en dist/: imposible calcular el SHA-256."
             exit 1
           fi
+          # Solo la seccion de ESTA version: el fichero acumula el historico y
+          # publicarlo entero colgaba la tabla de descargas de la version
+          # anterior en la pagina de cada release nueva (paso en la 3.0.1).
+          VERSION=$(node -p "require('./package.json').version")
+          awk -v ver="$VERSION" '
+            { sub(/\r$/, "") }
+            /^# SAGITARI / {
+              if (capturar) exit
+              if (index($0, "# SAGITARI " ver " ") == 1 || $0 == "# SAGITARI " ver) capturar = 1
+            }
+            capturar { print }
+          ' RELEASE_NOTES.md > release-section.md
+          if [ ! -s release-section.md ]; then
+            echo "::error::RELEASE_NOTES.md no tiene seccion '# SAGITARI ${VERSION}': la release saldria con notas de otra version."
+            exit 1
+          fi
           {
-            cat RELEASE_NOTES.md
+            cat release-section.md
             echo
             echo '## SHA-256'
             echo '```'

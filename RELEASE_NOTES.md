@@ -15,6 +15,16 @@ forever, ignoring everything you typed next. The Settings model now wins (the ro
 when there is no explicit choice), provider silence cuts itself off after ~2 min with a readable
 error and a Retry button, and long tasks stay recoverable if the model stops sending data.
 
+## Descargas / Downloads
+
+| Archivo / File | Descripción / Description |
+|---|---|
+| `SAGITARI-Setup-3.0.1.exe` | **Instalador / Installer** (NSIS): accesos directos, desinstalador / shortcuts, uninstaller |
+| `SAGITARI-Portable-3.0.1.exe` | **Portable**: un solo ejecutable, sin instalación / single executable, no install |
+| `Source code (zip/tar.gz)` | Código fuente / Source code |
+
+> Binario sin firmar: Windows SmartScreen puede avisar en la primera ejecución (*Más información → Ejecutar de todas formas*). La app te dice si la actualización que descarga está firmada o no. / Unsigned binary: SmartScreen may warn on first run (*More info → Run anyway*). The app tells you whether the update it downloads is signed.
+
 # SAGITARI 3.0.0
 
 **Glow del marco corregido:** el aura vuelve a renderizarse de forma consistente, con un halo suave, visible y sin bloquear la interacción de la ventana. También se corrige la muestra de color del glow en Ajustes. / **Frame glow fixed:** the aura now renders consistently with a soft, visible halo without blocking window interaction. The glow color preview in Settings is fixed too.
