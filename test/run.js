@@ -2043,10 +2043,24 @@ test('updater: informa de la firma digital del binario descargado', async () => 
   /* El hash publicado en la release demuestra integridad, no autenticidad: si el
      repo se compromete, el binario y su hash cambian juntos. La firma Authenticode
      es el único anclaje externo, así que el usuario tiene que ver si falta. */
-  const firmado = await updater.signatureOf(path.join(process.env.SystemRoot || 'C:/Windows', 'System32', 'notepad.exe'));
+  const sistema = path.join(process.env.SystemRoot || 'C:/Windows', 'System32', 'notepad.exe');
+  ok(fs.existsSync(sistema), 'la sonda existe en esta máquina (' + sistema + ')');
+  // Get-AuthenticodeSignature depende del servicio de firmas del sistema y en una
+  // máquina recién arrancada falla de vez en cuando (el runner de CI devolvía "no
+  // se pudo consultar", que la app informa como un estado legítimo). Se reintenta
+  // antes de dar por roto el camino real; si el binario no estuviera firmado, los
+  // tres intentos devolverían lo mismo y el test seguiría fallando.
+  let firmado = null;
+  for (let intento = 0; intento < 3 && !firmado; intento++) {
+    if (intento) await new Promise((r) => setTimeout(r, 1000));
+    firmado = await updater.signatureOf(sistema);
+  }
   ok(firmado, 'un binario de sistema tiene firma consultable');
   eq(firmado.status, 'Valid');
   ok(/Microsoft/.test(firmado.signer || ''), 'y se informa de quién lo firma (' + firmado.signer + ')');
+  // Un fichero que no es una imagen PE válida no sirve como sonda sin firmar:
+  // Windows responde "UnknownError", no "NotSigned", así que el caso contrario
+  // se cubre con el binario ausente de abajo (que no depende del servicio).
   const inexistente = await updater.signatureOf(path.join(tmpDir('sagi-sig-'), 'no-existe.exe'));
   eq(inexistente, null, 'si no se puede consultar, no se inventa un estado');
 });
