@@ -58,6 +58,10 @@ function goto(view, opts) {
     if (on) b.setAttribute('aria-current', 'page'); else b.removeAttribute('aria-current');
   });
   $$('.view').forEach(v => v.classList.toggle('on', v.id === 'view-' + view));
+  // la vista activa queda marcada en la carcasa: el rail lateral solo se pinta
+  // donde aporta (chat y agentes), no en las otras siete, donde está vacío
+  const shell = $('#app');
+  if (shell) shell.dataset.view = view;
   if (view === 'chat') $('#chatInput').focus();
   else if (opts && opts.focus) {
     // cambio de vista por atajo: el foco caía a <body>; se lleva al título de la vista
@@ -66,6 +70,7 @@ function goto(view, opts) {
   }
   if (view === 'memory') renderMemory();
   if (view === 'tasks') renderTasks();
+  if (view === 'tools') renderTools();
   if (view === 'agents') { renderToolTray(); renderHealth(); renderHabits(); }
   if (view === 'skills') { renderMarket(); renderSkills(); }
   if (view === 'projects') window.sagitari.workspaceGet().then(w => { $('#projPath').value = w; });
@@ -836,6 +841,13 @@ function updateAgentCount() {
   const n = cards.length;
   $('#agentCount').textContent = n;
   $('#bigRing').parentElement.parentElement.classList.toggle('idle', n === 0);
+  // Sin nada en marcha, el «0» a 24px y el anillo vacío son decoración ocupando el
+  // sitio de la información: se dice en una línea y desaparece el resto.
+  const caja = $('#agentCount') && $('#agentCount').closest('.rc-count');
+  if (caja) caja.hidden = n === 0;
+  if ($('#bigRing')) $('#bigRing').hidden = n === 0;
+  const titulo = document.querySelector('.rc-title');
+  if (titulo) titulo.textContent = n === 0 ? 'Sin agentes en marcha' : 'Agentes activos';
   // el rail lista SOLO agentes vivos: antes acumulaba entradas de herramientas ya
   // terminadas mientras el contador marcaba 0 (lista y número se contradecían)
   const rail = $('#railAgents');
@@ -1355,6 +1367,10 @@ function setSendMode() {
   b.innerHTML = ic(busy ? 'stop' : 'send');
   b.classList.toggle('stop', busy);
   b.title = busy ? 'Detener' : 'Enviar';
+  // el hilo se anuncia como ocupado mientras el agente trabaja: los lectores de
+  // pantalla esperan a que termine en vez de leer cada delta
+  const m = $('#messages');
+  if (m) m.setAttribute('aria-busy', busy ? 'true' : 'false');
 }
 
 // ============ sending ============
@@ -2693,15 +2709,35 @@ const TOOL_INFO = [
   ['window_manage', 'window', 'Minimizar todo, mostrar escritorio'],
   ['system_info', 'monitor', 'CPU, RAM, red y tiempo encendido']
 ];
-(function renderTools() {
+/* El catálogo se agrupa por lo que de verdad decide el usuario: qué herramientas
+   piden permiso. Antes eran 14 tarjetas idénticas donde ese dato no aparecía. */
+const TOOL_GROUPS = [
+  { key: 'confirmar', titulo: 'Piden tu permiso antes de actuar' },
+  { key: 'safe', titulo: 'Se ejecutan sin preguntar' },
+  { key: 'restricted', titulo: 'Bloqueadas' },
+];
+async function renderTools() {
   const g = $('#toolsGrid');
-  for (const [n, i, d] of TOOL_INFO) {
-    const c = document.createElement('div');
-    c.className = 'toolcard';
-    c.innerHTML = `<div class="tic">${ic(i)}</div><div><b>${esc(K.tool(n).label)}</b> <small class="md">${esc(n)}</small><br><small>${d}</small></div>`;
-    g.appendChild(c);
+  if (!g) return;
+  let rec = {};
+  try { const m = await window.sagitari.metaGet(); rec = (m && m.riskDefaults) || {}; } catch {}
+  const grupoDe = (n) => (rec[n] === 'restricted' || rec[n] === 'safe') ? rec[n] : 'confirmar';
+  g.innerHTML = '';
+  for (const gr of TOOL_GROUPS) {
+    const items = TOOL_INFO.filter(([n]) => grupoDe(n) === gr.key);
+    if (!items.length) continue;
+    const h = document.createElement('div');
+    h.className = 'toolsgroup';
+    h.textContent = gr.titulo + ' · ' + items.length;
+    g.appendChild(h);
+    for (const [n, i, d] of items) {
+      const c = document.createElement('div');
+      c.className = 'toolcard';
+      c.innerHTML = `<div class="tic">${ic(i)}</div><div><b>${esc(K.tool(n).label)}</b> <small class="md">${esc(n)}</small><br><small>${d}</small></div>`;
+      g.appendChild(c);
+    }
   }
-})();
+}
 
 // ============ v1.2: tasks view (checkpoints, pausa, reanudación) ============
 const TASK_STATUS = {

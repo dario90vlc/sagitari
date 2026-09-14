@@ -556,6 +556,7 @@ input::placeholder, textarea::placeholder { color: var(--dim); }
 .memitem .mt { flex: 1; font-size: 15px; }
 .memitem .md { color: var(--dim); font-size: 11px; }
 .toolsgrid { display: grid; grid-template-columns: repeat(2, 1fr); gap: 12px; max-width: 860px; }
+.toolsgroup { grid-column: 1 / -1; font: 600 11px 'Sora'; letter-spacing: .08em; text-transform: uppercase; color: var(--dim); margin-top: 8px; }
 .toolcard { display: flex; gap: 12px; align-items: center; padding: 13px 15px; border: 1px solid var(--line2); border-radius: 13px; background: rgba(18,12,42,0.5); }
 .toolcard .tic { width: 34px; height: 34px; border-radius: 10px; display: grid; place-items: center; background: rgba(var(--acc2-rgb), 0.14); font-size: 15px; }
 .toolcard b { display: block; font-size: 15px; } .toolcard small { color: var(--dim); font-size: 12px; }
@@ -1061,6 +1062,32 @@ input[type="range"].glowslider::-webkit-slider-thumb:active { transform: scale(1
   .plancard li.now .pl-n, .typing i, .stream::after,
   .confirmbar .cb-dot { animation: none !important; }
 }
+
+/* ============ el rail solo donde aporta ============
+   El panel «Live / Agentes activos / Actividad» está vacío en siete de las nueve
+   vistas y se lleva 300px de la ventana (23% a 1280px). Se queda donde hay
+   actividad en vivo que mirar y desaparece en el resto, devolviendo el ancho a la
+   tarea. La actividad en vivo sigue accesible desde Agentes. */
+.app:not([data-view="chat"]):not([data-view="agents"]) { grid-template-columns: 232px 1fr; }
+.app:not([data-view="chat"]):not([data-view="agents"]) .rail { display: none; }
+
+/* ============ superficies del navegador ============
+   Selección, caret y barras de scroll son superficies que nadie dibuja y que, sin
+   tematizar, delatan una interfaz ensamblada en vez de construida. Se pintan desde
+   la paleta, igual que los anillos de foco y el estado pulsado. */
+::selection { background: rgba(var(--acc2-rgb), 0.38); color: #fff; }
+:root { caret-color: rgb(var(--acc-rgb)); }
+* { scrollbar-color: rgba(var(--acc2-rgb), 0.35) transparent; scrollbar-width: thin; }
+::-webkit-scrollbar { width: 8px; height: 8px; }
+::-webkit-scrollbar-track { background: transparent; }
+::-webkit-scrollbar-thumb { background: rgba(var(--acc2-rgb), 0.30); border-radius: 4px; }
+::-webkit-scrollbar-thumb:hover { background: rgba(var(--acc2-rgb), 0.48); }
+/* los controles de ventana y el de compactar llevaban el anillo del sistema */
+#btnMin:focus-visible, #btnMax:focus-visible, #btnClose:focus-visible, #sideToggle:focus-visible {
+  outline: 2px solid rgba(var(--acc-rgb), 0.85); outline-offset: 1px;
+}
+/* respuesta al pulsado: la interfaz tenía 28 reglas :hover y una sola :active */
+.btn:active, .cbtn:active, .navitem:active, .toolcard:active, .hitem:active { transform: translateY(1px); }
 
 /* ============ ventanas estrechas: el compositor ============
    Bajo 1120px el mobiliario de la fila (segmento de modo + 4 botones) no cabía
