@@ -136,8 +136,11 @@ const ChatKit = (function () {
       const task = flatValue(a.task, 80);
       return task ? who + ' → ' + task : who;
     }
-    const hints = ARG_HINTS[String(name || '')];
-    if (hints) {
+    // hasOwnProperty: el modelo puede emitir una herramienta llamada `constructor`
+    // (o `toString`, `__proto__`…); leerlas del prototipo daba un valor no iterable
+    // y el `for…of` lanzaba, dejando la tarjeta y el rail a medias
+    const hints = Object.prototype.hasOwnProperty.call(ARG_HINTS, String(name || '')) ? ARG_HINTS[String(name || '')] : null;
+    if (Array.isArray(hints)) {
       const parts = [];
       for (const k of hints) {
         // sólo el primer campo vacío se omite; el resto se une con flechas
@@ -174,9 +177,16 @@ const ChatKit = (function () {
     const n = Number(ms);
     if (!isFinite(n) || n < 0) return '';
     if (n < 1000) return Math.round(n) + ' ms';
-    if (n < 60000) return (n / 1000).toFixed(1).replace('.', ',') + ' s';
+    if (n < 60000) {
+      // sub-minuto: se conservan las décimas (1,4 s); si el redondeo llega a 60,0
+      // (59,96 s) se lee mejor como 1 min que como «60,0 s»
+      const dec = (n / 1000).toFixed(1);
+      return dec === '60.0' ? '1 min' : dec.replace('.', ',') + ' s';
+    }
+    // los segundos se redondean y PUEDEN valer 60 (1 min 59,6 s): hay que acarrearlos
     const m = Math.floor(n / 60000), s = Math.round((n % 60000) / 1000);
-    return m + ' min' + (s ? ' ' + s + ' s' : '');
+    const mins = s === 60 ? m + 1 : m, secs = s % 60;
+    return mins + ' min' + (secs ? ' ' + secs + ' s' : '');
   }
 
   /** "3 herramientas" / "1 herramienta". */

@@ -732,7 +732,9 @@ function finishAssistant(finalText, opts) {
         current.el.remove();
       }
     }
-    const text = parsed.steps.length ? (parsed.body || '') : finalText;
+    // El texto se recorta solo cuando el plan se pinta como tarjeta (modo PLAN): en
+    // ACT/THINK el prompt también pide planes, y ahí desaparecían de la respuesta.
+    const text = (runMode === 'plan' && parsed.steps.length) ? (parsed.body || '') : finalText;
     if (text) {
       const div = document.createElement('div');
       div.innerHTML = fmt(text);
@@ -1161,6 +1163,11 @@ window.sagitari.onAgentEvent((ev) => {
         // terminó la ejecución: el color vuelve al modo que tengas elegido
         applyModeTheme(mode);
         agentStop();                // sin ejecución no queda ningún agente vivo
+        // Un corte por guardarraíl sale del bucle SIN respuesta final, así que el
+        // turno quedaba abierto: la respuesta siguiente se escribía DENTRO de la
+        // burbuja anterior (encima de la pregunta recién enviada) y el turno se
+        // quedaba sin pie de acciones. Aquí ya no hay ejecución: se cierra.
+        if (pendingAssistant) finishAssistant('', { interrupted: true, failed: true });
         if (devMode) paintMeta();
         refreshAgentsPanels();
         if (!currentConfirm || !currentConfirm.runId) hideConfirm();
@@ -1377,6 +1384,10 @@ setInterval(paintMeta, 2000);
 setInterval(() => {
   const v = $('#view-tasks');
   if (!v || !v.classList.contains('on') || document.hidden) return;
+  // Con una confirmación inline abierta no se repinta: el repintado vacía la lista,
+  // desconecta la barra del DOM y el observador la resolvía como cancelada — el
+  // usuario veía desaparecer el diálogo sin que su clic hiciera nada.
+  if (v.querySelector('.confirmbar')) return;
   renderTasks();
 }, 5000);
 
@@ -3233,11 +3244,43 @@ function openModelMenu() {
   }
   modelMenu.hidden = false;
   $('#sideStatusBtn').setAttribute('aria-expanded', 'true');
-  modelMenu.querySelector('.sm-item.on')?.scrollIntoView({ block: 'nearest' });
+  // el modelo activo queda marcado para navegar con el teclado desde ahí
+  const on = modelMenu.querySelector('.sm-item.on');
+  if (on) { on.classList.add('hl'); on.scrollIntoView({ block: 'nearest' }); }
 }
 
 $('#sideStatusBtn').onclick = openModelMenu;
 document.addEventListener('keydown', (e) => { if (e.key === 'Escape') closeModelMenu(); });
+/* Teclado dentro del menú de modelos: mismo patrón que los desplegables propios
+   (csel). Sin esto el botón anunciaba aria-haspopup="listbox" pero no se podía
+   elegir nada sin ratón. El foco sigue en el botón (las filas son divs), así que
+   la escucha va en el documento y solo actúa con el menú abierto y el foco ahí. */
+document.addEventListener('keydown', (e) => {
+  if (!modelMenu || modelMenu.hidden) return;
+  if (!$('#sideStatusBtn').contains(document.activeElement)) return;
+  const rows = [...modelMenu.querySelectorAll('.sm-item')];
+  if (!rows.length) return;
+  const at = rows.findIndex(r => r.classList.contains('hl'));
+  const paint = (i) => {
+    rows.forEach(r => r.classList.remove('hl'));
+    rows[i].classList.add('hl');
+    rows[i].scrollIntoView({ block: 'nearest' });
+  };
+  if (e.key === 'ArrowDown' || e.key === 'ArrowUp') {
+    e.preventDefault();
+    const step = e.key === 'ArrowDown' ? 1 : -1;
+    paint(at < 0 ? (step > 0 ? 0 : rows.length - 1) : (at + step + rows.length) % rows.length);
+  } else if (e.key === 'Home') {
+    e.preventDefault();
+    paint(0);
+  } else if (e.key === 'End') {
+    e.preventDefault();
+    paint(rows.length - 1);
+  } else if (e.key === 'Enter' && at >= 0) {
+    e.preventDefault();
+    rows[at].click();
+  }
+});
 // clic fuera: cierra (el menú flota sobre la barra, no bloquea la app)
 document.addEventListener('mousedown', (e) => {
   if (!modelMenu || modelMenu.hidden) return;

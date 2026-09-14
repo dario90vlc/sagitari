@@ -320,16 +320,10 @@ let whisperBuf = '';
 
 const runlog = require('../agent/runlog');
 
-/* ---- adjuntos del chat: límites y extracción de texto ----
-   El texto se extrae en el proceso principal y viaja como texto del mensaje:
-   así cualquier modelo lo ve, incluso los que no aceptan archivos. */
-const MAX_ATTACH_CHARS = 120000;   // ~30k tokens: margen sobrado, techo real
-const MAX_FILE_BYTES = 25 * 1024 * 1024;
-const TEXT_EXTS = new Set(['.txt', '.md', '.markdown', '.json', '.csv', '.tsv', '.log', '.xml', '.yml', '.yaml', '.ini', '.cfg', '.env', '.js', '.mjs', '.cjs', '.ts', '.tsx', '.jsx', '.py', '.rb', '.go', '.rs', '.java', '.kt', '.c', '.cpp', '.h', '.cs', '.php', '.sh', '.bat', '.ps1', '.sql', '.html', '.htm', '.css', '.scss', '.vue', '.svelte', '.tex', '.rtf', '.srt', '.vtt']);
-const IMG_EXTS = new Set(['.png', '.jpg', '.jpeg', '.gif', '.webp', '.bmp', '.svg']);
-/* Extensiones claramente binarias: ni intentamos leerlas como texto. Ojo: si
-   se anuncia texto y luego sale binario, se degrada a 'binary' con aviso. */
-const BINARY_EXTS = new Set(['.exe', '.dll', '.zip', '.rar', '.7z', '.gz', '.tar', '.bin', '.dat', '.db', '.sqlite', '.pdf', '.doc', '.docx', '.xls', '.xlsx', '.ppt', '.pptx', '.epub', '.iso', '.img', '.woff', '.woff2', '.ttf', '.otf', '.mp3', '.mp4', '.avi', '.mkv', '.mov', '.wav', '.psd', '.ai']);
+/* ---- adjuntos del chat: los límites y la extracción de texto viven en
+   main/attachments.js (Node puro, con tests propios). Aquí solo se lee el fichero
+   y se comprueba que la ruta sea legítima. ---- */
+const attach = require('./attachments');
 
 ipcMain.handle('attachments:pick', async () => {
   try {
@@ -354,26 +348,19 @@ ipcMain.handle('attachments:read', async (e, filePath) => {
     // sea un archivo regular. realpath resuelve enlaces antes de comprobar.
     let full;
     try { full = await fsp.realpath(filePath); } catch { return { ok: false, error: 'La ruta no existe' }; }
-    const rel = path.relative(CONFIG_DIR, full);
-    if (rel === '' || (!rel.startsWith('..') && !path.isAbsolute(rel))) return { ok: false, error: 'ruta no permitida' };
+    if (attach.insideDir(full, CONFIG_DIR)) return { ok: false, error: 'ruta no permitida' };
     const st = await fsp.stat(full);
     if (!st.isFile()) return { ok: false, error: 'no es un archivo regular' };
-    if (st.size > MAX_FILE_BYTES) return { ok: false, error: `Supera ${Math.round(MAX_FILE_BYTES / 1048576)} MB` };
+    if (st.size > attach.MAX_FILE_BYTES) return { ok: false, error: `Supera ${Math.round(attach.MAX_FILE_BYTES / 1048576)} MB` };
     const name = path.basename(full);
-    const ext = path.extname(full).toLowerCase();
-    const kind = IMG_EXTS.has(ext) ? 'image'
-      : (TEXT_EXTS.has(ext) || st.size < 512 * 1024 && !BINARY_EXTS.has(ext)) ? 'text' : 'binary';
+    const kind = attach.kindOf(name, st.size);
     if (kind === 'image') {
       const buf = await fsp.readFile(full);
-      const mime = ext === '.svg' ? 'image/svg+xml' : `image/${ext === '.jpg' ? 'jpeg' : ext.slice(1)}`;
-      return { ok: true, att: { name, kind, size: st.size, dataUrl: `data:${mime};base64,${buf.toString('base64')}` } };
+      return { ok: true, att: { name, kind, size: st.size, dataUrl: `data:${attach.mimeOf(name)};base64,${buf.toString('base64')}` } };
     }
     if (kind === 'text') {
-      const buf = await fsp.readFile(full);
-      let text = buf.toString('utf8').replace(/\u0000/g, '').trim();
-      if (ext === '.srt' || ext === '.vtt') text = text.replace(/^\d+\s*$/gm, '').replace(/-->\s*/g, ' → ');   // subtítulos: solo texto útil
-      const printable = text.replace(/[^\x09\x0A\x0D\x20-\x7E\u00A0-\uFFFF]/g, '');
-      if (printable.length < Math.max(40, text.length * 0.55)) return { ok: true, att: { name, kind: 'binary', size: st.size, note: 'parece binario' } };
+      const text = attach.textOf(await fsp.readFile(full), name);
+      if (text === null) return { ok: true, att: { name, kind: 'binary', size: st.size, note: 'parece binario' } };
       return { ok: true, att: { name, kind: 'text', size: st.size, text } };
     }
     return { ok: true, att: { name, kind: 'binary', size: st.size, note: 'binario' } };
@@ -453,6 +440,9 @@ function wireTaskManager() {
   taskManager = new TaskManager({
     getSettings: () => config,
     agentFactory: () => createAgent(true),
+    // el chat y las tareas comparten run store: «Reanudar» no puede lanzar un
+    // segundo agente sobre el run que el chat está ejecutando ahora mismo
+    isRunBusy: (runId) => !!(agent && agent.isBusy() && agent.currentRunId === runId),
     emit: (e) => { if (win && !win.isDestroyed()) win.webContents.send('agent:event', e); },
     notify: (run, kind) => {
       const title = 'SAGITARI — tarea ' + (kind === 'completed' ? 'completada' : kind === 'failed' ? 'falló' : kind === 'cancelled' ? 'cancelada' : kind === 'paused' ? 'pausada' : 'actualizada');
@@ -731,8 +721,7 @@ ipcMain.handle('chat:send', async (e, { text, imageDataUrl, attachments }) => {
   const txtAtts = atts.filter(a => a && a.kind === 'text');
   let body = text || (imgAtts.length && !txtAtts.length ? '(análisis de imagen)' : '');
   if (txtAtts.length) {
-    const blocks = txtAtts.map(a => `--- ARCHIVO ADJUNTO: ${a.name} (${a.size ? Math.round(a.size / 1024) + ' KB' : 'n/a'}) ---\n${(a.text || '').slice(0, MAX_ATTACH_CHARS)}${(a.text || '').length > MAX_ATTACH_CHARS ? '\n… (truncado)' : ''}`).join('\n\n');
-    body = (body ? body + '\n\n' : '') + 'He adjuntado archivos para que los uses en tu respuesta:\n\n' + blocks;
+    body = (body ? body + '\n\n' : '') + 'He adjuntado archivos para que los uses en tu respuesta:\n\n' + attach.blocksFor(txtAtts);
   }
   if (!body) body = '(adjunto sin texto)';
   // comando manual de skill: "/skill <resto>" — el usuario fuerza la skill
@@ -1212,7 +1201,10 @@ app.whenReady().then(() => {
     setTimeout(async () => {
       const ok = { window: !!win && !win.isDestroyed(), configDir: CONFIG_DIR };
       console.log('SMOKE::' + JSON.stringify(ok));
-      app.exit(0);
+      // Salir con 0 SIEMPRE hacía que este paso no pudiera fallar: publicaba si
+      // había ventana, pero nadie leía esa línea y el job quedaba verde con una
+      // app que no abre ninguna. El código de salida es el veredicto.
+      app.exit(ok.window ? 0 : 1);
     }, 2500);
   }
 });

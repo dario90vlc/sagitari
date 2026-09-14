@@ -5,11 +5,19 @@
 
 const fs = require('fs');
 const path = require('path');
+const os = require('os');
 
 /* Los tests crean almacenes temporales (memoria, checkpoints, skills…): se anotan
    aquí para borrarlos al terminar. Sin esto, cada ejecución dejaba basura en %TEMP%. */
 const TMP_DIRS = [];
 const tmpDir = (prefix) => { const d = fs.mkdtempSync(path.join(os.tmpdir(), prefix)); TMP_DIRS.push(d); return d; };
+
+/* La suite NO puede escribir en los datos reales del usuario. Cada módulo de
+   agent/ resuelve su carpeta AL CARGARSE (agent/datadir.js), así que la raíz de
+   prueba se fija aquí, antes de requerirlos: sin esto cada `npm test` dejaba un
+   run-<ts>.jsonl nuevo en %APPDATA%\SagitariAI\logs, con eventos indistinguibles
+   de una sesión real, y el panel de registros de la app los mostraba. */
+process.env.SAGITARI_DATA_DIR = tmpDir('sagitari-datadir-');
 
 let pass = 0, fail = 0;
 const failures = [];
@@ -75,6 +83,12 @@ test('approve() remembers the signature for 10 minutes', () => {
   eq(g.decide('write_file', { path: 'C:/a.txt' }).action, 'allow');
   // pero otros argumentos vuelven a preguntar
   eq(g.decide('write_file', { path: 'C:/b.txt' }).action, 'confirm');
+  // la caducidad es la garantía del recuerdo: una firma aprobada una vez no puede
+  // valer para siempre (este test no la comprobaba: valdría incluso con Infinity)
+  ok(g.approvals.get(d.signature) - Date.now() <= 10 * 60 * 1000, 'la firma caduca en 10 minutos');
+  ok(g.approvals.get(d.signature) - Date.now() > 9 * 60 * 1000, 'y no antes');
+  g.approvals.set(d.signature, Date.now() - 1);   // caducada
+  eq(g.decide('write_file', { path: 'C:/a.txt' }).action, 'confirm', 'una aprobación caducada vuelve a preguntar');
 });
 test('unknown tool defaults to confirm', () => {
   const g = new Guardrails();
@@ -204,7 +218,6 @@ test('stallThreshold 0 disables stall detection', () => {
 });
 
 /* ---------- v1.2: memoria avanzada (almacén aislado en tmp) ---------- */
-const os = require('os');
 const memory = require('../agent/memory');
 const MEM_DIR = tmpDir('sagi-mem-');
 memory.__test._resetForTests(path.join(MEM_DIR, 'memory.json'));
@@ -318,6 +331,27 @@ test('checkpoints: list("active") excluye las tareas archivadas', () => {
   ok(!activeIds.includes(c.runId), 'la completada NO aparece en activas');
   ok(!activeIds.includes(f.runId), 'la fallida NO aparece en activas');
   eq(checkpoints.list('all').length, 3, 'all sí incluye las tres');
+});
+
+test('checkpoints: la poda del histórico conserva los más recientes', () => {
+  const dir = tmpDir('sagi-prune-');
+  checkpoints.__test._resetForTests(dir);
+  // 5 archivadas con el mismo mtime no servirían: la poda ordena por fecha real
+  const ids = [];
+  for (let i = 0; i < 5; i++) {
+    const r = checkpoints.newRun({ goal: 't' + i });
+    checkpoints.complete(r, 'hecho');
+    const f = path.join(dir, 'completed', r.runId);
+    const t = new Date(Date.now() + i * 1000);   // la 4 es la más nueva
+    fs.utimesSync(f, t, t);
+    ids.push(r.runId);
+  }
+  checkpoints.__test.pruneArchived(3);
+  const left = fs.readdirSync(path.join(dir, 'completed'));
+  eq(left.length, 3, 'solo quedan 3');
+  ok(!left.includes(ids[0]), 'la más antigua se va');
+  ok(left.includes(ids[4]), 'la más reciente se queda');
+  checkpoints.__test._resetForTests(TASKS_TMP);   // el resto de la sección usa su directorio
 });
 
 /* ---------- v1.2: herramienta remember (integración con executors) ---------- */
@@ -455,16 +489,91 @@ function makeManager(overrides = {}) {
 
 const wait = (ms) => new Promise(r => setTimeout(r, ms));
 
+/** Espera a que se cumpla una condición, con deadline. La cola de tareas encadena
+    varias escrituras síncronas de disco (save → _pump → _start → resume → chat →
+    complete → finally) y una espera fija de 60 ms se queda corta en una máquina
+    cargada: eso era rojo intermitente en el gate de release. */
+const waitFor = async (fn, ms = 4000) => {
+  const t0 = Date.now();
+  for (;;) {
+    let v = null;
+    try { v = fn(); } catch { v = null; }
+    if (v) return v;
+    if (Date.now() - t0 > ms) return null;
+    await wait(25);
+  }
+};
+
 test('TaskManager: enqueue + running → completed with notification', async () => {
   const notes = [];
   const tm = makeManager({ notify: (run, kind) => notes.push(kind) });
   const r = tm.enqueue({ goal: 'Investigar vuelos baratos' });
   ok(r.ok && r.runId);
-  await wait(80);
-  const t = checkpoints.read(r.runId);
-  eq(t.status, 'completed');
+  const t = await waitFor(() => { const x = checkpoints.read(r.runId); return x && x.status === 'completed' ? x : null; });
+  ok(t, 'la tarea termina: ' + JSON.stringify(checkpoints.read(r.runId)));
   ok(notes.includes('completed'), 'notifica al terminar: ' + JSON.stringify(notes));
   ok(t.result.includes('vuelos'));
+  tm.dispose();
+});
+
+test('TaskManager: no reanuda un run que el chat está ejecutando', async () => {
+  const tm = makeManager();
+  const dir = tmpDir('sagi-busy-');
+  const prev = checkpoints._dir();
+  checkpoints.__test._resetForTests(dir);
+  const r = checkpoints.newRun({ goal: 'la del chat', status: 'paused' });
+  checkpoints.save(r);
+  tm.isRunBusy = (id) => id === r.runId;   // el chat lo tiene en marcha
+  const res = tm.resume(r.runId);
+  eq(res.ok, false, 'no puede lanzar un segundo agente sobre el mismo run');
+  ok(/chat/.test(res.error), res.error);
+  eq(checkpoints.read(r.runId).status, 'paused', 'el estado no se toca');
+  checkpoints.__test._resetForTests(prev);
+  tm.dispose();
+});
+
+test('TaskManager: cancelar avisa una sola vez', async () => {
+  const notes = [];
+  const tm = makeManager({ notify: (run, kind) => notes.push(kind) });
+  // el chat sigue "trabajando" cuando el usuario cancela: su .finally llega después
+  tm.agentFactory = () => ({
+    chat: async () => { await wait(200); },
+    stop: () => {}, getMeta: () => ({ busy: true }), getToolsFired: () => [], pause: () => {},
+  });
+  const r = tm.enqueue({ goal: 'tarea cancelable' });
+  await wait(30);
+  tm.cancel(r.runId);
+  await wait(300);   // tiempo de sobra para que el chat abortado cierre y notifique
+  eq(notes.filter(k => k === 'cancelled').length, 1, 'una acción = un aviso: ' + JSON.stringify(notes));
+  tm.dispose();
+});
+
+test('TaskManager: stopAll deja la cola parada', async () => {
+  const started = [];
+  const tm = makeManager();
+  // agente que "termina" rápido y deja su run interrumpido: es lo que hace el real
+  // cuando se le aborta, y su .finally es el que volvía a arrancar la cola
+  tm.agentFactory = () => ({
+    chat: async (goal, settings, img, opts) => {
+      started.push(goal);
+      await wait(20);
+      if (opts && opts.task) checkpoints.interrupt(opts.task);
+    },
+    stop: () => {}, getMeta: () => ({ busy: false }), getToolsFired: () => [], pause: () => {},
+  });
+  const dir = tmpDir('sagi-stop-');
+  const prev = checkpoints._dir();
+  checkpoints.__test._resetForTests(dir);
+  tm.enqueue({ goal: 'primera tarea de la cola' });
+  tm.enqueue({ goal: 'segunda tarea de la cola' });
+  tm.enqueue({ goal: 'tercera tarea de la cola' });
+  await wait(40);                      // la primera arranca; las otras dos esperan hueco
+  const afterStop = started.length;
+  ok(afterStop >= 1, 'la primera arrancó');
+  tm.stopAll();
+  await wait(80);
+  eq(started.length, afterStop, 'al cerrar no se arranca ninguna más: ' + JSON.stringify(started));
+  checkpoints.__test._resetForTests(prev);
   tm.dispose();
 });
 
@@ -479,44 +588,45 @@ test('TaskManager: scheduled task waits and ticks to pending', async () => {
   const tm = makeManager();
   const r = tm.enqueue({ goal: 'tarea futura', scheduledAt: new Date(Date.now() + 30 * 60000).toISOString() });
   ok(r.ok);
-  await wait(30);
+  // enqueue guarda de forma síncrona: no hace falta esperar para leerlo
   eq(checkpoints.read(r.runId).status, 'scheduled', 'queda programada');
   // fuerza el vencimiento y tick manual (no esperamos los 20s del timer)
   const run = checkpoints.read(r.runId);
   run.scheduledAt = new Date(Date.now() - 1000).toISOString();
   checkpoints.save(run);
   tm._tick();
-  await wait(30);
-  const t = checkpoints.read(r.runId);
-  ok(['pending', 'running', 'completed'].includes(t.status), 'tras tick se encola/ejecuta: ' + t.status);
+  const t = await waitFor(() => {
+    const x = checkpoints.read(r.runId);
+    return x && ['pending', 'running', 'completed'].includes(x.status) ? x : null;
+  });
+  ok(t, 'tras tick se encola/ejecuta: ' + JSON.stringify(checkpoints.read(r.runId)));
   tm.dispose();
 });
 
 test('TaskManager: pause a pending task keeps it paused, resume re-enqueues', async () => {
   const tm = makeManager({ behavior: 'pause' });
   tm.enqueue({ goal: 'tarea pausable' });
-  await wait(60);
-  const pend = checkpoints.list('active').find(t => t.goal === 'tarea pausable');
-  ok(pend, 'la tarea existe');
-  // encolamos otra pendiente y la pausamos (status pending → paused)
+  const first = await waitFor(() => checkpoints.list('active').find(t => t.goal === 'tarea pausable') || null);
+  ok(first, 'la tarea existe');
+  // la segunda arranca (el hueco queda libre cuando la primera se pausa) y el
+  // agente de prueba la pausa en su primer arranque
   const r2 = tm.enqueue({ goal: 'otra más' });
-  // con concurrencia 1 y behavior pause, la primera se completa como paused
-  await wait(60);
+  const started = await waitFor(() => { const x = checkpoints.read(r2.runId); return x && x.status === 'paused' ? x : null; });
+  ok(started, 'la segunda arrancó y quedó pausada: ' + JSON.stringify(checkpoints.read(r2.runId)));
   const r = tm.pause(r2.runId);
-  eq(r.ok, true);
+  eq(r.ok, true, 'pausar una ya pausada no es un error');
   eq(checkpoints.read(r2.runId).status, 'paused');
   const rs = tm.resume(r2.runId);
   eq(rs.ok, true);
-  await wait(60);
-  eq(checkpoints.read(r2.runId).status, 'completed');
+  const done = await waitFor(() => { const x = checkpoints.read(r2.runId); return x && x.status === 'completed' ? x : null; });
+  ok(done, 'tras reanudar, la tarea se completa: ' + JSON.stringify(checkpoints.read(r2.runId)));
   tm.dispose();
 });
 
 test('TaskManager: cancel archives the task as cancelled', async () => {
   const tm = makeManager({ behavior: 'pause' });
   const r = tm.enqueue({ goal: 'tarea cancelable' });
-  await wait(40);
-  const c = tm.cancel(r.runId, 'ya no la quiero');
+  const c = tm.cancel(r.runId, 'ya no la quiero');   // cancelar en cualquier estado vivo
   eq(c.ok, true);
   const t = checkpoints.read(r.runId);
   eq(t.status, 'cancelled');
@@ -531,8 +641,8 @@ test('TaskManager: autoResume re-enqueues interrupted tasks', async () => {
   const tm = makeManager();
   const r = tm.autoResume();
   ok(r.resumed >= 1, 're-encola al menos la huérfana');
-  await wait(60);
-  eq(checkpoints.read(run.runId).status, 'completed');
+  const done = await waitFor(() => { const x = checkpoints.read(run.runId); return x && x.status === 'completed' ? x : null; });
+  ok(done, 'la huérfana se completa: ' + JSON.stringify(checkpoints.read(run.runId)));
   tm.dispose();
 });
 
@@ -543,9 +653,9 @@ test('TaskManager: no model configured → task parked as paused', async () => {
     emit: () => {}, notify: () => {},
   });
   const r = tm.enqueue({ goal: 'sin proveedor' });
-  await wait(40);
-  const t = checkpoints.read(r.runId);
-  eq(t.status, 'paused');
+  // se aparca en cuanto el _pump la mira: sin proveedor no hay nada que esperar
+  const t = await waitFor(() => { const x = checkpoints.read(r.runId); return x && x.status === 'paused' ? x : null; });
+  ok(t, 'queda en pausa: ' + JSON.stringify(checkpoints.read(r.runId)));
   tm.dispose();
 });
 
@@ -1159,6 +1269,25 @@ test('tareas: Detener mata también el comando en curso de un subagente', async 
   eq(killed.join(','), 'herramienta,subagente', 'sin esto el comando del subagente seguía vivo tras pulsar Detener');
 });
 
+test('chatkit: duraciones redondeadas y nombres de herramienta hostiles', () => {
+  const K = ChatKit;
+  // los segundos redondeados pueden valer 60: hay que acarrearlos al minuto
+  eq(K.fmtDuration(119600), '2 min', 'no puede decir «1 min 60 s»');
+  eq(K.fmtDuration(59500), '59,5 s', 'por debajo del minuto se conservan las décimas');
+  eq(K.fmtDuration(59999), '1 min', '59,96 s se lee mejor como 1 min que como «60,0 s»');
+  eq(K.fmtDuration(60000), '1 min');
+  eq(K.fmtDuration(72000), '1 min 12 s');
+  eq(K.fmtDuration(640), '640 ms');
+  eq(K.fmtDuration(1400), '1,4 s');
+  // un nombre que colisiona con Object.prototype no puede reventar el resumen
+  // (el modelo puede emitir `constructor`/`toString`/`__proto__` como tool_call)
+  for (const n of ['constructor', 'toString', '__proto__', 'hasOwnProperty', 'valueOf']) {
+    const r = K.summarizeArgs(n, { a: 1 });
+    ok(typeof r === 'string', n + ' → ' + JSON.stringify(r));
+  }
+  ok(K.summarizeArgs('constructor', { a: 1 }).length >= 0, 'sin excepción');
+});
+
 test('ajustes: cada pestaña tiene su panel, y la búsqueda tiene filas que filtrar', () => {
   const html = fs.readFileSync(path.join(__dirname, '..', 'renderer', 'index.html'), 'utf8');
   const tabs = [...html.matchAll(/class="settab[^"]*"\s+data-set="([^"]+)"/g)].map(m => m[1]);
@@ -1713,15 +1842,16 @@ test('apariencia: main guarda preferencias y emite tts:done + theme:changed', ()
 
 /* ---------- adjuntos del chat: archivos, documentos e imágenes ---------- */
 
-test('adjuntos: main expone pick/read con límites y extracción de texto', () => {
+test('adjuntos: main delega en el módulo de adjuntos y conserva los metadatos', () => {
   ok(/attachments:pick/.test(MAIN_SRC) && /attachments:read/.test(MAIN_SRC), 'faltan los handlers IPC de adjuntos');
-  ok(/MAX_FILE_BYTES/.test(MAIN_SRC) && /MAX_ATTACH_CHARS/.test(MAIN_SRC), 'deben existir límites de tamaño y caracteres');
-  ok(/BINARY_EXTS/.test(MAIN_SRC), 'debe haber lista de extensiones binarias (no leerlas como texto)');
-  ok(/IMG_EXTS/.test(MAIN_SRC) && /TEXT_EXTS/.test(MAIN_SRC), 'deben existir las listas de tipos imagen/texto');
+  // Los límites, las listas de extensiones y el bloque de texto viven ahora en
+  // main/attachments.js y se prueban por COMPORTAMIENTO (ver «adjuntos: tipo,
+  // texto, recorte y ruta prohibida»): aquí solo el cableado y que no se dupliquen.
+  ok(/require\('\.\/attachments'\)/.test(MAIN_SRC), 'main debe usar main/attachments.js');
+  ok(/attach\.kindOf\(/.test(MAIN_SRC) && /attach\.textOf\(/.test(MAIN_SRC) && /attach\.blocksFor\(/.test(MAIN_SRC), 'la lectura y el volcado al mensaje pasan por el módulo');
+  ok(!/const MAX_FILE_BYTES/.test(MAIN_SRC) && !/const TEXT_EXTS/.test(MAIN_SRC), 'los límites y las listas no pueden duplicarse en main.js');
   // el mensaje guardado conserva metadatos de adjuntos (miniaturas al recargar)
   ok(/attachments: attMeta/.test(MAIN_SRC), 'los metadatos de adjuntos deben guardarse en la conversación');
-  // el texto de documentos viaja inline (visible para cualquier modelo)
-  ok(/ARCHIVO ADJUNTO/.test(MAIN_SRC), 'los documentos se inyectan como texto del mensaje');
   // el body por defecto con imagen pero sin texto sigue funcionando
   ok(/\(análisis de imagen\)/.test(MAIN_SRC), 'imagen sola debe tener texto por defecto');
 });
@@ -1804,6 +1934,51 @@ test('updater: el hash del portable no se confunde con el del Setup', () => {
   eq(updater.sha512For(both, 'Setup.exe'), 'HASH_SETUP');
   // El de nivel superior SÍ vale cuando el yml nombra ese archivo en `path`
   eq(updater.sha512For(updater.parseLatestYml('version: 1\npath: Portable.exe\nsha512: HASH_P\n'), 'Portable.exe'), 'HASH_P');
+});
+
+test('adjuntos: tipo, texto, recorte y ruta prohibida', () => {
+  const attach = require('../main/attachments');
+  // tipo por extensión y tamaño
+  eq(attach.kindOf('foto.PNG', 10), 'image');
+  eq(attach.kindOf('notas.md', 10), 'text');
+  eq(attach.kindOf('setup.exe', 10), 'binary', 'un ejecutable no se lee como texto ni siendo pequeño');
+  eq(attach.kindOf('datos.bin', 10), 'binary');
+  eq(attach.kindOf('sin-extension', 100), 'text', 'pequeño y sin extensión conocida: se intenta como texto');
+  eq(attach.kindOf('sin-extension', 2 * 1024 * 1024), 'binary', 'grande y sin extensión: no');
+  eq(attach.mimeOf('x.jpg'), 'image/jpeg');
+  eq(attach.mimeOf('x.svg'), 'image/svg+xml');
+  // texto de verdad y binario disfrazado de texto
+  const texto = attach.textOf(Buffer.from('hola, esto es un texto normal con acentos: ñáé\n', 'utf8'), 'a.txt');
+  ok(texto.includes('acentos'), 'el texto se conserva');
+  const basura = Buffer.alloc(400, 0x01);   // 400 bytes de control: no es texto
+  eq(attach.textOf(basura, 'a.txt'), null, 'lo que no es texto se degrada a binario');
+  // los subtítulos se limpian (números de secuencia y flechas)
+  const srt = attach.textOf(Buffer.from('1\n00:00:01,000 --> 00:00:02,000\nHola, ¿qué tal?\n2\n00:00:03,000 --> 00:00:04,500\nTodo bien por aquí, gracias.\n', 'utf8'), 'a.srt');
+  ok(srt && srt.includes('Hola') && !srt.includes('-->'), srt);
+  ok(srt && !/^\d+$/m.test(srt), 'los números de secuencia se quitan: ' + srt);
+  // recorte al techo real, y queda dicho
+  const largo = attach.blockFor({ name: 'g.txt', size: 2048, text: 'x'.repeat(attach.MAX_ATTACH_CHARS + 10) });
+  ok(largo.includes('2 KB'), 'el bloque dice el tamaño');
+  ok(largo.endsWith('… (truncado)'), 'el recorte se anuncia');
+  ok(largo.length < attach.MAX_ATTACH_CHARS + 200, 'no se cuela el texto entero');
+  eq(attach.blockFor({ name: 'c.txt', size: 10, text: 'corto' }).includes('truncado'), false);
+  // dos adjuntos → dos bloques
+  eq(attach.blocksFor([{ name: 'a', size: 1, text: 'uno' }, { name: 'b', size: 1, text: 'dos' }]).split('--- ARCHIVO ADJUNTO').length - 1, 2);
+  // el directorio de datos de la app no se puede adjuntar (claves, conversaciones)
+  ok(attach.insideDir(path.join('C:', 'd', 'config.json'), path.join('C:', 'd')), 'dentro');
+  ok(!attach.insideDir(path.join('C:', 'otro', 'x.txt'), path.join('C:', 'd')), 'fuera');
+});
+
+test('adjuntos: un archivo por encima del tope se rechaza antes de leerlo', async () => {
+  const attach = require('../main/attachments');
+  const dir = tmpDir('sagi-adj-');
+  const big = path.join(dir, 'grande.txt');
+  fs.writeFileSync(big, 'x'.repeat(1024));
+  // la comprobación de tamaño es la que evita cargar 25 MB en memoria: se prueba
+  // contra el módulo (main.js solo la usa, no la define)
+  eq(attach.MAX_FILE_BYTES, 25 * 1024 * 1024);
+  ok(fs.statSync(big).size <= attach.MAX_FILE_BYTES, 'un fichero normal pasa');
+  ok(attach.kindOf('grande.txt', attach.MAX_FILE_BYTES + 1) === 'text', 'el tipo no decide el rechazo: lo decide el tamaño en main.js');
 });
 
 test('icono incluido: BMP en los tamaños pequeños (o Windows cae al icono genérico)', () => {

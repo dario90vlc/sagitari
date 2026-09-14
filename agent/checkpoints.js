@@ -23,6 +23,7 @@ const HISTORY_MAX = 60;   // eventos conservados por run.json
 
 const ALL_STATUS = ['pending', 'scheduled', 'running', 'paused', 'interrupted', 'failed', 'completed', 'cancelled'];
 const LIVE_STATUS = ['running', 'pending', 'scheduled'];   // vivos: no se borran sin detenerlos antes
+const ARCHIVED_STATUS = ['completed', 'failed', 'cancelled'];   // histórico (sujeto a poda)
 
 function dirFor(status) {
   if (status === 'completed') return path.join(TASKS_DIR, 'completed');
@@ -123,7 +124,30 @@ function save(run) {
       try { fs.rmSync(dir, { recursive: true, force: true }); } catch {}
     }
   } catch (e) { console.error('checkpoints.save', e.message); }
+  // poda solo al archivar (una vez por tarea): el histórico no puede crecer sin techo
+  if (ARCHIVED_STATUS.includes(run.status)) pruneArchived();
   return run;
+}
+
+/** Poda las carpetas de histórico: el agente crea un run por tarea y nada los
+    borraba, así que `list()` (síncrono, en el hilo que pinta la interfaz) acababa
+    leyendo y parseando cientos de run.json. Conserva los más recientes. */
+const ARCHIVE_KEEP = 200;
+function pruneArchived(keep = ARCHIVE_KEEP) {
+  for (const status of ['completed', 'failed', 'cancelled']) {
+    const base = dirFor(status);
+    let entries;
+    try { entries = fs.readdirSync(base, { withFileTypes: true }).filter(e => e.isDirectory()); } catch { continue; }
+    if (entries.length <= keep) continue;
+    const dated = entries.map(e => {
+      let t = 0;
+      try { t = fs.statSync(path.join(base, e.name)).mtimeMs; } catch {}
+      return { name: e.name, t };
+    }).sort((a, b) => b.t - a.t);
+    for (const e of dated.slice(keep)) {
+      try { fs.rmSync(path.join(base, e.name), { recursive: true, force: true }); } catch {}
+    }
+  }
 }
 
 /** Lee la copia más reciente de un run (no la primera carpeta de ALL_STATUS). */
@@ -247,4 +271,4 @@ function remove(runId) {
 function _resetForTests(dir) { TASKS_DIR = dir; }
 function _dir() { return TASKS_DIR; }
 
-module.exports = { newRun, save, read, list, record, setStep, fail, complete, pause, resume, interrupt, cancel, setStatus, recoverable, remove, _dir, __test: { _resetForTests, ALL_STATUS, LIVE_STATUS, copiesOf } };
+module.exports = { newRun, save, read, list, record, setStep, fail, complete, pause, resume, interrupt, cancel, setStatus, recoverable, remove, _dir, __test: { _resetForTests, ALL_STATUS, LIVE_STATUS, ARCHIVED_STATUS, ARCHIVE_KEEP, copiesOf, pruneArchived } };

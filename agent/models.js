@@ -119,6 +119,7 @@ let HEALTH_FILE = path.join(require('./datadir').dataDir(), 'model-health.json')
 /* El fichero se lee una vez y se mantiene en memoria: `record()` corre en cada
    llamada al modelo y no debe releer ni reescribir el JSON entero cada vez. */
 let _cache = null;
+let _tainted = false;   // no se pudo leer el fichero: no se pisa con el almacén vacío
 
 function _load() {
   if (_cache) return _cache;
@@ -127,8 +128,11 @@ function _load() {
   } catch (e) {
     // Un fichero ilegible no puede acabar pisado por un almacén vacío: se aparta
     // con marca de tiempo (mismo criterio que memory.js y habits.js) para no
-    // perder el histórico de salud de los modelos.
+    // perder el histórico de salud de los modelos. Si la cuarentena tampoco se
+    // puede hacer (permisos, fichero bloqueado), la marca impide que el siguiente
+    // record() reescriba el histórico con lo poco de esta sesión.
     if (e && e.code !== 'ENOENT') {
+      _tainted = true;
       try { fs.renameSync(HEALTH_FILE, HEALTH_FILE + '.corrupt-' + Date.now()); } catch {}
     }
     _cache = {};
@@ -138,6 +142,7 @@ function _load() {
 
 /* Escritura atómica: un corte a mitad no debe truncar las estadísticas. */
 function _save(data) {
+  if (_tainted) return;
   try {
     fs.mkdirSync(path.dirname(HEALTH_FILE), { recursive: true });
     const tmp = HEALTH_FILE + '.tmp';
@@ -192,6 +197,6 @@ function summary() {
 }
 
 /** Para tests: redirige el fichero. */
-function _resetForTests(file) { HEALTH_FILE = file; _cache = null; }
+function _resetForTests(file) { HEALTH_FILE = file; _cache = null; _tainted = false; }
 
 module.exports = { CATEGORIES, classify, fallbackChain, pickModelFor, record, summary, _resetForTests };

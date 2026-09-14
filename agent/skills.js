@@ -191,13 +191,25 @@ async function suggestSkillsFor(text) {
 
 /* ---------- v1.7: actualización de skills importadas ---------- */
 
+/** Escritura atómica: el resto del almacén (memoria, hábitos, checkpoints) ya
+    escribe a .tmp y renombra. Aquí un corte a mitad dejaba un SKILL.md sin
+    front-matter (la skill desaparecía de la lista) o un enabled.json truncado
+    (la skill desactivada volvía al prompt). */
+async function writeFileAtomic(file, text) {
+  const tmp = file + '.tmp';
+  await fsp.writeFile(tmp, text, 'utf8');
+  try { await fsp.rename(tmp, file); }
+  catch (e) { await fsp.rm(tmp, { force: true }).catch(() => {}); throw e; }
+}
+
 /** Guarda el origen de una skill importada (repo + path) para poder actualizarla. */
 async function writeSource(id, source) {
   const dir = safeSkillDir(id); // id inválido → lanza y no se toca el disco
-  try {
-    await fsp.mkdir(dir, { recursive: true });
-    await fsp.writeFile(path.join(dir, 'source.json'), JSON.stringify(source, null, 2), 'utf8');
-  } catch {}
+  // Sin catch: si el origen no se guarda, la skill queda imposible de actualizar o
+  // reimportar (la siguiente importación diría «ya existe» para siempre) y el
+  // usuario no vería el motivo. El error sube al importador, que lo anota.
+  await fsp.mkdir(dir, { recursive: true });
+  await writeFileAtomic(path.join(dir, 'source.json'), JSON.stringify(source, null, 2));
 }
 
 /** Re-importa una skill desde su repo de origen. Devuelve {ok, changed}. */
@@ -212,7 +224,7 @@ async function updateSkill(id) {
   const raw = await fetchSkillMarkdown(f.url);
   const fm = parseFrontMatter(raw);
   const changed = !fm || fm.meta.version !== s.version || fm.body !== s.body;
-  if (changed) await fsp.writeFile(path.join(dir, 'SKILL.md'), raw, 'utf8');
+  if (changed) await writeFileAtomic(path.join(dir, 'SKILL.md'), raw);
   return { ok: true, changed, version: fm ? fm.meta.version : '' };
 }
 
@@ -231,7 +243,7 @@ async function updateAll() {
 async function setEnabled(id, enabled) {
   const dir = safeSkillDir(id); // lanza 'id de skill inválido' ante traversal
   await fsp.mkdir(dir, { recursive: true });
-  await fsp.writeFile(path.join(dir, 'enabled.json'), JSON.stringify({ enabled: !!enabled }), 'utf8');
+  await writeFileAtomic(path.join(dir, 'enabled.json'), JSON.stringify({ enabled: !!enabled }));
 }
 
 /* ---------- importación desde GitHub (sin git ni unzip) ---------- */
@@ -239,19 +251,38 @@ async function setEnabled(id, enabled) {
 /** Tope de tamaño de un SKILL.md descargado (512 KB). */
 const MAX_SKILL_BYTES = 512 * 1024;
 
+/** Lee el cuerpo con tope, abortando al pasarse: bufferizar primero y medir
+    después dejaba el tope sin aplicar durante la descarga. */
+async function readCapped(res, max) {
+  const declared = Number(res.headers.get('content-length') || 0);
+  if (declared && declared > max) throw new Error('SKILL.md demasiado grande (máx. 512 KB).');
+  const reader = res.body.getReader();
+  const chunks = [];
+  let total = 0;
+  for (;;) {
+    const { done, value } = await reader.read();
+    if (done) break;
+    total += value.byteLength;
+    if (total > max) {
+      try { reader.cancel().catch(() => {}); } catch {}
+      throw new Error('SKILL.md demasiado grande (máx. 512 KB).');
+    }
+    chunks.push(value);
+  }
+  return Buffer.concat(chunks).toString('utf8');
+}
+
 /** Descarga un SKILL.md con tope de tamaño (evita reventar memoria/contexto). */
 async function fetchSkillMarkdown(url) {
-  const res = await fetch(url, { headers: { 'User-Agent': 'Sagitari' } });
+  // con timeout: un proxy que acepta la conexión y no responde dejaba el botón de
+  // importar deshabilitado para siempre (el IPC no llegaba a resolver nunca)
+  const res = await fetch(url, { headers: { 'User-Agent': 'Sagitari' }, signal: AbortSignal.timeout(20000) });
   if (!res.ok) throw new Error('GitHub ' + res.status);
-  const declared = Number(res.headers.get('content-length') || 0);
-  if (declared && declared > MAX_SKILL_BYTES) throw new Error('SKILL.md demasiado grande (máx. 512 KB).');
-  const raw = await res.text();
-  if (Buffer.byteLength(raw, 'utf8') > MAX_SKILL_BYTES) throw new Error('SKILL.md demasiado grande (máx. 512 KB).');
-  return raw;
+  return readCapped(res, MAX_SKILL_BYTES);
 }
 
 async function ghJson(url) {
-  const res = await fetch(url, { headers: { 'User-Agent': 'Sagitari', 'Accept': 'application/vnd.github+json' } });
+  const res = await fetch(url, { headers: { 'User-Agent': 'Sagitari', 'Accept': 'application/vnd.github+json' }, signal: AbortSignal.timeout(20000) });
   if (!res.ok) throw new Error(`GitHub ${res.status}: ${url}`);
   return res.json();
 }
@@ -312,9 +343,19 @@ async function importFromGitHub(repo) {
       });
       continue;
     }
-    await fsp.mkdir(dest, { recursive: true });
-    await fsp.writeFile(path.join(dest, 'SKILL.md'), raw, 'utf8');
-    await writeSource(id, { repo: repoName, path: f.path, installedAt: new Date().toISOString() });
+    try {
+      await fsp.mkdir(dest, { recursive: true });
+      // El origen PRIMERO: si el SKILL.md falla, no queda una skill «instalada» que
+      // no se puede ni actualizar ni reimportar; una carpeta con solo source.json
+      // es invisible para listSkills y la siguiente importación la repara.
+      await writeSource(id, { repo: repoName, path: f.path, installedAt: new Date().toISOString() });
+      await writeFileAtomic(path.join(dest, 'SKILL.md'), raw);
+    } catch (e) {
+      // un id que Windows rechaza (con/aux/nul…) o un disco lleno no pueden cortar
+      // la importación entera dejando las demás sin instalar y sin explicación
+      skipped.push({ id, name: fm.meta.name, from: repoName, skipped: true, reason: e.message });
+      continue;
+    }
     installed.push({ id, name: fm.meta.name, from: repoName });
   }
   if (!installed.length && !skipped.length) throw new Error('Los SKILL.md encontrados no tienen front-matter válido (name/description).');
@@ -327,7 +368,7 @@ async function createSkill({ name, description, body }) {
   const dest = safeSkillDir(slug);
   await fsp.mkdir(dest, { recursive: true });
   const md = `---\nname: ${slug}\ndescription: ${description || 'Skill personalizada'}\n---\n\n${body || ''}\n`;
-  await fsp.writeFile(path.join(dest, 'SKILL.md'), md, 'utf8');
+  await writeFileAtomic(path.join(dest, 'SKILL.md'), md);
   return { id: slug, name: slug };
 }
 

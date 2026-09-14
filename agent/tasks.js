@@ -63,13 +63,19 @@ class TaskManager {
    * @param {(event) => void} deps.emit         eventos hacia la UI (se les añade runId)
    * @param {(run, kind) => void} deps.notify   notificación al usuario (toast + nativa)
    */
-  constructor({ getSettings, agentFactory, emit, notify }) {
+  constructor({ getSettings, agentFactory, emit, notify, isRunBusy }) {
     this.getSettings = getSettings || (() => ({}));
     this.agentFactory = agentFactory || (() => { throw new Error('agentFactory no configurado'); });
     this.emit = emit || (() => {});
     this.notify = notify || (() => {});
+    // ¿Ese run lo tiene el chat en marcha? Lo inyecta main.js: sin esta comprobación,
+    // «Reanudar» en la vista Tareas lanzaba un SEGUNDO agente sobre el mismo runId
+    // mientras el chat seguía ejecutándolo (mismas herramientas, dos escritores).
+    this.isRunBusy = isRunBusy || (() => false);
     this.agents = new Map();     // runId -> Agent en ejecución
     this._liveRuns = new Map();  // runId -> objeto run vivo que muta el agente (para cancelar/borrar)
+    this._notified = new Set();  // runIds ya avisados (no repetir el toast/notificación)
+    this._stopped = false;       // apagado/cancelación global: la cola no arranca nada más
     this._timer = setInterval(() => this._tick(), TICK_MS);
     if (this._timer.unref) this._timer.unref();
   }
@@ -91,6 +97,8 @@ class TaskManager {
       if (t > Date.now() + 5000) status = 'scheduled';
     }
     const run = checkpoints.newRun({ goal: text, mode: mode || 'act', status, scheduledAt, origin });
+    this._stopped = false;             // hay trabajo nuevo: la cola vuelve a arrancar
+    this._notified.delete(run.runId);
     checkpoints.save(run);
     this._update(run, 'Tarea ' + (status === 'scheduled' ? 'programada' : 'en cola'));
     this._pump();
@@ -121,9 +129,14 @@ class TaskManager {
   resume(runId) {
     const run = checkpoints.read(runId);
     if (!run) return { ok: false, error: 'Tarea no encontrada.' };
+    if (this.isRunBusy(runId)) {
+      return { ok: false, error: 'Esa tarea la está ejecutando el chat ahora mismo. Detén el chat antes de reanudarla aquí.' };
+    }
     if (!['paused', 'interrupted', 'pending', 'failed'].includes(run.status)) {
       return { ok: false, error: 'La tarea está ' + run.status + ' y no se puede reanudar.' };
     }
+    this._stopped = false;         // el usuario pide trabajo: la cola vuelve a arrancar
+    this._notified.delete(runId);  // su desenlace se puede volver a avisar
     run.attempts = 0;              // reanudación manual: presupuesto de reintentos limpio
     run.nextAttemptAt = null;
     checkpoints.setStatus(run, 'pending');
@@ -150,6 +163,9 @@ class TaskManager {
     if (a) { try { a.stop(); } catch {} this.agents.delete(runId); }
     checkpoints.cancel(run, reason || 'Cancelada por el usuario');
     this._update(run, 'Tarea cancelada');
+    // el aviso se da AQUÍ; el .finally del chat abortado no debe repetirlo (antes
+    // llegaban dos notificaciones nativas y dos toasts por una sola cancelación)
+    this._notified.add(runId);
     this.notify(run, 'cancelled');
     return { ok: true };
   }
@@ -194,6 +210,10 @@ class TaskManager {
 
   /** Detiene todas las tareas en background (al cerrar la app: quedan interrumpidas). */
   stopAll() {
+    // Marca primero: los agentes abortados resuelven chat() de inmediato, así que el
+    // .finally de cada uno llama a _pump() al salir y arrancaba tareas nuevas durante
+    // el apagado (cuando el navegador y la voz ya se habían matado).
+    this._stopped = true;
     for (const [runId, a] of this.agents) {
       try { a.stop(); } catch {}
       const run = checkpoints.read(runId);
@@ -235,12 +255,13 @@ class TaskManager {
   }
 
   /** Cierra el manager (tests / quit). */
-  dispose() { if (this._timer) clearInterval(this._timer); }
+  dispose() { this._stopped = true; clearInterval(this._timer); }
 
   /* ================= motor interno ================= */
 
   /** Arranca tareas pendientes hasta agotar la concurrencia configurada. */
   _pump() {
+    if (this._stopped) return;   // apagando: no se arranca nada nuevo
     const s = this.getSettings();
     const max = Math.max(1, Math.min(4, Number(s && s.settings && s.settings.maxConcurrentTasks) || 1));
     if (this.agents.size >= max) return;
@@ -297,7 +318,7 @@ class TaskManager {
           checkpoints.interrupt(after);   // el chat terminó sin cerrar el checkpoint
         }
         const final = checkpoints.read(runId);
-        if (final) this.notify(final, final.status);
+        if (final && !this._notified.has(runId)) this.notify(final, final.status);
         this._pump();   // siguiente tarea de la cola
       });
   }

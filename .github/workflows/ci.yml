@@ -65,7 +65,12 @@ jobs:
         # heredaba el PSModulePath de PowerShell 7: pasaba en el release y no en
         # la CI. Correrlos también con el shell por defecto cubre el entorno del
         # release antes de etiquetar.
-        run: npm test
+        # Se guarda su salida en su PROPIO fichero: si falla este paso, el
+        # artefacto de fallo ya no puede ser el log verde del paso anterior.
+        shell: pwsh
+        run: |
+          npm test 2>&1 | Tee-Object -FilePath test-output-pwsh.log
+          if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
 
       - name: Smoke test (la app arranca de verdad)
         run: npm run smoke
@@ -80,5 +85,7 @@ jobs:
         uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4.6.2
         with:
           name: ci-failure-context
-          path: test-output.log
+          path: |
+            test-output.log
+            test-output-pwsh.log
           if-no-files-found: ignore

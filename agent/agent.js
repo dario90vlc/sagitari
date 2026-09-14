@@ -247,6 +247,7 @@ class Agent {
         // pausa solicitada: checkpoint del último paso completado antes de parar
         if (this.pauseRequested && this.currentRun && !this.currentRun.closed) {
           checkpoints.pause(this.currentRun);
+          this.currentRun.closed = true;
           this.meta.paused = true;
           this.emit({ type: 'paused', runId: this.currentRun.runId, goal: this.currentRun.goal });
         }
@@ -429,7 +430,7 @@ class Agent {
         this.emit({ type: 'status', text: 'Límite de seguridad alcanzado — detenido' });
         this.emit({ type: 'guardrail', reason: stepCheck.reason });
         runlog.log({ agent: 'sagitari', task: taskId, event: 'guardrail_stop', reason: stepCheck.reason });
-        if (task && !task.closed) checkpoints.interrupt(task);
+        if (task && !task.closed) { checkpoints.interrupt(task); task.closed = true; }
         this._pushAssistant(assistantSaidSomething ? { role: 'assistant', content: '(detenido por límite de seguridad)' } : null);
         return;
       }
@@ -443,6 +444,8 @@ class Agent {
             checkpoints.interrupt(task);
             this.emit({ type: 'task_interrupted', runId: task.runId, goal: task.goal });
           }
+          // la ejecución abandona el run: ninguna vuelta posterior debe reutilizarlo
+          task.closed = true;
         }
         this._pushAssistant(assistantSaidSomething ? { role: 'assistant', content: '(detenido por el usuario)' } : null);
         this.emit({ type: 'stopped' });
@@ -462,7 +465,7 @@ class Agent {
         this.meta.costUsd = this.guardrails.getCost();
         if (!tok.ok) {
           this.emit({ type: 'guardrail', reason: tok.reason });
-          if (task && !task.closed) checkpoints.interrupt(task);
+          if (task && !task.closed) { checkpoints.interrupt(task); task.closed = true; }
           this._pushAssistant(assistantSaidSomething ? { role: 'assistant', content: '(detenido por límite de tokens)' } : null);
           return;
         }
@@ -473,6 +476,7 @@ class Agent {
         // la reanudación y la tarea quedaba marcada como interrumpida
         if (task && !task.closed && this.pauseRequested) {
           checkpoints.pause(task);
+          task.closed = true;
           this.meta.paused = true;
           this.emit({ type: 'paused', runId: task.runId, goal: task.goal });
         }
@@ -487,7 +491,7 @@ class Agent {
         this.emit({ type: 'status', text: 'Sin progreso — detenido' });
         this.emit({ type: 'guardrail', reason: stall.reason });
         runlog.log({ agent: 'sagitari', task: taskId, event: 'stall_detected' });
-        if (task && !task.closed) checkpoints.interrupt(task);
+        if (task && !task.closed) { checkpoints.interrupt(task); task.closed = true; }
         this._pushAssistant(assistantSaidSomething ? { role: 'assistant', content: '(detenido: sin progreso)' } : null);
         return;
       }
@@ -540,7 +544,7 @@ class Agent {
             this.emit({ type: 'guardrail', reason });
             runlog.log({ agent: 'sagitari', task: taskId, event: 'loop_detected', tool: tc.function.name, pattern: r.pattern });
             closePendingCalls('(no ejecutada: bucle detectado)');
-            if (task && !task.closed) checkpoints.interrupt(task);
+            if (task && !task.closed) { checkpoints.interrupt(task); task.closed = true; }
             this._pushAssistant(assistantSaidSomething ? { role: 'assistant', content: '(detenido: bucle detectado)' } : null);
             return;
           }

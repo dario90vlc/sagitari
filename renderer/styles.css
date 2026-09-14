@@ -396,6 +396,8 @@ body.nofocus .glow, body.nofocus .glow::before, body.nofocus .glowRing { animati
 }
 .modelmenu .sm-item .sm-name { font: 600 13px var(--font-ui); white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
 .modelmenu .sm-item.on .sm-name { color: var(--vio2); }
+/* fila señalada al navegar con el teclado (mismo realce que los csel) */
+.modelmenu .sm-item.hl { background: rgba(var(--acc2-rgb), 0.16); }
 .modelmenu .mm-mark { margin-left: auto; color: var(--vio2); font-size: 12px; flex-shrink: 0; }
 .modelmenu .mm-hint { padding: 4px 14px 9px; color: var(--dim); font-size: 11px; line-height: 1.45; }
 /* Las acciones se quedan al pie sin dejar ver las filas que pasan por debajo: con

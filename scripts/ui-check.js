@@ -26,6 +26,9 @@ const WebSocket = require('ws');
 const electron = require('electron');   // en un proceso Node normal: la ruta del binario
 const APP_DIR = path.join(__dirname, '..');
 const TIMEOUT_MS = 25000;
+/* Tope por comprobación: una que no responde (hilo del renderer bloqueado) debe
+   contar como fallo, no dejar el script esperando para siempre. */
+const CHECK_DEADLINE_MS = 8000;
 
 /* La app de prueba vive en su propio directorio de datos (main.js lo deriva de
    --hidden/--test). Se le deja un config mínimo para que la interfaz se vea como
@@ -135,6 +138,7 @@ const AFTER = {
 
   const ws = new WebSocket(page.webSocketDebuggerUrl);
   let id = 0;
+  let terminado = false;   // el veredicto final ya está dado: no lo pisa el cierre
   const pending = new Map();
   const scriptErrors = [];
   /* Sólo cuentan los errores de SCRIPT (un fichero que no compila, una función
@@ -155,14 +159,31 @@ const AFTER = {
   });
   const evaluate = (expr) => new Promise((res) => {
     const myId = ++id;
-    pending.set(myId, (m) => res(m.result && m.result.result ? m.result.result.value : undefined));
+    // deadline: si el renderer deja de responder (bucle en su hilo, IPC colgado,
+    // proceso muerto) la comprobación se resuelve como fallo en vez de dejar el
+    // job colgado para siempre — que es justo lo que este script debe detectar.
+    const timer = setTimeout(() => { pending.delete(myId); res(undefined); }, CHECK_DEADLINE_MS);
+    pending.set(myId, (m) => { clearTimeout(timer); res(m.result && m.result.result ? m.result.result.value : undefined); });
     ws.send(JSON.stringify({ id: myId, method: 'Runtime.evaluate', params: { expression: expr, returnByValue: true } }));
   });
   /* Comando CDP cualquiera (se usa para emular el tamaño mínimo de ventana). */
   const cmd = (method, params = {}) => new Promise((res) => {
     const myId = ++id;
-    pending.set(myId, (m) => res(m.result));
+    const timer = setTimeout(() => { pending.delete(myId); res(undefined); }, CHECK_DEADLINE_MS);
+    pending.set(myId, (m) => { clearTimeout(timer); res(m.result); });
     ws.send(JSON.stringify({ id: myId, method, params }));
+  });
+  /* Si el renderer se cae a mitad, sin esto el script se quedaba esperando una
+     respuesta que ya no podía llegar (y la CI, 360 min de job). */
+  ws.on('close', () => {
+    if (terminado) return;
+    console.error('UI-CHECK::{"ok":false,"error":"la interfaz cerró la conexión antes de terminar"}');
+    done(1);
+  });
+  ws.on('error', (e) => {
+    if (terminado) return;
+    console.error('UI-CHECK::{"ok":false,"error":' + JSON.stringify('websocket: ' + ((e && e.message) || e)) + '}');
+    done(1);
   });
   await new Promise((r) => ws.on('open', r));
   await new Promise((r) => setTimeout(r, 1200));           // deja terminar el arranque del renderer
@@ -253,6 +274,31 @@ const AFTER = {
     failed++;
     console.log('  FALLO el selector de modelo no responde al ratón real  ->  ' + JSON.stringify({ menuAbierto, destino, pulsado, menuCerrado, pildora }));
   }
+  /* ---- el menú de modelos también con el teclado (antes solo con ratón) ----
+     El botón anuncia aria-haspopup="listbox": si no se puede elegir sin ratón, la
+     promesa de accesibilidad es falsa. Se comprueba sobre la interfaz viva. */
+  await judge('el menú de modelos se navega con el teclado',
+    '(function(){'
+    + ' var b = document.querySelector("#sideStatusBtn"), m = document.querySelector("#modelMenu");'
+    + ' if (!b || !m) return false;'
+    + ' if (m.hidden) b.click();'            // abrir solo si estaba cerrado
+    + ' if (m.hidden) return false;'
+    + ' b.focus();'
+    + ' if (!b.contains(document.activeElement)) return false;'
+    + ' var kv = function (k) { document.dispatchEvent(new KeyboardEvent("keydown", { key: k, bubbles: true })); };'
+    + ' var hl = function () { return m.querySelectorAll(".sm-item.hl"); };'
+    + ' kv("ArrowDown");'
+    + ' if (hl().length !== 1) return false;'
+    + ' var uno = hl()[0];'
+    + ' kv("ArrowDown");'
+    + ' if (hl().length !== 1 || hl()[0] === uno) return false;'
+    + ' kv("End");'
+    + ' if (hl().length !== 1) return false;'
+    + ' kv("ArrowUp");'
+    + ' if (hl().length !== 1) return false;'
+    + ' kv("Escape");'
+    + ' return m.hidden === true;'
+    + '})()');
   /* ---- desplegables propios: el popup del sistema no se puede tematizar ----
      El popup de un <select> lo dibuja Windows (claro, con su tipografía) y no hay
      CSS que lo alcance; por eso cada select lleva encima un control de la app. Se
@@ -324,6 +370,7 @@ const AFTER = {
   console.log('');
   console.log('UI-CHECK::' + JSON.stringify({ ok: failed === 0, fallos: failed }));
   if (failed) console.error(failed + ' comprobación(es) de interfaz fallaron');
+  terminado = true;   // veredicto dado: el cierre del socket ya no decide nada
   ws.close();
   done(failed ? 1 : 0);
 })().catch((e) => {

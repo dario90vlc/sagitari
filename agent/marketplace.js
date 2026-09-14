@@ -27,6 +27,7 @@ async function searchGitHub(query, { limit = 8 } = {}) {
   const q = encodeURIComponent(`${String(query || 'skill').slice(0, 100)} in:readme SKILL.md`);
   const res = await fetch(`https://api.github.com/search/repositories?q=${q}&per_page=${limit}&sort=stars`, {
     headers: { 'User-Agent': 'Sagitari', 'Accept': 'application/vnd.github+json' },
+    signal: AbortSignal.timeout(20000),   // sin tope, la búsqueda dejaba la UI esperando para siempre
   });
   if (!res.ok) throw new Error('GitHub ' + res.status);
   const data = await res.json();
