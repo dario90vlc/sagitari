@@ -2,9 +2,7 @@
 <html lang="es">
 <head>
 <meta charset="UTF-8" />
-<meta http-equiv="Content-Security-Policy" content="default-src 'self' data: blob:; style-src 'self' 'unsafe-inline' https://fonts.googleapis.com; font-src https://fonts.gstatic.com; script-src 'self'" />
-<link rel="preconnect" href="https://fonts.googleapis.com">
-<link href="https://fonts.googleapis.com/css2?family=Sora:wght@300;400;600;700&family=Space+Grotesk:wght@400;500;600&display=swap" rel="stylesheet">
+<meta http-equiv="Content-Security-Policy" content="default-src 'self' data: blob:; style-src 'self' 'unsafe-inline'; font-src 'self'; script-src 'self'" />
 <link rel="stylesheet" href="styles.css" />
 <title>SAGITARI</title>
 </head>
@@ -184,7 +182,7 @@
         </div>
       </section>
 
-      <!-- TASKS (v1.3: cola en background, programadas, pausa/cancelar) -->
+      <!-- TASKS (v1.3: cola en segundo plano, programadas, pausa/cancelar) -->
       <section class="view" id="view-tasks">
         <h1 class="sr-only">Tareas</h1>
         <div class="viewhead"><h2>Tareas</h2>
@@ -206,7 +204,7 @@
             <button class="btn ghost" id="taskSchedule"><span class="bi"><i data-i="history"></i></span> Programar</button>
             <span class="saving" id="taskMsg"></span>
           </div>
-          <div class="subnote">Las tareas en background usan su propio agente: puedes seguir chateando mientras trabajan. Se te notificará al terminar. Máx. simultáneas configurable en Ajustes.</div>
+          <div class="subnote">Las tareas en segundo plano usan su propio agente: puedes seguir chateando mientras trabajan. Se te notificará al terminar. Máx. simultáneas configurable en Ajustes.</div>
         </div>
         <p class="subnote" style="margin-top:0;margin-bottom:14px">Cada tarea larga guarda un punto de control con su último paso completado. Puedes pausar, reanudar donde se quedó (también tras cerrar la app) y ver qué paso falló y por qué.</p>
         <div id="tasksList" class="histlist"></div>

@@ -827,14 +827,14 @@ class Agent {
         // primario falla y contesta otro más caro (o más barato), el límite de
         // coste y el panel deben reflejarlo
         if (entry.model) this.guardrails.model = entry.model;
-        if (entry.role !== 'primary') this.emit({ type: 'status', text: `Modelo «${entry.model}» (${cfg.format}) respondiendo…` });
+        if (entry.role !== 'primary') this.emit({ type: 'status', text: `Modelo «${entry.model}» respondiendo…` });
         return res;
       } catch (e) {
         lastErr = e;
         models.record(entry.model, { ok: false, durationMs: Date.now() - t0, error: e.message, fallbackFrom: true });
         runlog.log({ agent: 'sagitari', event: 'model_fallback', model: entry.model, role: entry.role, error: String(e.message).slice(0, 150) });
         if (signal.aborted) throw e;
-        this.emit({ type: 'status', text: `Modelo «${entry.model}» no disponible — probando siguiente (${entry.role})…` });
+        this.emit({ type: 'status', text: `Modelo «${entry.model}» no disponible — probando el siguiente…` });
       }
     }
     throw lastErr || new Error('Ningún modelo disponible en la cadena de fallback.');

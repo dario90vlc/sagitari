@@ -889,10 +889,10 @@ async function renderHealth() {
   box.innerHTML = rows.map(r => {
     const health = r.errorRate >= 0.3 ? 'mag' : r.errorRate > 0 ? 'a-y' : 'ok';
     const plain = `${r.model} · ${r.calls} llamadas · ${r.avgLatencyMs || '—'} ms · ${(r.tokensIn + r.tokensOut).toLocaleString('es')} tok`
-      + `${r.errors ? ' · ' + r.errors + ' errores' : ''}${r.fallbacks ? ' · ' + r.fallbacks + ' fallbacks' : ''}`;
+      + `${r.errors ? ' · ' + r.errors + ' errores' : ''}${r.fallbacks ? ' · ' + r.fallbacks + (r.fallbacks === 1 ? ' relevo' : ' relevos') : ''}`;
     return `<div class="toolchip" title="${esc(r.lastError || '')}">
       <span class="dot ${health}"></span>
-      <span class="tc-txt" title="${esc(plain)}"><b>${esc(r.model)}</b> · ${r.calls} llamadas · ${r.avgLatencyMs || '—'} ms · ${(r.tokensIn + r.tokensOut).toLocaleString('es')} tok${r.errors ? ' · ' + r.errors + ' errores' : ''}${r.fallbacks ? ' · ' + r.fallbacks + ' fallbacks' : ''}</span>
+      <span class="tc-txt" title="${esc(plain)}"><b>${esc(r.model)}</b> · ${r.calls} llamadas · ${r.avgLatencyMs || '—'} ms · ${(r.tokensIn + r.tokensOut).toLocaleString('es')} tok${r.errors ? ' · ' + r.errors + ' errores' : ''}${r.fallbacks ? ' · ' + r.fallbacks + (r.fallbacks === 1 ? ' relevo' : ' relevos') : ''}</span>
     </div>`;
   }).join('');
 }
@@ -1024,7 +1024,7 @@ function scheduleStreamRender(holder) {
 }
 
 window.sagitari.onAgentEvent((ev) => {
-  // v1.3: los eventos de una tarea en background NO deben tocar el chat
+  // v1.3: los eventos de una tarea en segundo plano NO deben tocar el chat
   // interactivo (ni sus burbujas ni el estado busy/detener): solo el feed,
   // el panel de Tareas, las confirmaciones y los avisos.
   if (ev.bg) {
@@ -1033,12 +1033,12 @@ window.sagitari.onAgentEvent((ev) => {
       case 'tool': feed(ev.name || 'herramienta', 'pur'); break;
       case 'tool_result': feed((ev.name || '') + ' — ' + String(ev.result || 'ok').slice(0, 90), (String(ev.result || '').startsWith('Error') ? 'err' : 'ok')); break;
       case 'task_done':
-        feed('Tarea en background completada', 'ok');
+        feed('Tarea en segundo plano completada', 'ok');
         if ($('#view-tasks').classList.contains('on')) renderTasks();
         refreshAgentsPanels();
         break;
       case 'task_interrupted':
-        feed('Tarea en background interrumpida — recuperable', 'err');
+        feed('Tarea en segundo plano interrumpida — recuperable', 'err');
         if ($('#view-tasks').classList.contains('on')) renderTasks();
         break;
       case 'task_update':
@@ -1046,12 +1046,12 @@ window.sagitari.onAgentEvent((ev) => {
         if ($('#view-tasks').classList.contains('on')) renderTasks();
         break;
       case 'guardrail':
-        feed('Límite de seguridad (background): ' + String(ev.reason || '').slice(0, 90), 'err');
+        feed('Límite de seguridad (segundo plano): ' + String(ev.reason || '').slice(0, 90), 'err');
         showToast(String(ev.reason || 'Límite de seguridad en una tarea'));
         break;
       case 'error':
-        feed('Error en tarea de background', 'err');
-        showToast(ev.message || 'Error en una tarea de background');
+        feed('Error en una tarea en segundo plano', 'err');
+        showToast(ev.message || 'Error en una tarea en segundo plano');
         break;
       case 'confirm_request': showConfirm(ev); break;
       case 'toast': showToast(ev.title + ': ' + ev.message); break;
@@ -1127,7 +1127,7 @@ window.sagitari.onAgentEvent((ev) => {
       syncChatBadge();
       glowOffSoon();
       agentStop();
-      feed('Tarea pausada — checkpoint guardado', 'blu');
+      feed('Tarea pausada — punto de control guardado', 'blu');
       showToast('Tarea pausada. Reanúdala desde el panel Tareas.');
       break;
     case 'task_done':
@@ -1253,7 +1253,7 @@ function paintConfirm() {
   const ev = confirmQueue[0];
   currentConfirm = ev || null;
   if (!ev) { if (bar) bar.hidden = true; return; }
-  const who = ev.runId ? ' (tarea en background)' : '';
+  const who = ev.runId ? ' (tarea en segundo plano)' : '';
   // con varias esperando se dice cuál se está viendo: «1 de 3»
   const prog = confirmQueue.length > 1 ? ' · 1 de ' + confirmQueue.length : '';
   $('#confirmTitle').textContent = 'El agente quiere: ' + (ev.description || ev.tool) + who + prog;
@@ -2231,7 +2231,7 @@ function renderUpdate(state) {
   const pct = Math.max(0, Math.min(100, Math.round(Number(s.progress && s.progress.pct) || 0)));
   const prow = $('#updProgressRow'); if (prow) prow.classList.toggle('on', downloading);
   const bar = $('#updBar'); if (bar) bar.setAttribute('aria-valuenow', String(pct));
-  const fill = $('#updBarFill'); if (fill) fill.style.width = pct + '%';
+  const fill = $('#updBarFill'); if (fill) fill.style.transform = 'scaleX(' + (pct / 100) + ')';
   const bnote = $('#updBarNote');
   if (bnote && downloading) {
     const total = s.progress && s.progress.total;
@@ -2776,7 +2776,7 @@ async function renderTools() {
   }
 }
 
-// ============ v1.2: tasks view (checkpoints, pausa, reanudación) ============
+// ============ v1.2: tasks view (puntos de control, pausa, reanudación) ============
 const TASK_STATUS = {
   pending:     { label: 'En cola', cls: 'blu' },
   scheduled:   { label: 'Programada', cls: 'blu' },
@@ -2794,7 +2794,7 @@ async function renderTasks() {
   try { list = (await window.sagitari.tasksList()) || []; } catch (e) { err = e; }
   box.innerHTML = '';
   if (err) { box.innerHTML = `<div class="subnote">No se pudieron cargar las tareas: ${esc((err && err.message) || err)}</div>`; return; }
-  if (!list.length) { box.innerHTML = '<div class="subnote">Aún no hay tareas. Lanza una arriba o espera a que el chat cree checkpoints automáticamente.</div>'; return; }
+  if (!list.length) { box.innerHTML = '<div class="subnote">Aún no hay tareas. Lanza una arriba o espera a que el chat cree puntos de control automáticamente.</div>'; return; }
   for (const t of list) {
     const st = TASK_STATUS[t.status] || TASK_STATUS.completed;
     const it = document.createElement('div');
@@ -2889,7 +2889,7 @@ $('#taskCreate').onclick = async () => {
     if (r && r.ok) {
       msg.textContent = 'Tarea en cola (' + r.runId + ').';
       $('#taskGoal').value = '';
-      feed('Tarea lanzada en background', 'blu');
+      feed('Tarea lanzada en segundo plano', 'blu');
       renderTasks();
     } else msg.textContent = (r && r.error) || 'No se pudo crear la tarea.';
   } catch (e) { msg.textContent = 'Error: ' + ((e && e.message) || e); }
@@ -3043,7 +3043,6 @@ function cselCerrar() {
   if (!cselAbierto) return;
   const { sel, menu } = cselAbierto;
   menu.hidden = true;
-  menu.classList.remove('arriba');
   const btn = sel.closest('.csel').querySelector('.csel-btn');
   if (btn) btn.setAttribute('aria-expanded', 'false');
   cselAbierto = null;
@@ -3062,11 +3061,18 @@ function cselAbrir(sel) {
     return `<div class="sm-item${on ? ' on' : ''}" role="option" aria-selected="${on}"${datos}>`
       + `<span class="sm-name">${esc(o.textContent.trim())}</span>${on ? '<span class="mm-mark" aria-hidden="true">✓</span>' : ''}</div>`;
   }).join('') || '<div class="mm-hint">Sin opciones.</div>';
-  menu.hidden = false;
-  // si abajo no cabe, se abre hacia arriba (nunca fuera de la vista)
+  // Coordenadas propias: el menú es position:fixed, así que escapa del overflow del
+  // contenedor (antes .main lo recortaba). Se mide con la lista ya pintada, se ancla
+  // al botón, se voltea hacia arriba si abajo no cabe y se mantiene dentro de la vista.
   const r = caja.getBoundingClientRect();
   const alto = Math.min(300, menu.scrollHeight || 300);
-  menu.classList.toggle('arriba', r.bottom + 8 + alto > window.innerHeight && r.top > alto);
+  menu.style.width = Math.round(r.width) + 'px';
+  const cabeAbajo = window.innerHeight - r.bottom - 8 >= Math.min(alto, 200);
+  const arriba = !cabeAbajo && r.top > alto;
+  const top = arriba ? r.top - alto - 6 : r.bottom + 6;
+  menu.style.left = Math.round(Math.max(8, Math.min(r.left - 2, window.innerWidth - r.width - 6))) + 'px';
+  menu.style.top = Math.round(Math.max(8, Math.min(top, window.innerHeight - 12))) + 'px';
+  menu.hidden = false;
   const ya = menu.querySelector('.sm-item.on');
   if (ya) ya.scrollIntoView({ block: 'nearest' });
   caja.querySelector('.csel-btn').setAttribute('aria-expanded', 'true');
@@ -3175,6 +3181,8 @@ document.addEventListener('mousedown', (e) => {
 });
 document.addEventListener('keydown', (e) => { if (e.key === 'Escape') cselCerrar(); });
 window.addEventListener('resize', cselCerrar);
+// el menú está anclado a un punto: si el contenedor se desplaza, el ancla se queda atrás
+window.addEventListener('scroll', cselCerrar, true);
 window.addEventListener('blur', cselCerrar);
 
 /* ---- selector de modelo del pie: cambia entre los modelos de tu API ---- */
