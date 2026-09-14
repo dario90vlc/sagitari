@@ -2088,6 +2088,17 @@ test('chat: el fallo se explica y la píldora sale de los datos reales', () => {
   eq(K.statusPill({ model: 'm' }, { calls: 5, errors: 2, errorRate: 0.4 }).label, 'Con errores');
   eq(K.statusPill({ model: 'm' }, { calls: 5, errors: 0, fallbacks: 2 }).label, 'Con fallbacks');
   eq(K.statusPill({ model: 'm' }, { calls: 5, errors: 1, errorRate: 0.4 }).dot, 'mag', 'y el punto lo dice igual');
+  /* Manda la ÚLTIMA llamada, no el histórico: un modelo con 99 fallos antiguos que
+     acaba de responder bien no puede seguir diciendo «Con errores» para siempre. */
+  const viejo = { calls: 100, errors: 99, errorRate: 0.99, lastOk: false, lastUsed: '2026-09-14T01:00:50Z', lastError: 'HTTP 401 de OpenCode Go: Missing API key' };
+  eq(K.statusPill({ model: 'm' }, viejo).label, 'Con errores');
+  eq(K.statusPill({ model: 'm' }, viejo).dot, 'mag');
+  ok(/Missing API key/.test(K.statusPill({ model: 'm' }, viejo).title), 'el title lleva el error real');
+  // …y si otro modelo de la cadena respondió después, se dice así en vez de alarmar
+  eq(K.statusPill({ model: 'm' }, viejo, '2026-09-14T01:00:53Z').label, 'Con otro modelo');
+  eq(K.statusPill({ model: 'm' }, viejo, '2026-09-14T01:00:53Z').dot, 'a-y');
+  // un fallo viejo con respuesta buena posterior ya no condiciona la píldora
+  eq(K.statusPill({ model: 'm' }, { calls: 100, errors: 99, errorRate: 0.99, lastOk: true }).label, 'Conectado');
 });
 
 /* Los tests async registrados más arriba (la descarga del actualizador) todavía

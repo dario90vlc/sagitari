@@ -156,6 +156,11 @@ function record(model, { ok, durationMs, tokens, error, fallbackFrom, costUsd })
     m.lastError = String(error || 'error').slice(0, 300);
     if (fallbackFrom) m.fallbacks++;
   }
+  // El resultado de la ÚLTIMA llamada, aparte de los totales: la píldora del
+  // sidebar tiene que describir el estado actual, no el historial de por vida
+  // (con solo los acumulados, un modelo que falló 100 veces sigue «Con errores»
+  // para siempre aunque hoy funcione).
+  m.lastOk = !!ok;
   m.lastUsed = new Date().toISOString();
   data[model] = m;
   _save(data);
@@ -176,6 +181,7 @@ function summary() {
     costUsd: +Number(m.costUsd || 0).toFixed(4),
     fallbacks: m.fallbacks || 0,
     lastError: m.lastError,
+    lastOk: typeof m.lastOk === 'boolean' ? m.lastOk : null,
     lastUsed: m.lastUsed,
   })).sort((a, b) => b.calls - a.calls);
 }

@@ -2966,12 +2966,16 @@ async function updateStatusLabels() {
   {/* La píldora decía «Conectado» con punto verde solo por haber un proveedor
       activo, aunque el panel de salud registrara errores y fallbacks. Ahora sale
       de los datos reales del modelo activo. */}
-  let fila = null;
+  let fila = null, ultimoOkAjeno = null;
   try {
     const filas = (await window.sagitari.healthGet()) || [];
     fila = filas.find(r => r.model === (a && a.model)) || null;
+    // el modelo que respondió más recientemente (si no es el activo): distingue
+    // «este falló» de «este falló y otro contestó por él»
+    const otros = filas.filter(r => !a || r.model !== a.model).filter(r => r.lastOk === true && r.lastUsed);
+    ultimoOkAjeno = otros.length ? otros.map(r => r.lastUsed).sort().pop() : null;
   } catch {}
-  const p = K.statusPill(a, fila);
+  const p = K.statusPill(a, fila, ultimoOkAjeno);
   $('#stConn').textContent = p.label;
   const dot = $('#stDot');
   if (dot) { dot.className = 'dot ' + p.dot; dot.title = p.title; }
