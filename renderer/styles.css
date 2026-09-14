@@ -499,12 +499,76 @@ input[type="url"], input[type="email"], textarea, select {
   outline: none;
   transition: border-color .15s, box-shadow .15s;
 }
+/* Los de fecha/hora faltaban en la lista y salían con el aspecto claro del sistema,
+   icono de calendario incluido. `color-scheme: dark` hace que Chromium pinte TAMBIÉN
+   el desplegable del calendario en oscuro (el popup lo dibuja él, no se puede
+   tematizar por CSS). */
+input[type="date"], input[type="datetime-local"], input[type="time"], input[type="month"] {
+  background: rgba(8,5,24,0.6);
+  border: 1px solid var(--line2);
+  border-radius: 11px;
+  color: var(--txt);
+  font: 500 13px 'Space Grotesk';
+  padding: 9px 12px;
+  outline: none;
+  color-scheme: dark;
+  transition: border-color .15s, box-shadow .15s;
+}
+input[type="date"]::-webkit-calendar-picker-indicator,
+input[type="datetime-local"]::-webkit-calendar-picker-indicator,
+input[type="time"]::-webkit-calendar-picker-indicator { cursor: pointer; opacity: .7; }
+input[type="date"]::-webkit-calendar-picker-indicator:hover,
+input[type="datetime-local"]::-webkit-calendar-picker-indicator:hover { opacity: 1; }
 input[type="text"]:focus, input[type="password"]:focus, input[type="number"]:focus,
 input[type="search"]:focus, input[type="url"]:focus, input[type="email"]:focus,
 textarea:focus, select:focus {
   border-color: rgba(var(--acc-rgb), 0.55);
   box-shadow: 0 0 14px rgba(var(--acc2-rgb), 0.25);
 }
+input[type="date"]:focus, input[type="datetime-local"]:focus, input[type="time"]:focus {
+  border-color: rgba(var(--acc-rgb), 0.55);
+  box-shadow: 0 0 14px rgba(var(--acc2-rgb), 0.25);
+}
+
+/* ---- desplegables con el estilo de la app ----
+   El popup de un <select> lo dibuja el sistema (claro, con su tipografía) y no se
+   puede tematizar desde CSS. Cada select lleva encima un control propio con el
+   lenguaje de los menús (skills, modelos) y el select nativo queda debajo como
+   fuente de verdad: `.value`/`.options` y el evento `change` siguen siendo suyos,
+   así que el resto del código y el teclado no cambian de contrato. */
+.csel { position: relative; display: block; width: 100%; min-width: 0; }
+.csel-btn {
+  width: 100%; display: flex; align-items: center; gap: 8px;
+  background: rgba(8,5,24,0.6); border: 1px solid var(--line2); border-radius: 11px;
+  color: var(--txt); font: 500 15px 'Space Grotesk'; padding: 10px 12px; cursor: pointer; text-align: left;
+  transition: border-color .15s, box-shadow .15s;
+}
+.csel-btn:hover { border-color: var(--line); }
+.csel-btn:focus-visible { border-color: rgba(var(--acc-rgb), 0.55); box-shadow: 0 0 14px rgba(var(--acc2-rgb), 0.25); outline: none; }
+.csel-btn[aria-expanded="true"] { border-color: rgba(var(--acc-rgb), 0.55); box-shadow: 0 0 14px rgba(var(--acc2-rgb), 0.25); }
+.csel-btn .csel-label { flex: 1; min-width: 0; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+.csel-menu {
+  position: absolute; left: -2px; right: -2px; top: calc(100% + 6px); z-index: 140;
+  background: linear-gradient(165deg, rgba(22,14,48,0.99), rgba(12,8,30,0.99));
+  border: 1px solid var(--line); border-radius: 12px;
+  box-shadow: 0 14px 44px rgba(0,0,0,0.5), 0 0 26px rgba(var(--acc2-rgb), 0.18);
+  max-height: 300px; overflow-y: auto;
+}
+.csel-menu.arriba { top: auto; bottom: calc(100% + 6px); }
+.csel-menu::-webkit-scrollbar { width: 6px; }
+.csel-menu::-webkit-scrollbar-thumb { background: rgba(var(--acc2-rgb), 0.3); border-radius: 3px; }
+.csel-menu .sm-item { padding: 9px 14px; }
+.csel-menu .sm-item.hl { background: rgba(var(--acc2-rgb), 0.16); }
+.csel-menu .sm-item.on .sm-name { color: var(--vio2); }
+.csel-menu .mm-mark { margin-left: auto; color: var(--vio2); font-size: 12px; flex-shrink: 0; }
+/* variantes del sitio donde vive cada select */
+.permrow .csel-btn { padding: 5px 9px; font-size: 12px; border-radius: 8px; }
+.permrow .csel { width: 100%; }
+.btnrow .csel { width: auto; }
+.tt-head + .btnrow .csel-btn, .btnrow .csel-btn { padding: 9px 12px; }
+/* el select nativo se queda en el DOM (es la fuente de verdad) pero no se pinta:
+   el control visible es el botón */
+.csel-native { display: none; }
 input::placeholder, textarea::placeholder { color: var(--dim); }
 
 .field { margin-bottom: 12px; }

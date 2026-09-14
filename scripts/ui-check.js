@@ -253,6 +253,43 @@ const AFTER = {
     failed++;
     console.log('  FALLO el selector de modelo no responde al ratón real  ->  ' + JSON.stringify({ menuAbierto, destino, pulsado, menuCerrado, pildora }));
   }
+  /* ---- desplegables propios: el popup del sistema no se puede tematizar ----
+     El popup de un <select> lo dibuja Windows (claro, con su tipografía) y no hay
+     CSS que lo alcance; por eso cada select lleva encima un control de la app. Se
+     comprueba que TODOS están mejorados, que la lista se pinta con las clases de los
+     menús, que elegir escribe en el select nativo y propaga `change` —el contrato
+     del que vive el resto del código— y que los campos de fecha piden tema oscuro
+     (así el calendario del sistema sale oscuro). */
+  /* Un `evaluate` cuya expresión lanza devuelve undefined: si eso pasaba (p. ej. al
+     desactivar la mejora para probar esta misma comprobación) el JSON.parse reventaba
+     el arnés entero en vez de contar un fallo. */
+  const jsonDe = (v) => { try { return JSON.parse(v); } catch { return null; } };
+  const selects = jsonDe(await evaluate('JSON.stringify({ total: document.querySelectorAll("select").length, mejorados: [...document.querySelectorAll("select")].filter(s => s.dataset.csel === "1" && s.closest(".csel") && s.closest(".csel").querySelector(".csel-btn") && s.closest(".csel").querySelector(".csel-menu")).length })')) || { total: -1, mejorados: -1 };
+  await evaluate('document.querySelector(\'[data-view="tasks"]\').click()');
+  await new Promise(r => setTimeout(r, 400));
+  await pulsarConRaton('.csel[data-csel-de="taskMode"] .csel-btn');
+  const listaModo = jsonDe(await evaluate(`JSON.stringify({
+    abierto: document.querySelector('.csel[data-csel-de="taskMode"] .csel-menu') ? !document.querySelector('.csel[data-csel-de="taskMode"] .csel-menu').hidden : false,
+    filas: [...document.querySelectorAll('.csel[data-csel-de="taskMode"] .sm-item .sm-name')].map(f => f.textContent),
+    opciones: [...(document.querySelector('#taskMode') || { options: [] }).options].map(o => o.textContent.trim()),
+    clases: (document.querySelector('.csel[data-csel-de="taskMode"] .sm-item') || {}).className || '',
+    fondo: document.querySelector('.csel[data-csel-de="taskMode"] .csel-menu') ? getComputedStyle(document.querySelector('.csel[data-csel-de="taskMode"] .csel-menu')).backgroundImage.slice(0, 21) : ''
+  })`)) || {};
+  await pulsarConRaton('.csel[data-csel-de="taskMode"] .sm-item:nth-child(2)');
+  const elegido = jsonDe(await evaluate(`JSON.stringify({
+    valor: (document.querySelector('#taskMode') || {}).value,
+    etiqueta: (document.querySelector('.csel[data-csel-de="taskMode"] .csel-label') || {}).textContent,
+    cerrado: (document.querySelector('.csel[data-csel-de="taskMode"] .csel-menu') || {}).hidden
+  })`)) || {};
+  const fechaOscura = await evaluate('getComputedStyle(document.querySelector("#taskWhen")).colorScheme === "dark"') === true;
+  await evaluate('document.querySelector(\'[data-view="chat"]\').click()');
+  await new Promise(r => setTimeout(r, 300));
+  const selectsOk = selects.total > 0 && selects.total === selects.mejorados
+    && listaModo.abierto === true && (listaModo.filas || []).join(',') === (listaModo.opciones || []).join(',') && listaModo.filas.length > 0
+    && /sm-item/.test(listaModo.clases) && /linear-gradient/.test(listaModo.fondo)
+    && elegido.valor === 'plan' && elegido.etiqueta === 'Plan' && elegido.cerrado === true && fechaOscura;
+  if (selectsOk) console.log('  ok   los desplegables son de la app (lista propia, elegir propaga change, fecha en oscuro)');
+  else { failed++; console.log('  FALLO los desplegables nativos siguen a la vista  ->  ' + JSON.stringify({ selects, listaModo, elegido, fechaOscura })); }
   // Tamaño mínimo real de la ventana (main.js: minWidth 1000 x minHeight 620):
   // el compositor quedaba 60px fuera de pantalla porque el grid se dimensionaba
   // por contenido en vez de por la altura disponible

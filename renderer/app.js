@@ -1947,6 +1947,8 @@ async function renderSecurity() {
     };
     permBox.appendChild(row);
   }
+  // los desplegables de permisos nacen aquí: se mejoran al pintarse
+  mejoraSelects(permBox);
 }
 async function initSecurity() {
   try {
@@ -3010,6 +3012,171 @@ function updateStatusLabels() {
   if (mm && !mm.hidden) { mm.hidden = true; openModelMenu(); }
 }
 
+/* ---- desplegables con el estilo de la app ----
+   El popup de un <select> lo dibuja el sistema operativo (claro, con su tipografía)
+   y no se puede tematizar desde CSS: por eso los desplegables de la app se veían
+   fuera de estilo. Cada select lleva encima un control propio, con el mismo lenguaje
+   que los menús de skills y modelos, y el select nativo queda debajo como fuente de
+   verdad: `.value`/`.options` y el evento `change` siguen siendo suyos, así que el
+   resto del código no cambia de contrato. */
+let cselAbierto = null;
+
+function cselEtiqueta(sel) {
+  const o = sel.selectedOptions && sel.selectedOptions[0];
+  return o ? o.textContent.trim() : '';
+}
+
+/** Refresca la etiqueta y el estado del botón de un select ya mejorado. */
+function cselPintar(sel) {
+  const caja = sel.closest('.csel');
+  if (!caja) return;
+  const btn = caja.querySelector('.csel-btn');
+  const et = cselEtiqueta(sel);
+  btn.querySelector('.csel-label').textContent = et || '—';
+  btn.disabled = !!sel.disabled;
+  const lab = sel.id && document.querySelector('label[for="' + sel.id + '"]');
+  const nombre = (lab && lab.textContent.trim()) || sel.getAttribute('aria-label') || 'Desplegable';
+  btn.setAttribute('aria-label', nombre + ': ' + (et || 'sin selección'));
+}
+
+function cselCerrar() {
+  if (!cselAbierto) return;
+  const { sel, menu } = cselAbierto;
+  menu.hidden = true;
+  menu.classList.remove('arriba');
+  const btn = sel.closest('.csel').querySelector('.csel-btn');
+  if (btn) btn.setAttribute('aria-expanded', 'false');
+  cselAbierto = null;
+}
+
+/** Abre la lista: filas con el mismo aspecto que el resto de menús de la app. */
+function cselAbrir(sel) {
+  cselCerrar();
+  const caja = sel.closest('.csel');
+  if (!caja) return;
+  const menu = caja.querySelector('.csel-menu');
+  const actual = sel.value;
+  menu.innerHTML = [...sel.options].map(o => {
+    const on = o.value === actual && !o.disabled;
+    const datos = o.disabled ? '' : ` data-v="${esc(o.value)}"`;
+    return `<div class="sm-item${on ? ' on' : ''}" role="option" aria-selected="${on}"${datos}>`
+      + `<span class="sm-name">${esc(o.textContent.trim())}</span>${on ? '<span class="mm-mark" aria-hidden="true">✓</span>' : ''}</div>`;
+  }).join('') || '<div class="mm-hint">Sin opciones.</div>';
+  menu.hidden = false;
+  // si abajo no cabe, se abre hacia arriba (nunca fuera de la vista)
+  const r = caja.getBoundingClientRect();
+  const alto = Math.min(300, menu.scrollHeight || 300);
+  menu.classList.toggle('arriba', r.bottom + 8 + alto > window.innerHeight && r.top > alto);
+  const ya = menu.querySelector('.sm-item.on');
+  if (ya) ya.scrollIntoView({ block: 'nearest' });
+  caja.querySelector('.csel-btn').setAttribute('aria-expanded', 'true');
+  cselAbierto = { sel, menu };
+}
+
+/** Elige una opción: escribe en el select nativo y dispara `change`. */
+function cselElegir(sel, valor) {
+  if (sel.value !== valor) {
+    sel.value = valor;
+    sel.dispatchEvent(new Event('change', { bubbles: true }));
+  }
+  cselPintar(sel);
+  cselCerrar();
+}
+
+/** Convierte un <select> en desplegable propio (idempotente). */
+function mejoraSelect(sel) {
+  if (sel.dataset.csel) return;
+  sel.dataset.csel = '1';
+  const caja = document.createElement('div');
+  caja.className = 'csel';
+  if (sel.id) caja.dataset.cselDe = sel.id;   // gancho estable para las comprobaciones
+  if (sel.style.width) { caja.style.width = sel.style.width; sel.style.width = ''; }
+  const btn = document.createElement('button');
+  btn.type = 'button';
+  btn.className = 'csel-btn';
+  btn.setAttribute('aria-haspopup', 'listbox');
+  btn.setAttribute('aria-expanded', 'false');
+  btn.innerHTML = '<span class="csel-label"></span><span class="ss-caret" aria-hidden="true">▾</span>';
+  const menu = document.createElement('div');
+  menu.className = 'csel-menu';
+  menu.setAttribute('role', 'listbox');
+  menu.hidden = true;
+  sel.parentNode.insertBefore(caja, sel);
+  caja.append(btn, menu, sel);
+  sel.classList.add('csel-native');   // oculto: el control visible es el botón
+
+  const resaltar = (n) => {
+    const filas = [...menu.querySelectorAll('.sm-item[data-v]')];
+    if (!filas.length) return;
+    filas.forEach(f => f.classList.remove('hl'));
+    const i = ((n % filas.length) + filas.length) % filas.length;
+    filas[i].classList.add('hl');
+    filas[i].scrollIntoView({ block: 'nearest' });
+  };
+  const indiceResaltado = () => [...menu.querySelectorAll('.sm-item')].findIndex(f => f.classList.contains('hl'));
+
+  btn.onclick = (e) => {
+    e.stopPropagation();
+    if (cselAbierto && cselAbierto.sel === sel) cselCerrar();
+    else cselAbrir(sel);
+  };
+  btn.onkeydown = (e) => {
+    const abierto = !!(cselAbierto && cselAbierto.sel === sel);
+    if (e.key === 'ArrowDown' || e.key === 'ArrowUp') {
+      e.preventDefault();
+      if (!abierto) { cselAbrir(sel); resaltar(e.key === 'ArrowDown' ? 0 : -1); }
+      else resaltar(indiceResaltado() + (e.key === 'ArrowDown' ? 1 : -1));
+      return;
+    }
+    if (e.key === 'Enter' || e.key === ' ') {
+      e.preventDefault();
+      if (!abierto) return cselAbrir(sel);
+      const f = menu.querySelector('.sm-item.hl') || menu.querySelector('.sm-item.on');
+      if (f && f.dataset.v !== undefined) cselElegir(sel, f.dataset.v);
+      return;
+    }
+    if (abierto && (e.key === 'Home' || e.key === 'End')) { e.preventDefault(); resaltar(e.key === 'Home' ? 0 : -1); return; }
+    if (abierto && e.key === 'Escape') { e.preventDefault(); cselCerrar(); return; }
+    if (e.key === 'Tab') { cselCerrar(); return; }
+    // salto por letra, como hace el select nativo
+    if (abierto && e.key.length === 1 && /\S/.test(e.key)) {
+      const filas = [...menu.querySelectorAll('.sm-item[data-v]')];
+      const desde = indiceResaltado();
+      const k = e.key.toLowerCase();
+      for (let i = 1; i <= filas.length; i++) {
+        const j = (desde + i + filas.length) % filas.length;
+        if (filas[j].textContent.trim().toLowerCase().startsWith(k)) { e.preventDefault(); resaltar(j); break; }
+      }
+    }
+  };
+  menu.onclick = (e) => {
+    const fila = e.target.closest('.sm-item');
+    if (fila && fila.dataset.v !== undefined) cselElegir(sel, fila.dataset.v);
+  };
+  // las opciones pueden llegar después (detectar modelos, presets): el botón se
+  // repinta solo y, si está abierto, la lista también
+  new MutationObserver(() => {
+    cselPintar(sel);
+    if (cselAbierto && cselAbierto.sel === sel) cselAbrir(sel);
+  }).observe(sel, { childList: true });
+  cselPintar(sel);
+}
+
+/** Mejora todos los selects de un contenedor (o de la app entera). */
+function mejoraSelects(root) {
+  (root || document).querySelectorAll('select:not([data-csel])').forEach(mejoraSelect);
+}
+
+document.addEventListener('mousedown', (e) => {
+  if (!cselAbierto) return;
+  const caja = cselAbierto.sel.closest('.csel');
+  if (caja && (caja.contains(e.target) || cselAbierto.menu.contains(e.target))) return;
+  cselCerrar();
+});
+document.addEventListener('keydown', (e) => { if (e.key === 'Escape') cselCerrar(); });
+window.addEventListener('resize', cselCerrar);
+window.addEventListener('blur', cselCerrar);
+
 /* ---- selector de modelo del pie: cambia entre los modelos de tu API ---- */
 const modelMenu = $('#modelMenu');
 
@@ -3153,6 +3320,8 @@ window.sagitari.onThemeChanged && window.sagitari.onThemeChanged(() => applyThem
   // paneles que leen CFG/metaGet: van DESPUÉS de cargar la configuración real
   fillMemorySens();
   await initSecurity();
+  // los desplegables nativos (selects) pasan a ser controles con el estilo de la app
+  mejoraSelects();
   applyTheme();            // acento + glow antes del primer frame
   setSendMode();
   // el chat arranca vacío: nada de sellos de hora sueltos, sólo la bienvenida
