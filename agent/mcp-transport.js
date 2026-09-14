@@ -3,6 +3,8 @@
 /* Transporte MCP: JSON-RPC 2.0 delimitado por líneas (stdio) o por HTTP con SSE.
    Aquí no se sabe nada de herramientas: solo de mensajes, ids y timeouts. */
 
+const { StringDecoder } = require('string_decoder');
+
 const DEFAULT_TIMEOUT_MS = 60000;
 
 /**
@@ -13,8 +15,10 @@ const DEFAULT_TIMEOUT_MS = 60000;
 function createLineReader(onMessage) {
   let buf = '';
   let noise = 0;
+  const dec = new StringDecoder('utf8');   // la conversión tiene que ser incremental:
+                                           // un chunk puede cortar un carácter multibyte
   return (chunk) => {
-    buf += typeof chunk === 'string' ? chunk : chunk.toString('utf8');
+    buf += typeof chunk === 'string' ? chunk : dec.write(chunk);
     let idx;
     while ((idx = buf.indexOf('\n')) >= 0) {
       const line = buf.slice(0, idx).replace(/\r$/, '');
@@ -31,7 +35,10 @@ function createLineReader(onMessage) {
 class Rpc {
   constructor({ send, onNotice, defaultTimeoutMs = DEFAULT_TIMEOUT_MS }) {
     this.send = send;                       // (text) => void
-    this.onNotice = onNotice || (() => {}); // (method, params) => void
+    this.onNotice = onNotice || (() => {}); // (method, params, id) => void; id es null
+                                            // en las notificaciones y no-null cuando el
+                                            // servidor espera respuesta (contestar con
+                                            // send(JSON.stringify({ jsonrpc: '2.0', id, result })))
     this.timeoutMs = defaultTimeoutMs;
     this._id = 0;
     this._pending = new Map();
@@ -45,7 +52,8 @@ class Rpc {
     return new Promise((resolve, reject) => {
       const timer = setTimeout(() => {
         this._pending.delete(id);
-        reject(new Error(`timeout: ${method} no respondió en ${Math.round(ms / 1000)} s.`));
+        const cuanto = ms >= 1000 ? `${Math.round(ms / 1000)} s` : `${Math.round(ms)} ms`;
+        reject(new Error(`timeout: ${method} no respondió en ${cuanto}.`));
       }, ms);
       this._pending.set(id, {
         resolve: (v) => { clearTimeout(timer); resolve(v); },
@@ -71,7 +79,7 @@ class Rpc {
       else p.resolve(msg.result);
       return;
     }
-    if (msg.method) this.onNotice(msg.method, msg.params || {});
+    if (msg.method) this.onNotice(msg.method, msg.params || {}, msg.id ?? null);
   }
 
   /** El transporte murió: ninguna petición en vuelo puede quedarse esperando. */

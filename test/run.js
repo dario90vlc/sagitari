@@ -1106,6 +1106,30 @@ test('mcp: si el transporte muere, las peticiones en vuelo se rechazan', async (
   ok(/se cayó/.test(err.message), 'no se queda esperando para siempre');
 });
 
+test('mcp: un chunk partido en mitad de un carácter no corrompe el mensaje', () => {
+  const vistos = [];
+  const feed = mcpTransport.createLineReader((m) => vistos.push(m));
+  const linea = Buffer.from(JSON.stringify({ jsonrpc: '2.0', id: 1, result: { t: 'descripción con acentos: ñáé' } }) + '\n', 'utf8');
+  // se parte justo en mitad de la 'ó' (2 bytes): convertir cada chunk por separado
+  // dejaría dos U+FFFD y el mensaje llegaría corrupto sin avisar
+  const corte = linea.indexOf(Buffer.from('ó', 'utf8')) + 1;
+  feed(linea.subarray(0, corte));
+  feed(linea.subarray(corte));
+  eq(vistos.length, 1, 'el mensaje llega entero');
+  eq(vistos[0].result.t, 'descripción con acentos: ñáé');
+});
+
+test('mcp: una petición del servidor llega con su id (para poder responderla)', () => {
+  const avisos = [];
+  const rpc = new mcpTransport.Rpc({ send: () => {}, onNotice: (method, params, id) => avisos.push({ method, params, id }) });
+  rpc.handleMessage({ jsonrpc: '2.0', id: 7, method: 'ping', params: {} });
+  eq(avisos.length, 1);
+  eq(avisos[0].method, 'ping');
+  eq(avisos[0].id, 7, 'sin el id no se puede contestar y el servidor se queda esperando');
+  rpc.handleMessage({ jsonrpc: '2.0', method: 'notifications/tools/list_changed', params: {} });
+  eq(avisos[1].id, null, 'las notificaciones no traen id con el que responder');
+});
+
 test('agent: la cadena elige el protocolo del modelo (Qwen en Go → /messages)', async () => {
   const { Agent } = require('../agent/agent');
   const seen = [];
