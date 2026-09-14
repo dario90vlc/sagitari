@@ -179,20 +179,27 @@ body { font-family: var(--font-ui), 'Segoe UI', sans-serif; font-size: 13px; col
    máximo hacia dentro y dejaba el borde flojo; la máscara blanda devolvía el charco. */
 .glowRing {
   position: absolute; inset: 0; border-radius: inherit;
-  /* La rampa la genera app.js (marcos finos con alfa exponencial): cuatro escalones se veían
-     como bandas, dieciséis de 7px se leen como un degradado. El respaldo de aquí abajo vale
-     para el primer frame, antes de que corra el tema. */
-  box-shadow: var(--glow-frames,
-    inset 0 0 0 10px rgba(var(--glow-a-rgb), 0.12),
-    inset 0 0 0 26px rgba(var(--glow-b-rgb), 0.07),
-    inset 0 0 0 44px rgba(var(--glow-c-rgb), 0.04),
-    inset 0 0 0 64px rgba(var(--glow-b-rgb), 0.02));
+  /* HALO: tres sombras interiores CENTRADAS y difuminadas. Centradas = sin rectángulos de
+     sombra que se crucen en las esquinas; difuminadas = luz continua. Sin spread, sin máscara,
+     sin marcos y sin filtro de capa: ninguna primitiva capaz de dibujar una forma o un
+     escalón. Cada capa es un degradado que sale del borde y se apaga hacia dentro; la de
+     fuera solo lleva un tono algo más frío para que la luz no sea plana. */
+  /* Reparto el alcance en varias capas de desenfoque MENOR en vez de una larga: la acumulación
+     en el vértice crece con el desenfoque, así que cuatro capas de 26-80px dejan el vértice
+     casi a la altura del borde (medido: 1,40× con una sola capa de 168px) y suman el mismo
+     alcance. Todo centrado y difuminado: ninguna forma, ningún escalón. */
+  box-shadow:
+    inset 0 0 22px rgba(var(--glow-a-rgb), calc(0.26 * var(--glow-str) * var(--energy))),
+    inset 0 0 46px rgba(var(--glow-b-rgb), calc(0.15 * var(--glow-str) * var(--energy))),
+    inset 0 0 78px rgba(var(--glow-b-rgb), calc(0.09 * var(--glow-str) * var(--energy))),
+    inset 0 0 132px rgba(var(--glow-c-rgb), calc(0.05 * var(--glow-str) * var(--energy)));
 }
 .glow::before {
   content: ''; position: absolute; inset: 0; border-radius: inherit;
+  /* El filo brillante y su latido: es la capa que respira con el estado. */
   box-shadow:
-    inset 0 0 0 5px rgba(var(--glow-c-rgb), calc(0.16 * var(--glow-str) * var(--energy))),
-    inset 0 0 0 13px rgba(var(--glow-a-rgb), calc(0.08 * var(--glow-str) * var(--energy)));
+    inset 0 0 10px rgba(var(--glow-a-rgb), calc(0.22 * var(--glow-str) * var(--energy))),
+    inset 0 0 44px rgba(var(--glow-b-rgb), calc(0.12 * var(--glow-str) * var(--energy)));
   opacity: 0; will-change: opacity;
 }
 
