@@ -47,7 +47,7 @@ class Rpc {
     this._dead = null;
   }
 
-  request(method, params = {}, { timeoutMs } = {}) {
+  request(method, params = {}, { timeoutMs, onStart } = {}) {
     if (this._dead) return Promise.reject(new Error(this._dead));
     const id = ++this._id;
     const ms = Number(timeoutMs) > 0 ? Number(timeoutMs) : this.timeoutMs;
@@ -61,9 +61,24 @@ class Rpc {
         resolve: (v) => { clearTimeout(timer); resolve(v); },
         reject: (e) => { clearTimeout(timer); reject(e); },
       });
+      // El llamante puede querer el id para poder cancelar ESTA petición mientras
+      // está en vuelo (p. ej. el botón Detener del agente).
+      if (typeof onStart === 'function') { try { onStart(id); } catch {} }
       try { this.send(JSON.stringify({ jsonrpc: '2.0', id, method, params })); }
       catch (e) { this._pending.delete(id); clearTimeout(timer); reject(e); }
     });
+  }
+
+  /**
+   * Cancela UNA petición en vuelo (el usuario pulsó Detener): rechaza solo esa, no
+   * la conexión entera. Devuelve true si había algo que cancelar.
+   */
+  cancel(id, reason) {
+    const p = this._pending.get(id);
+    if (!p) return false;
+    this._pending.delete(id);
+    p.reject(new Error(reason || 'petición cancelada'));
+    return true;
   }
 
   notify(method, params = {}) {

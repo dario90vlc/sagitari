@@ -263,7 +263,7 @@ class McpManager {
    * Ejecuta una herramienta MCP y devuelve TEXTO para el modelo. Nunca lanza:
    * un servidor caído o un timeout se explican, no rompen el turno.
    */
-  async callTool(exposedName, args = {}, { timeoutMs } = {}) {
+  async callTool(exposedName, args = {}, { timeoutMs, onExit } = {}) {
     let info = this.describe(exposedName);
     // Sin conexión todavía no hay tabla (el servidor está `idle` al arrancar la app):
     // se identifica por el prefijo, se conecta y se resuelve con la tabla REAL. Si se
@@ -282,8 +282,14 @@ class McpManager {
     if (!info) info = this.describe(exposedName);
     if (!info) return `Error: la herramienta MCP «${exposedName}» no está disponible ahora mismo.`;
     const ms = Number(timeoutMs) > 0 ? Number(timeoutMs) : (Number(s.timeoutMs) > 0 ? Number(s.timeoutMs) : DEFAULT_TIMEOUT_MS);
+    let reqId = null;
+    // El gancho que usa el agente: mientras la petición está en vuelo, Detener puede
+    // cortar SOLO esa llamada (si no, agotaría su timeout sin que el usuario pare nada).
+    if (typeof onExit === 'function') {
+      try { onExit({ stop: () => { if (reqId != null) st.transport.rpc.cancel(reqId, 'detenida por el usuario'); } }); } catch {}
+    }
     try {
-      const res = await st.transport.rpc.request('tools/call', { name: info.toolName, arguments: args || {} }, { timeoutMs: ms });
+      const res = await st.transport.rpc.request('tools/call', { name: info.toolName, arguments: args || {} }, { timeoutMs: ms, onStart: (id) => { reqId = id; } });
       const texto = this._flatten(res);
       return res && res.isError ? 'Error del servidor MCP: ' + texto : texto;
     } catch (e) {
@@ -307,9 +313,13 @@ class McpManager {
       try { partes.push(JSON.stringify(res.structuredContent)); } catch {}
     }
     const texto = partes.join('\n').trim() || '(el servidor MCP no devolvió contenido)';
-    return texto.length > MAX_RESULT_CHARS
-      ? texto.slice(0, MAX_RESULT_CHARS) + '\n… (resultado recortado)'
-      : texto;
+    if (texto.length > MAX_RESULT_CHARS) {
+      let corte = MAX_RESULT_CHARS;
+      const c = texto.charCodeAt(corte - 1);
+      if (c >= 0xD800 && c <= 0xDBFF) corte--;   // no partir un par suplente
+      return texto.slice(0, corte) + '\n… (resultado recortado)';
+    }
+    return texto;
   }
 
   /** Estado para la UI (y para el usuario): nunca expone secretos. */

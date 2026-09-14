@@ -1489,6 +1489,7 @@ test('mcp: la llamada aplana el contenido, resume imágenes y recorta', async ()
         { type: 'text', text: 'primera parte' },
         { type: 'image', mimeType: 'image/png', data: 'A'.repeat(40000) },
         { type: 'text', text: 'segunda parte' },
+        { type: 'text', text: 'X'.repeat(70000) },   // fuerza el recorte
       ] };
     }
     return {};
@@ -1504,7 +1505,9 @@ test('mcp: la llamada aplana el contenido, resume imágenes y recorta', async ()
   eq(calls[0].arguments.a, 1);
   ok(out.includes('primera parte') && out.includes('segunda parte'), 'los textos se concatenan en orden');
   ok(/imagen: image\/png/.test(out), 'la imagen se resume (no viaja base64 al modelo): ' + out.slice(0, 120));
-  ok(out.length <= 60000, 'el resultado está acotado');
+  ok(out.length <= 60000 + 40, 'el resultado está acotado');
+  ok(out.endsWith('… (resultado recortado)'), 'el recorte se anuncia al modelo');
+  ok(!/A{100}/.test(out), 'el base64 de la imagen no viaja al modelo');
   await mcp.shutdown();
 });
 
@@ -1579,6 +1582,30 @@ test('mcp: si el servidor está caído, la siguiente llamada reintenta con backo
   const out = await mcp.callTool('mcp__r__tool', {});
   eq(intentos, 2, 'la llamada vuelve a intentar conectar');
   eq(out, 'ya va');
+  await mcp.shutdown();
+});
+
+test('mcp: Detener corta una llamada MCP en vuelo', async () => {
+  const tr = fakeTransport([]);
+  let pendiente = null;
+  tr.rpc.cancel = (id, reason) => { if (!pendiente) return false; const p = pendiente; pendiente = null; p.rej(new Error(reason || 'cancelada')); return true; };
+  tr.rpc.request = async (method, params, opts) => {
+    if (method === 'initialize') return { capabilities: { tools: {} }, serverInfo: { name: 'l', version: '1' } };
+    if (method === 'tools/list') return { tools: [{ name: 'lenta', description: 'd', inputSchema: { type: 'object' } }] };
+    if (method === 'tools/call') {
+      if (opts && opts.onStart) opts.onStart(7);   // el id que usará cancel()
+      return new Promise((res, rej) => { pendiente = { res, rej }; });
+    }
+    return {};
+  };
+  const mcp = new McpManager({ servers: [{ id: 'l', name: 'L', enabled: true, transport: 'stdio', command: 'node', args: [] }], dataDir: tmpDir('sagi-mcp-'), clientVersion: 't', log: () => {}, makeTransport: () => tr });
+  let killable = null;
+  const p = mcp.callTool('mcp__l__lenta', {}, { onExit: (k) => { killable = k; } });
+  await new Promise(r => setTimeout(r, 50));
+  ok(killable && typeof killable.stop === 'function', 'la llamada en vuelo queda registrada como cancelable');
+  killable.stop();
+  const out = await p;
+  ok(/detenid|cancelad/i.test(out), 'el corte se explica en el resultado: ' + out);
   await mcp.shutdown();
 });
 
