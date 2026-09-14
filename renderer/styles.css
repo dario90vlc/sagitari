@@ -53,21 +53,36 @@
   --glow-b-rgb: 139, 92, 246;   /* el elegido */
   --glow-c-rgb: 120, 96, 240;   /* tono vecino frío del aura */
   --glow-str: 1;                /* intensidad del glow: 0.4–1.4 */
-  /* superficies: cada paleta trae su rampa (mismo brillo, su tono). Estos son los
-     valores de la paleta violeta; applyTheme los reescribe al cambiar de tema. */
-  --bg0-rgb: 6, 4, 15;
-  --bg1-rgb: 16, 10, 38;
-  --bg2-rgb: 22, 14, 48;
-  --deep-rgb: 12, 8, 30;
-  --field-rgb: 8, 5, 24;
-  --panel-rgb: 18, 12, 42;
-  --panel2-rgb: 26, 18, 56;
-  --face-rgb: 30, 20, 64;
-  --face2-rgb: 38, 26, 76;
-  --bg0: rgb(var(--bg0-rgb));
-  --bg1: rgba(var(--bg1-rgb), 0.78);
-  --bg2: rgba(var(--bg2-rgb), 0.66);
-  --panel: rgba(var(--panel-rgb), 0.55);
+  /* superficies: cada paleta trae su rampa (mismo brillo, su tono). Estos son los
+
+     valores de la paleta violeta; applyTheme los reescribe al cambiar de tema. */
+
+  --bg0-rgb: 6, 4, 15;
+
+  --bg1-rgb: 16, 10, 38;
+
+  --bg2-rgb: 22, 14, 48;
+
+  --deep-rgb: 12, 8, 30;
+
+  --field-rgb: 8, 5, 24;
+
+  --panel-rgb: 18, 12, 42;
+
+  --panel2-rgb: 26, 18, 56;
+
+  --face-rgb: 30, 20, 64;
+
+  --face2-rgb: 38, 26, 76;
+
+  --bg0: rgb(var(--bg0-rgb));
+
+  --bg1: rgba(var(--bg1-rgb), 0.78);
+
+  --bg2: rgba(var(--bg2-rgb), 0.66);
+
+  --panel: rgba(var(--panel-rgb), 0.55);
+
   --panel2: rgba(var(--panel2-rgb), 0.45);
   --line: rgba(var(--acc-rgb), 0.22);
   --line2: rgba(var(--acc-rgb), 0.12);
@@ -153,30 +168,15 @@ body { font-family: var(--font-ui), 'Segoe UI', sans-serif; font-size: 13px; col
    repite igual y se lee como luz viva en vez de bucle.
    La luz la dibujan SOMBRAS INTERIORES: ya son degradados suaves, así que no hay bordes duros.
    (La primera versión usaba una banda con máscara y desenfoque y salía un corte recto: en CSS
-   la máscara se aplica después del filtro, de modo que recortaba la luz en seco.)
-   El único sitio con máscara es el filo de 1px, donde el corte limpio es lo que se busca. */
-/* Una sola capa con el anillo dentro (.glowRing) y el DESENFOQUE EN LA DE FUERA: así el
-   recorte del anillo no corta la luz —primero se recorta la banda y luego se difumina—, que
-   era el corte recto de la primera versión. Un anillo con máscara es además UNIFORME a lo
-   largo del perímetro: las sombras interiores siempre se acumulan en la esquina (~20 %) y
-   ese punto caliente, con otro tono, se leía como una esfera. Aquí la luz del borde es la
-   misma de la esquina al centro, y el tono cambia A LO LARGO del marco, no por profundidad. */
-/* Marcos SÓLIDOS interiores (`inset 0 0 0 Npx`): cada uno es un marco de grosor exacto que
-   sigue el radio de la ventana, así que la luz es la misma en la esquina que en el centro del
-   borde — sin acumulaciones — y el escalón se suaviza apilando cuatro con alfas pequeñas.
-   Es la única primitiva probada que cumple las tres: borde brillante de verdad, caída continua
-   hacia dentro (rellena) y sin bulto en el vértice. El desenfoque desplazaba el máximo hacia
-   dentro y dejaba el borde flojo; la máscara blanda devolvía el charco de la esquina. */
+   la máscara se aplica después del filtro, de modo que recortaba la luz en seco.) */
+/* El aura vive en dos capas: .glowRing lleva el cuerpo del halo y .glow::before el filo que
+   respira. Ninguna usa máscara, ni spread, ni filtro: sólo sombras interiores centradas y
+   difuminadas, que es lo que hace que la luz no tenga bordes ni formas. */
 .glow {
   position: absolute; inset: 0; border-radius: inherit; pointer-events: none; z-index: 401;
   opacity: 0; transition: opacity .7s cubic-bezier(0.16, 1, 0.3, 1);
 }
-/* Marcos SÓLIDOS interiores (`inset 0 0 0 Npx`): cada uno es un marco de grosor exacto que
-   sigue el radio de la ventana, así que la luz es la misma en la esquina que en el centro del
-   borde, sin acumulaciones. El escalón hacia dentro se suaviza apilando cuatro con alfas
-   pequeñas. Es la única primitiva probada que cumple las tres cosas: borde brillante de
-   verdad, caída continua (rellena) y sin bulto en el vértice. El desenfoque desplazaba el
-   máximo hacia dentro y dejaba el borde flojo; la máscara blanda devolvía el charco. */
+
 .glowRing {
   position: absolute; inset: 0; border-radius: inherit;
   /* HALO: tres sombras interiores CENTRADAS y difuminadas. Centradas = sin rectángulos de
@@ -184,10 +184,7 @@ body { font-family: var(--font-ui), 'Segoe UI', sans-serif; font-size: 13px; col
      sin marcos y sin filtro de capa: ninguna primitiva capaz de dibujar una forma o un
      escalón. Cada capa es un degradado que sale del borde y se apaga hacia dentro; la de
      fuera solo lleva un tono algo más frío para que la luz no sea plana. */
-  /* Reparto el alcance en varias capas de desenfoque MENOR en vez de una larga: la acumulación
-     en el vértice crece con el desenfoque, así que cuatro capas de 26-80px dejan el vértice
-     casi a la altura del borde (medido: 1,40× con una sola capa de 168px) y suman el mismo
-     alcance. Todo centrado y difuminado: ninguna forma, ningún escalón. */
+  
   box-shadow:
     inset 0 0 22px rgba(var(--glow-a-rgb), calc(0.26 * var(--glow-str) * var(--energy))),
     inset 0 0 46px rgba(var(--glow-b-rgb), calc(0.15 * var(--glow-str) * var(--energy))),
