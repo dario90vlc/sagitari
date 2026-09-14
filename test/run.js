@@ -1242,9 +1242,12 @@ test('mcp: transporte http manda cabeceras, guarda la sesión y lee SSE', async 
       // MISMO evento (que es lo que la spec SSE obliga a concatenar)
       res.writeHead(200, { 'content-type': 'text/event-stream' });
       const payload = JSON.stringify({ jsonrpc: '2.0', id: msg.id, result: { tools: [{ name: 'uno', description: 'x', inputSchema: { type: 'object' } }] } });
-      const mitad = Math.floor(payload.length / 2);
-      res.write('event: message\ndata: ' + payload.slice(0, mitad) + '\n');
-      res.write('data: ' + payload.slice(mitad) + '\n\n');
+      // El corte va en una frontera entre tokens (antes de `,"result"`), nunca dentro
+      // de una cadena: unir con `\n` entre tokens es espacio en blanco válido para
+      // JSON, así que esto sí comprueba la regla de la spec sin inventarse nada.
+      const corte = payload.indexOf(',"result"');
+      res.write('event: message\ndata: ' + payload.slice(0, corte) + '\n');
+      res.write('data: ' + payload.slice(corte) + '\n\n');
       res.end();
     });
   });

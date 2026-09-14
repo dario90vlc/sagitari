@@ -196,13 +196,10 @@ function parseSseText(text) {
   for (const bloque of String(text || '').split(/\r?\n\r?\n/)) {
     const datos = bloque.split(/\r?\n/).filter(l => l.startsWith('data:')).map(l => l.slice(5).trimStart());
     if (!datos.length) continue;
-    // La spec SSE une las líneas `data:` con \n, pero hay emisores que parten el
-    // JSON en mitad de una cadena: ahí ese \n lo invalida, así que se reintenta con
-    // la concatenación cruda (que reproduce el JSON original tal cual).
-    let m;
-    try { m = JSON.parse(datos.join('\n')); }
-    catch { try { m = JSON.parse(datos.join('')); } catch { continue; } }
-    out.push(m);
+    // Las líneas `data:` del mismo evento se unen con \n (spec SSE): entre tokens
+    // ese salto es espacio en blanco válido para JSON. Un mensaje mal formado (una
+    // cadena partida, por ejemplo) no parsea y se descarta.
+    try { out.push(JSON.parse(datos.join('\n'))); } catch {}
   }
   return out;
 }
