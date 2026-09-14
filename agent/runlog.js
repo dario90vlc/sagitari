@@ -33,21 +33,25 @@ const nombresUsados = new Set();   // nombres abiertos en esta sesión (unicidad
 function pruneOldLogs() {
   clearTimeout(pruneTimer);
   pruneTimer = setTimeout(() => {
-    let files = [];
-    try { files = fs.readdirSync(LOG_DIR).filter(f => f.endsWith('.jsonl')).sort(); } catch { return; }
-    const activo = currentFile && path.basename(currentFile);
-    const otros = files.filter(f => f !== activo);
-    let pendientes = otros.slice(0, Math.max(0, otros.length - (MAX_LOGS - 1)));
     const paso = (intento) => {
-      pendientes = pendientes.filter((f) => {
-        try { fs.unlinkSync(path.join(LOG_DIR, f)); nombresUsados.delete(f); return false; }
-        catch (e) { return e.code !== 'ENOENT'; }        // ENOENT: ya no está
-      });
-      if (pendientes.length && intento < 4) setTimeout(() => paso(intento + 1), 200);
+      let files = [];
+      try { files = fs.readdirSync(LOG_DIR).filter(f => f.endsWith('.jsonl')).sort(); } catch { return; }
+      const activo = currentFile && path.basename(currentFile);
+      const otros = files.filter(f => f !== activo);
+      const pendientes = otros.slice(0, Math.max(0, otros.length - (MAX_LOGS - 1)));
+      for (const f of pendientes) {
+        try { fs.unlinkSync(path.join(LOG_DIR, f)); nombresUsados.delete(f); }
+        catch (e) { if (e.code !== 'ENOENT') continue; } // ENOENT: ya no está
+      }
+      // Los write streams crean sus archivos de forma asíncrona. Releer la carpeta
+      // evita que una poda temprana vea solo el archivo activo y deje los demás.
+      if (intento < 10) {
+        pruneTimer = setTimeout(() => paso(intento + 1), 100);
+        if (pruneTimer.unref) pruneTimer.unref();
+      }
     };
     paso(1);
-  }, 200);
-  if (pruneTimer.unref) pruneTimer.unref();
+  }, 50);
 }
 
 function openStream() {
