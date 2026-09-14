@@ -11,6 +11,7 @@ const MAX_TOOL_NAME = 64;
 const MAX_TOOLS_PER_SERVER = 500;
 const MAX_PAGES = 20;
 const DEFAULT_TIMEOUT_MS = 60000;
+const MAX_RESULT_CHARS = 60000;
 
 /** Trozo saneado `[a-z0-9_]` sin guiones bajos sobrantes. */
 function slug(s, max) {
@@ -246,6 +247,71 @@ class McpManager {
     return null;
   }
 
+  /**
+   * Servidor al que pertenece un nombre expuesto, por el prefijo del slug. No exige
+   * que esté conectado: en el primer uso hay que conectar ANTES de poder resolver el
+   * nombre real de la herramienta (el slug no tiene por qué coincidir con él).
+   */
+  _serverIdOf(exposed) {
+    const m = /^mcp__([a-z0-9_]+)__/.exec(String(exposed || ''));
+    if (!m) return null;
+    const s = this._servers.find(x => slug(x.id, 16) === m[1]);
+    return s ? s.id : null;
+  }
+
+  /**
+   * Ejecuta una herramienta MCP y devuelve TEXTO para el modelo. Nunca lanza:
+   * un servidor caído o un timeout se explican, no rompen el turno.
+   */
+  async callTool(exposedName, args = {}, { timeoutMs } = {}) {
+    let info = this.describe(exposedName);
+    // Sin conexión todavía no hay tabla (el servidor está `idle` al arrancar la app):
+    // se identifica por el prefijo, se conecta y se resuelve con la tabla REAL. Si se
+    // resolviera por el slug, al servidor le llegaría un nombre deformado.
+    const sid = info ? info.serverId : this._serverIdOf(exposedName);
+    if (!sid) return `Error: la herramienta MCP «${exposedName}» no está disponible ahora mismo.`;
+    const s = this._server(sid);
+    const st = this._state.get(sid);
+    if (!s || !st) return `Error: el servidor MCP «${sid}» ya no está configurado.`;
+    if (st.state !== 'ready') {
+      const r = await this.ensure(sid);
+      if (!r.ok) return `Error: no pude usar «${exposedName}» porque el servidor MCP «${s.name || s.id}» no está disponible (${r.error}).`;
+      info = this.describe(exposedName);
+      if (!info) return `Error: el servidor MCP «${s.name || s.id}» no expone la herramienta «${exposedName}» (¿está bloqueada o fuera de la lista permitida?).`;
+    }
+    if (!info) info = this.describe(exposedName);
+    if (!info) return `Error: la herramienta MCP «${exposedName}» no está disponible ahora mismo.`;
+    const ms = Number(timeoutMs) > 0 ? Number(timeoutMs) : (Number(s.timeoutMs) > 0 ? Number(s.timeoutMs) : DEFAULT_TIMEOUT_MS);
+    try {
+      const res = await st.transport.rpc.request('tools/call', { name: info.toolName, arguments: args || {} }, { timeoutMs: ms });
+      const texto = this._flatten(res);
+      return res && res.isError ? 'Error del servidor MCP: ' + texto : texto;
+    } catch (e) {
+      // el transporte puede haber muerto: se marca para que la próxima llamada reconecte
+      if (!st.transport || !st.transport.rpc.alive) { st.state = 'dead'; st.error = e.message; st.tools = []; st.logTail = st.transport && st.transport.stderrTail ? st.transport.stderrTail() : ''; }
+      return `Error: la herramienta MCP «${info.toolName}» falló (${e.message}).`;
+    }
+  }
+
+  /** Texto legible del resultado: textos concatenados, imágenes y recursos resumidos. */
+  _flatten(res) {
+    const partes = [];
+    for (const c of (res && res.content) || []) {
+      if (!c || typeof c !== 'object') continue;
+      if (c.type === 'text') partes.push(String(c.text || ''));
+      else if (c.type === 'image') partes.push(`[imagen: ${c.mimeType || 'desconocido'}, ${Math.round(String(c.data || '').length * 0.75 / 1024)} KB — no se envía al modelo]`);
+      else if (c.type === 'resource') partes.push(`[recurso: ${(c.resource && c.resource.uri) || 'sin uri'}]`);
+      else partes.push('[' + (c.type || 'contenido') + ']');
+    }
+    if (!partes.length && res && res.structuredContent) {
+      try { partes.push(JSON.stringify(res.structuredContent)); } catch {}
+    }
+    const texto = partes.join('\n').trim() || '(el servidor MCP no devolvió contenido)';
+    return texto.length > MAX_RESULT_CHARS
+      ? texto.slice(0, MAX_RESULT_CHARS) + '\n… (resultado recortado)'
+      : texto;
+  }
+
   /** Estado para la UI (y para el usuario): nunca expone secretos. */
   status() {
     return this._servers.map((s) => {
@@ -272,4 +338,4 @@ class McpManager {
   }
 }
 
-module.exports = { McpManager, mapToolName, MAX_TOOL_NAME, DEFAULT_TIMEOUT_MS };
+module.exports = { McpManager, mapToolName, MAX_TOOL_NAME, DEFAULT_TIMEOUT_MS, MAX_RESULT_CHARS };

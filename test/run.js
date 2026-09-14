@@ -1476,6 +1476,112 @@ test('mcp: un servidor que muere deja de describir y de listar herramientas', as
   await mcp.shutdown();
 });
 
+/* ---------- MCP: llamadas (resultado, errores y límites) ---------- */
+
+test('mcp: la llamada aplana el contenido, resume imágenes y recorta', async () => {
+  const tr = fakeTransport([]);
+  tr.rpc.request = async (method, params) => {
+    if (method === 'initialize') return { capabilities: { tools: {} }, serverInfo: { name: 'c', version: '1' } };
+    if (method === 'tools/list') return { tools: [{ name: 'tool', description: 'd', inputSchema: { type: 'object' } }] };
+    if (method === 'tools/call') {
+      calls.push(params);
+      return { content: [
+        { type: 'text', text: 'primera parte' },
+        { type: 'image', mimeType: 'image/png', data: 'A'.repeat(40000) },
+        { type: 'text', text: 'segunda parte' },
+      ] };
+    }
+    return {};
+  };
+  const calls = [];
+  const mcp = new McpManager({
+    servers: [{ id: 'c', name: 'C', enabled: true, transport: 'stdio', command: 'node', args: [] }],
+    dataDir: tmpDir('sagi-mcp-'), clientVersion: 't', log: () => {}, makeTransport: () => tr,
+  });
+  await mcp.ensure('c');
+  const out = await mcp.callTool('mcp__c__tool', { a: 1 });
+  eq(calls[0].name, 'tool', 'al servidor le llega el nombre ORIGINAL, no el expuesto');
+  eq(calls[0].arguments.a, 1);
+  ok(out.includes('primera parte') && out.includes('segunda parte'), 'los textos se concatenan en orden');
+  ok(/imagen: image\/png/.test(out), 'la imagen se resume (no viaja base64 al modelo): ' + out.slice(0, 120));
+  ok(out.length <= 60000, 'el resultado está acotado');
+  await mcp.shutdown();
+});
+
+test('mcp: la primera llamada conecta el servidor antes de resolver el nombre', async () => {
+  const tr = fakeTransport([]);
+  tr.rpc.request = async (method) => {
+    if (method === 'initialize') return { capabilities: { tools: {} }, serverInfo: { name: 'x', version: '1' } };
+    if (method === 'tools/list') return { tools: [{ name: 'echo', description: 'd', inputSchema: { type: 'object' } }] };
+    if (method === 'tools/call') return { content: [{ type: 'text', text: 'eco' }] };
+    return {};
+  };
+  const mcp = new McpManager({
+    servers: [{ id: 'x', name: 'X', enabled: true, transport: 'stdio', command: 'node', args: [] }],
+    dataDir: tmpDir('sagi-mcp-'), clientVersion: 't', log: () => {}, makeTransport: () => tr,
+  });
+  // Sin ensure() previo: la app acaba de arrancar y el servidor está en 'idle', así
+  // que no hay tabla de nombres. La llamada tiene que conectar y resolver sola.
+  const out = await mcp.callTool('mcp__x__echo', {});
+  eq(out, 'eco', 'la primera llamada tras arrancar conecta el servidor por su cuenta');
+  await mcp.shutdown();
+});
+
+test('mcp: un isError y un error JSON-RPC se explican al modelo', async () => {
+  const tr = fakeTransport([]);
+  const respuestas = {
+    fallo: { isError: true, content: [{ type: 'text', text: 'no pude hacerlo' }] },
+    roto: null,
+  };
+  tr.rpc.request = async (method, params) => {
+    if (method === 'initialize') return { capabilities: { tools: {} }, serverInfo: { name: 'e', version: '1' } };
+    if (method === 'tools/list') return { tools: [{ name: 'fallo', description: 'd', inputSchema: { type: 'object' } }, { name: 'roto', description: 'd', inputSchema: { type: 'object' } }] };
+    if (params.name === 'roto') throw new Error('servidor MCP: se rompió por dentro');
+    return respuestas[params.name];
+  };
+  const mcp = new McpManager({
+    servers: [{ id: 'e', name: 'E', enabled: true, transport: 'stdio', command: 'node', args: [] }],
+    dataDir: tmpDir('sagi-mcp-'), clientVersion: 't', log: () => {}, makeTransport: () => tr,
+  });
+  await mcp.ensure('e');
+  const ok1 = await mcp.callTool('mcp__e__fallo', {});
+  ok(/^Error del servidor MCP:/.test(ok1), ok1);
+  const ok2 = await mcp.callTool('mcp__e__roto', {});
+  ok(/se rompió por dentro/.test(ok2), 'el error del servidor llega tal cual: ' + ok2);
+  await mcp.shutdown();
+});
+
+test('mcp: una herramienta desconocida no llama a nadie y se explica', async () => {
+  const mcp = new McpManager({ servers: [], dataDir: tmpDir('sagi-mcp-'), clientVersion: 't', log: () => {}, makeTransport: () => fakeTransport([]) });
+  const out = await mcp.callTool('mcp__nadie__nada', {});
+  ok(out.startsWith('Error:'), out);
+  await mcp.shutdown();
+});
+
+test('mcp: si el servidor está caído, la siguiente llamada reintenta con backoff', async () => {
+  let intentos = 0;
+  const mcp = new McpManager({
+    servers: [{ id: 'r', name: 'R', enabled: true, transport: 'stdio', command: 'node', args: [] }],
+    dataDir: tmpDir('sagi-mcp-'), clientVersion: 't', log: () => {},
+    makeTransport: () => {
+      intentos++;
+      if (intentos === 1) return fakeTransport([], { failInit: true });
+      const tr = fakeTransport([{ name: 'tool', description: 'd', inputSchema: { type: 'object' } }]);
+      tr.rpc.request = async (method, params) => {
+        if (method === 'initialize') return { capabilities: { tools: {} }, serverInfo: { name: 'r', version: '1' } };
+        if (method === 'tools/list') return { tools: [{ name: 'tool', description: 'd', inputSchema: { type: 'object' } }] };
+        return { content: [{ type: 'text', text: 'ya va' }] };
+      };
+      return tr;
+    },
+  });
+  eq((await mcp.ensure('r')).ok, false, 'el primer intento falla');
+  const out = await mcp.callTool('mcp__r__tool', {});
+  eq(intentos, 2, 'la llamada vuelve a intentar conectar');
+  eq(out, 'ya va');
+  await mcp.shutdown();
+});
+
 test('agent: la cadena elige el protocolo del modelo (Qwen en Go → /messages)', async () => {
   const { Agent } = require('../agent/agent');
   const seen = [];
