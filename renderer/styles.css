@@ -121,7 +121,12 @@ body.nofocus .shell::before { animation: none !important; }
   display: flex; gap: 4px; -webkit-app-region: no-drag; /* descendiente: sí anula */
 }
 /* el titlebar es la zona de arrastre principal; la barra lateral sigue siendo
-   arrastrable como zona secundaria (su contenido ya es no-drag por naturaleza) */
+   arrastrable como zona secundaria. OJO: dentro de una zona de arrastre el
+   contenido NO recibe el clic físico del sistema (se queda en el arrastre de
+   ventana) salvo que se excluya — aquí abajo sólo lo hacen button/input/textarea,
+   así que cualquier otra cosa interactiva, como una capa flotante (el menú de
+   modelos), tiene que declarar su propio `-webkit-app-region: no-drag`. Si no, se
+   pinta perfecta y está muerta: se abre y no responde a nada. */
 .side { -webkit-app-region: drag; }
 .side button, .side input, .side textarea { -webkit-app-region: no-drag; }
 .wb {
@@ -187,6 +192,11 @@ body.nofocus .shell::before { animation: none !important; }
 .sidefoot { margin-top: auto; padding: 11px 12px; display: flex; gap: 8px; align-items: stretch; border-top: 1px solid var(--line2); }
 /* el selector de modelo ocupa el hueco del pie y ancla su menú encima */
 .ssel { position: relative; flex: 1; min-width: 0; display: flex; }
+/* El sidebar es zona de arrastre de la ventana (`-webkit-app-region: drag`) y solo
+   los button/input/textarea se excluían: el menú, al ser un div, quedaba dentro de
+   la zona y sus clics los consumía el arrastre (el menú no respondía ni se
+   cerraba). Todo lo interactivo del pie tiene que declararse fuera. */
+.ssel, .modelmenu, .modelmenu * { -webkit-app-region: no-drag; }
 .side-status {
   flex: 1; min-width: 0; display: flex; align-items: center; gap: 7px;
   padding: 9px 9px; border: 1px solid var(--line2); border-radius: 12px;
@@ -211,14 +221,22 @@ body.nofocus .shell::before { animation: none !important; }
 }
 .modelmenu::-webkit-scrollbar { width: 6px; }
 .modelmenu::-webkit-scrollbar-thumb { background: rgba(var(--acc2-rgb), 0.3); border-radius: 3px; }
+/* La cabecera se queda fija: al desplazar hasta el modelo en uso, el `scrollIntoView`
+   dejaba «MODELOS · …» cortada a media altura (parecía un texto mal encajado). Lleva
+   fondo opaco y una línea abajo para que la fila que pasa por debajo se lea como
+   «desplazada», no como texto superpuesto. */
+.modelmenu .sm-head {
+  position: sticky; top: 0; z-index: 1; padding: 9px 14px 8px;
+  background: #0f0a22; border-bottom: 1px solid var(--line2);
+}
 .modelmenu .sm-item .sm-name { font: 600 13px 'Space Grotesk'; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
 .modelmenu .sm-item.on .sm-name { color: var(--vio2); }
 .modelmenu .mm-mark { margin-left: auto; color: var(--vio2); font-size: 12px; flex-shrink: 0; }
 .modelmenu .mm-hint { padding: 4px 14px 9px; color: var(--dim); font-size: 11px; line-height: 1.45; }
-/* las acciones no se pierden al final de una lista larga (37 modelos) */
+/* Las acciones se quedan al pie sin dejar ver las filas que pasan por debajo: con
+   un degradado translúcido el nombre del modelo se leía a medias tras el botón. */
 .modelmenu .mm-foot {
-  position: sticky; bottom: 0; margin-top: 4px;
-  background: linear-gradient(180deg, rgba(12,8,30,0.86), rgba(12,8,30,0.99) 42%);
+  position: sticky; bottom: 0; margin-top: 4px; background: #0c081e;
   border-top: 1px solid var(--line2); padding: 3px 0 4px;
 }
 .modelmenu .mm-foot .sm-item { padding: 8px 14px; }

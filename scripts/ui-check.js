@@ -195,6 +195,39 @@ const AFTER = {
   // Los atajos no deben dispararse mientras se escribe en un campo
   await judge('los atajos no saltan de vista escribiendo en el chat',
     '(function(){ var input = document.querySelector("#chatInput"); input.focus(); input.dispatchEvent(new KeyboardEvent("keydown", { key: "4", altKey: true, bubbles: true })); var on = document.querySelector(".view.on"); var ok = !!on && on.id === "view-chat"; input.blur(); return ok; })()');
+  /* ---- selector de modelo: el clic tiene que llegar al menú ----
+     Comprueba el recorrido completo del selector (abrir → pulsar una fila →
+     menú cerrado y píldora actualizada) con eventos de ENTRADA del navegador en
+     vez de `.click()`, que se salta el reparto de eventos y por eso no veía nada.
+
+     Lo que ESTE check no puede cubrir: el reparto de zonas de arrastre de la
+     ventana. Los eventos inyectados por CDP entran directamente en el renderer y
+     no pasan por el hit-test del sistema, así que un elemento dentro de una zona
+     `-webkit-app-region: drag` recibe el clic inyectado aunque para el ratón real
+     esté muerto (le pasó al menú de modelos: se abría y no respondía). Eso sólo se
+     detecta con un clic físico en una ventana visible: ver el comentario de
+     `.side` en styles.css. */
+  const pulsarConRaton = async (selector) => {
+    const pos = await evaluate(`(function(){ var e = document.querySelector(${JSON.stringify(selector)}); if (!e) return null; var r = e.getBoundingClientRect(); return JSON.stringify({ x: Math.round(r.left + r.width / 2), y: Math.round(r.top + r.height / 2) }); })()`);
+    if (!pos) return false;
+    const { x, y } = JSON.parse(pos);
+    await cmd('Input.dispatchMouseEvent', { type: 'mousePressed', x, y, button: 'left', clickCount: 1 });
+    await cmd('Input.dispatchMouseEvent', { type: 'mouseReleased', x, y, button: 'left', clickCount: 1 });
+    await new Promise((r) => setTimeout(r, 450));
+    return true;
+  };
+  await pulsarConRaton('#sideStatusBtn');
+  const menuAbierto = await evaluate('!document.querySelector("#modelMenu").hidden');
+  const destino = await evaluate('(function(){ var f = [...document.querySelectorAll("#modelMenu [data-model]")]; var otro = f.filter(function(r){ return !r.classList.contains("on"); })[0]; return (otro || f[0] || {}).dataset ? (otro || f[0]).dataset.model : null; })()');
+  const pulsado = destino ? await pulsarConRaton('#modelMenu [data-model="' + destino + '"]') : false;
+  const menuCerrado = await evaluate('document.querySelector("#modelMenu").hidden');
+  const pildora = await evaluate('document.querySelector("#stModel").textContent');
+  if (menuAbierto && destino && pulsado && menuCerrado && pildora === destino) {
+    console.log('  ok   el selector de modelo responde al ratón real (' + destino + ')');
+  } else {
+    failed++;
+    console.log('  FALLO el selector de modelo no responde al ratón real  ->  ' + JSON.stringify({ menuAbierto, destino, pulsado, menuCerrado, pildora }));
+  }
   // Tamaño mínimo real de la ventana (main.js: minWidth 1000 x minHeight 620):
   // el compositor quedaba 60px fuera de pantalla porque el grid se dimensionaba
   // por contenido en vez de por la altura disponible
