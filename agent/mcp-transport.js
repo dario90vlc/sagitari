@@ -4,6 +4,8 @@
    Aquí no se sabe nada de herramientas: solo de mensajes, ids y timeouts. */
 
 const { StringDecoder } = require('string_decoder');
+const { spawn } = require('child_process');
+const { killTree } = require('./proc');
 
 const DEFAULT_TIMEOUT_MS = 60000;
 
@@ -92,4 +94,77 @@ class Rpc {
   get alive() { return !this._dead; }
 }
 
-module.exports = { DEFAULT_TIMEOUT_MS, createLineReader, Rpc };
+/* Línea de comandos para cmd.exe. En Windows `npx`/`npm` son .cmd y Node ≥20 se
+   niega a lanzarlos directamente, así que hay que pasar por cmd.exe. Nada de
+   `shell: true` con texto interpolado: los argumentos se citan uno a uno y lo que
+   no se puede citar con seguridad se rechaza con un motivo legible. */
+function buildCmdLine(command, args = []) {
+  const partes = [String(command || ''), ...args.map((a) => String(a))];
+  for (const p of partes) {
+    if (/["%^&|<>]/.test(p) || /[\r\n]/.test(p)) {
+      throw new Error('El comando o un argumento contiene caracteres que cmd.exe interpretaría (" % ^ & | < > o salto de línea). Simplifícalo.');
+    }
+  }
+  return partes.map((p) => (/\s/.test(p) ? '"' + p + '"' : p)).join(' ');
+}
+
+/** ¿Hay que lanzarlo por cmd.exe? (los .cmd/.bat de npm en Windows) */
+function needsShell(command) {
+  return process.platform === 'win32' && /\.(cmd|bat)$/i.test(String(command || ''));
+}
+
+function resolveCommand(command, args) {
+  const cmd = String(command || '').trim();
+  if (!cmd) throw new Error('Falta el comando del servidor MCP.');
+  if (needsShell(cmd) || /^(npx|npm|yarn|pnpm)$/i.test(cmd)) {
+    const com = process.env.ComSpec || 'cmd.exe';
+    return { file: com, argv: ['/d', '/s', '/c', buildCmdLine(cmd, args)] };
+  }
+  return { file: cmd, argv: args.map(String) };
+}
+
+/**
+ * Servidor MCP local por stdio. `stderr` se guarda en un bucle (los últimos 8 KB)
+ * porque es donde los servidores explican por qué no arrancan.
+ */
+function createStdioTransport({ command, args = [], cwd, env = {}, defaultTimeoutMs }) {
+  const { file, argv } = resolveCommand(command, args);
+  const child = spawn(file, argv, {
+    cwd: cwd || undefined,
+    env: { ...process.env, ...env },
+    windowsHide: true,
+    stdio: ['pipe', 'pipe', 'pipe'],
+  });
+  let stderr = '';
+  child.stderr.on('data', (d) => { stderr = (stderr + d.toString('utf8')).slice(-8192); });
+  const exitHandlers = [];
+  let exited = false;
+  // `rpc` se declara ANTES de los listeners que lo usan: `const rpc =` más abajo
+  // dejaría a esos callbacks cerrando sobre una variable en zona muerta temporal.
+  let rpc = null;
+  const avisarSalida = (code) => {
+    if (exited) return;
+    exited = true;
+    if (rpc) rpc.fail(`el servidor MCP terminó (código ${code === null || code === undefined ? 'desconocido' : code}).` + (stderr ? '\n' + stderr.trim().split('\n').slice(-4).join('\n') : ''));
+    for (const h of exitHandlers) { try { h(code); } catch {} }
+  };
+  child.on('error', (e) => avisarSalida('error: ' + e.message));
+  child.on('exit', (code) => avisarSalida(code));
+
+  const feed = createLineReader((m, noise) => { if (m && rpc) rpc.handleMessage(m); });
+  child.stdout.on('data', feed);
+  rpc = new Rpc({
+    send: (text) => { if (!child.stdin.destroyed) child.stdin.write(text + '\n'); },
+    defaultTimeoutMs,
+  });
+  // cerrar stdin sin destruirlo a lo bruto: el servidor ve el final del flujo
+  return {
+    rpc,
+    pid: child.pid,
+    stderrTail: () => stderr,
+    onExit: (cb) => { exitHandlers.push(cb); if (exited) cb(-1); },
+    kill: () => { try { child.stdin.end(); } catch {} try { killTree(child); } catch {} },
+  };
+}
+
+module.exports = { DEFAULT_TIMEOUT_MS, createLineReader, Rpc, buildCmdLine, resolveCommand, createStdioTransport };

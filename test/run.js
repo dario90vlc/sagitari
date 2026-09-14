@@ -1130,6 +1130,36 @@ test('mcp: una petición del servidor llega con su id (para poder responderla)',
   eq(avisos[1].id, null, 'las notificaciones no traen id con el que responder');
 });
 
+test('mcp: la linea de comandos de cmd.exe cita los argumentos', () => {
+  eq(mcpTransport.buildCmdLine('npx', ['-y', '@modelcontextprotocol/server-github']), 'npx -y @modelcontextprotocol/server-github');
+  eq(mcpTransport.buildCmdLine('npx', ['-y', 'pkg with space']), 'npx -y "pkg with space"');
+  // no se escapa a ciegas: un argumento con metacaracteres de cmd se rechaza
+  for (const malo of ['a&b', 'a|b', 'a^b', '50%', 'di"hola', 'linea\nnueva']) {
+    let err = null;
+    try { mcpTransport.buildCmdLine('npx', [malo]); } catch (e) { err = e; }
+    ok(err, 'debe rechazar ' + JSON.stringify(malo));
+  }
+});
+
+test('mcp: transporte stdio completo contra un servidor real', async () => {
+  const path2 = path.join(__dirname, 'fixtures', 'mcp-echo-server.js');
+  const tr = mcpTransport.createStdioTransport({
+    command: process.execPath, args: [path2], env: { MCP_ECHO_BANNER: '1' }, cwd: tmpDir('sagi-mcp-'),
+  });
+  const init = await tr.rpc.request('initialize', { protocolVersion: '2025-06-18', capabilities: {}, clientInfo: { name: 'SAGITARI', version: 'test' } }, { timeoutMs: 5000 });
+  eq(init.serverInfo.name, 'eco');
+  tr.rpc.notify('notifications/initialized', {});
+  const p1 = await tr.rpc.request('tools/list', {}, { timeoutMs: 5000 });
+  eq(p1.tools.length, 2);
+  eq(p1.nextCursor, 'pagina2');
+  const p2 = await tr.rpc.request('tools/list', { cursor: p1.nextCursor }, { timeoutMs: 5000 });
+  eq(p2.tools.length, 1);
+  const call = await tr.rpc.request('tools/call', { name: 'echo', arguments: { text: 'hola' } }, { timeoutMs: 5000 });
+  eq(call.content[0].text, 'eco: hola', 'el banner de arranque no rompió el emparejado por id');
+  tr.kill();
+  ok(tr.pid > 0, 'el proceso tuvo pid (se mató entero)');
+});
+
 test('agent: la cadena elige el protocolo del modelo (Qwen en Go → /messages)', async () => {
   const { Agent } = require('../agent/agent');
   const seen = [];
