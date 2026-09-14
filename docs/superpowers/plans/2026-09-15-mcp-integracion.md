@@ -197,8 +197,10 @@ const DEFAULT_TIMEOUT_MS = 60000;
 function createLineReader(onMessage) {
   let buf = '';
   let noise = 0;   // líneas descartadas hasta ahora (banners, avisos sueltos)
+  const dec = new StringDecoder('utf8');   // la conversión debe ser INCREMENTAL: un
+                                           // chunk puede cortar un carácter multibyte
   return (chunk) => {
-    buf += typeof chunk === 'string' ? chunk : chunk.toString('utf8');
+    buf += typeof chunk === 'string' ? chunk : dec.write(chunk);
     let idx;
     while ((idx = buf.indexOf('\n')) >= 0) {
       const line = buf.slice(0, idx).replace(/\r$/, '');
@@ -222,19 +224,23 @@ class Rpc {
     this._dead = null;
   }
 
-  request(method, params = {}, { timeoutMs } = {}) {
+  request(method, params = {}, { timeoutMs, onStart } = {}) {
     if (this._dead) return Promise.reject(new Error(this._dead));
     const id = ++this._id;
     const ms = Number(timeoutMs) > 0 ? Number(timeoutMs) : this.timeoutMs;
     return new Promise((resolve, reject) => {
       const timer = setTimeout(() => {
         this._pending.delete(id);
-        reject(new Error(`timeout: ${method} no respondió en ${Math.round(ms / 1000)} s.`));
+        const cuanto = ms >= 1000 ? `${Math.round(ms / 1000)} s` : `${Math.round(ms)} ms`;
+        reject(new Error(`timeout: ${method} no respondió en ${cuanto}.`));
       }, ms);
       this._pending.set(id, {
         resolve: (v) => { clearTimeout(timer); resolve(v); },
         reject: (e) => { clearTimeout(timer); reject(e); },
       });
+      // Avisa del id ANTES de enviar: es lo que permite cancelar esta petición
+      // concreta si el usuario pulsa Detener mientras está en vuelo.
+      if (typeof onStart === 'function') { try { onStart(id); } catch {} }
       try { this.send(JSON.stringify({ jsonrpc: '2.0', id, method, params })); }
       catch (e) { this._pending.delete(id); clearTimeout(timer); reject(e); }
     });
@@ -245,17 +251,34 @@ class Rpc {
     try { this.send(JSON.stringify({ jsonrpc: '2.0', method, params })); } catch {}
   }
 
-  /** Respuesta o notificación del servidor. */
+  /** Cancela UNA petición en vuelo (el usuario pulsó Detener): rechaza solo esa,
+      no la conexión entera. Devuelve true si había algo que cancelar. */
+  cancel(id, reason) {
+    const p = this._pending.get(id);
+    if (!p) return false;
+    this._pending.delete(id);
+    p.reject(new Error(reason || 'petición cancelada'));
+    return true;
+  }
+
+  /**
+   * Respuesta o mensaje del servidor.
+   * `onNotice(method, params, id)`: el tercer argumento es null en las
+   * notificaciones y NO es null cuando el servidor espera respuesta (ping,
+   * roots/list, sampling/createMessage): hay que contestarle con el mismo id.
+   */
   handleMessage(msg) {
     if (!msg || typeof msg !== 'object') return;
+    // Las peticiones del servidor se miran ANTES que las respuestas: una respuesta
+    // nunca lleva `method`, y un `ping` del servidor con un id que choque con una
+    // petición nuestra se consumía como si fuera su respuesta.
+    if (msg.method) { this.onNotice(msg.method, msg.params || {}, msg.id ?? null); return; }
     if (msg.id != null && this._pending.has(msg.id)) {
       const p = this._pending.get(msg.id);
       this._pending.delete(msg.id);
       if (msg.error) p.reject(new Error('servidor MCP: ' + (msg.error.message || JSON.stringify(msg.error))));
       else p.resolve(msg.result);
-      return;
     }
-    if (msg.method) this.onNotice(msg.method, msg.params || {});
   }
 
   /** El transporte murió: ninguna petición en vuelo puede quedarse esperando. */
@@ -412,25 +435,32 @@ function resolveCommand(command, args) {
   if (!cmd) throw new Error('Falta el comando del servidor MCP.');
   if (needsShell(cmd) || /^(npx|npm|yarn|pnpm)$/i.test(cmd)) {
     const com = process.env.ComSpec || 'cmd.exe';
-    return { file: com, argv: ['/d', '/s', '/c', buildCmdLine(cmd, args)] };
+    // `verbatim` es imprescindible: si Node vuelve a citar por su cuenta, escapa las
+    // comillas internas con \" y cmd.exe no entiende ese escape, así que un argumento
+    // con espacios llegaba partido en trozos. cmd.exe espera /d /s /c "<línea>" tal cual.
+    return { file: com, argv: ['/d', '/s', '/c', `"${buildCmdLine(cmd, args)}"`], verbatim: true };
   }
-  return { file: cmd, argv: args.map(String) };
+  return { file: cmd, argv: args.map(String), verbatim: false };
 }
 
 /**
  * Servidor MCP local por stdio. `stderr` se guarda en un bucle (los últimos 8 KB)
  * porque es donde los servidores explican por qué no arrancan.
  */
-function createStdioTransport({ command, args = [], cwd, env = {}, defaultTimeoutMs }) {
-  const { file, argv } = resolveCommand(command, args);
+function createStdioTransport({ command, args = [], cwd, env = {}, defaultTimeoutMs, onNotice }) {
+  const { file, argv, verbatim } = resolveCommand(command, args);
   const child = spawn(file, argv, {
     cwd: cwd || undefined,
     env: { ...process.env, ...env },
     windowsHide: true,
+    windowsVerbatimArguments: verbatim,   // ver resolveCommand: cmd.exe necesita la línea tal cual
     stdio: ['pipe', 'pipe', 'pipe'],
   });
   let stderr = '';
   child.stderr.on('data', (d) => { stderr = (stderr + d.toString('utf8')).slice(-8192); });
+  // stdin de un servidor que acaba de morir: sin este listener, el EPIPE del write
+  // es un error no capturado y se lleva por delante el proceso principal.
+  child.stdin.on('error', () => {});
   const exitHandlers = [];
   let exited = false;
   // `rpc` se declara ANTES de los listeners que lo usan: `const rpc =` más abajo
@@ -449,6 +479,7 @@ function createStdioTransport({ command, args = [], cwd, env = {}, defaultTimeou
   child.stdout.on('data', feed);
   rpc = new Rpc({
     send: (text) => { if (!child.stdin.destroyed) child.stdin.write(text + '\n'); },
+    onNotice,
     defaultTimeoutMs,
   });
   // cerrar stdin sin destruirlo a lo bruto: el servidor ve el final del flujo
@@ -529,9 +560,12 @@ test('mcp: transporte http manda cabeceras, guarda la sesión y lee SSE', async 
       // MISMO evento (que es lo que la spec SSE obliga a concatenar)
       res.writeHead(200, { 'content-type': 'text/event-stream' });
       const payload = JSON.stringify({ jsonrpc: '2.0', id: msg.id, result: { tools: [{ name: 'uno', description: 'x', inputSchema: { type: 'object' } }] } });
-      const mitad = Math.floor(payload.length / 2);
-      res.write('event: message\ndata: ' + payload.slice(0, mitad) + '\n');
-      res.write('data: ' + payload.slice(mitad) + '\n\n');
+      // El corte va en una frontera entre tokens (antes de `,"result"`), nunca dentro
+      // de una cadena: unir con `\n` entre tokens es espacio en blanco válido para
+      // JSON, así que esto comprueba la regla de la spec sin inventarse nada.
+      const corte = payload.indexOf(',"result"');
+      res.write('event: message\ndata: ' + payload.slice(0, corte) + '\n');
+      res.write('data: ' + payload.slice(corte) + '\n\n');
       res.end();
     });
   });
@@ -548,7 +582,7 @@ test('mcp: transporte http manda cabeceras, guarda la sesión y lee SSE', async 
     eq(vistos[1].auth, 'Bearer tok', 'la cabecera de autorización viaja en cada petición');
     eq(vistos[1].session, 'sess-1', 'y la sesión también');
     tr.kill();
-  } finally { srv.close(); }
+  } finally { srv.closeAllConnections?.(); srv.close(); }
 });
 
 test('mcp: un servidor http que no responde corta por timeout', async () => {
@@ -557,13 +591,17 @@ test('mcp: un servidor http que no responde corta por timeout', async () => {
   await new Promise((r) => srv.listen(0, '127.0.0.1', r));
   const url = 'http://127.0.0.1:' + srv.address().port + '/mcp';
   try {
-    const tr = mcpTransport.createHttpTransport({ url });
+    // defaultTimeoutMs corto: es el que acota la petición HTTP real (el Rpc corta
+    // antes por su propio timeout). Sin él, el socket contra un servidor mudo
+    // seguiría abierto los 60 s por defecto y la suite tardaría un minuto de más
+    // aunque los tests ya hubieran terminado.
+    const tr = mcpTransport.createHttpTransport({ url, defaultTimeoutMs: 1000 });
     const t0 = Date.now();
     let err = null;
     try { await tr.rpc.request('initialize', {}, { timeoutMs: 300 }); } catch (e) { err = e; }
     ok(err && /timeout/i.test(err.message), 'corta con timeout: ' + (err && err.message));
     ok(Date.now() - t0 < 3000, 'no espera más de la cuenta');
-  } finally { srv.close(); }
+  } finally { srv.closeAllConnections?.(); srv.close(); }
 });
 ```
 
@@ -602,7 +640,7 @@ function parseSseText(text) {
  * un flujo SSE (streamable HTTP). El id de sesión que devuelva `initialize` se
  * reenvía en las peticiones siguientes.
  */
-function createHttpTransport({ url, headers = {}, defaultTimeoutMs, fetchFn = fetch }) {
+function createHttpTransport({ url, headers = {}, defaultTimeoutMs, fetchFn = fetch, onNotice }) {
   if (!httpUrlAllowed(url)) throw new Error('La URL del servidor MCP debe ser https (o http en localhost).');
   let session = null;
   const exitHandlers = [];
@@ -615,21 +653,33 @@ function createHttpTransport({ url, headers = {}, defaultTimeoutMs, fetchFn = fe
   };
   const rpc = new Rpc({
     send: (text) => { void enviar(text); },
+    onNotice,
     defaultTimeoutMs,
   });
   async function enviar(text) {
     const cabeceras = { 'content-type': 'application/json', accept: 'application/json, text/event-stream', ...headers };
     if (session) cabeceras['mcp-session-id'] = session;
     try {
-      const res = await fetchFn(url, { method: 'POST', headers: cabeceras, body: text });
+      // El temporizador del Rpc acota la espera lógica; este signal acota la
+      // petición HTTP de verdad (si no, una petición colgada deja el socket vivo
+      // para siempre aunque la llamada ya haya fallado por timeout).
+      const res = await fetchFn(url, { method: 'POST', headers: cabeceras, body: text, signal: AbortSignal.timeout((defaultTimeoutMs || DEFAULT_TIMEOUT_MS) + 2000) });
       const sid = res.headers.get('mcp-session-id');
       if (sid) session = sid;
       if (!res.ok) { avisarMuerte(`el servidor MCP respondió ${res.status}.`); return; }
       const tipo = String(res.headers.get('content-type') || '');
       const body = await res.text();
+      // 202 sin cuerpo: es lo que la spec manda para notificaciones y respuestas, así
+      // que no hay nada que interpretar (y no puede contar como caída del servidor)
+      if (!body.trim()) return;
       const mensajes = tipo.includes('text/event-stream') ? parseSseText(body) : [JSON.parse(body)];
       for (const m of mensajes) rpc.handleMessage(m);
     } catch (e) {
+      // Un abort causado por nuestro propio tope no significa que el servidor esté
+      // caído: el Rpc ya rechazó la petición con su mensaje de timeout, así que no
+      // se marca muerto (si lo estuviera, la siguiente llamada lo comprobaría).
+      // OJO: AbortSignal.timeout() rechaza con nombre `TimeoutError`, no `AbortError`.
+      if (e && (e.name === 'AbortError' || e.name === 'TimeoutError')) return;
       avisarMuerte('no se pudo hablar con el servidor MCP: ' + e.message);
     }
   }
@@ -865,6 +915,9 @@ class McpManager {
       if ((!antes || clave(antes) !== clave(s) || !s.enabled) && st.transport) this._drop(s.id, 'configuración cambiada');
     }
     for (const id of [...this._state.keys()]) if (!this._servers.some(s => s.id === id)) this._drop(id);
+    // Una sola pasada al final: aplica allow/deny cambiados y resuelve colisiones
+    // entre servidores sin reconectar (reconectar por un filtro tiraría la sesión).
+    this._rebuildExposed();
   }
 
   _server(id) { return this._servers.find(s => s.id === id) || null; }
@@ -872,13 +925,29 @@ class McpManager {
   /** Transporte real: stdio o HTTP según la configuración del servidor. */
   _realTransport(s) {
     const timeoutMs = Number(s.timeoutMs) > 0 ? Number(s.timeoutMs) : DEFAULT_TIMEOUT_MS;
+    const onNotice = (method, params, id) => this._answerNotice(s.id, method, params, id);
     if (s.transport === 'http') {
       if (!transport.httpUrlAllowed(s.url)) throw new Error('La URL debe ser https (o http en localhost).');
-      return transport.createHttpTransport({ url: s.url, headers: s.headers || {}, defaultTimeoutMs: timeoutMs });
+      return transport.createHttpTransport({ url: s.url, headers: s.headers || {}, defaultTimeoutMs: timeoutMs, onNotice });
     }
     return transport.createStdioTransport({
-      command: s.command, args: s.args || [], cwd: s.cwd || this.dataDir, env: s.env || {}, defaultTimeoutMs: timeoutMs,
+      command: s.command, args: s.args || [], cwd: s.cwd || this.dataDir, env: s.env || {}, defaultTimeoutMs: timeoutMs, onNotice,
     });
+  }
+
+  /**
+   * Peticiones que hace EL SERVIDOR. Se contesta `ping` (un servidor que hace ping
+   * y no recibe respuesta puede dar la conexión por muerta). El resto se ignora a
+   * propósito: en `initialize` no declaramos capacidades de sampling/roots, así que
+   * un servidor conforme no las pedirá y atenderlas ampliaría la superficie sin
+   * necesidad.
+   */
+  _answerNotice(serverId, method, params, id) {
+    if (method !== 'ping' || id == null) return;
+    const st = this._state.get(serverId);
+    if (st && st.transport) {
+      try { st.transport.rpc.send(JSON.stringify({ jsonrpc: '2.0', id, result: {} })); } catch {}
+    }
   }
 
   _drop(id, motivo) {
@@ -920,6 +989,7 @@ class McpManager {
         st.error = String(motivo || 'el servidor terminó');
         st.logTail = tr.stderrTail ? tr.stderrTail() : '';
         st.tools = [];
+        st.exposed = new Map();   // un servidor muerto no puede seguir describiéndose
       });
       const init = await tr.rpc.request('initialize', {
         protocolVersion: '2025-06-18',
@@ -930,8 +1000,8 @@ class McpManager {
       const caps = (init && init.capabilities) || {};
       st.serverInfo = (init && init.serverInfo) || null;
       st.tools = caps.tools ? await this._listTools(tr, s, timeoutMs) : [];
-      st.exposed = this._exposeTable(s.id, st.tools);
       st.state = 'ready';
+      this._rebuildExposed();
       st.error = null;
       st.logTail = tr.stderrTail ? tr.stderrTail() : '';
       this.log({ agent: 'sagitari', event: 'mcp_ready', server: s.id, tools: st.tools.length });
@@ -942,6 +1012,7 @@ class McpManager {
       st.logTail = st.transport && st.transport.stderrTail ? st.transport.stderrTail() : '';
       if (st.transport) { try { st.transport.kill(); } catch {} st.transport = null; }
       st.tools = [];
+      st.exposed = new Map();
       this.log({ agent: 'sagitari', event: 'mcp_error', server: s.id, message: e.message });
       return { ok: false, error: e.message };
     }
@@ -963,12 +1034,12 @@ class McpManager {
     return out;
   }
 
-  /** Tabla nombre expuesto → herramienta real, resolviendo colisiones con sufijo. */
-  _exposeTable(serverId, tools) {
+  /** Tabla nombre expuesto → herramienta real, resolviendo colisiones con sufijo.
+      `usados` se comparte entre servidores: ver _rebuildExposed. */
+  _exposeTable(serverId, tools, usados = new Set()) {
     const allow = this._server(serverId).tools && this._server(serverId).tools.allow;
     const deny = (this._server(serverId).tools && this._server(serverId).tools.deny) || [];
     const expuesta = new Map();
-    const usados = new Set();
     for (const t of tools) {
       if (deny.includes(t.name)) continue;
       if (Array.isArray(allow) && allow.length && !allow.includes(t.name)) continue;
@@ -982,6 +1053,21 @@ class McpManager {
       expuesta.set(name, t);
     }
     return expuesta;
+  }
+
+  /**
+   * Reconstruye la tabla de nombres expuestos de TODOS los servidores listos, con un
+   * conjunto de nombres COMPARTIDO: así un cambio de allow/deny se aplica sin matar
+   * el proceso del servidor y dos servidores con el mismo prefijo saneado no pueden
+   * emitir el mismo nombre (el segundo sería inalcanzable).
+   */
+  _rebuildExposed() {
+    const usados = new Set();
+    for (const s of this._servers) {
+      const st = this._state.get(s.id);
+      if (!st || st.state !== 'ready') continue;
+      st.exposed = this._exposeTable(s.id, st.tools, usados);
+    }
   }
 
   /** Definiciones para el modelo: solo de servidores habilitados y listos. */
@@ -1102,7 +1188,26 @@ test('mcp: la llamada aplana el contenido, resume imágenes y recorta', async ()
   await mcp.shutdown();
 });
 
-test('mcp: isError y error JSON-RPC se explican al modelo', async () => {
+test('mcp: la primera llamada conecta el servidor antes de resolver el nombre', async () => {
+  const tr = fakeTransport([]);
+  tr.rpc.request = async (method) => {
+    if (method === 'initialize') return { capabilities: { tools: {} }, serverInfo: { name: 'x', version: '1' } };
+    if (method === 'tools/list') return { tools: [{ name: 'echo', description: 'd', inputSchema: { type: 'object' } }] };
+    if (method === 'tools/call') return { content: [{ type: 'text', text: 'eco' }] };
+    return {};
+  };
+  const mcp = new McpManager({
+    servers: [{ id: 'x', name: 'X', enabled: true, transport: 'stdio', command: 'node', args: [] }],
+    dataDir: tmpDir('sagi-mcp-'), clientVersion: 't', log: () => {}, makeTransport: () => tr,
+  });
+  // Sin ensure() previo: la app acaba de arrancar y el servidor está en 'idle', así
+  // que no hay tabla de nombres. La llamada tiene que conectar y resolver sola.
+  const out = await mcp.callTool('mcp__x__echo', {});
+  eq(out, 'eco', 'la primera llamada tras arrancar conecta el servidor por su cuenta');
+  await mcp.shutdown();
+});
+
+test('mcp: un isError y un error JSON-RPC se explican al modelo', async () => {
   const tr = fakeTransport([]);
   const respuestas = {
     fallo: { isError: true, content: [{ type: 'text', text: 'no pude hacerlo' }] },
@@ -1169,22 +1274,48 @@ Añadir a la clase `McpManager` (y `const MAX_RESULT_CHARS = 60000;` arriba):
 
 ```js
   /**
+   * Servidor al que pertenece un nombre expuesto, por el prefijo del slug. No exige
+   * que esté conectado: en el primer uso hay que conectar ANTES de poder resolver el
+   * nombre real de la herramienta (el slug no tiene por qué coincidir con él).
+   */
+  _serverIdOf(exposed) {
+    const m = /^mcp__([a-z0-9_]+)__/.exec(String(exposed || ''));
+    if (!m) return null;
+    const s = this._servers.find(x => slug(x.id, 16) === m[1]);
+    return s ? s.id : null;
+  }
+
+  /**
    * Ejecuta una herramienta MCP y devuelve TEXTO para el modelo. Nunca lanza:
    * un servidor caído o un timeout se explican, no rompen el turno.
    */
-  async callTool(exposedName, args = {}, { timeoutMs } = {}) {
-    const info = this.describe(exposedName);
-    if (!info) return `Error: la herramienta MCP «${exposedName}» no está disponible ahora mismo.`;
-    const s = this._server(info.serverId);
-    const st = this._state.get(info.serverId);
-    if (!s || !st) return `Error: el servidor MCP «${info.serverId}» ya no está configurado.`;
+  async callTool(exposedName, args = {}, { timeoutMs, onExit } = {}) {
+    let info = this.describe(exposedName);
+    // Sin conexión todavía no hay tabla (el servidor está `idle` al arrancar la app):
+    // se identifica por el prefijo, se conecta y se resuelve con la tabla REAL. Si se
+    // resolviera por el slug, al servidor le llegaría un nombre deformado.
+    const sid = info ? info.serverId : this._serverIdOf(exposedName);
+    if (!sid) return `Error: la herramienta MCP «${exposedName}» no está disponible ahora mismo.`;
+    const s = this._server(sid);
+    const st = this._state.get(sid);
+    if (!s || !st) return `Error: el servidor MCP «${sid}» ya no está configurado.`;
     if (st.state !== 'ready') {
-      const r = await this.ensure(info.serverId);
-      if (!r.ok) return `Error: no pude usar «${info.toolName}» porque el servidor MCP «${s.name || s.id}» no está disponible (${r.error}).`;
+      const r = await this.ensure(sid);
+      if (!r.ok) return `Error: no pude usar «${exposedName}» porque el servidor MCP «${s.name || s.id}» no está disponible (${r.error}).`;
+      info = this.describe(exposedName);
+      if (!info) return `Error: el servidor MCP «${s.name || s.id}» no expone la herramienta «${exposedName}» (¿está bloqueada o fuera de la lista permitida?).`;
     }
+    if (!info) info = this.describe(exposedName);
+    if (!info) return `Error: la herramienta MCP «${exposedName}» no está disponible ahora mismo.`;
     const ms = Number(timeoutMs) > 0 ? Number(timeoutMs) : (Number(s.timeoutMs) > 0 ? Number(s.timeoutMs) : DEFAULT_TIMEOUT_MS);
+    let reqId = null;
+    // El gancho que usa el agente: mientras la petición está en vuelo, Detener puede
+    // cortar SOLO esa llamada (si no, agotaría su timeout sin que el usuario pare nada).
+    if (typeof onExit === 'function') {
+      try { onExit({ stop: () => { if (reqId != null) st.transport.rpc.cancel(reqId, 'detenida por el usuario'); } }); } catch {}
+    }
     try {
-      const res = await st.transport.rpc.request('tools/call', { name: info.toolName, arguments: args || {} }, { timeoutMs: ms });
+      const res = await st.transport.rpc.request('tools/call', { name: info.toolName, arguments: args || {} }, { timeoutMs: ms, onStart: (id) => { reqId = id; } });
       const texto = this._flatten(res);
       return res && res.isError ? 'Error del servidor MCP: ' + texto : texto;
     } catch (e) {
@@ -1208,9 +1339,13 @@ Añadir a la clase `McpManager` (y `const MAX_RESULT_CHARS = 60000;` arriba):
       try { partes.push(JSON.stringify(res.structuredContent)); } catch {}
     }
     const texto = partes.join('\n').trim() || '(el servidor MCP no devolvió contenido)';
-    return texto.length > MAX_RESULT_CHARS
-      ? texto.slice(0, MAX_RESULT_CHARS) + '\n… (resultado recortado)'
-      : texto;
+    if (texto.length > MAX_RESULT_CHARS) {
+      let corte = MAX_RESULT_CHARS;
+      const c = texto.charCodeAt(corte - 1);
+      if (c >= 0xD800 && c <= 0xDBFF) corte--;   // no partir un par suplente (emoji a medias)
+      return texto.slice(0, corte) + '\n… (resultado recortado)';
+    }
+    return texto;
   }
 ```
 
