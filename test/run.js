@@ -1455,6 +1455,14 @@ test('apariencia: el CSS tematiza por triplets RGB y el glow escala con intensid
   ok(/input\[type="range"\]\.glowslider/.test(css), 'debe existir el estilo del slider de intensidad');
 });
 
+test('apariencia: el alias glow de la muestra de color no hereda el lienzo del halo', () => {
+  const css = fs.readFileSync(path.join(__dirname, '..', 'renderer', 'styles.css'), 'utf8');
+  const muestra = css.match(/\.colordot\.glow\s*\{([^}]*)\}/);
+  ok(muestra, 'debe existir una regla específica para la muestra del glow');
+  ok(/position:\s*relative/.test(muestra[1]) && /opacity:\s*1/.test(muestra[1]), 'la muestra debe ser visible y ocupar su propio espacio');
+  ok(/inset:\s*auto/.test(muestra[1]), 'la muestra no debe cubrir la ventana');
+});
+
 test('apariencia: Ajustes expone color de UI, color de glow e intensidad', () => {
   const html = fs.readFileSync(path.join(__dirname, '..', 'renderer', 'index.html'), 'utf8');
   for (const id of ['uiColor', 'glowColor', 'glowStrength', 'dotUiColor', 'dotGlowColor', 'glowStrengthLabel'])

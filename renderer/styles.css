@@ -128,11 +128,8 @@ body { font-family: var(--font-ui), 'Segoe UI', sans-serif; font-size: 13px; col
      una esquina (su valor varía a lo largo del borde, así que la luz se apila en ese lado).
      La atmósfera va aquí como sombra interior centrada —igual por los cuatro lados— y la luz
      la pone encima el aura, que también es uniforme a lo largo del borde. */
-  background:
-    linear-gradient(155deg, rgb(var(--deep-rgb)) 0%, rgb(var(--bg1-rgb)) 40%, rgb(var(--bg2-rgb)) 100%);
+  background: linear-gradient(155deg, rgb(var(--deep-rgb)) 0%, rgb(var(--bg1-rgb)) 40%, rgb(var(--bg2-rgb)) 100%);
   box-shadow: inset 0 0 170px rgba(var(--acc3-rgb), calc(0.10 * var(--ambient)));
-    /* el lienzo también es del tema: tres escalones de la rampa, en orden de claridad */
-    linear-gradient(155deg, rgb(var(--deep-rgb)) 0%, rgb(var(--bg1-rgb)) 40%, rgb(var(--bg2-rgb)) 100%);
 }
 /* ===== glow INTERIOR — suave, degradado, integrado =====
    Luz que vive DENTRO del marco y emana de él: núcleo caliente de 1px y capas
@@ -179,6 +176,8 @@ body { font-family: var(--font-ui), 'Segoe UI', sans-serif; font-size: 13px; col
 .glow {
   position: absolute; inset: 0; border-radius: inherit; pointer-events: none; z-index: 401;
   opacity: 0; transition: opacity .7s cubic-bezier(0.16, 1, 0.3, 1);
+  /* El halo queda por encima del contenido, pero sus capas no capturan clics. */
+  isolation: isolate;
 }
 /* El anillo del aura (medido con el halo real, no con la versión de marcos). */
 .glowRing {
@@ -193,18 +192,29 @@ body { font-family: var(--font-ui), 'Segoe UI', sans-serif; font-size: 13px; col
      casi a la altura del borde (medido: 1,40× con una sola capa de 168px) y suman el mismo
      alcance. Todo centrado y difuminado: ninguna forma, ningún escalón. */
   box-shadow:
-    inset 0 0 22px rgba(var(--glow-a-rgb), calc(0.26 * var(--glow-str) * var(--energy))),
-    inset 0 0 46px rgba(var(--glow-b-rgb), calc(0.15 * var(--glow-str) * var(--energy))),
-    inset 0 0 78px rgba(var(--glow-b-rgb), calc(0.09 * var(--glow-str) * var(--energy))),
-    inset 0 0 132px rgba(var(--glow-c-rgb), calc(0.05 * var(--glow-str) * var(--energy)));
+    inset 0 0 5px rgba(var(--glow-a-rgb), calc(0.42 * var(--glow-str) * var(--energy))),
+    inset 0 0 18px rgba(var(--glow-a-rgb), calc(0.24 * var(--glow-str) * var(--energy))),
+    inset 0 0 48px rgba(var(--glow-b-rgb), calc(0.16 * var(--glow-str) * var(--energy))),
+    inset 0 0 86px rgba(var(--glow-b-rgb), calc(0.09 * var(--glow-str) * var(--energy))),
+    inset 0 0 132px rgba(var(--glow-c-rgb), calc(0.045 * var(--glow-str) * var(--energy)));
+  border: 1px solid rgba(var(--glow-a-rgb), calc(0.42 * var(--glow-str) * var(--energy)));
 }
 .glow::before {
   content: ''; position: absolute; inset: 0; border-radius: inherit;
   /* El filo brillante y su latido: es la capa que respira con el estado. */
   box-shadow:
-    inset 0 0 10px rgba(var(--glow-a-rgb), calc(0.22 * var(--glow-str) * var(--energy))),
-    inset 0 0 44px rgba(var(--glow-b-rgb), calc(0.12 * var(--glow-str) * var(--energy)));
-  opacity: 0; will-change: opacity;
+    inset 0 0 4px rgba(var(--glow-a-rgb), calc(0.48 * var(--glow-str) * var(--energy))),
+    inset 0 0 16px rgba(var(--glow-a-rgb), calc(0.28 * var(--glow-str) * var(--energy))),
+    inset 0 0 42px rgba(var(--glow-b-rgb), calc(0.14 * var(--glow-str) * var(--energy)));
+  border: 1px solid rgba(var(--glow-a-rgb), calc(0.72 * var(--glow-str) * var(--energy)));
+}
+
+/* `.glow` también se usa como etiqueta semántica en el selector de color. Sin este
+   reset, el punto heredaba `position:absolute; inset:0; opacity:0` y se convertía en
+   una capa invisible de toda la ventana en vez de una muestra de 12px. */
+.colordot.glow {
+  position: relative; inset: auto; z-index: auto; opacity: 1;
+  transition: none; isolation: auto;
 }
 
 /* Latido asimétrico: entra algo más rápido de lo que sale, como una respiración. */
