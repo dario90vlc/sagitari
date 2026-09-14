@@ -1427,7 +1427,12 @@ test('apariencia: el CSS tematiza por triplets RGB y el glow escala con intensid
   const css = fs.readFileSync(path.join(__dirname, '..', 'renderer', 'styles.css'), 'utf8');
   for (const v of ['--acc-rgb', '--acc2-rgb', '--acc3-rgb', '--glow-rgb', '--glow-str'])
     ok(css.includes(v + ':'), 'debe declarar ' + v);
-  ok(/rgba\(var\(--glow-rgb\), calc\(/.test(css), 'las capas del glow deben multiplicar por --glow-str');
+  /* El aura tiene tres tonos (--glow-a/b/c-rgb) y todos escalan con la intensidad del
+     ajuste. Se comprueba ese contrato y no una regla concreta: antes esto afirmaba el
+     anillo del marco, que ya no lleva luz propia (la luz es del aura, y sólo cuando el
+     agente hace algo). */
+  ok(/rgba\(var\(--glow-[abc]-rgb\), calc\([^)]*var\(--glow-str\)/.test(css), 'las capas del aura deben multiplicar por --glow-str');
+  ok(/--ambient/.test(css), 'la atmósfera del fondo también debe seguir al estado');
   ok((css.match(/rgba\(var\(--acc/g) || []).length >= 40, 'los tintes decorativos deben usar los triplets (' + (css.match(/rgba\(var\(--acc/g) || []).length + ')');
   // los modos conservan su color aunque cambie el acento
   ok(/#view-chat\[data-mode="plan"\]\s*\{[^}]*167,139,250/.test(css), 'PLAN mantiene su violeta');
