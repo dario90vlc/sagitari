@@ -1330,6 +1330,123 @@ test('mcp: un timeout del tope HTTP no marca el servidor como caido', async () =
   } finally { srv.closeAllConnections?.(); srv.close(); }
 });
 
+/* ---------- MCP: registro, nombres y catálogo ---------- */
+const { McpManager, mapToolName, MAX_TOOL_NAME } = require('../agent/mcp');
+
+test('mcp: el nombre expuesto se sanea y no pasa de 64 caracteres', () => {
+  eq(mapToolName('github', 'create_issue'), 'mcp__github__create_issue');
+  eq(mapToolName('Mi Servidor!', 'Crear-Nota'), 'mcp__mi_servidor__crear_nota');
+  const largo = mapToolName('servidor-con-nombre-muy-largo', 'herramienta-con-nombre-absurdamente-largo-de-mas');
+  ok(largo.length <= MAX_TOOL_NAME, 'largo: ' + largo.length);
+  ok(largo.startsWith('mcp__'), largo);
+  // nunca puede pisar una herramienta nativa
+  for (const nativa of ['run_command', 'read_file', 'browser_control']) ok(mapToolName('x', nativa) !== nativa);
+});
+
+function fakeTransport(tools, { failInit = false } = {}) {
+  const calls = [];
+  const t = {
+    calls,
+    esperandoSalida: [],
+    rpc: {
+      alive: true,
+      async request(method, params) {
+        calls.push({ method, params });
+        if (method === 'initialize') {
+          if (failInit) throw new Error('no arrancó');
+          return { protocolVersion: '2025-06-18', capabilities: { tools: {} }, serverInfo: { name: 'falso', version: '1' } };
+        }
+        if (method === 'tools/list') return { tools };
+        if (method === 'tools/call') return { content: [{ type: 'text', text: 'ok' }] };
+        return {};
+      },
+      notify() {}, fail() {},
+    },
+    stderrTail: () => '',
+    onExit(cb) { this.esperandoSalida.push(cb); },
+    kill() {},
+  };
+  return t;
+}
+
+const MCP_SERVERS = [
+  { id: 'eco', name: 'Eco', enabled: true, transport: 'stdio', command: 'node', args: ['x.js'], env: {}, timeoutMs: 5000 },
+  { id: 'apagado', name: 'Apagado', enabled: false, transport: 'stdio', command: 'node', args: [], env: {} },
+];
+
+test('mcp: el catálogo solo trae las herramientas de servidores habilitados y listos', async () => {
+  const transports = {};
+  const mcp = new McpManager({
+    servers: MCP_SERVERS, dataDir: tmpDir('sagi-mcp-'), clientVersion: 'test', log: () => {},
+    makeTransport: (s) => (transports[s.id] = fakeTransport([
+      { name: 'echo', description: 'Devuelve el texto', inputSchema: { type: 'object', properties: { text: { type: 'string' } } } },
+    ])),
+  });
+  eq(mcp.toolDefs().length, 0, 'sin conectar no hay herramientas (no se arranca nada por abrir Ajustes)');
+  await mcp.ensure('eco');
+  const defs = mcp.toolDefs();
+  eq(defs.length, 1);
+  eq(defs[0].type, 'function');
+  eq(defs[0].function.name, 'mcp__eco__echo');
+  eq(defs[0].function.parameters.properties.text.type, 'string', 'el esquema del servidor viaja tal cual');
+  ok(/Eco/.test(defs[0].function.description), 'la descripción identifica el servidor: ' + defs[0].function.description);
+  ok(!/nueva línea|\\n/.test(defs[0].function.description), 'la descripción va en una línea');
+  eq(mcp.describe('mcp__eco__echo').toolName, 'echo');
+  eq(mcp.describe('mcp__nadie__x'), null);
+  await mcp.shutdown();
+});
+
+test('mcp: tools/list se pagina con cursor', async () => {
+  const paginas = [
+    { tools: [{ name: 'uno', description: 'a', inputSchema: { type: 'object' } }], nextCursor: 'c1' },
+    { tools: [{ name: 'dos', description: 'b', inputSchema: { type: 'object' } }], nextCursor: 'c2' },
+    { tools: [{ name: 'tres', description: 'c', inputSchema: { type: 'object' } }] },
+  ];
+  let i = 0;
+  const tr = fakeTransport([]);
+  tr.rpc.request = async (method, params) => {
+    if (method === 'initialize') return { capabilities: { tools: {} }, serverInfo: { name: 'pag', version: '1' } };
+    if (method === 'tools/list') return paginas[i++];
+    return {};
+  };
+  const mcp = new McpManager({
+    servers: [{ id: 'pag', name: 'Pag', enabled: true, transport: 'stdio', command: 'node', args: [] }],
+    dataDir: tmpDir('sagi-mcp-'), clientVersion: 't', log: () => {}, makeTransport: () => tr,
+  });
+  await mcp.ensure('pag');
+  eq(mcp.toolDefs().map(d => d.function.name).join(','), 'mcp__pag__uno,mcp__pag__dos,mcp__pag__tres');
+  await mcp.shutdown();
+});
+
+test('mcp: allow/deny y colisiones de nombre', async () => {
+  const tr = fakeTransport([
+    { name: 'ok', description: 'permitida', inputSchema: { type: 'object' } },
+    { name: 'secreta', description: 'prohibida', inputSchema: { type: 'object' } },
+  ]);
+  const mcp = new McpManager({
+    servers: [{ id: 'f', name: 'F', enabled: true, transport: 'stdio', command: 'node', args: [], tools: { deny: ['secreta'] } }],
+    dataDir: tmpDir('sagi-mcp-'), clientVersion: 't', log: () => {}, makeTransport: () => tr,
+  });
+  await mcp.ensure('f');
+  eq(mcp.toolDefs().map(d => d.function.name).join(','), 'mcp__f__ok', 'deny quita la herramienta del catálogo');
+  await mcp.shutdown();
+});
+
+test('mcp: un servidor que no arranca queda en error legible y no aporta herramientas', async () => {
+  const tr = fakeTransport([], { failInit: true });
+  const mcp = new McpManager({
+    servers: [{ id: 'malo', name: 'Malo', enabled: true, transport: 'stdio', command: 'no-existe-xyz', args: [] }],
+    dataDir: tmpDir('sagi-mcp-'), clientVersion: 't', log: () => {},
+    makeTransport: () => { tr.stderrTail = () => 'ENOENT: no such file'; return tr; },
+  });
+  const r = await mcp.ensure('malo');
+  eq(r.ok, false);
+  ok(/no arrancó|malo/i.test(r.error), r.error);
+  eq(mcp.toolDefs().length, 0);
+  eq(mcp.status()[0].state, 'dead');
+  await mcp.shutdown();
+});
+
 test('agent: la cadena elige el protocolo del modelo (Qwen en Go → /messages)', async () => {
   const { Agent } = require('../agent/agent');
   const seen = [];
