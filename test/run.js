@@ -1286,6 +1286,50 @@ test('mcp: un servidor http que no responde corta por timeout', async () => {
   } finally { srv.closeAllConnections?.(); srv.close(); }
 });
 
+test('mcp: una notificacion contestada con 202 sin cuerpo no mata el transporte', async () => {
+  const http = require('http');
+  const srv = http.createServer((req, res) => {
+    let body = '';
+    req.on('data', (c) => body += c);
+    req.on('end', () => {
+      const msg = JSON.parse(body);
+      if (msg.id == null) { res.writeHead(202); return res.end(); }   // notificación: 202 sin cuerpo
+      res.writeHead(200, { 'content-type': 'application/json' });
+      res.end(JSON.stringify({ jsonrpc: '2.0', id: msg.id, result: {} }));
+    });
+  });
+  await new Promise((r) => srv.listen(0, '127.0.0.1', r));
+  const url = 'http://127.0.0.1:' + srv.address().port + '/mcp';
+  const muertes = [];
+  try {
+    const tr = mcpTransport.createHttpTransport({ url, defaultTimeoutMs: 2000 });
+    tr.onExit((m) => muertes.push(m));
+    await tr.rpc.request('initialize', { clientInfo: { name: 'SAGITARI', version: 't' } }, { timeoutMs: 2000 });
+    tr.rpc.notify('notifications/initialized', {});
+    await new Promise((r) => setTimeout(r, 300));
+    eq(muertes.length, 0, 'un 202 sin cuerpo no puede marcar el servidor como caído: ' + muertes.join(' | '));
+    const r = await tr.rpc.request('tools/list', {}, { timeoutMs: 2000 });
+    ok(r && typeof r === 'object', 'el transporte sigue usable después');
+  } finally { srv.closeAllConnections?.(); srv.close(); }
+});
+
+test('mcp: un timeout del tope HTTP no marca el servidor como caido', async () => {
+  const http = require('http');
+  const srv = http.createServer(() => { /* nunca responde */ });
+  await new Promise((r) => srv.listen(0, '127.0.0.1', r));
+  const url = 'http://127.0.0.1:' + srv.address().port + '/mcp';
+  const muertes = [];
+  try {
+    // el tope HTTP vence a los 2,5 s y el Rpc espera 3 s: gana el abort del transporte
+    const tr = mcpTransport.createHttpTransport({ url, defaultTimeoutMs: 500 });
+    tr.onExit((m) => muertes.push(m));
+    let err = null;
+    try { await tr.rpc.request('tools/list', {}, { timeoutMs: 3000 }); } catch (e) { err = e; }
+    ok(err && /timeout/i.test(err.message), 'la petición falla por timeout: ' + (err && err.message));
+    eq(muertes.length, 0, 'un timeout puntual no puede dejar el servidor caído para siempre');
+  } finally { srv.closeAllConnections?.(); srv.close(); }
+});
+
 test('agent: la cadena elige el protocolo del modelo (Qwen en Go → /messages)', async () => {
   const { Agent } = require('../agent/agent');
   const seen = [];

@@ -238,13 +238,18 @@ function createHttpTransport({ url, headers = {}, defaultTimeoutMs, fetchFn = fe
       if (!res.ok) { avisarMuerte(`el servidor MCP respondió ${res.status}.`); return; }
       const tipo = String(res.headers.get('content-type') || '');
       const body = await res.text();
+      // 202 sin cuerpo: es lo que la spec manda para notificaciones y respuestas, así
+      // que no hay nada que interpretar (y no puede contar como caída del servidor)
+      if (!body.trim()) return;
       const mensajes = tipo.includes('text/event-stream') ? parseSseText(body) : [JSON.parse(body)];
       for (const m of mensajes) rpc.handleMessage(m);
     } catch (e) {
       // Un abort causado por nuestro propio tope no significa que el servidor esté
       // caído: el Rpc ya rechazó la petición con su mensaje de timeout, así que no
       // se marca muerto (si lo estuviera, la siguiente llamada lo comprobaría).
-      if (e && e.name === 'AbortError') return;
+      // `AbortSignal.timeout()` rechaza con un DOMException llamado `TimeoutError`,
+      // no `AbortError`: hay que cubrir los dos o la guarda no coincide nunca.
+      if (e && (e.name === 'AbortError' || e.name === 'TimeoutError')) return;
       avisarMuerte('no se pudo hablar con el servidor MCP: ' + e.message);
     }
   }
