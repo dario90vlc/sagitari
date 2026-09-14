@@ -73,6 +73,7 @@
     <main class="main">
       <!-- CHAT -->
       <section class="view on" id="view-chat" data-mode="act">
+        <h1 class="sr-only" id="chatRootTitle">Nueva conversación</h1>
         <div class="viewhead chathead">
           <div class="ch-left">
             <h2 id="chatTitle">Nueva conversación</h2>
@@ -128,10 +129,10 @@
             <div id="attachStrip" class="attachstrip" hidden></div>
             <div class="compline">
             <div class="modeseg" id="modeSeg" title="Modo del agente (Alt+M para cambiar)"></div>
-            <textarea id="chatInput" rows="1" placeholder="Escribe a Sagitari… (/ para usar una skill)"></textarea>
+            <textarea id="chatInput" aria-label="Mensaje para Sagitari" rows="1" placeholder="Escribe a Sagitari… (/ para usar una skill)"></textarea>
             <button class="cbtn" id="chatAttach" title="Adjuntar archivos, documentos o imágenes" aria-label="Adjuntar archivos, documentos o imágenes"><i data-i="clip"></i></button>
             <button class="cbtn" id="chatMic" title="Dictado por voz" aria-label="Dictado por voz" aria-pressed="false"><i data-i="mic"></i></button>
-            <button class="cbtn" id="chatPause" title="Pausar tarea (checkpoint)" aria-label="Pausar tarea"><i data-i="pause"></i></button>
+            <button class="cbtn" id="chatPause" title="Pausar la tarea (guarda el punto de control)" aria-label="Pausar tarea"><i data-i="pause"></i></button>
             <button class="cbtn send" id="chatSend" title="Enviar" aria-label="Enviar"><i data-i="send"></i></button>
             </div>
           </div>
@@ -143,6 +144,7 @@
 
       <!-- HISTORY -->
       <section class="view" id="view-history">
+        <h1 class="sr-only">Historial</h1>
         <div class="viewhead">
           <h2>Historial</h2>
           <div class="vh-actions"><button class="btn" id="histNew">Nueva conversación</button></div>
@@ -152,6 +154,7 @@
 
       <!-- AGENTS -->
       <section class="view" id="view-agents">
+        <h1 class="sr-only">Agentes</h1>
         <div class="viewhead"><h2>Agentes</h2></div>
         <div class="agents-grid">
           <div class="acard" id="agentCard-researcher"><div class="aic a-b"><i data-i="search"></i></div><div><b>Investigador</b><small>Busca, lee y sintetiza información</small></div><span class="adot"></span></div>
@@ -166,7 +169,7 @@
           <div id="toolTrayList" class="tt-list"></div>
         </div>
         <div class="tooltray" style="margin-top:18px">
-          <div class="tt-head">MODEL HEALTH · SALUD DE MODELOS</div>
+          <div class="tt-head">SALUD DE LOS MODELOS</div>
           <div id="healthList" class="tt-list"></div>
         </div>
         <div class="tooltray" style="margin-top:18px;margin-bottom:24px">
@@ -177,14 +180,15 @@
 
       <!-- TASKS (v1.3: cola en background, programadas, pausa/cancelar) -->
       <section class="view" id="view-tasks">
+        <h1 class="sr-only">Tareas</h1>
         <div class="viewhead"><h2>Tareas</h2>
           <div class="vh-actions"><button class="btn ghost" id="tasksRefresh">Actualizar</button></div>
         </div>
         <div class="tooltray" style="max-width:860px;margin-bottom:14px">
-          <div class="tt-head">NUEVA TAREA EN BACKGROUND</div>
+          <div class="tt-head">NUEVA TAREA EN SEGUNDO PLANO</div>
           <div class="btnrow">
-            <input type="text" id="taskGoal" placeholder="Objetivo: busca esto y compara precios…" style="flex:3;min-width:220px" />
-            <select id="taskMode" style="width:110px">
+            <input type="text" id="taskGoal" aria-label="Objetivo de la tarea" placeholder="Objetivo: busca esto y compara precios…" style="flex:3;min-width:220px" />
+            <select id="taskMode" aria-label="Modo de la tarea" style="width:110px">
               <option value="act">Act</option>
               <option value="plan">Plan</option>
               <option value="think">Think</option>
@@ -192,21 +196,22 @@
             <button class="btn primary" id="taskCreate"><span class="bi"><i data-i="zap"></i></span> Lanzar</button>
           </div>
           <div class="btnrow" style="margin-top:8px">
-            <input type="datetime-local" id="taskWhen" style="width:210px" />
+            <input type="datetime-local" id="taskWhen" aria-label="Fecha y hora de la tarea" style="width:210px" />
             <button class="btn ghost" id="taskSchedule"><span class="bi"><i data-i="history"></i></span> Programar</button>
             <span class="saving" id="taskMsg"></span>
           </div>
           <div class="subnote">Las tareas en background usan su propio agente: puedes seguir chateando mientras trabajan. Se te notificará al terminar. Máx. simultáneas configurable en Ajustes.</div>
         </div>
-        <p class="subnote" style="margin-top:0;margin-bottom:14px">Cada tarea larga guarda un checkpoint con su último paso completado. Puedes pausar, reanudar donde se quedó (también tras cerrar la app) y ver qué paso falló y por qué.</p>
+        <p class="subnote" style="margin-top:0;margin-bottom:14px">Cada tarea larga guarda un punto de control con su último paso completado. Puedes pausar, reanudar donde se quedó (también tras cerrar la app) y ver qué paso falló y por qué.</p>
         <div id="tasksList" class="histlist"></div>
       </section>
 
       <!-- PROJECTS -->
       <section class="view" id="view-projects">
+        <h1 class="sr-only">Espacio de trabajo</h1>
         <div class="viewhead"><h2>Espacio de trabajo</h2></div>
         <div class="projwrap">
-          <div class="field"><label>ESPACIO DE TRABAJO ACTIVO</label>
+          <div class="field"><label for="projPath">ESPACIO DE TRABAJO ACTIVO</label>
             <input type="text" id="projPath" placeholder="C:\Users\tu-usuario\Desktop\mi-proyecto" />
           </div>
           <button class="btn" id="projOpen"><span class="bi"><i data-i="external"></i></span> Abrir y trabajar aquí</button>
@@ -218,16 +223,18 @@
 
       <!-- TOOLS -->
       <section class="view" id="view-tools">
+        <h1 class="sr-only">Herramientas</h1>
         <div class="viewhead"><h2>Herramientas</h2></div>
         <div class="toolsgrid" id="toolsGrid"></div>
       </section>
 
       <!-- MEMORY -->
       <section class="view" id="view-memory">
+        <h1 class="sr-only">Memoria</h1>
         <div class="viewhead">
           <h2>Memoria</h2>
           <div class="vh-actions">
-            <input type="text" id="memInput" placeholder="Añade algo que Sagitari debe recordar…" />
+            <input type="text" id="memInput" aria-label="Añade algo que Sagitari debe recordar" placeholder="Añade algo que Sagitari debe recordar…" />
             <button class="btn" id="memAdd"><span class="bi"><i data-i="plus"></i></span> Añadir</button>
           </div>
         </div>
@@ -236,10 +243,11 @@
 
       <!-- SKILLS -->
       <section class="view" id="view-skills">
+        <h1 class="sr-only">Skills</h1>
         <div class="viewhead">
           <h2>Skills</h2>
           <div class="vh-actions">
-            <input type="text" id="skillImportInput" placeholder="owner/repo de GitHub con SKILL.md…" />
+            <input type="text" id="skillImportInput" aria-label="Repositorio de GitHub (owner/repo) con SKILL.md" placeholder="owner/repo de GitHub con SKILL.md…" />
             <button class="btn" id="skillImportBtn"><span class="bi"><i data-i="download"></i></span> Importar</button>
             <button class="btn ghost" id="skillsFolderBtn"><span class="bi"><i data-i="folder"></i></span> Carpeta</button>
           </div>
@@ -247,9 +255,9 @@
         <p class="subnote" style="margin-top:-6px;margin-bottom:14px">Las skills son instrucciones especializadas (SKILL.md) que Sagitari carga solo cuando la tarea lo necesita: sin coste en tokens hasta que aplican. Importa packs desde GitHub (owner/repo), crea las tuyas o edita la carpeta directamente.</p>
         <div id="skillsList" class="memlist"></div>
         <div class="tooltray" style="margin-top:18px;max-width:860px">
-          <div class="tt-head">MARKETPLACE DE SKILLS · CATÁLOGO DESTACADO</div>
+          <div class="tt-head">CATÁLOGO DE PACKS · LISTOS PARA INSTALAR</div>
           <div class="btnrow">
-            <input type="text" id="marketQuery" placeholder="Buscar packs en GitHub: blender, wordpress, excel…" style="flex:1;min-width:180px" />
+            <input type="text" id="marketQuery" aria-label="Buscar packs de skills en GitHub" placeholder="Buscar packs en GitHub: blender, wordpress, excel…" style="flex:1;min-width:180px" />
             <button class="btn ghost" id="marketSearchBtn"><span class="bi"><i data-i="search"></i></span> Buscar</button>
             <button class="btn ghost" id="skillsUpdateAllBtn"><span class="bi"><i data-i="history"></i></span> Actualizar todas</button>
           </div>
@@ -259,10 +267,10 @@
         <div class="tooltray" style="margin-top:18px;max-width:860px">
           <div class="tt-head">CREAR SKILL</div>
           <div class="btnrow">
-            <input type="text" id="skillNewName" placeholder="nombre-ejemplo" style="flex:1;min-width:160px" />
-            <input type="text" id="skillNewDesc" placeholder="Qué hace y cuándo usarla" style="flex:2;min-width:240px" />
+            <input type="text" id="skillNewName" aria-label="Nombre de la skill" placeholder="nombre-ejemplo" style="flex:1;min-width:160px" />
+            <input type="text" id="skillNewDesc" aria-label="Qué hace la skill y cuándo usarla" placeholder="Qué hace y cuándo usarla" style="flex:2;min-width:240px" />
           </div>
-          <textarea id="skillNewBody" rows="5" placeholder="Instrucciones que seguirá Sagitari… (markdown)"></textarea>
+          <textarea id="skillNewBody" aria-label="Instrucciones que seguirá Sagitari (markdown)" rows="5" placeholder="Instrucciones que seguirá Sagitari… (markdown)"></textarea>
           <div class="btnrow" style="margin-top:8px">
             <button class="btn primary" id="skillCreateBtn"><span class="bi"><i data-i="plus"></i></span> Crear skill</button>
             <span class="saving" id="skillMsg"></span>
@@ -272,10 +280,11 @@
 
       <!-- SETTINGS -->
       <section class="view" id="view-settings">
+        <h1 class="sr-only">Ajustes</h1>
         <div class="viewhead">
           <h2>Ajustes</h2>
           <div class="vh-actions">
-            <input type="search" id="setSearch" placeholder="Buscar en ajustes…" />
+            <input type="search" id="setSearch" aria-label="Buscar en ajustes" placeholder="Buscar en ajustes…" />
           </div>
         </div>
 
@@ -303,13 +312,13 @@
           <div class="setpanel on" data-panel="model">
             <div class="setcard">
               <div class="sc-head"><b>Proveedor y modelo</b><span class="sc-hint">La API que usará Sagitari</span></div>
-              <div class="field srow" data-keys="preset proveedor api plantilla"><label>PRESET</label>
+              <div class="field srow" data-keys="preset proveedor api plantilla"><label for="presetSel">PRESET</label>
                 <select id="presetSel"></select>
                 <div class="subnote" id="presetHint"></div>
               </div>
               <div class="grid2">
-                <div class="field srow" data-keys="nombre proveedor etiqueta"><label>NOMBRE</label><input type="text" id="pName" /></div>
-                <div class="field srow" data-keys="formato api protocolo endpoint anthropic responses openai"><label>FORMATO DE API</label>
+                <div class="field srow" data-keys="nombre proveedor etiqueta"><label for="pName">NOMBRE</label><input type="text" id="pName" /></div>
+                <div class="field srow" data-keys="formato api protocolo endpoint anthropic responses openai"><label for="apiFormat">FORMATO DE API</label>
                   <select id="apiFormat">
                     <option value="auto">Automático (detectar)</option>
                     <option value="openai">OpenAI — /chat/completions</option>
@@ -318,8 +327,8 @@
                   </select>
                 </div>
               </div>
-              <div class="field srow" data-keys="base url endpoint servidor direccion"><label>BASE URL</label><input type="text" id="pUrl" placeholder="https://…/v1" /></div>
-              <div class="field srow" data-keys="api key token clave secreta"><label>API KEY</label>
+              <div class="field srow" data-keys="base url endpoint servidor direccion"><label for="pUrl">BASE URL</label><input type="text" id="pUrl" placeholder="https://…/v1" /></div>
+              <div class="field srow" data-keys="api key token clave secreta"><label for="pKey">API KEY</label>
                 <div class="keyrow">
                   <input type="password" id="pKey" placeholder="sk-… (vacío para Ollama o LM Studio)" />
                   <button class="btn ghost sq" id="apiKeyReveal" type="button" title="Mostrar u ocultar la clave"><i data-i="eye"></i></button>
@@ -332,7 +341,7 @@
                   <button class="btn" id="btnSaveProv"><span class="bi"><i data-i="save"></i></span> Guardar proveedor</button>
                 </div>
               </div>
-              <div class="field srow" data-keys="modelo model id elegir"><label>MODELO</label><select id="modelSel"><option value="">— detecta modelos primero —</option></select></div>
+              <div class="field srow" data-keys="modelo model id elegir"><label for="modelSel">MODELO</label><select id="modelSel"><option value="">— detecta modelos primero —</option></select></div>
               <div class="srow" data-keys="formato endpoint protocolo"><div class="subnote" id="formatHint">El formato «Automático» deduce el endpoint por proveedor y modelo: en OpenCode Go, los Qwen y MiniMax usan /messages y Grok o GPT-Luna usan /responses.</div></div>
               <div class="srow" data-keys="activar modelo usar">
                 <div class="btnrow"><button class="btn primary" id="btnActivate"><span class="bi"><i data-i="play"></i></span> Activar este modelo</button></div>
@@ -350,13 +359,13 @@
             <div class="setcard">
               <div class="sc-head"><b>Personal</b><span class="sc-hint">Tu identidad y el comportamiento visual</span></div>
               <div class="swrow srow" data-keys="nombre usuario como te llamas identidad"><span class="st"><b>Tu nombre</b><small>Sagitari lo usa para dirigirse a ti.</small></span>
-                <input type="text" id="setUserName" style="width:160px" /></div>
+                <input type="text" id="setUserName" aria-label="Tu nombre" style="width:160px" /></div>
               <div class="swrow srow" data-keys="glow resplandor bordes luz ambiental"><span class="st"><b>Glow ambiental en los bordes</b><small>El marco se ilumina cuando el agente piensa, trabaja o te habla.</small></span>
-                <div class="sw on" id="swGlow"></div></div>
+                <div class="sw on" id="swGlow" aria-label="Glow ambiental en los bordes"></div></div>
               <div class="swrow srow" data-keys="voz tts leer hablar respuestas"><span class="st"><b>Leer en voz alta (TTS)</b><small>Sagitari pronuncia sus respuestas.</small></span>
-                <div class="sw on" id="swTts"></div></div>
+                <div class="sw on" id="swTts" aria-label="Leer en voz alta (TTS)"></div></div>
               <div class="swrow srow" data-keys="idioma voz dictado reconocimiento"><span class="st"><b>Idioma de voz</b><small>Para el dictado y la lectura en voz alta.</small></span>
-                <select id="voiceLang" style="width:200px">
+                <select id="voiceLang" aria-label="Idioma de voz" style="width:200px">
                   <option value="es-ES">Español (España)</option>
                   <option value="es-MX">Español (México)</option>
                   <option value="en-US">English (US)</option>
@@ -367,7 +376,7 @@
             <div class="sc-head"><b>Apariencia</b><span class="sc-hint">Color de la interfaz y del resplandor</span></div>
             <div class="themerow" data-keys="color tema apariencia acento interfaz"><span class="st"><b>Color de la interfaz</b><small>Teñe bordes, menús, botones y detalles de toda la app.</small></span>
               <span class="colordot" id="dotUiColor"></span>
-              <select id="uiColor" style="width:150px">
+              <select id="uiColor" aria-label="Color de la interfaz" style="width:150px">
                 <option value="violet">Violeta</option>
                 <option value="magenta">Magenta</option>
                 <option value="cyan">Cian</option>
@@ -377,7 +386,7 @@
               </select></div>
             <div class="themerow" data-keys="color glow resplandor luz"><span class="st"><b>Color del glow</b><small>El tono de la luz del marco, puede diferir del tema.</small></span>
               <span class="colordot glow" id="dotGlowColor"></span>
-              <select id="glowColor" style="width:150px">
+              <select id="glowColor" aria-label="Color del glow" style="width:150px">
                 <option value="match">Igual que la interfaz</option>
                 <option value="violet">Violeta</option>
                 <option value="magenta">Magenta</option>
@@ -388,7 +397,7 @@
               </select></div>
             <div class="themerow" data-keys="intensidad glow resplandor fuerza brillo"><span class="st"><b>Intensidad del glow</b><small id="glowStrengthLabel">Equilibrado</small></span>
               <div style="text-align:right">
-                <input type="range" min="0.4" max="1.4" step="0.05" class="glowslider" id="glowStrength" />
+                <input type="range" min="0.4" max="1.4" step="0.05" class="glowslider" id="glowStrength" aria-label="Intensidad del glow" />
                 <div class="glowlabels"><span id="lblSuave">Suave</span><span id="lblEq">Equilibrado</span><span id="lblInt">Intenso</span></div>
               </div></div>
             </div>
@@ -397,7 +406,7 @@
               <div class="sc-head"><b>Espacio de trabajo</b><span class="sc-hint">Dónde trabaja el agente con tus archivos</span></div>
               <div class="srow" data-keys="espacio trabajo carpeta workspace proyectos ruta">
                 <div class="btnrow" style="margin:0">
-                  <input type="text" id="wsPath" readonly style="flex:1;min-width:200px" />
+                  <input type="text" id="wsPath" aria-label="Ruta del espacio de trabajo" readonly style="flex:1;min-width:200px" />
                   <button class="btn" id="wsPick"><span class="bi"><i data-i="folder"></i></span> Elegir…</button>
                 </div>
                 <div class="subnote">Carpeta donde Sagitari crea y modifica archivos, y donde se ejecutan los comandos. Las rutas relativas («informe.md») aterrizan aquí.</div>
@@ -429,11 +438,11 @@
             <div class="setcard">
               <div class="sc-head"><b>Límites de ejecución</b><span class="sc-hint">Frenos de seguridad de cada tarea</span></div>
               <div class="grid2">
-                <div class="field srow" data-keys="pasos maximos limite steps"><label>PASOS MÁXIMOS (0 = sin límite)</label><input type="number" id="grSteps" min="0" /></div>
-                <div class="field srow" data-keys="herramientas maximas limite llamadas tools"><label>LLAMADAS A HERRAMIENTAS (0 = sin límite)</label><input type="number" id="grToolCalls" min="0" /></div>
-                <div class="field srow" data-keys="minutos tiempo maximo duracion"><label>MINUTOS MÁXIMOS (0 = sin límite)</label><input type="number" id="grMinutes" min="0" /></div>
-                <div class="field srow" data-keys="tokens limite consumo"><label>TOKENS MÁXIMOS (0 = sin límite)</label><input type="number" id="grTokens" min="0" /></div>
-                <div class="field srow" data-keys="coste dinero dolares presupuesto gasto"><label>COSTE MÁXIMO $ (0 = sin límite)</label><input type="number" id="grCost" min="0" step="0.1" /></div>
+                <div class="field srow" data-keys="pasos maximos limite steps"><label for="grSteps">PASOS MÁXIMOS (0 = sin límite)</label><input type="number" id="grSteps" min="0" /></div>
+                <div class="field srow" data-keys="herramientas maximas limite llamadas tools"><label for="grToolCalls">LLAMADAS A HERRAMIENTAS (0 = sin límite)</label><input type="number" id="grToolCalls" min="0" /></div>
+                <div class="field srow" data-keys="minutos tiempo maximo duracion"><label for="grMinutes">MINUTOS MÁXIMOS (0 = sin límite)</label><input type="number" id="grMinutes" min="0" /></div>
+                <div class="field srow" data-keys="tokens limite consumo"><label for="grTokens">TOKENS MÁXIMOS (0 = sin límite)</label><input type="number" id="grTokens" min="0" /></div>
+                <div class="field srow" data-keys="coste dinero dolares presupuesto gasto"><label for="grCost">COSTE MÁXIMO $ (0 = sin límite)</label><input type="number" id="grCost" min="0" step="0.1" /></div>
               </div>
               <div class="subnote">Al alcanzar cualquiera de estos límites la ejecución se detiene y queda como tarea recuperable desde el panel Tareas.</div>
             </div>
@@ -441,8 +450,8 @@
             <div class="setcard">
               <div class="sc-head"><b>Protección anti-bucles</b><span class="sc-hint">Que el agente no se quede dando vueltas</span></div>
               <div class="grid2">
-                <div class="field srow" data-keys="repeticiones bucle loop identicas"><label>REPETICIONES DE UNA ACCIÓN = BUCLE</label><input type="number" id="grLoop" min="2" /></div>
-                <div class="field srow" data-keys="pasos sin progreso estancado stall"><label>PASOS SIN PROGRESO (0 = sin límite)</label><input type="number" id="grStall" min="0" /></div>
+                <div class="field srow" data-keys="repeticiones bucle loop identicas"><label for="grLoop">REPETICIONES DE UNA ACCIÓN = BUCLE</label><input type="number" id="grLoop" min="2" /></div>
+                <div class="field srow" data-keys="pasos sin progreso estancado stall"><label for="grStall">PASOS SIN PROGRESO (0 = sin límite)</label><input type="number" id="grStall" min="0" /></div>
               </div>
               <div class="srow">
                 <div class="btnrow" style="margin:6px 0 0">
@@ -458,22 +467,22 @@
             <div class="setcard">
               <div class="sc-head"><b>Memoria</b><span class="sc-hint">Cuánta memoria entra en cada conversación</span></div>
               <div class="swrow srow" data-keys="memoria sensibilidad relevancia recuerdos contexto"><span class="st"><b>Sensibilidad de relevancia (0-3)</b><small>0 = entran más recuerdos · 3 = solo coincidencias muy claras.</small></span>
-                <input type="number" id="memSens" min="0" max="3" step="1" style="width:80px" /></div>
+                <input type="number" id="memSens" aria-label="Sensibilidad de relevancia (0-3)" min="0" max="3" step="1" style="width:80px" /></div>
               <div class="subnote">La memoria irrelevante no se inyecta en el contexto: solo lo que encaja con lo que estás pidiendo.</div>
             </div>
 
             <div class="setcard">
               <div class="sc-head"><b>Tareas en segundo plano</b><span class="sc-hint">Sagitari puede trabajar mientras sigues hablando</span></div>
               <div class="swrow srow" data-keys="tareas simultaneas concurrencia background paralelo"><span class="st"><b>Tareas simultáneas (1-4)</b><small>Cuántas tareas puede ejecutar a la vez.</small></span>
-                <input type="number" id="setMaxTasks" min="1" max="4" style="width:80px" /></div>
+                <input type="number" id="setMaxTasks" aria-label="Tareas simultáneas (1-4)" min="1" max="4" style="width:80px" /></div>
               <div class="swrow srow" data-keys="recuperar tareas interrumpidas arrancar reanudar"><span class="st"><b>Recuperar tareas interrumpidas al arrancar</b><small>Si cierras la app con tareas a medias, se reanudan solas.</small></span>
-                <div class="sw on" id="swAutoResume"></div></div>
+                <div class="sw on" id="swAutoResume" aria-label="Recuperar tareas interrumpidas al arrancar"></div></div>
             </div>
 
             <div class="setcard">
               <div class="sc-head"><b>Diagnóstico</b><span class="sc-hint">Para depurar el comportamiento del agente</span></div>
               <div class="swrow srow" data-keys="modo desarrollador metricas debug tokens latencia coste"><span class="st"><b>Modo desarrollador</b><small>Muestra métricas en vivo (tokens, latencia, coste) bajo el chat.</small></span>
-                <div class="sw" id="devModeSw"></div></div>
+                <div class="sw" id="devModeSw" aria-label="Modo desarrollador"></div></div>
             </div>
           </div>
 
@@ -541,14 +550,14 @@
     <!-- ===== Right rail ===== -->
     <aside class="rail">
       <div class="rcard">
-        <div class="rc-top"><span class="live"><span class="dot ok"></span> Live</span><div class="bigring" id="bigRing"></div></div>
+        <div class="rc-top"><span class="live"><span class="dot ok"></span> En vivo</span><div class="bigring" id="bigRing"></div></div>
         <div class="rc-title">Agentes activos</div>
         <div class="rc-count"><span id="agentCount">0</span><span class="mini-dots"><span class="dot ok"></span><span class="dot pur"></span><span class="dot blu"></span></span></div>
         <div id="railAgents" class="rail-agents"></div>
       </div>
 
       <div class="rcard">
-        <div class="rc-top"><span class="live2">Actividad en tiempo real</span></div>
+        <div class="rc-top"><span class="live2">Actividad en vivo</span></div>
         <div id="activityFeed" class="feed"></div>
       </div>
 

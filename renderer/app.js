@@ -1919,7 +1919,7 @@ async function renderSecurity() {
     const row = document.createElement('div');
     row.className = 'permrow';
     row.innerHTML = `<span class="mt"><b>${esc(K.tool(t.n).label)}</b> <small class="md">${esc(t.n)}</small><br><small class="md">${esc(t.d)}</small><br><small class="pd">recomendado: ${rec}</small></span>
-      <select data-tool="${t.n}">
+      <select data-tool="${t.n}" aria-label="Permiso para ${esc(K.tool(t.n).label)} (${esc(t.n)})">
         <option value="default"${lvl === 'default' ? ' selected' : ''}>Por defecto (${rec})</option>
         <option value="safe"${lvl === 'safe' ? ' selected' : ''}>Permitir siempre</option>
         <option value="confirm"${lvl === 'confirm' ? ' selected' : ''}>Preguntar antes</option>
@@ -2391,6 +2391,8 @@ function setChatTitle(t) {
   convTitle = t || 'Nueva conversación';
   const h = $('#chatTitle');
   h.textContent = convTitle;
+  const root = $('#chatRootTitle');   // el h1 (oculto) de la vista mantiene la raíz del documento
+  if (root) root.textContent = convTitle;
   h.title = convTitle;   // se trunca con ellipsis: la pista completa va en el title
   // sincroniza el título con la conversación real en el historial
   if (t) {
@@ -2552,7 +2554,7 @@ function renderEmptyModes() {
     return `<button class="ce-mode${k === mode ? ' on' : ''}" style="--mr:${M.rgb}" data-m="${k}" aria-pressed="${k === mode}">
       <span class="cm-top">${ic(M.icon)}<b>${M.name.toUpperCase()}</b></span>
       <span class="cm-tag">${esc(M.label)} · ${esc(M.tagline)}</span>
-      <ul class="cm-bullets">${M.bullets.map(b => `<li>${esc(b)}</li>`).join('')}</ul>
+      <ul class="cm-bullets">${M.bullets.slice(0, 1).map(b => `<li>${esc(b)}</li>`).join('')}</ul>
     </button>`;
   }).join('');
   box.querySelectorAll('[data-m]').forEach(b => b.onclick = () => setMode(b.dataset.m));
@@ -2650,7 +2652,7 @@ async function renderSkills() {
       <span class="md">~${Math.ceil(s.bodyChars / 4)} tok</span>
       ${s.source ? `<button class="btn ghost sq" data-update title="Actualizar desde su repo">${ic('history')}</button>` : ''}
       <button class="btn ghost sq" data-view title="Ver skill">${ic('search')}</button>
-      <label class="sw ${s.enabled ? 'on' : ''}" data-sw title="Activar/desactivar"></label>
+      <label class="sw ${s.enabled ? 'on' : ''}" data-sw title="Activar/desactivar" aria-label="Activar o desactivar ${esc(s.name)}"></label>
       <button class="btn ghost sq danger" data-del title="Eliminar">${ic('trash')}</button>`;
     it.querySelector('[data-sw]').onclick = async (e) => { await window.sagitari.skillsToggle(s.id, !s.enabled); renderSkills(); };
     it.querySelector('[data-del]').onclick = async () => {

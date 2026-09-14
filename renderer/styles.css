@@ -251,6 +251,15 @@ body.nofocus .shell::before { animation: none !important; }
 
 .viewhead { display: flex; align-items: center; justify-content: space-between; margin-bottom: 18px; }
 .viewhead h2 { font-family: 'Sora'; font-weight: 600; font-size: 18px; }
+/* Cada vista lleva un h1 (raíz del documento) que NO se pinta: la cabecera visible
+   sigue siendo el h2 y su regla de arriba no se toca. Convertir el h2 en h1
+   cambiaría el aspecto (esa regla depende del selector), así que el h1 se oculta
+   con el recorte de 1px, que lo mantiene DENTRO del árbol de accesibilidad:
+   display:none, visibility:hidden o [hidden] lo borrarían y no habría raíz. */
+.sr-only {
+  position: absolute; width: 1px; height: 1px; overflow: hidden;
+  clip-path: inset(50%); white-space: nowrap;
+}
 .vh-actions { display: flex; gap: 8px; align-items: center; }
 
 /* home */
