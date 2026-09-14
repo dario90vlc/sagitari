@@ -95,8 +95,11 @@
             <small id="confirmDetail"></small>
           </div>
           <div class="btnrow" style="margin:0">
-            <button class="btn primary" id="confirmOk">Permitir</button>
-            <button class="btn ghost" id="confirmNo">Denegar</button>
+            <!-- El permiso NO se concede por defecto: el botón con peso es el
+                 que deniega y el foco no entra en la barra. Ejecutar en tu PC
+                 exige un clic deliberado, no un Enter al vuelo. -->
+            <button class="btn ghost" id="confirmOk">Permitir</button>
+            <button class="btn primary" id="confirmNo">Denegar</button>
           </div>
         </div>
         <div id="chatWrap">

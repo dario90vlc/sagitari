@@ -1233,10 +1233,12 @@ function paintConfirm() {
   // al mostrarse es un diálogo modal de aviso: el lector de pantalla lo anuncia
   bar.setAttribute('role', 'alertdialog');
   bar.setAttribute('aria-live', 'assertive');
-  // con el foco en el chat la única salida era el ratón: se enfoca «Permitir» y
-  // Escape/Enter resuelven la confirmación con teclado
-  const ok = $('#confirmOk');
-  if (ok) ok.focus();
+  // El foco NO entra en «Permitir»: un Enter al vuelo ejecutaba la acción en tu
+  // PC. Se enfoca la barra (para que Escape funcione y el lector la anuncie) y
+  // confirmar exige un clic o tabular hasta el botón: elegir una acción es un
+  // acto deliberado, y el error por defecto es no ejecutar.
+  if (bar.tabIndex < 0) bar.tabIndex = -1;
+  bar.focus();
   feed('Esperando tu confirmación: ' + ev.tool, 'blu');
 }
 
@@ -1266,7 +1268,7 @@ document.addEventListener('keydown', (e) => {
   const bar = $('#confirmBar');
   if (!bar || bar.hidden) return;
   if (e.key === 'Escape') { e.preventDefault(); resolveConfirm(false); return; }
-  if (e.key === 'Enter' && bar.contains(document.activeElement)) { e.preventDefault(); resolveConfirm(true); }
+  if (e.key === 'Enter' && document.activeElement !== bar && bar.contains(document.activeElement)) { e.preventDefault(); resolveConfirm(true); }
 });
 
 /**
@@ -1306,9 +1308,10 @@ function askConfirm(anchor, message, detail) {
     };
     const onKey = (e) => {
       if (e.key === 'Escape') { e.preventDefault(); e.stopPropagation(); finish(false); }
-      // Enter sólo confirma con el foco dentro de la barra: si el usuario se ha
-      // ido a escribir, Enter no debe borrar nada
-      else if (e.key === 'Enter' && bar.contains(document.activeElement)) { e.preventDefault(); e.stopPropagation(); finish(true); }
+      // Enter sólo confirma con el foco en un BOTÓN de la barra (no en la barra,
+      // que ahora es la que recibe el foco al abrirse): si el usuario se ha ido a
+      // escribir, o acaba de aparecer la tarjeta, Enter no borra nada
+      else if (e.key === 'Enter' && document.activeElement !== bar && bar.contains(document.activeElement)) { e.preventDefault(); e.stopPropagation(); finish(true); }
     };
     bar.querySelector('[data-ok]').onclick = () => finish(true);
     bar.querySelector('[data-no]').onclick = () => finish(false);
@@ -1317,7 +1320,9 @@ function askConfirm(anchor, message, detail) {
     else if (view) view.insertBefore(bar, view.firstChild);
     else document.body.appendChild(bar);
     mo.observe(document.body, { childList: true, subtree: true });
-    bar.querySelector('[data-ok]').focus();
+    // el foco va a la barra, no al botón que ejecuta: nada se confirma sin querer
+    if (bar.tabIndex < 0) bar.tabIndex = -1;
+    bar.focus();
   });
 }
 

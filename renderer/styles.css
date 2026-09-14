@@ -681,7 +681,7 @@ i[data-i] { display: inline-flex; line-height: 0; }
 }
 .confirmbar .cb-txt { flex: 1; min-width: 0; }
 .confirmbar .cb-txt b { display: block; font-size: 13.5px; color: #ffd9a0; }
-.confirmbar .cb-txt small { display: block; color: var(--dim); font-size: 11.5px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; max-width: 520px; }
+.confirmbar .cb-txt small { display: -webkit-box; -webkit-line-clamp: 3; -webkit-box-orient: vertical; color: var(--dim); font-size: 11.5px; overflow: hidden; white-space: normal; max-width: 520px; }
 @keyframes cbIn { from { opacity: 0; transform: translateY(-6px); } to { opacity: 1; transform: none; } }
 @keyframes cbPulse { 0%,100% { opacity: 1; } 50% { opacity: .45; } }
 
