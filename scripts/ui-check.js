@@ -37,11 +37,19 @@ const TIMEOUT_MS = 25000;
 const TEST_DATA_DIR = path.join(process.env.APPDATA || path.join(os.homedir(), 'AppData', 'Roaming'), 'SagitariAI-test');
 function seedTestConfig() {
   const file = path.join(TEST_DATA_DIR, 'config.json');
-  if (fs.existsSync(file)) return;
-  const dummy = { providerId: 'ui-check', name: 'Prueba (sin conexión)', baseUrl: 'http://127.0.0.1:9/v1', apiKey: '', model: 'test-model', vision: false };
+  /* Proveedor con lista larga y el modelo en uso al final: es el caso que hace
+     desplazarse al menú de modelos, así que las comprobaciones de interfaz se
+     enfrentan al mismo escenario que el usuario (lista desplazada, cabecera y pie
+     fijos) y no al caso fácil de una sola fila. */
+  const modelos = Array.from({ length: 12 }, (_, i) => 'test-model-' + (i + 1));
+  const dummy = { providerId: 'ui-check', name: 'Prueba (sin conexión)', baseUrl: 'http://127.0.0.1:9/v1', apiKey: '', model: 'test-model-10', vision: false };
+  /* SIEMPRE se reescribe. Este perfil es de las pruebas: dar por bueno lo que
+     hubiera dejado otro proceso hacía que el ui-check verificara un estado distinto
+     cada vez (llegó a comprobar un menú con 16 modelos y otro activo, donde la
+     primera fila de la lista quedaba fuera de la parte visible). */
   try {
     fs.mkdirSync(TEST_DATA_DIR, { recursive: true });
-    fs.writeFileSync(file, JSON.stringify({ providers: [{ ...dummy, id: 'ui-check', models: ['test-model'] }], active: dummy }, null, 2), 'utf8');
+    fs.writeFileSync(file, JSON.stringify({ providers: [{ ...dummy, id: 'ui-check', models: modelos }], active: dummy }, null, 2), 'utf8');
   } catch {}
 }
 
@@ -218,7 +226,24 @@ const AFTER = {
   };
   await pulsarConRaton('#sideStatusBtn');
   const menuAbierto = await evaluate('!document.querySelector("#modelMenu").hidden');
-  const destino = await evaluate('(function(){ var f = [...document.querySelectorAll("#modelMenu [data-model]")]; var otro = f.filter(function(r){ return !r.classList.contains("on"); })[0]; return (otro || f[0] || {}).dataset ? (otro || f[0]).dataset.model : null; })()');
+  const destino = await evaluate(`(function(){
+    /* Se elige una fila que esté DENTRO de la parte visible del menú y que el
+       hit-test del navegador confirme. Con la lista desplazada (el modelo en uso va
+       marcado y se desplaza a la vista), la primera fila del proveedor puede quedar
+       por encima del área visible: pulsar sus coordenadas cae fuera del menú, en la
+       barra lateral — eso cerraba el menú como «clic fuera» y además cambiaba de
+       vista, tirando las comprobaciones siguientes. */
+    var m = document.querySelector('#modelMenu').getBoundingClientRect();
+    var filas = [...document.querySelectorAll('#modelMenu [data-model]')];
+    var orden = filas.filter(function(r){ return !r.classList.contains('on'); }).concat(filas);
+    for (var i = 0; i < orden.length; i++) {
+      var b = orden[i].getBoundingClientRect();
+      if (b.top < m.top || b.bottom > m.bottom) continue;
+      var hit = document.elementFromPoint(Math.round(b.left + b.width / 2), Math.round(b.top + b.height / 2));
+      if (hit && hit.closest('[data-model]') === orden[i]) return orden[i].dataset.model;
+    }
+    return null;
+  })()`);
   const pulsado = destino ? await pulsarConRaton('#modelMenu [data-model="' + destino + '"]') : false;
   const menuCerrado = await evaluate('document.querySelector("#modelMenu").hidden');
   const pildora = await evaluate('document.querySelector("#stModel").textContent');
