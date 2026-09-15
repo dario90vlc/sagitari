@@ -55,7 +55,9 @@ function validateServer(raw) {
     if (!command) return { ok: false, error: 'Falta el comando del servidor.' };
     // Un `args` que no sea lista (JSON pegado de otro cliente, config editado a mano)
     // reventaba en buildCmdLine como «args.map is not a function», que no explica nada.
-    if (s.args !== undefined && !Array.isArray(s.args)) {
+    // `null` y `''` NO entran aquí: son «sin argumentos», y abortar por ellos descartaría
+    // en silencio un servidor que hasta ahora cargaba bien.
+    if (s.args != null && s.args !== '' && !Array.isArray(s.args)) {
       return { ok: false, error: 'Los argumentos deben ser una lista (ej.: ["-y", "paquete"]).' };
     }
     try { buildCmdLine(command, s.args || []); }

@@ -976,13 +976,18 @@ ipcMain.handle('mcp:toggle', (e, { id, enabled }) => {
   s.enabled = enabled !== false;
   // reconfigure aplica el cambio: apagado suelta el proceso y deja de ofrecer herramientas
   wireMcp();
+  // activar una fila debe dejarla lista, no solo marcar la bandera
+  if (config.mcp.enabled !== false && s.enabled) wireMcp().ensure(s.id).catch(() => {});
   const r = persistConfig();
   return r.ok ? { ok: true, servers: mcpState().servers } : { ok: false, error: r.error };
 });
 
 ipcMain.handle('mcp:setGlobal', (e, enabled) => {
   config.mcp.enabled = enabled !== false;
-  wireMcp();
+  const m = wireMcp();
+  // Al reencender el interruptor hay que reconectar lo que el arranque no arrancó:
+  // sin esto los servidores autoStart se quedan en 'idle' y MCP no aporta nada.
+  if (config.mcp.enabled) for (const s of config.mcp.servers || []) if (s.autoStart && s.enabled) m.ensure(s.id).catch(() => {});
   return persistConfig();
 });
 

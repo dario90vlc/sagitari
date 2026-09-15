@@ -1644,6 +1644,16 @@ test('mcp: un args que no es lista se rechaza con un mensaje legible', () => {
   ok(validateServer({ ...base, args: ['-y', 'paquete'] }).ok, 'una lista válida sigue pasando');
 });
 
+test('mcp: args nulo o vacío se acepta como lista vacía', () => {
+  const { validateServer } = require('../main/mcp-config');
+  const base = { id: 'eco', name: 'Eco', transport: 'stdio', command: 'npx' };
+  for (const vacio of [null, '', undefined]) {
+    const r = validateServer({ ...base, args: vacio });
+    ok(r.ok, 'args ' + JSON.stringify(vacio) + ' debe cargar el servidor sin argumentos: ' + r.error);
+    eq(r.value.args.join(','), '', 'y quedar como lista vacía');
+  }
+});
+
 test('mcp: importar el JSON de otro cliente y conservar secretos al guardar', () => {
   const { parseMcpImport, mergeSecrets } = require('../main/mcp-config');
   const r = parseMcpImport(JSON.stringify({ mcpServers: {
