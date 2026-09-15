@@ -975,7 +975,7 @@ test('voz/manager: un final limpio pasa, la basura se avisa y no se envía', asy
 });
 
 test('voz/manager: trocea la respuesta en frases y las sintetiza en orden', async () => {
-  const { createVoiceManager } = require('../main/voice/manager');
+  const { createVoiceManager, trocear } = require('../main/voice/manager');
   const eventos = [];
   const frases = [];
   const tts = { nombre: 'tts-mentira', capacidades: { partials: false, confidence: false, level: false },
@@ -988,9 +988,14 @@ test('voz/manager: trocea la respuesta en frases y las sintetiza en orden', asyn
   await new Promise((r) => setTimeout(r, 80));
   eq(frases.length, 2, 'dos frases: ' + JSON.stringify(frases));
   eq(frases[0], 'Hecho.', 'la primera es la primera');
-  /* Los saltos de línea son frontera de frase: una lista se lee frase a frase. */
-  const { trocear } = require('../main/voice/manager');
-  eq(trocear('Lista uno.\nLista dos sin punto'), ['Lista uno.', 'Lista dos sin punto'], 'los saltos de línea parten la frase');
+  /* Los saltos de línea son frontera de frase: una lista se lee frase a frase. Dos detalles
+     que costaron una ronda: `eq` compara con `!==`, así que NO sirve para arrays (hay que
+     comparar longitud y elementos); y el caso va SIN punto en la primera línea, porque con
+     punto el corte por punto ya daba dos frases y la aserción no protegería el arreglo. */
+  const lista = trocear('Lista uno\nLista dos sin punto');
+  eq(lista.length, 2, 'los saltos de línea parten la frase: ' + JSON.stringify(lista));
+  eq(lista[0], 'Lista uno', 'la primera línea');
+  eq(lista[1], 'Lista dos sin punto', 'la segunda línea');
   ok(eventos.some((e) => e.type === 'state' && e.state === 'hablando'), 'el estado pasa a hablando');
   ok(eventos.some((e) => e.type === 'state' && e.state === 'escuchando'), 'y vuelve a escuchando al terminar');
 });
