@@ -509,6 +509,13 @@
                   <button class="btn ghost" id="mcpPaste">Pegar JSON de mcpServers</button>
                   <button class="btn ghost" id="mcpExportBtn">Exportar</button>
                 </div>
+                <div id="mcpPasteBox" hidden>
+                  <textarea id="mcpPasteText" rows="5" placeholder='{"mcpServers": { "github": { "command": "npx", "args": ["-y", "@modelcontextprotocol/server-github"] } }}' spellcheck="false"></textarea>
+                  <div class="btnrow">
+                    <button class="btn" id="mcpPasteGo">Importar</button>
+                    <button class="btn ghost" id="mcpPasteCancel">Cancelar</button>
+                  </div>
+                </div>
               </div>
               <div class="subnote" id="mcpMsg"></div>
             </div>

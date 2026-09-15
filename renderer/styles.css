@@ -868,6 +868,12 @@ input::placeholder, textarea::placeholder { color: var(--dim); }
 .mcptools { display: flex; flex-wrap: wrap; gap: 6px; margin: 8px 0 0; }
 .mcptool { font: 500 11px var(--font-ui); color: var(--vio2); background: rgba(var(--acc2-rgb), .12); border-radius: 999px; padding: 2px 8px; }
 .mcpacts { display: flex; gap: 6px; flex-wrap: wrap; margin-top: 10px; }
+/* Los textarea del panel (entorno, cabeceras y el JSON pegado) ocupan la fila como
+   los inputs: la regla global solo les da color y borde, así que el navegador los
+   dejaba en ~20 columnas, estrechos y con tirador de resize en las dos direcciones. */
+#mcpFormCard textarea, #mcpPasteText { width: 100%; resize: vertical; line-height: 1.5; }
+#mcpPasteBox { margin-top: 10px; }
+#mcpPasteBox .btnrow { margin: 8px 0 0; }
 
 /* ============ Right rail ============ */
 .rail { display: flex; flex-direction: column; gap: 14px; padding: 50px 18px 18px 4px; overflow-y: auto; position: relative; z-index: 1; }

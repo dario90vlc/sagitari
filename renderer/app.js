@@ -2078,7 +2078,7 @@ async function renderMcp() {
   mejoraSelects(box);
 }
 
-function mcpFormShow(server) {
+async function mcpFormShow(server) {
   const s = server || { transport: 'stdio', tools: {} };
   // Se oculta con clase (ver styles.css), pero el buscador de Ajustes pudo fijar
   // [hidden] en esta tarjeta mientras había una búsqueda activa: al abrirla hay
@@ -2086,6 +2086,9 @@ function mcpFormShow(server) {
   const card = $('#mcpFormCard');
   card.hidden = false;
   card.classList.add('on');
+  // Y el buscador también dejó `hidden` en las FILAS de la tarjeta que no casaron:
+  // sin devolverlas, el formulario se abriría a medias (solo la fila que coincidió).
+  card.querySelectorAll('.srow').forEach(r => { r.hidden = false; });
   $('#mcpFormTitle').textContent = server ? 'Editar servidor' : 'Nuevo servidor';
   $('#mcpId').value = s.id || '';
   $('#mcpId').disabled = !!server;
@@ -2098,9 +2101,21 @@ function mcpFormShow(server) {
   $('#mcpHeaders').value = mcpLines(s.headers);
   $('#mcpAllow').value = (s.tools && s.tools.allow || []).join(', ');
   $('#mcpDeny').value = (s.tools && s.tools.deny || []).join(', ');
+  // El nivel real vive en security.permissions['mcp__<id>__*'] (misma fuente que la
+  // vista Seguridad: config:get no expone `security`). Sin esto el desplegable mentiría:
+  // diría «Preguntar siempre» con el comodín en 'safe'.
+  let nivel = 'default';
+  if (server && server.id) {
+    try { const m = await window.sagitari.metaGet(); nivel = (m.permissions || {})['mcp__' + server.id + '__*'] || 'default'; } catch {}
+  }
+  $('#mcpLevel').value = nivel;
   $('#mcpFormDelete').hidden = !server;
+  mejoraSelects(card);
+  // fijar el <select> por código no dispara el MutationObserver de mejoraSelect: el
+  // control propio (.csel) se quedaría con la etiqueta anterior
+  cselPintar($('#mcpTransport'));
+  cselPintar($('#mcpLevel'));
   mcpTransportRows();
-  mejoraSelects($('#mcpFormCard'));
 }
 
 function mcpTransportRows() {
@@ -2142,10 +2157,11 @@ $('#mcpSave').onclick = async () => {
   const nivel = $('#mcpLevel').value;
   const r = await window.sagitari.mcpSave(s);
   if (!r.ok) return mcpMsg('Error: ' + r.error);
-  // El nivel elegido se aplica al comodín del servidor (el MISMO que edita Seguridad):
-  // sin esto el desplegable sería decorativo. Se usa el id que devuelve main (ya
-  // saneado), no el del formulario, que puede traer mayúsculas o símbolos.
-  if (nivel && nivel !== 'default' && r.id) await window.sagitari.secSetToolPerm('mcp__' + r.id + '__*', nivel);
+  // El nivel elegido se aplica SIEMPRE al comodín del servidor (el MISMO que edita
+  // Seguridad), también con 'default': así el desplegable no es decorativo y se puede
+  // volver atrás (sec:setToolPerm borra el comodín cuando recibe 'default'). Se usa el
+  // id que devuelve main (ya saneado), no el del formulario, que puede traer mayúsculas.
+  if (r.id && nivel) await window.sagitari.secSetToolPerm('mcp__' + r.id + '__*', nivel);
   $('#mcpFormCard').classList.remove('on');
   mcpMsg('Guardado. Probando la conexión…');
   const t = await window.sagitari.mcpTest(r.id || s.id);
@@ -2176,6 +2192,12 @@ $('#mcpList').onclick = async (e) => {
     const yes = await askConfirm(btn, '¿Eliminar «' + id + '»?', 'Se borran su configuración y sus permisos.');
     if (!yes) return;
     await window.sagitari.mcpDelete(id);
+    // si el formulario estaba editando justo ese servidor, se cierra: dejarlo abierto
+    // permitiría recrearlo en silencio con un «Guardar» posterior
+    if ($('#mcpFormCard').classList.contains('on') && $('#mcpId').value.trim() === id) {
+      $('#mcpFormCard').classList.remove('on');
+      $('#mcpFormCard').hidden = true;
+    }
     return renderMcp();
   }
   if (accion === 'log') {
@@ -2195,15 +2217,24 @@ $('#mcpExportBtn').onclick = async () => {
   if (!r.ok) return mcpMsg('Error: ' + r.error);
   copyText(r.json, 'JSON copiado (contiene tus secretos: no lo compartas).');
 };
-$('#mcpPaste').onclick = async () => {
-  const json = prompt('Pega el bloque mcpServers:');
-  if (!json) return;
+// `window.prompt` NO existe en Electron (lanza «prompt() is not supported»): el
+// cuadro de pegado es propio, como el resto de la interfaz.
+$('#mcpPaste').onclick = () => {
+  const b = $('#mcpPasteBox');
+  b.hidden = !b.hidden;
+  if (!b.hidden) { $('#mcpPasteText').value = ''; $('#mcpPasteText').focus(); }
+};
+$('#mcpPasteCancel').onclick = () => { $('#mcpPasteBox').hidden = true; };
+$('#mcpPasteGo').onclick = async () => {
+  const json = $('#mcpPasteText').value.trim();
+  if (!json) return mcpMsg('Pega el bloque mcpServers en el cuadro.');
   const r = await window.sagitari.mcpImport(json);
   if (!r.ok) return mcpMsg('Error: ' + r.error);
   const resumen = r.servers.map(s => s.id + (s.conflict ? ' (reemplaza el actual)' : '')).join(', ');
-  const yes = await askConfirm($('#mcpPaste'), '¿Añadir estos servidores?', resumen);
+  const yes = await askConfirm($('#mcpPasteBox'), '¿Añadir estos servidores?', resumen);
   if (!yes) return;
   for (const s of r.servers) await window.sagitari.mcpSave(s);
+  $('#mcpPasteBox').hidden = true;
   mcpMsg('Añadidos: ' + resumen);
   renderMcp();
 };
