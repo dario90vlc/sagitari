@@ -53,6 +53,7 @@ The recommended option is the Windows installer:
 - **Bring your own model** — OpenCode Go, OpenRouter, OpenAI, Groq, Anthropic, Ollama, LM Studio, or any compatible endpoint.
 - **Think / Plan / Act** — reason deeply, prepare a plan before acting, or execute directly.
 - **Skills** — import specialized `SKILL.md` packs and load their instructions on demand instead of bloating every prompt.
+- **MCP servers** — Connect your own MCP servers (local commands or remote URLs) and the agent uses their tools like built-in ones. Everything they run asks for permission first, and you can promote a server you trust.
 - **Memory and habits** — keep useful context across conversations, locally.
 - **Fallbacks and recovery** — model fallback, background tasks, checkpoints, pause/resume, and recovery after interruptions. If a provider accepts the connection but stops sending data, the turn cuts itself off (configurable limit in Settings › Security) and the error is explained in the chat. The model chosen in Settings wins: the router no longer swaps it silently.
 
@@ -69,6 +70,7 @@ The recommended option is the Windows installer:
 SAGITARI gives an agent real access to your computer, so safety is part of the product:
 
 - **Permission levels per tool** — safe actions can run automatically; sensitive actions ask first.
+- **MCP tools** — follow the same permission engine: confirmation by default, per-server and per-tool levels, and their credentials are stored encrypted like your API keys.
 - **Mandatory confirmation for sensitive browser operations** such as clipboard access, page JavaScript, and profile changes.
 - **Guardrails** for steps, tool calls, duration, tokens, cost, loops, and stalled work.
 - **Real stop control** — stopping a run also cancels the process behind it where possible.
