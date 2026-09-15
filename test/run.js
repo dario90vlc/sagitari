@@ -3357,6 +3357,34 @@ test('voz/contrato: un motor necesita nombre, capacidades y los tres métodos', 
   ok(fallo && /stop/.test(fallo), 'se dice exactamente qué falta: ' + fallo);
 });
 
+/* ---------- voz: filtro de frases basura ---------- */
+
+test('voz/basura: rechaza frases vacías, golpes y ruido del motor de dictado', () => {
+  const { esBasura } = require('../main/voice/junk');
+  ok(esBasura('', 900).basura, 'texto vacío');
+  ok(esBasura('   ', 900).basura, 'sólo espacios');
+  ok(esBasura('.', 900).basura, 'un punto');
+  ok(esBasura('eh', 120).basura, 'un golpe de 120 ms con dos letras');
+  ok(!esBasura('Recuérdame mañana llamar a Álvaro', 1200).basura, 'una frase de verdad pasa');
+  ok(!esBasura('sí', 400).basura, 'un «sí» corto pero con voz real pasa: es una respuesta');
+});
+
+test('voz/basura: las alucinaciones conocidas no llegan al agente', () => {
+  const { esBasura, BASURA } = require('../main/voice/junk');
+  ok(BASURA.length >= 6, 'hay lista negra');
+  for (const frase of ['Gracias por ver el vídeo', '¡Suscríbete al canal!', 'Subtítulos realizados por la comunidad', 'Música', 'Aplausos']) {
+    const r = esBasura(frase, 3000);
+    ok(r.basura, 'la lista negra caza: ' + frase);
+    ok(/lista negra/.test(r.motivo), 'y dice por qué: ' + r.motivo);
+  }
+});
+
+test('voz/basura: una palabra repetida en bucle no es una orden', () => {
+  const { esBasura } = require('../main/voice/junk');
+  ok(esBasura('no no no no no', 2000).basura, 'repetición');
+  ok(!esBasura('no, gracias', 800).basura, 'una negativa normal pasa');
+});
+
 /* Cierre de la suite: se ejecutan TODOS los tests registrados, en orden, uno
    detrás de otro, y solo entonces se imprime el resumen. */
 for (const t of QUEUE) {
