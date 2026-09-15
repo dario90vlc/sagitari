@@ -254,7 +254,10 @@ const normalizar = (t) => String(t).toLowerCase().normalize('NFD').replace(/[\u0
 
 const REGLAS = [
   { motivo: 'no hay texto', prueba: (t) => normalizar(t).length === 0 },
-  { motivo: 'sin vocales: no es una palabra', prueba: (t) => !/[aeiou]/i.test(t) },
+  /* OJO: se comprueba sobre el texto NORMALIZADO. La bandera `i` de JavaScript no pliega
+     tildes, así que «sí» no casaba con [aeiou] y se descartaba una respuesta legítima
+     (lo cazó el implementador al ejecutar el propio test del brief). */
+  { motivo: 'sin vocales: no es una palabra', prueba: (t) => !/[aeiou]/.test(normalizar(t)) },
   { motivo: 'demasiado corto y sin voz suficiente', prueba: (t, ms) => normalizar(t).replace(/ /g, '').length < 4 && ms < 350 },
   { motivo: 'palabra repetida en bucle', prueba: (t) => { const w = normalizar(t).split(' '); return w.length >= 4 && new Set(w).size === 1; } },
   { motivo: 'está en la lista negra de alucinaciones', prueba: (t) => { const n = normalizar(t); return BASURA.some((b) => n === b || n.startsWith(b)); } },
@@ -618,7 +621,10 @@ try {
   $t0 = Get-Date
   $stream = Await ($syn.SynthesizeSsmlToStreamAsync($ssml)) ([Windows.Media.SpeechSynthesis.SpeechSynthesisStream])
   $ms = [int]((Get-Date) - $t0).TotalMilliseconds
-  $input = $stream.AsStreamForRead()
+  # OJO: en PowerShell 5.1 esto NO existe como método de instancia; hay que llamar a la
+  # extensión estática. Comprobado con una sonda en la máquina de desarrollo: con la
+  # forma de instancia falla con «no contiene ningún método llamado AsStreamForRead».
+  $input = [System.IO.WindowsRuntimeStreamExtensions]::AsStreamForRead($stream)
   $out = [IO.File]::Create($OutFile)
   $input.CopyTo($out); $out.Close(); $input.Close()
   Say ("VOICEUSED::" + $syn.Voice.DisplayName)
