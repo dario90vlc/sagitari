@@ -485,6 +485,15 @@ const AFTER = {
   await evaluate('document.querySelector(\'.navitem[data-view="mcp"]\').click()');
   await evaluate('document.querySelector(\'[data-view="chat"]\').click()');
 
+  /* La app de prueba arranca OCULTA (--hidden) y su modelo de mentira responde «listo» a
+     todo: si además hablara, el usuario oiría una voz salida de la nada, sin ventana que
+     la explique (pasó, y se cazó con una sonda de procesos). El perfil de prueba deja el
+     TTS encendido a propósito, así que esta comprobación falla si alguien quita el
+     silencio de los arranques automatizados: con el silencio puesto, la app responde que
+     no habla y no llega a lanzar ninguna síntesis. */
+  await judge('un arranque de prueba no saca voz por los altavoces',
+    '(async function(){ const r = await window.sagitari.speak("esto no debe sonar"); return !!r && r.ok === false; })()');
+
   // errores que la propia interfaz haya detectado (red de seguridad del renderer)
   const propios = await evaluate('Array.isArray(window.__errores) ? window.__errores.slice(0, 5) : null');
   if (Array.isArray(propios) && propios.length) {

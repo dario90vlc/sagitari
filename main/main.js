@@ -1094,6 +1094,13 @@ ipcMain.handle('voice:stop', async () => {
 // ---- TTS (SAPI, Spanish voice if available) ----
 let ttsProc = null;
 ipcMain.handle('tts:speak', (e, text) => {
+  /* Un arranque automatizado (--smoke/--hidden/--test) NUNCA habla. Los bancos de
+     prueba conducen conversaciones simuladas —el modelo de ui-check contesta «listo»—
+     con la ventana OCULTA, así que la voz salía por los altavoces del usuario sin nada
+     en pantalla que la explicase: parecía que la app saludaba sola al arrancar. Es la
+     misma regla que ya rige el glow al arrancar (!HIDDEN), pero aquí pesa más porque el
+     sonido sale del equipo. */
+  if (HEADLESS) return { ok: false };
   if (!config.settings.ttsEnabled || !text) return { ok: false };
   try {
     if (ttsProc) { try { ttsProc.kill(); } catch {} ttsProc = null; }
