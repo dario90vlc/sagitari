@@ -1094,10 +1094,11 @@ ipcMain.handle('voice:stop', async () => {
 // ---- TTS (SAPI, Spanish voice if available) ----
 const { createTtsWindows } = require('./voice/tts-windows');
 /* Una sola tubería de voz: el VoiceManager trocea y sintetiza por frases; el renderer las
-   reproduce (tiene el analizador de audio para el orbe y puede cortar al instante).
+   reproduce (tiene el analizador de audio para el orbe y puede cortar al instante). El
+   manager se crea aquí si hace falta: hablar no necesita el modo voz abierto.
    Se conserva el nombre `tts:speak` y su contrato de silencio en arranques automatizados:
    hay una comprobación de ui-check que depende de eso. */
-ipcMain.handle('tts:speak', async (e, text) => {
+ipcMain.handle('tts:speak', async (e, text, opts) => {
   /* Un arranque automatizado (--smoke/--hidden/--test) NUNCA habla. Los bancos de
      prueba conducen conversaciones simuladas —el modelo de ui-check contesta «listo»—
      con la ventana OCULTA, así que la voz salía por los altavoces del usuario sin nada
@@ -1105,9 +1106,13 @@ ipcMain.handle('tts:speak', async (e, text) => {
      misma regla que ya rige el glow al arrancar (!HIDDEN), pero aquí pesa más porque el
      sonido sale del equipo. */
   if (HEADLESS) return { ok: false };
-  if (!config.settings.ttsEnabled || !text) return { ok: false };
-  if (!voiceManager) return { ok: false };
-  try { voiceManager.say(String(text)); return { ok: true }; } catch { return { ok: false }; }
+  if (!text) return { ok: false };
+  /* El ajuste de Ajustes no manda cuando el modo voz lo pide con `forzar`: es un modo de
+     oído y negarse a hablar ahí sería absurdo. El permiso viaja por el canal porque quien
+     conoce los ajustes es el renderer; el silencio de los arranques de prueba va ANTES y
+     no se toca. */
+  if (!config.settings.ttsEnabled && !(opts && opts.forzar)) return { ok: false };
+  try { managerDeVoz().say(String(text)); return { ok: true }; } catch { return { ok: false }; }
 });
 
 /* Motor de síntesis del sistema. La síntesis por frases la orquesta el VoiceManager
@@ -1162,19 +1167,27 @@ app.whenReady().then(() => {
 
 function emitVoz(ev) { try { if (win && !win.isDestroyed()) win.webContents.send('voice:event', ev); } catch {} }
 
+/* El único sitio donde nace el manager. Hablar NO necesita micrófono: la lectura del chat
+   también pasa por aquí (una sola tubería de frases), así que se crea de forma perezosa
+   desde `tts:speak` y no solo al abrir el modo voz. El constructor no arranca ningún motor
+   —el micrófono lo pide `open()` y la síntesis, la primera frase—, así que tenerlo vivo sin
+   modo voz no cuesta nada. */
+function managerDeVoz() {
+  if (voiceManager) return voiceManager;
+  ttsEngine = createTtsWindows({ dataDir: DATA_DIR });
+  voiceManager = createVoiceManager({
+    emit: emitVoz,
+    stt: createSttWindows({ emit: (ev) => voiceManager.ingest(ev), lang: config.settings.voiceLang || 'es-ES' }),
+    tts: ttsEngine,
+    onPhrase: (p) => { try { if (win && !win.isDestroyed()) win.webContents.send('tts:phrase', p); } catch {} },
+    settings: config.settings,
+  });
+  return voiceManager;
+}
+
 ipcMain.handle('voice:open', async () => {
   try {
-    if (!voiceManager) {
-      ttsEngine = createTtsWindows({ dataDir: DATA_DIR });
-      voiceManager = createVoiceManager({
-        emit: emitVoz,
-        stt: createSttWindows({ emit: (ev) => voiceManager.ingest(ev), lang: config.settings.voiceLang || 'es-ES' }),
-        tts: ttsEngine,
-        onPhrase: (p) => { try { if (win && !win.isDestroyed()) win.webContents.send('tts:phrase', p); } catch {} },
-        settings: config.settings,
-      });
-    }
-    await voiceManager.open();
+    await managerDeVoz().open();
     return { ok: true, motores: { escuchar: 'windows', hablar: 'windows' } };
   } catch (e) { return { ok: false, error: e.message }; }
 });

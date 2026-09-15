@@ -33,19 +33,16 @@ function createVoiceManager({ emit, stt, tts, onPhrase = () => {}, settings = {}
   let cola = [];
   let hablando = null;
   let seq = 0;
-  let abierto = false;
 
   const pon = (e) => { assertEvent(e); emit(e); };
   const setEstado = (s) => { if (estado !== s) { estado = s; pon({ type: 'state', state: s }); } };
 
   async function open() {
     await stt.start();
-    abierto = true;
     setEstado('escuchando');
   }
 
   async function close() {
-    abierto = false;
     stopSpeaking();
     try { await stt.stop(); } catch {}
     try { tts.dispose && tts.dispose(); } catch {}
@@ -80,7 +77,10 @@ function createVoiceManager({ emit, stt, tts, onPhrase = () => {}, settings = {}
 
   async function siguiente() {
     const frase = cola.shift();
-    if (!frase || !abierto) { hablando = null; setEstado('escuchando'); return; }
+    /* Hablar no depende del micrófono: la cola de frases y su síntesis van aparte del modo
+       voz (la lectura del chat entra por aquí con el modo cerrado). Si se exigiera «abierto»,
+       `say()` encolaría frases que nadie sonaría nunca. */
+    if (!frase) { hablando = null; setEstado('escuchando'); return; }
     hablando = frase;
     setEstado('hablando');
     let r;

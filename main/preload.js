@@ -43,7 +43,8 @@ contextBridge.exposeInMainWorld('sagitari', {
   voiceClose: () => ipcRenderer.invoke('voice:close'),
   voiceEvent: (ev) => ipcRenderer.send('voice:event', ev),
   onVoiceEvent: on('voice:event', ([ev]) => [ev]),
-  speak: (text) => ipcRenderer.invoke('tts:speak', text),
+  /* `opts.forzar` = el modo voz pide hablar aunque el TTS esté apagado en Ajustes. */
+  speak: (text, opts) => ipcRenderer.invoke('tts:speak', text, opts),
   ttsList: () => ipcRenderer.invoke('tts:list'),
   onTtsPhrase: on('tts:phrase', ([p]) => [p]),      // { id, bytes }
   ttsPlayed: (id) => ipcRenderer.send('tts:played', id),

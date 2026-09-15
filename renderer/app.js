@@ -3313,7 +3313,9 @@ function speak(text, { forzar = false } = {}) {
   const clean = text.replace(/```[\s\S]*?```/g, ' (código) ').replace(/[*_`#>«»]/g, '').replace(/\s+/g, ' ').trim();
   if (clean) {
     window.sagitari.glow('speak');            // el marco late mientras habla
-    window.sagitari.speak(clean);
+    /* El `forzar` viaja al proceso principal: es él quien conoce el ajuste del TTS y el
+       silencio de los arranques de prueba, y quien decide si esta lectura sale. */
+    window.sagitari.speak(clean, { forzar });
   }
 }
 // cuando la voz termina (el proceso TTS sale), el glow vuelve a su calma
