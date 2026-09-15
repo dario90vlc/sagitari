@@ -3545,6 +3545,56 @@ test('voz/tts-windows: sin voz disponible devuelve un error legible, no una exce
   ok(!r.wav, 'y no devuelve audio inventado');
 });
 
+test('voz/manager: un final limpio pasa, la basura se avisa y no se envía', async () => {
+  const { createVoiceManager } = require('../main/voice/manager');
+  const eventos = [];
+  const stt = { nombre: 'stt-mentira', capacidades: { partials: true, confidence: true, level: false }, start: async () => {}, push: () => {}, stop: async () => {} };
+  const tts = { nombre: 'tts-mentira', capacidades: { partials: false, confidence: false, level: false }, sintetizar: async () => ({ wav: Buffer.from('RIFF'), voz: 'x', ms: 1 }), listarVoces: async () => [] };
+  const m = createVoiceManager({ emit: (e) => eventos.push(e), stt, tts, onPhrase: () => {} });
+  await m.open();
+  m.ingest({ type: 'final', text: 'Recuérdame llamar a Álvaro', confidence: 0.9 });
+  m.ingest({ type: 'final', text: 'Gracias por ver el vídeo', confidence: 0.4 });
+  const fines = eventos.filter((e) => e.type === 'final');
+  eq(fines.length, 1, 'sólo pasa la frase de verdad');
+  eq(fines[0].text, 'Recuérdame llamar a Álvaro', 'y es la buena');
+  ok(eventos.some((e) => e.type === 'notice' && /basura|no te he entendido/i.test(e.text)), 'la basura se avisa');
+  eq(m.estado(), 'oyendo', 'con una frase cerrada el estado pasa a oyendo');
+});
+
+test('voz/manager: trocea la respuesta en frases y las sintetiza en orden', async () => {
+  const { createVoiceManager } = require('../main/voice/manager');
+  const eventos = [];
+  const frases = [];
+  const tts = { nombre: 'tts-mentira', capacidades: { partials: false, confidence: false, level: false },
+    sintetizar: async (t) => { frases.push(t); return { wav: Buffer.from('RIFF'), voz: 'x', ms: 1 }; }, listarVoces: async () => [] };
+  const stt = { nombre: 'stt', capacidades: { partials: true, confidence: true, level: false }, start: async () => {}, push: () => {}, stop: async () => {} };
+  let siguienteId = 0;
+  const m = createVoiceManager({ emit: (e) => eventos.push(e), stt, tts, onPhrase: (p) => { siguienteId = p.id; setTimeout(() => m.spoken(p.id), 5); } });
+  await m.open();
+  m.say('Hecho. He creado el recordatorio y lo he anotado.');
+  await new Promise((r) => setTimeout(r, 80));
+  eq(frases.length, 2, 'dos frases: ' + JSON.stringify(frases));
+  eq(frases[0], 'Hecho.', 'la primera es la primera');
+  ok(eventos.some((e) => e.type === 'state' && e.state === 'hablando'), 'el estado pasa a hablando');
+  ok(eventos.some((e) => e.type === 'state' && e.state === 'escuchando'), 'y vuelve a escuchando al terminar');
+});
+
+test('voz/manager: interrumpir corta la cola y no sintetiza lo que queda', async () => {
+  const { createVoiceManager } = require('../main/voice/manager');
+  const frases = [];
+  const tts = { nombre: 'tts', capacidades: { partials: false, confidence: false, level: false },
+    sintetizar: async (t) => { frases.push(t); return { wav: Buffer.from('RIFF'), voz: 'x', ms: 1 }; }, listarVoces: async () => [] };
+  const stt = { nombre: 'stt', capacidades: { partials: true, confidence: true, level: false }, start: async () => {}, push: () => {}, stop: async () => {} };
+  const m = createVoiceManager({ emit: () => {}, stt, tts, onPhrase: () => {} });   // nunca llega 'spoken'
+  await m.open();
+  m.say('Primera frase. Segunda frase. Tercera frase.');
+  await new Promise((r) => setTimeout(r, 40));
+  m.stopSpeaking();
+  await new Promise((r) => setTimeout(r, 40));
+  eq(frases.length, 1, 'sólo se sintetizó la que ya estaba en marcha');
+  eq(m.estado(), 'escuchando', 'y vuelve a escuchar');
+});
+
 /* Cierre de la suite: se ejecutan TODOS los tests registrados, en orden, uno
    detrás de otro, y solo entonces se imprime el resumen. */
 for (const t of QUEUE) {
