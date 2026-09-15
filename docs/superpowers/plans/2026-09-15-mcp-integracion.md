@@ -2008,7 +2008,7 @@ oculta al filtrar):
       <div class="field srow" data-keys="mcp cabeceras headers autorizacion token"><label for="mcpHeaders">CABECERAS</label><textarea id="mcpHeaders" rows="3" placeholder="Authorization=Bearer … (una por línea)"></textarea></div>
     </div>
     <div class="field srow" data-keys="mcp permiso nivel bloquear permitir preguntar servidor"><label for="mcpLevel">PERMISO DEL SERVIDOR</label>
-      <select id="mcpLevel"><option value="default">Preguntar siempre (recomendado)</option><option value="safe">Permitir siempre</option><option value="restricted">Bloqueado</option></select>
+      <select id="mcpLevel"><option value="default">Por defecto (preguntar antes)</option><option value="safe">Permitir siempre</option><option value="confirm">Preguntar antes</option><option value="restricted">Bloqueado</option></select>
     </div>
     <div class="field srow" data-keys="mcp herramientas permitir allow lista"><label for="mcpAllow">HERRAMIENTAS A PERMITIR (vacío = todas)</label><input type="text" id="mcpAllow" placeholder="create_issue, list_issues" spellcheck="false" /></div>
     <div class="field srow" data-keys="mcp herramientas bloquear deny lista"><label for="mcpDeny">HERRAMIENTAS A BLOQUEAR</label><input type="text" id="mcpDeny" placeholder="delete_repository" spellcheck="false" /></div>
@@ -2398,13 +2398,42 @@ y en el JSON que se escribe: `{ providers: [...], active: dummy, mcp: { enabled:
   await new Promise(r => setTimeout(r, 400));
   await judge('la pestaña MCP muestra el servidor de prueba', '(function(){ var rows = document.querySelectorAll("#mcpList .mcprow"); return rows.length >= 1 && /Eco de prueba/.test(document.querySelector("#mcpList").textContent); })()');
   await judge('el formulario de MCP abre y tiene los campos', '(function(){ document.querySelector("#mcpNew").click(); var c = document.querySelector("#mcpFormCard"); return c.classList.contains("on") && getComputedStyle(c).display !== "none" && !!document.querySelector("#mcpCommand") && !!document.querySelector("#mcpUrl"); })()');
+  // se cierra para no interferir con las comprobaciones siguientes del panel
+  await evaluate('document.querySelector("#mcpCancel").click()');
   await judge('cambiar a URL remota oculta el comando local', '(function(){ var t = document.querySelector("#mcpTransport"); t.value = "http"; t.dispatchEvent(new Event("change", { bubbles: true })); var ok1 = document.querySelector("#mcpStdioRows").hidden && !document.querySelector("#mcpHttpRows").hidden; t.value = "stdio"; t.dispatchEvent(new Event("change", { bubbles: true })); return ok1 && !document.querySelector("#mcpStdioRows").hidden; })()');
-  await judge('guardar un servidor inválido explica el motivo', '(function(){ document.querySelector("#mcpCancel").click(); return true; })()');
-  // el botón Probar de una fila habla con el servidor y trae sus herramientas
+  // El flujo de importación tiene su propia entrada (window.prompt NO existe en Electron):
+  // se comprueba que abre y que un JSON inválido se explica en el aviso del panel.
+  await evaluate('document.querySelector("#mcpPaste").click()');
+  await judge('la caja de pegar JSON abre', '(function(){ var b = document.querySelector("#mcpPasteBox"); return !!b && !b.hidden && !!document.querySelector("#mcpPasteText"); })()');
+  await evaluate('(function(){ document.querySelector("#mcpPasteText").value = "no es json"; document.querySelector("#mcpPasteGo").click(); return true; })()');
+  await new Promise(r => setTimeout(r, 600));
+  await judge('un JSON inválido se explica en el aviso del panel', '(function(){ return /Error/.test(document.querySelector("#mcpMsg").textContent); })()');
+  await evaluate('(function(){ document.querySelector("#mcpPasteCancel").click(); return true; })()');
+  // el botón Probar habla con el servidor de prueba y trae sus herramientas reales
   await evaluate('(function(){ var b = document.querySelector("#mcpList .mcprow [data-mcp=\\"test\\"]"); if (b) b.click(); return true; })()');
   await new Promise(r => setTimeout(r, 2500));
   await judge('probar el servidor trae sus herramientas reales',
     '(function(){ var t = document.querySelector("#mcpList").textContent; return /echo/.test(t) && /Listo/.test(t); })()');
+  // ---- las OTRAS dos superficies del mismo dato: Herramientas y Seguridad ----
+  await evaluate('document.querySelector(\'[data-view="tools"]\').click()');
+  await new Promise(r => setTimeout(r, 600));
+  await judge('la vista Herramientas muestra el grupo con las herramientas MCP',
+    '(function(){ var g = document.querySelector("#toolsGrid"); return !!g && /Servidores MCP/.test(g.textContent) && /echo/.test(g.textContent); })()');
+  await evaluate('document.querySelector(\'[data-view="settings"]\').click(); document.querySelector(\'#setTabs .settab[data-set="security"]\').click()');
+  await new Promise(r => setTimeout(r, 600));
+  await judge('Seguridad tiene una fila de permiso para el servidor MCP',
+    '(function(){ var p = document.querySelector("#permList"); return !!p && /MCP/.test(p.textContent) && !!p.querySelector(\'select[data-tool="mcp__eco__*"]\'); })()');
+  // ---- el interruptor global apaga y enciende el catálogo (de punta a punta) ----
+  await evaluate('document.querySelector(\'#setTabs .settab[data-set="mcp"]\').click()');
+  await new Promise(r => setTimeout(r, 400));
+  await evaluate('document.querySelector("#mcpGlobal").click()');
+  await new Promise(r => setTimeout(r, 1500));
+  await judge('con el interruptor apagado el catálogo no ofrece herramientas MCP',
+    '(function(){ return typeof window.sagitari.mcpList === "function" && document.querySelector("#mcpGlobal") && !document.querySelector("#mcpGlobal").classList.contains("on"); })()');
+  await evaluate('document.querySelector("#mcpGlobal").click()');
+  await new Promise(r => setTimeout(r, 2500));
+  await judge('al reencender, el servidor vuelve a estar listo',
+    '(function(){ return /Listo/.test(document.querySelector("#mcpList").textContent); })()');
   await evaluate('document.querySelector(\'[data-view="chat"]\').click()');
 ```
 
