@@ -85,6 +85,30 @@ function freePort() {
   });
 }
 
+/* Un WAV de mentira con voz y silencios: Chromium lo usa como micrófono
+   (--use-file-for-fake-audio-capture), así que el nivel del orbe y la interrupción se
+   prueban deterministas, sin hardware y sin tono constante. */
+async function vozFalsa() {
+  const fs = require('fs');
+  const path = require('path');
+  const os = require('os');
+  const sr = 48000, seg = 5, n = sr * seg;
+  const buf = Buffer.alloc(44 + n * 2);
+  buf.write('RIFF', 0); buf.writeUInt32LE(36 + n * 2, 4); buf.write('WAVE', 8);
+  buf.write('fmt ', 12); buf.writeUInt32LE(16, 16); buf.writeUInt16LE(1, 20); buf.writeUInt16LE(1, 22);
+  buf.writeUInt32LE(sr, 24); buf.writeUInt32LE(sr * 2, 28); buf.writeUInt16LE(2, 32); buf.writeUInt16LE(16, 34);
+  buf.write('data', 36); buf.writeUInt32LE(n * 2, 40);
+  for (let i = 0; i < n; i++) {
+    const t = i / sr;
+    const habla = (t > 1 && t < 2.2) || (t > 3.5 && t < 4.6);   // silencio, voz, silencio, voz
+    const v = habla ? Math.sin(2 * Math.PI * 180 * t) * 0.35 : 0;
+    buf.writeInt16LE(Math.max(-32768, Math.min(32767, Math.round(v * 32767))), 44 + i * 2);
+  }
+  const f = path.join(os.tmpdir(), 'sagi-voz-falsa.wav');
+  fs.writeFileSync(f, buf);
+  return f;
+}
+
 /* Un «modelo» de mentira, en local: contesta cada petición con un turno SSE de una línea y
    apunta qué herramientas (`tools`) le ofreció la app. Es la ÚNICA ventana al catálogo real
    que ve el modelo (`allToolDefs`): no viaja por ningún canal de la interfaz, así que sin
@@ -150,9 +174,13 @@ const AFTER = {
   const port = await freePort();
   // --hidden: la ventana NO se muestra. Antes se abría y se cerraba sola durante
   // probar.bat, y eso se ve idéntico a «la app se cierra sola».
-  /* --use-fake-device-for-media-stream: micrófono sintético (tono), para que la
-     comprobación de permiso y de nivel no dependa del hardware de quien ejecute esto. */
-  const child = spawn(electron, ['--remote-debugging-port=' + port, '--hidden', '--use-fake-device-for-media-stream', '.'], { cwd: APP_DIR, stdio: ['ignore', 'pipe', 'pipe'] });
+  /* --use-fake-device-for-media-stream: micrófono sintético, para que las comprobaciones
+     de permiso, de nivel y de interrupción no dependan del hardware de quien ejecute esto.
+     El WAV de mentira sustituye al tono constante de la tarea anterior: con voz y
+     silencios de verdad, la interrupción y el nivel se pueden comprobar. */
+  const wavFalso = await vozFalsa();
+  const child = spawn(electron, ['--remote-debugging-port=' + port, '--hidden',
+    '--use-fake-device-for-media-stream', '--use-file-for-fake-audio-capture=' + wavFalso, '.'], { cwd: APP_DIR, stdio: ['ignore', 'pipe', 'pipe'] });
   let childOut = '';
   child.stdout.on('data', (d) => { childOut += d; });
   child.stderr.on('data', (d) => { childOut += d; });
@@ -534,6 +562,42 @@ const AFTER = {
   /* El panel del modo voz: se abre, se cierra con Esc y no deja rastro cuando está cerrado. */
   await judge('el modo voz abre con el micro y cierra con Esc',
     '(async function(){ const vm = window.VoiceMode; if (!vm) return false; await vm.abrir(); const abierto = vm.abierto() && !document.querySelector("#voiceMode").hidden; document.dispatchEvent(new KeyboardEvent("keydown", { key: "Escape", bubbles: true })); await new Promise(r => setTimeout(r, 60)); const cerrado = !vm.abierto() && document.querySelector("#voiceMode").hidden; return abierto && cerrado; })()');
+
+  /* ---- modo voz: voz sintética, sin micrófono y sin depender del hardware ----
+     Lo que ocurre EN LA PÁGINA se comprueba con `judge`; lo que tiene que LLEGAR AL
+     MODELO se comprueba aquí, en Node, mirando las peticiones que recibe el modelo de
+     mentira (el mismo patrón que usan las comprobaciones del catálogo MCP). */
+  await judge('el orbe late con la voz inyectada',
+    '(async function(){ await window.VoiceMode.abrir(); window.VoiceMode.handle({ type: "level", value: 0.7 }); await new Promise(r => setTimeout(r, 250)); const c = document.querySelector("#vmOrbe"); const d = c.getContext("2d").getImageData(0, 0, c.width, c.height).data; let n = 0; for (let i = 3; i < d.length; i += 4) if (d[i] > 12) n++; return n > 500; })()');
+  await judge('el permiso de una herramienta se contesta diciendo «sí»',
+    '(function(){ let hecho = false; window.VoiceMode.pedirConfirmacion({ texto: "¿Borro la carpeta?", si: function(){ hecho = true; }, no: function(){} }); window.VoiceMode.handle({ type: "final", text: "sí" }); return hecho && window.VoiceMode.estado() !== "confirmando"; })()');
+  await judge('interrumpir mientras habla vuelve a escuchar',
+    '(async function(){ window.VoiceMode.handle({ type: "state", state: "hablando" }); await new Promise(r => setTimeout(r, 60)); await window.VoiceMode.audio.parar(); window.VoiceMode.handle({ type: "state", state: "oyendo" }); return window.VoiceMode.estado() === "oyendo"; })()');
+
+  /* Las tres que se juzgan por lo que llega al modelo: se dispara un final y se espera
+     a que el modelo de mentira reciba (o no reciba) una petición nueva. El final entra por
+     `voiceEvent`, que es el punto único del proceso principal (`VoiceManager.ingest`): ahí
+     vive el filtro de basura, así que sólo por ahí se puede comprobar que el ruido que se
+     inventa el motor no llega al agente. Llamando a `VoiceMode.handle` desde la página el
+     filtro se saltaría y la comprobación mediría una tubería que la app no tiene. */
+  const vozDice = async (texto) => {
+    const antes = llm.vistos.length;
+    await evaluate('window.sagitari.voiceEvent({ type: "final", text: ' + JSON.stringify(texto) + ' })');
+    const limite = Date.now() + 8000;
+    while (llm.vistos.length === antes && Date.now() < limite) await new Promise(r => setTimeout(r, 150));
+    return llm.vistos.length > antes;
+  };
+  if (await vozDice('recuérdame llamar a Álvaro')) console.log('  ok   una frase dictada llega al agente por el mismo camino del chat');
+  else { failed++; console.log('  FALLO una frase dictada no llegó al agente'); }
+  if (!(await vozDice('Gracias por ver el vídeo'))) console.log('  ok   la basura no llega al agente');
+  else { failed++; console.log('  FALLO la basura llegó al agente'); }
+  if (!(await vozDice('adiós'))) console.log('  ok   decir «adiós» cierra el modo y no envía nada');
+  else { failed++; console.log('  FALLO «adiós» envió algo al agente'); }
+
+  /* El panel tapa el chat: la respuesta tiene que ser legible ahí también (el modelo de
+     mentira contesta «listo» a todo). */
+  await judge('la respuesta del agente queda legible en el panel',
+    '(function(){ const h = document.querySelector("#vmHistorial"); return !!h && /listo/i.test(h.textContent); })()');
 
   /* La app de prueba arranca OCULTA (--hidden) y su modelo de mentira responde «listo» a
      todo: si además hablara, el usuario oiría una voz salida de la nada, sin ventana que
