@@ -1969,7 +1969,7 @@ oculta al filtrar):
     <div class="sc-head"><b>Servidores MCP</b><span class="sc-hint">Conecta herramientas externas (GitHub, Notion, tu propio servidor…) y el agente las usará como las de casa.</span></div>
     <div class="swrow srow" data-keys="mcp servidores activar conectar herramientas externas apagar">
       <span class="st"><b>Activar servidores MCP</b><small>Apagado, el agente no ve ninguna herramienta MCP.</small></span>
-      <div class="switch on" id="mcpGlobal" role="switch" tabindex="0" aria-label="Activar servidores MCP"></div>
+      <div class="sw on" id="mcpGlobal" role="switch" tabindex="0" aria-label="Activar servidores MCP"></div>
     </div>
     <div id="mcpList" class="mcplist"></div>
     <div class="srow" data-keys="mcp anadir servidor pegar json exportar mcpServers">
@@ -2018,7 +2018,8 @@ oculta al filtrar):
 
 ```js
 /* ============ v3.1: servidores MCP ============ */
-const MCP_STATE = { enabled: true, servers: [] };
+// `let`: renderMcp() REASIGNA el estado; con `const` el panel no pintaba nunca.
+let MCP_STATE = { enabled: true, servers: [] };
 const mcpPair = (text) => String(text || '').split('\n').map(l => l.trim()).filter(Boolean)
   .map(l => { const i = l.indexOf('='); return i > 0 ? [l.slice(0, i).trim(), l.slice(i + 1).trim()] : null; })
   .filter(Boolean);
@@ -2121,6 +2122,9 @@ $('#mcpGlobal').onclick = async (e) => {
   const on = !e.currentTarget.classList.contains('on');
   e.currentTarget.classList.toggle('on', on);
   await window.sagitari.mcpSetGlobal(on);
+  // El interruptor puede reconectar servidores en segundo plano: se pide su estado
+  // antes de repintar para no dejar la fila en «Conectando…» para siempre.
+  for (const s of (MCP_STATE.servers || [])) await window.sagitari.mcpRefresh(s.id).catch(() => {});
   renderMcp();
 };
 $('#mcpSave').onclick = async () => {
@@ -2156,6 +2160,8 @@ $('#mcpList').onclick = async (e) => {
   if (accion === 'toggle') {
     const s = MCP_STATE.servers.find(x => x.id === id);
     await window.sagitari.mcpToggle(id, !s.enabled);
+    // activar conecta en segundo plano: se pide el estado antes de repintar
+    await window.sagitari.mcpRefresh(id).catch(() => {});
     return renderMcp();
   }
   if (accion === 'del') {
@@ -2218,7 +2224,9 @@ En `showSetTab(panel)`, tras pintar el panel:
 - [ ] **Step 4: Estilos en `renderer/styles.css`**
 
 ```css
-/* ---- servidores MCP (Ajustes › MCP) ---- */
+/* ---- servidores MCP (Ajustes › MCP) ----
+   El interruptor usa la clase `.sw` de los demás y la tarjeta del formulario se muestra
+   con `.on` (no con [hidden], que el buscador de Ajustes reescribe al arrancar). */
 .mcplist { display: flex; flex-direction: column; gap: 10px; padding: 4px 0 10px; }
 .mcpempty { color: var(--dim); font-size: 12px; padding: 8px 0; }
 .mcprow { border: 1px solid var(--line); border-radius: 12px; padding: 10px 12px; }
@@ -2232,7 +2240,7 @@ En `showSetTab(panel)`, tras pintar el panel:
 .mcptools { display: flex; flex-wrap: wrap; gap: 6px; margin: 8px 0 0; }
 .mcptool { font: 500 11px var(--font-ui); color: var(--vio2); background: rgba(var(--acc2-rgb), .12); border-radius: 999px; padding: 2px 8px; }
 .mcpacts { display: flex; gap: 6px; flex-wrap: wrap; margin-top: 10px; }
-.mcpbtns { display: flex; gap: 8px; flex-wrap: wrap; margin-top: 10px; }
+#mcpFormCard:not(.on) { display: none; }
 ```
 
 - [ ] **Step 5: Verificar en la app viva (visual, no hay test unitario de UI)**
@@ -2259,60 +2267,65 @@ git commit -m "mcp: pestana de Ajustes con lista, formulario guiado, probar, log
 
 - [ ] **Step 1: Añadir las herramientas MCP a la vista Herramientas**
 
-En `renderTools()`, después de pintar los grupos nativos:
+`renderTools()` pinta sobre `#toolsGrid` con cabeceras `.toolsgroup` y tarjetas
+`.toolcard`; el bloque va AL FINAL de la función (después del bucle de grupos nativos):
 
 ```js
-  /* Grupo MCP: las herramientas REALES de los servidores del usuario, con su nivel
-     de permiso. No es una lista estática: se lee del gestor. */
-  const mcp = await window.sagitari.mcpList().catch(() => ({ servers: [] }));
-  const conHerramientas = (mcp.servers || []).filter(s => s.tools.length);
-  const cont = $('#toolsGroups');
+  // ---- v3.1: herramientas MCP reales del usuario (no están en el catálogo nativo) ----
+  let mcp = { servers: [] };
+  try { mcp = await window.sagitari.mcpList(); } catch {}
+  const conHerramientas = (mcp.servers || []).filter(s => s.enabled && (s.discovered || []).length);
   if (conHerramientas.length) {
-    const html = conHerramientas.map(s => `
-      <div class="tgroup">
-        <div class="tgt">MCP · ${esc(s.name)}</div>
-        <div class="tcards">${s.tools.map(t => `
-          <div class="tcard">
-            <div class="tcn">${esc(t.tool)}</div>
-            <div class="tcd">${esc(t.description || '')}</div>
-            <div class="tcp">Nivel: <b>${esc(RISK_LABEL[(CFG.security.permissions || {})[t.name] || 'confirm'])}</b></div>
-          </div>`).join('')}</div>
-      </div>`).join('');
-    cont.insertAdjacentHTML('beforeend', html);
+    const total = conHerramientas.reduce((n, s) => n + s.discovered.length, 0);
+    const h = document.createElement('div');
+    h.className = 'toolsgroup';
+    h.textContent = 'Servidores MCP · ' + total;
+    g.appendChild(h);
+    for (const s of conHerramientas) {
+      for (const t of s.discovered) {
+        const c = document.createElement('div');
+        c.className = 'toolcard';
+        c.innerHTML = `<div class="tic">${ic('bolt')}</div><div><b>${esc(t.tool)}</b> <small class="md">${esc(s.name)}</small><br><small>${esc(t.description || '')}</small></div>`;
+        g.appendChild(c);
+      }
+    }
   }
+}
 ```
-`MCP_LEVELS` se rellena con `CFG.security.permissions` (o lo devuelve `mcpList`): usar `CFG.security.permissions[t.name]` directamente en el `map`.
+(es decir: justo antes del `}` que cierra `renderTools`; el resto de la función no cambia)
 
 - [ ] **Step 2: Añadir los overrides MCP a Seguridad**
 
-En `renderSecurity()`, tras las filas de `PERM_TOOLS`:
+`renderSecurity()` pinta filas `.permrow` dentro de `#permList`, cada una con su
+`<select>` y su `onchange` propio. El bloque va tras el bucle de `PERM_TOOLS` y antes
+de `mejoraSelects(permBox)`:
 
 ```js
-  // Las herramientas MCP también se gobiernan desde aquí: el comodín del servidor
-  // (`mcp__github__*`) permite confiar en uno entero sin listar herramienta a herramienta.
-  const mcp = await window.sagitari.mcpList().catch(() => ({ servers: [] }));
+  // ---- v3.1: servidores MCP. El comodín `mcp__<id>__*` gobierna TODAS sus
+  // herramientas de una vez (el override exacto de una herramienta sigue ganando).
+  let mcp = { servers: [] };
+  try { mcp = await window.sagitari.mcpList(); } catch {}
   for (const s of (mcp.servers || [])) {
     const wildcard = 'mcp__' + s.id + '__*';
-    const nivel = (CFG.security.permissions || {})[wildcard] || 'default';
-    cont.insertAdjacentHTML('beforeend', `
-      <div class="srow"><div class="slabel"><b>${esc(s.name)} (MCP)</b><span>Todo el servidor: ${s.tools.length} herramientas</span></div>
-        <div class="permrow"><select data-mcp-perm="${esc(wildcard)}">
-          <option value="default"${nivel === 'default' ? ' selected' : ''}>preguntar siempre</option>
-          <option value="safe"${nivel === 'safe' ? ' selected' : ''}>permitir siempre</option>
-          <option value="restricted"${nivel === 'restricted' ? ' selected' : ''}>bloqueado</option>
-        </select></div></div>`);
+    const lvl = (cfg.permissions && cfg.permissions[wildcard]) || 'default';
+    const n = (s.discovered || []).length;
+    const row = document.createElement('div');
+    row.className = 'permrow';
+    row.innerHTML = `<span class="mt"><b>${esc(s.name)}</b> <small class="md">MCP</small><br><small class="md">${n} herramienta${n === 1 ? '' : 's'} del servidor</small><br><small class="pd">todas sus herramientas piden permiso salvo que las permitas aquí</small></span>
+      <select data-tool="${esc(wildcard)}" aria-label="Permiso para el servidor MCP ${esc(s.name)}">
+        <option value="default"${lvl === 'default' ? ' selected' : ''}>Por defecto (preguntar antes)</option>
+        <option value="safe"${lvl === 'safe' ? ' selected' : ''}>Permitir siempre</option>
+        <option value="confirm"${lvl === 'confirm' ? ' selected' : ''}>Preguntar antes</option>
+        <option value="restricted"${lvl === 'restricted' ? ' selected' : ''}>Bloqueado</option>
+      </select>`;
+    row.querySelector('select').onchange = async (e) => {
+      await window.sagitari.secSetToolPerm(wildcard, e.target.value);
+      showToast('MCP ' + s.name + ': ' + e.target.selectedOptions[0].textContent.toLowerCase());
+    };
+    permBox.appendChild(row);
   }
-  mejoraSelects(cont);
 ```
-Y en el listener de cambios de permisos, aceptar `data-mcp-perm`:
-```js
-  cont.addEventListener('change', async (e) => {
-    const w = e.target.closest('[data-mcp-perm]');
-    if (!w) return;
-    const r = await window.sagitari.secSetToolPerm(w.dataset.mcpPerm, w.value === 'default' ? 'default' : w.value);
-    if (r && r.ok === false) showToast('No se pudo guardar el permiso: ' + r.error);
-  });
-```
+(no hace falta un listener aparte: el `onchange` va en cada fila, como en las nativas)
 
 - [ ] **Step 3: Verificar en vivo**
 
