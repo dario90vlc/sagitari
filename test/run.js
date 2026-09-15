@@ -3449,6 +3449,33 @@ test('voz/stt-windows: un ERROR:: del motor se convierte en error con arreglo', 
   ok(err.fix && err.fix.includes('ms-settings:sound'), 'y trae un arreglo concreto: ' + err.fix);
 });
 
+test('voz/stt-windows: si el motor muere solo, avisa al consumidor', async () => {
+  const { createSttWindows } = require('../main/voice/stt-windows');
+  const eventos = [];
+  const spawnFn = () => {
+    const l = {};
+    const proc = { stdout: { on: (k, f) => { l['o' + k] = f; } }, stderr: { on: (k, f) => { l['e' + k] = f; } }, on: (k, f) => { l[k] = f; }, kill() {}, stdin: { end() {} } };
+    setTimeout(() => { l['odata'](Buffer.from('MODE::sapi\nREADY::es-ES\n')); l['exit'](1); }, 5);
+    return proc;
+  };
+  const engine = createSttWindows({ emit: (e) => eventos.push(e), spawnFn, scriptPath: 'voice.ps1' });
+  await engine.start();
+  await new Promise((r) => setTimeout(r, 40));
+  ok(eventos.some((e) => e.type === 'error' && /cerr[oó] solo/i.test(e.text)), 'la muerte sin aviso se convierte en error: ' + JSON.stringify(eventos.filter((e) => e.type === 'error')));
+
+  const eventos2 = [];
+  const spawnFn2 = () => {
+    const l = {};
+    const proc = { stdout: { on: (k, f) => { l['o' + k] = f; } }, stderr: { on: (k, f) => { l['e' + k] = f; } }, on: (k, f) => { l[k] = f; }, kill() { setTimeout(() => l['exit'](0), 5); }, stdin: { end() {} } };
+    return proc;
+  };
+  const engine2 = createSttWindows({ emit: (e) => eventos2.push(e), spawnFn: spawnFn2, scriptPath: 'voice.ps1' });
+  await engine2.start();
+  await engine2.stop();
+  await new Promise((r) => setTimeout(r, 30));
+  eq(eventos2.filter((e) => e.type === 'error').length, 0, 'un cierre pedido no es un error');
+});
+
 /* Cierre de la suite: se ejecutan TODOS los tests registrados, en orden, uno
    detrás de otro, y solo entonces se imprime el resumen. */
 for (const t of QUEUE) {
