@@ -1165,9 +1165,13 @@ function esNuestraPagina(url) {
 
 app.whenReady().then(() => {
   session.defaultSession.setPermissionRequestHandler((wc, permission, cb, details) => {
+    /* OJO: lo que NO sea 'media' se deja como estaba. Escribir aquí
+       `cb(permission === 'media' && …)` deniega permisos que Electron aprueba por defecto
+       (notificaciones, pantalla completa…): es un fallo que la revisión cazó en el plan. */
+    if (permission !== 'media') { cb(true); return; }
     const url = (details && details.requestingUrl) || wc.getURL();
     const soloAudio = !details || !details.mediaTypes || details.mediaTypes.every((t) => t === 'audio');
-    cb(permission === 'media' && soloAudio && esNuestraPagina(url));
+    cb(soloAudio && esNuestraPagina(url));
   });
   /* El de comprobación responde a las consultas internas de Chromium: solo se limita
      'media' (lo demás sigue como estaba) para no romper nada más. */
