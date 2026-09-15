@@ -59,7 +59,7 @@ function goto(view, opts) {
   });
   $$('.view').forEach(v => v.classList.toggle('on', v.id === 'view-' + view));
   // la vista activa queda marcada en la carcasa: el rail lateral solo se pinta
-  // donde aporta (chat y agentes), no en las otras siete, donde está vacío
+  // donde aporta (chat y agentes); en el resto de vistas está vacío
   const shell = $('#app');
   if (shell) shell.dataset.view = view;
   if (view === 'chat') $('#chatInput').focus();

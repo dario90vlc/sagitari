@@ -853,10 +853,11 @@ input::placeholder, textarea::placeholder { color: var(--dim); }
 .toolcard .tic { width: 34px; height: 34px; border-radius: 10px; display: grid; place-items: center; background: rgba(var(--acc2-rgb), 0.14); font-size: 15px; }
 .toolcard b { display: block; font-size: 15px; } .toolcard small { color: var(--dim); font-size: 12px; }
 
-/* ---- servidores MCP (Ajustes › MCP) ----
-   El formulario se oculta con CLASE, no con [hidden]: el buscador de Ajustes
-   reescribe el atributo hidden de cada tarjeta en cada búsqueda (igual que la
-   fila de progreso de «Acerca de»), así que el formulario reaparecería solo. */
+/* ---- servidores MCP (sección MCP del sidebar) ----
+   El formulario se muestra con CLASE: `mcpFormShow` añade `.on` y Cancelar,
+   Guardar y Eliminar la quitan. Nadie escribe el atributo [hidden] en esta
+   tarjeta —desde que la gestión vive fuera de Ajustes ningún buscador lo
+   reescribe—, así que su estado depende solo de esta clase. */
 #mcpFormCard:not(.on) { display: none; }
 .mcplist { display: flex; flex-direction: column; gap: 10px; padding: 4px 0 10px; }
 .mcpempty { color: var(--dim); font-size: 12px; padding: 8px 0; }
