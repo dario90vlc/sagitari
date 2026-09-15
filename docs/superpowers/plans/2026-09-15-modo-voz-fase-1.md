@@ -622,16 +622,19 @@ test('voz/tts-windows: sintetiza una frase, borra el temporal y dice qué voz us
     return proc;
   };
   const tts = createTtsWindows({ spawnFn, dataDir: dir });
-  const cuentaWavs = () => fs.readdirSync(os.tmpdir()).filter((f) => /^sagi-tts-.*\.wav$/.test(f)).length;
-  const antes = cuentaWavs();
+  const cuentaTemporales = () => (fs.existsSync(path.join(dir, 'tts')) ? fs.readdirSync(path.join(dir, 'tts')).filter((f) => /^sagi-tts-.*\.(wav|txt)$/.test(f)).length : 0);
+  const antes = cuentaTemporales();
   const r = await tts.sintetizar('Hola, esto es una prueba.', { voice: 'Microsoft Helena', lang: 'es-ES' });
   ok(r.wav.length > 8, 'devuelve bytes de WAV');
   eq(r.voz, 'Microsoft Helena', 'dice qué voz usó');
   eq(r.ms, 412, 'y cuánto tardó la síntesis');
-  /* Comprobación REAL de que no deja basura: se cuentan los WAV temporales antes y
-     después. (La primera versión de este test miraba un directorio que nunca se creaba,
-     así que no podía fallar; lo cazó el reconocimiento previo del plan.) */
-  eq(cuentaWavs(), antes, 'no deja WAV temporales tras sintetizar');
+  /* Comprobación REAL de que no deja basura: se cuentan los temporales de NUESTRA carpeta
+     antes y después. (La primera versión miraba un directorio que nunca se creaba, así que
+     no podía fallar; lo cazó el reconocimiento previo del plan.) */
+  eq(cuentaTemporales(), antes, 'no deja temporales tras sintetizar');
+  /* Y dispose() limpia de verdad lo que deje una síntesis interrumpida. */
+  tts.dispose();
+  ok(!fs.existsSync(path.join(dir, 'tts')), 'dispose() borra la carpeta de temporales');
   /* `includes` compara elementos enteros, y los args llevan rutas absolutas: la
      comparación correcta es sobre el final del argumento. */
   ok(llamadas[0].some((a) => String(a).endsWith('tts.ps1')), 'llama a tts.ps1');
@@ -694,10 +697,13 @@ try {
 
   $todas = [Windows.Media.SpeechSynthesis.SpeechSynthesizer]::AllVoices
   if ($List) {
-    foreach ($v in $todas) { Say ("VOICE::" + $v.DisplayName + "|" + $v.Language + "|" + $v.Gender) }
+    # OJO: en PowerShell 5.1 esta colección de WinRT hace enumeración de miembros, así que
+    # `$todas.Count` devuelve «1 1 1» (uno por voz) y NUNCA vale 0. Hay que contar al vuelo.
+    $vistas = 0
+    foreach ($v in $todas) { Say ("VOICE::" + $v.DisplayName + "|" + $v.Language + "|" + $v.Gender); $vistas++ }
     # Si el almacén moderno está vacío, las voces de escritorio son las únicas que hay:
     # sin esta rama, Ajustes diría «sin voces instaladas» aunque la síntesis funcione.
-    if ($todas.Count -eq 0) {
+    if ($vistas -eq 0) {
       $s = New-Object System.Speech.Synthesis.SpeechSynthesizer
       foreach ($v in $s.GetInstalledVoices()) { Say ("VOICE::" + $v.VoiceInfo.Name + "|" + $v.VoiceInfo.Culture.Name) }
       $s.Dispose()
@@ -728,6 +734,17 @@ try {
   Say ("VOICEUSED::" + $syn.Voice.DisplayName)
   Say ("OK::" + $OutFile + "|" + $ms)
 } catch {
+  # Si la proyección de WinRT no carga, el `-List` lo atiende este carril: sin esto,
+  # `tts:list` devolvería cero voces en una máquina con voces de escritorio.
+  if ($List) {
+    try {
+      Add-Type -AssemblyName System.Speech
+      $s = New-Object System.Speech.Synthesis.SpeechSynthesizer
+      foreach ($v in $s.GetInstalledVoices()) { Say ("VOICE::" + $v.VoiceInfo.Name + "|" + $v.VoiceInfo.Culture.Name) }
+      $s.Dispose()
+      exit 0
+    } catch { }
+  }
   # Respaldo: System.Speech (voces de escritorio). Peor voz, pero nunca deja al usuario mudo.
   try {
     Add-Type -AssemblyName System.Speech
@@ -737,8 +754,13 @@ try {
     $t0 = Get-Date
     $s.SetOutputToWaveFile($OutFile)
     $s.Speak([IO.File]::ReadAllText($TextFile))
+    # La voz se lee ANTES de Dispose: después, `$s.Voice.Name` devolvía vacío (lo cazó el
+    # implementador al ejercitar por fin este carril con una sonda). Y sin `$(try …)` dentro
+    # de la cadena, que era código muerto.
+    $usada = 'sistema'
+    try { $usada = $s.Voice.Name } catch {}
     $s.Dispose()
-    Say ("VOICEUSED::" + $(try { $s.Voice.Name } catch { 'sistema' }))
+    Say ("VOICEUSED::" + $usada)
     Say ("OK::" + $OutFile + "|" + [int]((Get-Date) - $t0).TotalMilliseconds)
   } catch {
     Say ("ERROR::" + $_.Exception.Message)
@@ -766,12 +788,22 @@ const { spawn } = require('child_process');
 const { CAPACIDADES_BASE } = require('./contract');
 
 function createTtsWindows({ spawnFn = spawn, dataDir = os.tmpdir(), scriptPath = path.join(__dirname, '..', 'tts.ps1'), rate = 0 } = {}) {
+  /* Los temporales de una frase viven bajo NUESTRA carpeta, no sueltos en %TEMP%: así
+     dispose() puede barrer de verdad lo que deje una síntesis interrumpida. Si la carpeta
+     no se puede crear (raíz de datos de solo lectura), se cae a %TEMP% para no dejar mudo
+     al usuario; y tras dispose() se vuelve a crear en la siguiente síntesis. */
   const dir = path.join(dataDir, 'tts');
+  let carpetaLista = false;
+  const carpeta = () => {
+    if (carpetaLista) return dir;
+    try { fs.mkdirSync(dir, { recursive: true }); carpetaLista = true; return dir; } catch { return os.tmpdir(); }
+  };
 
   function correr(args, texto) {
     return new Promise((resolve) => {
-      const tmpText = path.join(os.tmpdir(), 'sagi-tts-' + Date.now() + '-' + Math.random().toString(36).slice(2) + '.txt');
-      const tmpWav = path.join(os.tmpdir(), 'sagi-tts-' + Date.now() + '-' + Math.random().toString(36).slice(2) + '.wav');
+      const base = carpeta();
+      const tmpText = path.join(base, 'sagi-tts-' + Date.now() + '-' + Math.random().toString(36).slice(2) + '.txt');
+      const tmpWav = path.join(base, 'sagi-tts-' + Date.now() + '-' + Math.random().toString(36).slice(2) + '.wav');
       fs.writeFileSync(tmpText, String(texto || ''), 'utf8');
       const salida = { voz: '', ms: 0, error: '', file: tmpWav };
       let proc;
@@ -787,6 +819,9 @@ function createTtsWindows({ spawnFn = spawn, dataDir = os.tmpdir(), scriptPath =
            'error'. Sin listener, Node lo relanza como excepción no capturada y, como en ese
            caso no llega ningún 'exit', la promesa no resolvería y el .txt se quedaría. */
         proc.on('error', (e) => {
+          /* Se limpia el temporizador: sin esto, un fallo de arranque dejaba vivo el de 60 s
+             y el proceso de Node tardaba un minuto en poder salir. */
+          clearTimeout(killTimer);
           try { fs.unlinkSync(tmpText); } catch {}
           resolve({ ...salida, error: e.message });
         });
@@ -856,7 +891,9 @@ function createTtsWindows({ spawnFn = spawn, dataDir = os.tmpdir(), scriptPath =
     return r;
   }
 
-  return { nombre: 'windows', capacidades: { ...CAPACIDADES_BASE }, listarVoces, sintetizar, dispose: () => { try { fs.rmSync(dir, { recursive: true, force: true }); } catch {} } };
+  /* dispose() sí tiene trabajo: la carpeta de temporales es nuestra. Se marca como no
+     creada para que una síntesis posterior la vuelva a crear en vez de escribir en %TEMP%. */
+  return { nombre: 'windows', capacidades: { ...CAPACIDADES_BASE }, listarVoces, sintetizar, dispose: () => { try { fs.rmSync(dir, { recursive: true, force: true }); } catch {} carpetaLista = false; } };
 }
 
 module.exports = { createTtsWindows };
