@@ -850,6 +850,25 @@ input::placeholder, textarea::placeholder { color: var(--dim); }
 .toolcard .tic { width: 34px; height: 34px; border-radius: 10px; display: grid; place-items: center; background: rgba(var(--acc2-rgb), 0.14); font-size: 15px; }
 .toolcard b { display: block; font-size: 15px; } .toolcard small { color: var(--dim); font-size: 12px; }
 
+/* ---- servidores MCP (Ajustes › MCP) ----
+   El formulario se oculta con CLASE, no con [hidden]: el buscador de Ajustes
+   reescribe el atributo hidden de cada tarjeta en cada búsqueda (igual que la
+   fila de progreso de «Acerca de»), así que el formulario reaparecería solo. */
+#mcpFormCard:not(.on) { display: none; }
+.mcplist { display: flex; flex-direction: column; gap: 10px; padding: 4px 0 10px; }
+.mcpempty { color: var(--dim); font-size: 12px; padding: 8px 0; }
+.mcprow { border: 1px solid var(--line); border-radius: 12px; padding: 10px 12px; }
+.mcphead { display: flex; align-items: center; gap: 8px; font-size: 13px; }
+.mcpdot { width: 8px; height: 8px; border-radius: 50%; background: var(--dim); flex-shrink: 0; }
+.mcpdot.ok { background: #37f5a8; }
+.mcpdot.wait { background: #ffd166; }
+.mcpdot.err { background: #ff6b6b; }
+.mcpst { color: var(--dim); font-size: 12px; }
+.mcpdo { margin-left: auto; color: var(--dim); font-size: 11px; text-transform: uppercase; letter-spacing: .06em; }
+.mcptools { display: flex; flex-wrap: wrap; gap: 6px; margin: 8px 0 0; }
+.mcptool { font: 500 11px var(--font-ui); color: var(--vio2); background: rgba(var(--acc2-rgb), .12); border-radius: 999px; padding: 2px 8px; }
+.mcpacts { display: flex; gap: 6px; flex-wrap: wrap; margin-top: 10px; }
+
 /* ============ Right rail ============ */
 .rail { display: flex; flex-direction: column; gap: 14px; padding: 50px 18px 18px 4px; overflow-y: auto; position: relative; z-index: 1; }
 .rail::-webkit-scrollbar { width: 0; }

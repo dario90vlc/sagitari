@@ -1850,6 +1850,8 @@ function renderProviderList() {
   }
 }
 function smsg(t) { $('#saveMsg').textContent = t; }
+/** Aviso del panel MCP (no reutiliza el del formulario de proveedores). */
+function mcpMsg(t) { const el = $('#mcpMsg'); if (el) el.textContent = t || ''; }
 
 /* El campo de la clave se vacía al elegir un preset (no se reescribe una credencial
    en pantalla), y activar o detectar en ese momento parecía «sin clave»: el aviso
@@ -2025,9 +2027,190 @@ $('#devModeSw').onclick = async (e) => {
 // initSecurity() se llama desde init(), DESPUÉS de fillSettings(): en top-level
 // leía CFG.settings vacío y perdía devMode/maxConcurrentTasks/autoResume en cada arranque.
 
+/* ============ v3.1: servidores MCP ============ */
+/* let (no const): renderMcp() lo reemplaza en cada refresco — con const, la
+   asignación lanzaba «Assignment to constant variable» y el panel nunca pintaba. */
+let MCP_STATE = { enabled: true, servers: [] };
+const mcpPair = (text) => String(text || '').split('\n').map(l => l.trim()).filter(Boolean)
+  .map(l => { const i = l.indexOf('='); return i > 0 ? [l.slice(0, i).trim(), l.slice(i + 1).trim()] : null; })
+  .filter(Boolean);
+const mcpLines = (obj) => Object.entries(obj || {}).map(([k, v]) => k + '=' + v).join('\n');
+
+/** Estados del servidor, tal y como los ve el usuario. */
+function mcpStatusLabel(s) {
+  if (!s.enabled) return { text: 'Desactivado', cls: 'off' };
+  const n = (s.discovered || []).length;
+  if (s.state === 'ready') return { text: 'Listo (' + n + ' herramienta' + (n === 1 ? '' : 's') + ')', cls: 'ok' };
+  if (s.state === 'starting') return { text: 'Conectando…', cls: 'wait' };
+  if (s.state === 'dead') return { text: 'Error: ' + (s.error || 'no arrancó'), cls: 'err' };
+  return { text: 'Sin probar', cls: 'off' };
+}
+
+async function renderMcp() {
+  const box = $('#mcpList');
+  if (!box) return;
+  try { MCP_STATE = await window.sagitari.mcpList(); } catch (e) { showToast('No pude leer los servidores MCP: ' + e.message); return; }
+  $('#mcpGlobal').classList.toggle('on', MCP_STATE.enabled !== false);
+  if (!(MCP_STATE.servers || []).length) {
+    box.innerHTML = '<div class="mcpempty">Ningún servidor MCP. Añade uno o pega el JSON de <code>mcpServers</code> de otro cliente.</div>';
+    return;
+  }
+  box.innerHTML = MCP_STATE.servers.map(s => {
+    const st = mcpStatusLabel(s);
+    const lista = (s.discovered || []).map(t => `<span class="mcptool" title="${esc(t.description || '')}">${esc(t.tool)}</span>`).join('');
+    return `<div class="mcprow" data-id="${esc(s.id)}">
+      <div class="mcphead">
+        <span class="mcpdot ${st.cls}"></span>
+        <b>${esc(s.name)}</b>
+        <span class="mcpst">${esc(st.text)}</span>
+        <span class="mcpdo">${s.transport === 'http' ? 'URL' : 'local'}</span>
+      </div>
+      <div class="mcptools">${lista}</div>
+      <div class="mcpacts">
+        <button class="btn ghost" data-mcp="test">Probar</button>
+        <button class="btn ghost" data-mcp="log">Ver log</button>
+        <button class="btn ghost" data-mcp="edit">Editar</button>
+        <button class="btn ghost" data-mcp="toggle">${s.enabled ? 'Desactivar' : 'Activar'}</button>
+        <button class="btn ghost" data-mcp="del">Eliminar</button>
+      </div>
+    </div>`;
+  }).join('');
+  mejoraSelects(box);
+}
+
+function mcpFormShow(server) {
+  const s = server || { transport: 'stdio', tools: {} };
+  // Se oculta con clase (ver styles.css), pero el buscador de Ajustes pudo fijar
+  // [hidden] en esta tarjeta mientras había una búsqueda activa: al abrirla hay
+  // que soltarlo, o "Editar" con una búsqueda puesta no enseñaría nada.
+  const card = $('#mcpFormCard');
+  card.hidden = false;
+  card.classList.add('on');
+  $('#mcpFormTitle').textContent = server ? 'Editar servidor' : 'Nuevo servidor';
+  $('#mcpId').value = s.id || '';
+  $('#mcpId').disabled = !!server;
+  $('#mcpName').value = s.name || '';
+  $('#mcpTransport').value = s.transport || 'stdio';
+  $('#mcpCommand').value = s.command || '';
+  $('#mcpArgs').value = (s.args || []).join(' ');
+  $('#mcpEnv').value = mcpLines(s.env);
+  $('#mcpUrl').value = s.url || '';
+  $('#mcpHeaders').value = mcpLines(s.headers);
+  $('#mcpAllow').value = (s.tools && s.tools.allow || []).join(', ');
+  $('#mcpDeny').value = (s.tools && s.tools.deny || []).join(', ');
+  $('#mcpFormDelete').hidden = !server;
+  mcpTransportRows();
+  mejoraSelects($('#mcpFormCard'));
+}
+
+function mcpTransportRows() {
+  const esHttp = $('#mcpTransport').value === 'http';
+  $('#mcpStdioRows').hidden = esHttp;
+  $('#mcpHttpRows').hidden = !esHttp;
+}
+
+/** Construye el servidor con lo que hay en el formulario (valida main). */
+function mcpFormValue() {
+  const pair = (id) => Object.fromEntries(mcpPair($(id).value));
+  return {
+    id: $('#mcpId').value.trim(),
+    name: $('#mcpName').value.trim(),
+    transport: $('#mcpTransport').value,
+    command: $('#mcpCommand').value.trim(),
+    args: $('#mcpArgs').value.trim() ? $('#mcpArgs').value.trim().split(/\s+/) : [],
+    env: pair('#mcpEnv'),
+    url: $('#mcpUrl').value.trim(),
+    headers: pair('#mcpHeaders'),
+    tools: {
+      allow: $('#mcpAllow').value.split(',').map(x => x.trim()).filter(Boolean),
+      deny: $('#mcpDeny').value.split(',').map(x => x.trim()).filter(Boolean),
+    },
+  };
+}
+
+$('#mcpTransport').onchange = mcpTransportRows;
+$('#mcpNew').onclick = () => mcpFormShow(null);
+$('#mcpCancel').onclick = () => { $('#mcpFormCard').classList.remove('on'); };
+$('#mcpGlobal').onclick = async (e) => {
+  const on = !e.currentTarget.classList.contains('on');
+  e.currentTarget.classList.toggle('on', on);
+  await window.sagitari.mcpSetGlobal(on);
+  renderMcp();
+};
+$('#mcpSave').onclick = async () => {
+  const s = mcpFormValue();
+  const nivel = $('#mcpLevel').value;
+  const r = await window.sagitari.mcpSave(s);
+  if (!r.ok) return mcpMsg('Error: ' + r.error);
+  // El nivel elegido se aplica al comodín del servidor (el MISMO que edita Seguridad):
+  // sin esto el desplegable sería decorativo. Se usa el id que devuelve main (ya
+  // saneado), no el del formulario, que puede traer mayúsculas o símbolos.
+  if (nivel && nivel !== 'default' && r.id) await window.sagitari.secSetToolPerm('mcp__' + r.id + '__*', nivel);
+  $('#mcpFormCard').classList.remove('on');
+  mcpMsg('Guardado. Probando la conexión…');
+  const t = await window.sagitari.mcpTest(r.id || s.id);
+  mcpMsg(t.ok ? 'Conectado: ' + (t.server ? t.server.discovered.length : 0) + ' herramientas.' : 'No conecta: ' + t.error);
+  renderMcp();
+};
+$('#mcpFormDelete').onclick = async () => {
+  const id = $('#mcpId').value.trim();
+  const yes = await askConfirm($('#mcpFormCard'), '¿Eliminar el servidor MCP «' + id + '»?', 'Se borran su configuración y sus permisos.');
+  if (!yes) return;
+  const r = await window.sagitari.mcpDelete(id);
+  $('#mcpFormCard').classList.remove('on');
+  mcpMsg(r.ok ? 'Servidor eliminado.' : 'Error: ' + r.error);
+  renderMcp();
+};
+$('#mcpList').onclick = async (e) => {
+  const btn = e.target.closest('[data-mcp]');
+  if (!btn) return;
+  const id = btn.closest('.mcprow').dataset.id;
+  const accion = btn.dataset.mcp;
+  if (accion === 'edit') return mcpFormShow(MCP_STATE.servers.find(s => s.id === id));
+  if (accion === 'toggle') {
+    const s = MCP_STATE.servers.find(x => x.id === id);
+    await window.sagitari.mcpToggle(id, !s.enabled);
+    return renderMcp();
+  }
+  if (accion === 'del') {
+    const yes = await askConfirm(btn, '¿Eliminar «' + id + '»?', 'Se borran su configuración y sus permisos.');
+    if (!yes) return;
+    await window.sagitari.mcpDelete(id);
+    return renderMcp();
+  }
+  if (accion === 'log') {
+    const r = await window.sagitari.mcpLog(id);
+    return showToast(r.log ? r.log.split('\n').slice(-3).join(' · ') : (r.error || 'El servidor no ha escrito nada.'));
+  }
+  if (accion === 'test') {
+    btn.textContent = 'Probando…';
+    const r = await window.sagitari.mcpTest(id);
+    btn.textContent = 'Probar';
+    mcpMsg(r.ok ? 'Conectado: ' + (r.server ? r.server.discovered.length : 0) + ' herramientas.' : 'No conecta: ' + r.error);
+    return renderMcp();
+  }
+};
+$('#mcpExportBtn').onclick = async () => {
+  const r = await window.sagitari.mcpExport();
+  if (!r.ok) return mcpMsg('Error: ' + r.error);
+  copyText(r.json, 'JSON copiado (contiene tus secretos: no lo compartas).');
+};
+$('#mcpPaste').onclick = async () => {
+  const json = prompt('Pega el bloque mcpServers:');
+  if (!json) return;
+  const r = await window.sagitari.mcpImport(json);
+  if (!r.ok) return mcpMsg('Error: ' + r.error);
+  const resumen = r.servers.map(s => s.id + (s.conflict ? ' (reemplaza el actual)' : '')).join(', ');
+  const yes = await askConfirm($('#mcpPaste'), '¿Añadir estos servidores?', resumen);
+  if (!yes) return;
+  for (const s of r.servers) await window.sagitari.mcpSave(s);
+  mcpMsg('Añadidos: ' + resumen);
+  renderMcp();
+};
+
 /* ============ Ajustes: pestañas, búsqueda y utilidades ============ */
 
-const SET_TABS = ['model', 'prefs', 'security', 'agent', 'data', 'about'];
+const SET_TABS = ['model', 'prefs', 'security', 'agent', 'mcp', 'data', 'about'];
 let setTabName = 'model';
 try { const t = localStorage.getItem('sagi.setTab'); if (SET_TABS.includes(t)) setTabName = t; } catch {}
 
@@ -2048,6 +2231,7 @@ function showSetTab(panel) {
   }
   const wrap = $('#setWrap');
   if (wrap) wrap.querySelectorAll('.setpanel').forEach(p => p.classList.toggle('on', p.dataset.panel === name));
+  if (name === 'mcp') renderMcp();
   // la pestaña «Acerca de» ya enseña el aviso: el punto del sidebar sobra
   // (solo si Ajustes está a la vista: fillSettings llama aquí al arrancar)
   if (name === 'about' && $('#view-settings').classList.contains('on')) setBadge('#nbUpdate', 0);
