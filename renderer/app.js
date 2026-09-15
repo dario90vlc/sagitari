@@ -1717,12 +1717,24 @@ wireMic('#chatMic');
    `handle`), así que aquí solo se le dan las tres cosas que no puede saber por sí mismo
    —por dónde se envía, por dónde se reproduce una frase y si hay que hablar los avisos—
    y se le pasa todo lo que llega del proceso principal. */
-window.VoiceMode.setEnviar(enviarTexto);
+/* El turno dictado no puede salir mientras el agente trabaja: `agent.chat` lo rechazaría, y
+   el panel ya lo habría dado por enviado (solo saldría la tarjeta de error del chat). Se le
+   avisa por su franja y no se envía nada; a diferencia del botón Enviar, aquí no se detiene
+   al agente: dictar no es pedir que pare. */
+window.VoiceMode.setEnviar((text) => {
+  if (busy) { window.VoiceMode.handle({ type: 'notice', text: 'El agente está trabajando; no he enviado lo dictado.' }); return; }
+  return enviarTexto(text);
+});
 window.sagitari.onVoiceEvent((ev) => window.VoiceMode.handle(ev));
 window.sagitari.onTtsPhrase((p) => window.VoiceMode.audio.reproducir(p));
 /* Los avisos solo se hablan si el usuario lo ha pedido en Ajustes. La decisión se toma
-   aquí, que es donde se conocen los ajustes; el panel solo pide que se diga. */
-window.VoiceMode.setHablar((t) => { if (CFG.settings.ttsNotices) speak(t, { forzar: true }); });
+   aquí, que es donde se conocen los ajustes; el panel solo pide que se diga.
+   Y el aviso de que NO se ha podido leer no se habla nunca: lo emite el propio fallo de la
+   síntesis, así que hablarlo lo realimentaría —cada vuelta pide otra síntesis, que vuelve a
+   fallar y vuelve a avisar, y la app se queda girando—. Es el único aviso que se salta, y
+   solo ese: los demás (p. ej. «no te he entendido») sí se dicen. */
+const AVISO_SIN_VOZ = 'No he podido leer la respuesta en voz alta.';
+window.VoiceMode.setHablar((t) => { if (CFG.settings.ttsNotices && t !== AVISO_SIN_VOZ) speak(t, { forzar: true }); });
 
 window.sagitari.onVoiceReady((k, lang) => showToast('Dictado activo (' + lang + '). Habla ahora; pulsa el micro o envía para terminar.'));
 // motor clásico = precisión inferior: avisar que con el reconocimiento online mejora mucho

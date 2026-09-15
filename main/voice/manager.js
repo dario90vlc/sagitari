@@ -28,7 +28,11 @@ function trocear(texto) {
   return out;
 }
 
-function createVoiceManager({ emit, stt, tts, onPhrase = () => {}, settings = {} } = {}) {
+/* `settings` es una FUNCIÓN, no el objeto de ajustes: `settings:set` reemplaza el objeto
+   entero al guardar, así que guardarse una copia dejaría la voz, la velocidad y el idioma
+   congelados en los que hubiera al crear el manager (y el manager nace también para leer el
+   chat, antes de que el usuario toque Ajustes). Se lee en cada frase, que es cuando importa. */
+function createVoiceManager({ emit, stt, tts, onPhrase = () => {}, settings = () => ({}) } = {}) {
   let estado = 'escuchando';
   let cola = [];
   let hablando = null;
@@ -83,8 +87,9 @@ function createVoiceManager({ emit, stt, tts, onPhrase = () => {}, settings = {}
     if (!frase) { hablando = null; setEstado('escuchando'); return; }
     hablando = frase;
     setEstado('hablando');
+    const aj = settings() || {};
     let r;
-    try { r = await tts.sintetizar(frase, { lang: settings.voiceLang || 'es-ES', voice: settings.ttsVoice || '', rate: settings.ttsRate || 0 }); }
+    try { r = await tts.sintetizar(frase, { lang: aj.voiceLang || 'es-ES', voice: aj.ttsVoice || '', rate: aj.ttsRate || 0 }); }
     catch (e) { r = { wav: null, error: e.message }; }
     if (hablando !== frase) return;                      // la interrumpieron mientras sintetizaba
     if (!r || !r.wav) { pon({ type: 'notice', text: 'No he podido leer la respuesta en voz alta.' }); siguiente(); return; }

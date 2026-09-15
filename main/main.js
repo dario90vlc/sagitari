@@ -1112,7 +1112,15 @@ ipcMain.handle('tts:speak', async (e, text, opts) => {
      conoce los ajustes es el renderer; el silencio de los arranques de prueba va ANTES y
      no se toca. */
   if (!config.settings.ttsEnabled && !(opts && opts.forzar)) return { ok: false };
-  try { managerDeVoz().say(String(text)); return { ok: true }; } catch { return { ok: false }; }
+  try {
+    const voz = managerDeVoz();
+    /* Una lectura nueva CORTA la anterior (lo mismo que hacía el proceso viejo al morir):
+       sin esto, tras dos turnos seguidos el usuario oiría entera la respuesta anterior
+       antes de la nueva y la cola crecería turno a turno. */
+    voz.stopSpeaking();
+    voz.say(String(text));
+    return { ok: true };
+  } catch { return { ok: false }; }
 });
 
 /* Motor de síntesis del sistema. La síntesis por frases la orquesta el VoiceManager
@@ -1175,12 +1183,23 @@ function emitVoz(ev) { try { if (win && !win.isDestroyed()) win.webContents.send
 function managerDeVoz() {
   if (voiceManager) return voiceManager;
   ttsEngine = createTtsWindows({ dataDir: DATA_DIR });
+  /* El motor de escuchar nace la primera vez que se ABRE el modo, no al crear el manager:
+     el manager también nace solo para leer el chat (sin micrófono) y, si se construyera
+     aquí, se quedaría con el idioma que hubiera en los ajustes en ese momento. `stop()` sin
+     motor no hace nada (no hay proceso que parar). */
+  let motor = null;
+  const motorEscucha = () => {
+    if (!motor) motor = createSttWindows({ emit: (ev) => voiceManager.ingest(ev), lang: config.settings.voiceLang || 'es-ES' });
+    return motor;
+  };
   voiceManager = createVoiceManager({
     emit: emitVoz,
-    stt: createSttWindows({ emit: (ev) => voiceManager.ingest(ev), lang: config.settings.voiceLang || 'es-ES' }),
+    stt: { start: () => motorEscucha().start(), stop: () => (motor ? motor.stop() : Promise.resolve()) },
     tts: ttsEngine,
     onPhrase: (p) => { try { if (win && !win.isDestroyed()) win.webContents.send('tts:phrase', p); } catch {} },
-    settings: config.settings,
+    /* Los ajustes van EN VIVO: se guardan reemplazando el objeto, así que el manager tiene
+       que leerlos cada vez (voz, velocidad e idioma) y no quedarse con una copia. */
+    settings: () => config.settings,
   });
   return voiceManager;
 }
