@@ -1553,8 +1553,18 @@ Y al final del cuerpo, junto a los otros scripts del renderer:
     if (quien === 'Tú') { t.title = 'Pincha para corregir; Enter reenvía'; t.onclick = () => editar(t, texto); }
     fila.appendChild(q); fila.appendChild(t);
     h.appendChild(fila);
-    h.scrollTop = h.scrollHeight;
+    /* El que scrollea es el PADRE (`.vm-texto` tiene `overflow:auto` y altura máxima): sobre
+       `#vmHistorial`, que no desborda, `scrollTop` se quedaba en 0 y la frase recién dictada
+       podía quedar fuera de la vista. Lo cazó la revisión. */
+    const cajaTexto = h.parentElement;
+    if (cajaTexto) cajaTexto.scrollTop = cajaTexto.scrollHeight;
   }
+
+  /* La respuesta del agente también se LEE: el panel es opaco y tapa el chat, así que sin
+     esto, mientras el modo voz está abierto, la respuesta solo se podía oír. La llama el
+     cableado del renderer (tarea 9) al llegar el texto del asistente; el panel no habla con
+     el agente. Lo cazó la revisión: la rama «Sagitari» de escribir() era código muerto. */
+  function respuesta(texto) { if (texto) escribir('Sagitari', texto); }
 
   /* Corregir lo dictado: se pincha la frase, se arregla y Enter la reenvía por el MISMO
      camino (es la red de seguridad frente a un nombre propio mal oído). */
@@ -1632,11 +1642,33 @@ Y al final del cuerpo, junto a los otros scripts del renderer:
     const panel = $vm('#voiceMode');
     if (panel) panel.hidden = false;
     setEstado('escuchando');
+    /* Se reinician los avisos: si no, al reabrir tras denegar el micrófono el panel volvía
+       con el error viejo a la vista, diciendo que algo falla cuando ya funciona. */
+    const cajaError = $vm('#vmError'); if (cajaError) cajaError.hidden = true;
+    cablearBotones();
     document.addEventListener('keydown', alTeclado, true);
     const r = await window.sagitari.voiceOpen().catch(() => null);
+    /* OJO: entre el await y el cierre puede haber pasado un Esc. Si se cerró, NO se sigue:
+       si se siguiera, `abrirMicro()` dejaría el micrófono capturando (con su indicador en
+       Windows) y `arrancarBucle()` un bucle de dibujo que `cerrar()` ya no puede parar
+       (sale con `if (!abierto) return;`). Lo cazó la revisión de la tarea. */
+    if (!abierto) return;
     if (!r || !r.ok) { error('No he podido abrir el modo voz.', 'Cierra y vuelve a abrirlo; si sigue, revisa Ajustes › Voz.'); }
     await abrirMicro();
+    if (!abierto) {   // se cerró mientras pedíamos el micrófono: se suelta lo adquirido
+      if (mic) { mic.getTracks().forEach((t) => t.stop()); mic = null; }
+      return;
+    }
     arrancarBucle();
+  }
+
+  /* Los botones de la confirmación hacen exactamente lo mismo que decir «sí»/«no»: sin este
+     cableado la caja de permiso solo se podía contestar por voz, aunque el comentario de
+     arriba prometía el ratón. */
+  function cablearBotones() {
+    const si = $vm('#vmSi'); const no = $vm('#vmNo');
+    if (si) si.onclick = () => { if (confirmacion) responder('sí'); };
+    if (no) no.onclick = () => { if (confirmacion) responder('no'); };
   }
 
   async function cerrar() {
@@ -1653,7 +1685,13 @@ Y al final del cuerpo, junto a los otros scripts del renderer:
     try { await window.sagitari.voiceClose(); } catch {}
   }
 
-  function alTeclado(e) { if (e.key === 'Escape' && abierto) { e.preventDefault(); cerrar(); } }
+  function alTeclado(e) {
+    /* Si hay una corrección en curso, Esc la cancela (lo maneja el propio input) y NO cierra
+       el modo: este manejador va en captura sobre `document`, así que llegaría antes que el
+       del input y la rama de `editar()` sería inalcanzable. Lo cazó la revisión. */
+    if (e.key === 'Escape' && document.activeElement && document.activeElement.classList.contains('vm-editar')) return;
+    if (e.key === 'Escape' && abierto) { e.preventDefault(); cerrar(); }
+  }
 
   /* Micrófono del renderer: es la fuente del nivel del orbe y de la calibración de ruido. */
   async function abrirMicro() {
@@ -1704,7 +1742,11 @@ Y al final del cuerpo, junto a los otros scripts del renderer:
       reproductor.start();
     } catch (e) {
       pista('No he podido reproducir la voz.');
-      if (fraseActual === id) { fraseActual = null; window.sagitari.ttsPlayed(id); }
+      /* Se avisa SIEMPRE, sin mirar `fraseActual`: `spoken(id)` es lo único que hace avanzar
+         la cola del proceso principal, y el fallo esperable (decodeAudioData rechazando los
+         bytes) ocurre ANTES de `fraseActual = id`, así que la guarda dejaba la cola parada y
+         el estado en «hablando» para siempre. Lo cazó la revisión. */
+      window.sagitari.ttsPlayed(id);
     }
   }
 
@@ -1764,6 +1806,7 @@ Y al final del cuerpo, junto a los otros scripts del renderer:
     audio: { reproducir, parar: pararAudio },
     setEnviar: (fn) => { ENVIAR = fn; },
     setHablar: (fn) => { HABLAR = fn; },
+    respuesta,
   };
 })();
 ```
@@ -1925,6 +1968,9 @@ En el manejador de `assistant_done` (línea ~1117), donde hoy está `speak(ev.te
          los arranques automatizados sigue mandando por encima (la aplica el proceso
          principal). */
       speak(ev.text, { forzar: window.VoiceMode && window.VoiceMode.abierto() });
+      /* Y además se LEE: el panel tapa el chat, así que la respuesta tiene que aparecer ahí
+         también. Sin esto, con el modo voz abierto la respuesta solo se podía oír. */
+      if (window.VoiceMode && window.VoiceMode.abierto()) window.VoiceMode.respuesta(ev.text);
 ```
 
 Y en `speak()` (línea ~3253):
@@ -2038,6 +2084,11 @@ git commit -m "voz: el micro abre el modo voz y el texto entra por el mismo cami
   else { failed++; console.log('  FALLO la basura llegó al agente'); }
   if (!(await vozDice('adiós'))) console.log('  ok   decir «adiós» cierra el modo y no envía nada');
   else { failed++; console.log('  FALLO «adiós» envió algo al agente'); }
+
+  /* El panel tapa el chat: la respuesta tiene que ser legible ahí también (el modelo de
+     mentira contesta «listo» a todo). */
+  await judge('la respuesta del agente queda legible en el panel',
+    '(function(){ const h = document.querySelector("#vmHistorial"); return !!h && /listo/i.test(h.textContent); })()');
 ```
 
 Y en la parte de arriba del script, el generador del WAV y el contador de peticiones al modelo:
