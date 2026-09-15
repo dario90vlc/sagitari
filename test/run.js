@@ -3345,6 +3345,9 @@ test('voz/contrato: un evento bien formado pasa y uno roto se explica', () => {
   fallo = null;
   try { assertEvent({ type: 'inventado' }); } catch (e) { fallo = e.message; }
   ok(fallo && /tipo/i.test(fallo), 'un tipo inventado se rechaza: ' + fallo);
+  fallo = null;
+  try { assertEvent({ type: 'level', value: NaN }); } catch (e) { fallo = e.message; }
+  ok(fallo && /nivel/i.test(fallo), 'un nivel NaN se rechaza: ' + fallo);
 });
 
 test('voz/contrato: un motor necesita nombre, capacidades y los tres métodos', () => {
@@ -3367,6 +3370,11 @@ test('voz/basura: rechaza frases vacías, golpes y ruido del motor de dictado', 
   ok(esBasura('eh', 120).basura, 'un golpe de 120 ms con dos letras');
   ok(!esBasura('Recuérdame mañana llamar a Álvaro', 1200).basura, 'una frase de verdad pasa');
   ok(!esBasura('sí', 400).basura, 'un «sí» corto pero con voz real pasa: es una respuesta');
+  /* Sin duración (el motor de Windows no la manda) no se puede concluir «sin voz»:
+     estas dos pruebas son las que habrían cazado el fallo que encontró la revisión. */
+  ok(!esBasura('sí').basura, 'sin saber la duración, un «sí» no es basura');
+  ok(!esBasura('no').basura, 'ni un «no»');
+  ok(!esBasura('ok').basura, 'ni un «ok»');
 });
 
 test('voz/basura: las alucinaciones conocidas no llegan al agente', () => {
@@ -3383,6 +3391,9 @@ test('voz/basura: una palabra repetida en bucle no es una orden', () => {
   const { esBasura } = require('../main/voice/junk');
   ok(esBasura('no no no no no', 2000).basura, 'repetición');
   ok(!esBasura('no, gracias', 800).basura, 'una negativa normal pasa');
+  /* La lista negra no puede comerse una orden real que empiece como una alucinación. */
+  ok(!esBasura('música a todo volumen', 1500).basura, 'una orden que empieza por una palabra de la lista pasa');
+  ok(!esBasura('aplausos del público al final', 1800).basura, 'y otra igual');
 });
 
 /* Cierre de la suite: se ejecutan TODOS los tests registrados, en orden, uno

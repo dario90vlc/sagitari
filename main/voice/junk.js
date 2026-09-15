@@ -32,9 +32,14 @@ const REGLAS = [
   /* Se mira la forma normalizada y no el texto crudo: la bandera `i` de un regex no
      pliega las vocales acentuadas, así que «sí» se colaba como palabra sin vocales. */
   { motivo: 'sin vocales: no es una palabra', prueba: (t) => !/[aeiou]/.test(normalizar(t)) },
-  { motivo: 'demasiado corto y sin voz suficiente', prueba: (t, ms) => normalizar(t).replace(/ /g, '').length < 4 && ms < 350 },
+  /* `ms` = 0 significa «no se sabe», y el motor de Windows NO manda duración: sin el
+     `ms > 0`, toda respuesta corta («sí», «no», «ok») se descartaría como basura y el modo
+     voz no podría confirmar nada. Lo cazó la revisión de la tarea. */
+  { motivo: 'demasiado corto y sin voz suficiente', prueba: (t, ms) => normalizar(t).replace(/ /g, '').length < 4 && ms > 0 && ms < 350 },
   { motivo: 'palabra repetida en bucle', prueba: (t) => { const w = normalizar(t).split(' '); return w.length >= 4 && new Set(w).size === 1; } },
-  { motivo: 'está en la lista negra de alucinaciones', prueba: (t) => { const n = normalizar(t); return BASURA.some((b) => n === b || n.startsWith(b)); } },
+  /* El prefijo solo se aplica a entradas de varias palabras: si no, «música a todo
+     volumen» o «risas aparte, abre el navegador» caerían por empezar como una alucinación. */
+  { motivo: 'está en la lista negra de alucinaciones', prueba: (t) => { const n = normalizar(t); return BASURA.some((b) => n === b || (b.includes(' ') && n.startsWith(b))); } },
 ];
 
 function esBasura(text, ms = 0) {

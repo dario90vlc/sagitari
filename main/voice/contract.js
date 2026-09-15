@@ -19,7 +19,9 @@ function assertEvent(ev) {
       if (!ESTADOS.includes(ev.state)) throw new Error('estado de voz desconocido: ' + ev.state);
       break;
     case 'level':
-      if (typeof ev.value !== 'number' || ev.value < 0 || ev.value > 1) throw new Error('nivel fuera de 0..1: ' + ev.value);
+      /* Number.isFinite y no typeof: `typeof NaN === 'number'` es cierto y NaN no falla
+         ninguna comparación, así que un nivel NaN llegaría al canvas y no dibujaría nada. */
+      if (!Number.isFinite(ev.value) || ev.value < 0 || ev.value > 1) throw new Error('nivel fuera de 0..1: ' + ev.value);
       break;
     case 'partial':
     case 'notice':
