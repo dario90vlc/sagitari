@@ -1961,6 +1961,29 @@ async function renderSecurity() {
     };
     permBox.appendChild(row);
   }
+  // ---- v3.1: servidores MCP. El comodín `mcp__<id>__*` gobierna TODAS sus
+  // herramientas de una vez (el override exacto de una herramienta sigue ganando).
+  let mcp = { servers: [] };
+  try { mcp = await window.sagitari.mcpList(); } catch {}
+  for (const s of (mcp.servers || [])) {
+    const wildcard = 'mcp__' + s.id + '__*';
+    const lvl = (cfg.permissions && cfg.permissions[wildcard]) || 'default';
+    const n = (s.discovered || []).length;
+    const row = document.createElement('div');
+    row.className = 'permrow';
+    row.innerHTML = `<span class="mt"><b>${esc(s.name)}</b> <small class="md">MCP</small><br><small class="md">${n} herramienta${n === 1 ? '' : 's'} del servidor</small><br><small class="pd">todas sus herramientas piden permiso salvo que las permitas aquí</small></span>
+      <select data-tool="${esc(wildcard)}" aria-label="Permiso para el servidor MCP ${esc(s.name)}">
+        <option value="default"${lvl === 'default' ? ' selected' : ''}>Por defecto (preguntar antes)</option>
+        <option value="safe"${lvl === 'safe' ? ' selected' : ''}>Permitir siempre</option>
+        <option value="confirm"${lvl === 'confirm' ? ' selected' : ''}>Preguntar antes</option>
+        <option value="restricted"${lvl === 'restricted' ? ' selected' : ''}>Bloqueado</option>
+      </select>`;
+    row.querySelector('select').onchange = async (e) => {
+      await window.sagitari.secSetToolPerm(wildcard, e.target.value);
+      showToast('MCP ' + s.name + ': ' + e.target.selectedOptions[0].textContent.toLowerCase());
+    };
+    permBox.appendChild(row);
+  }
   // los desplegables de permisos nacen aquí: se mejoran al pintarse
   mejoraSelects(permBox);
 }
@@ -3005,6 +3028,25 @@ async function renderTools() {
       c.className = 'toolcard';
       c.innerHTML = `<div class="tic">${ic(i)}</div><div><b>${esc(K.tool(n).label)}</b> <small class="md">${esc(n)}</small><br><small>${d}</small></div>`;
       g.appendChild(c);
+    }
+  }
+  // ---- v3.1: herramientas MCP reales del usuario (no están en el catálogo nativo) ----
+  let mcp = { servers: [] };
+  try { mcp = await window.sagitari.mcpList(); } catch {}
+  const conHerramientas = (mcp.servers || []).filter(s => s.enabled && (s.discovered || []).length);
+  if (conHerramientas.length) {
+    const total = conHerramientas.reduce((n, s) => n + s.discovered.length, 0);
+    const h = document.createElement('div');
+    h.className = 'toolsgroup';
+    h.textContent = 'Servidores MCP · ' + total;
+    g.appendChild(h);
+    for (const s of conHerramientas) {
+      for (const t of s.discovered) {
+        const c = document.createElement('div');
+        c.className = 'toolcard';
+        c.innerHTML = `<div class="tic">${ic('bolt')}</div><div><b>${esc(t.tool)}</b> <small class="md">${esc(s.name)}</small><br><small>${esc(t.description || '')}</small></div>`;
+        g.appendChild(c);
+      }
     }
   }
 }
