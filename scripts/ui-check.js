@@ -46,13 +46,19 @@ function seedTestConfig() {
      fijos) y no al caso fácil de una sola fila. */
   const modelos = Array.from({ length: 12 }, (_, i) => 'test-model-' + (i + 1));
   const dummy = { providerId: 'ui-check', name: 'Prueba (sin conexión)', baseUrl: 'http://127.0.0.1:9/v1', apiKey: '', model: 'test-model-10', vision: false };
+  // Servidor MCP de prueba: el mismo que usan los tests unitarios. Sin red y sin
+  // instalar nada, así que la comprobación de interfaz no depende del entorno.
+  const mcpServer = {
+    id: 'eco', name: 'Eco de prueba', enabled: true, transport: 'stdio',
+    command: process.execPath, args: [path.join(APP_DIR, 'test', 'fixtures', 'mcp-echo-server.js')], env: {},
+  };
   /* SIEMPRE se reescribe. Este perfil es de las pruebas: dar por bueno lo que
      hubiera dejado otro proceso hacía que el ui-check verificara un estado distinto
      cada vez (llegó a comprobar un menú con 16 modelos y otro activo, donde la
      primera fila de la lista quedaba fuera de la parte visible). */
   try {
     fs.mkdirSync(TEST_DATA_DIR, { recursive: true });
-    fs.writeFileSync(file, JSON.stringify({ providers: [{ ...dummy, id: 'ui-check', models: modelos }], active: dummy }, null, 2), 'utf8');
+    fs.writeFileSync(file, JSON.stringify({ providers: [{ ...dummy, id: 'ui-check', models: modelos }], active: dummy, mcp: { enabled: true, servers: [mcpServer] } }, null, 2), 'utf8');
   } catch {}
 }
 
@@ -352,6 +358,51 @@ const AFTER = {
   await judge('a 1000x620 el chat no provoca scroll de página',
     '(function(){ return document.documentElement.scrollHeight <= innerHeight + 1; })()');
   await cmd('Emulation.clearDeviceMetricsOverride', {});
+
+  /* ---- MCP: la pestaña existe, el formulario abre y el estado se pinta ----
+     Sobre la app viva y con un servidor de verdad (el de eco de los tests): lo que
+     se comprueba es el recorrido completo, no que los elementos existan. */
+  await evaluate('document.querySelector(\'#setTabs .settab[data-set="mcp"]\').click()');
+  await new Promise(r => setTimeout(r, 400));
+  await judge('la pestaña MCP muestra el servidor de prueba', '(function(){ var rows = document.querySelectorAll("#mcpList .mcprow"); return rows.length >= 1 && /Eco de prueba/.test(document.querySelector("#mcpList").textContent); })()');
+  await judge('el formulario de MCP abre y tiene los campos', '(function(){ document.querySelector("#mcpNew").click(); var c = document.querySelector("#mcpFormCard"); return c.classList.contains("on") && getComputedStyle(c).display !== "none" && !!document.querySelector("#mcpCommand") && !!document.querySelector("#mcpUrl"); })()');
+  // se cierra para no interferir con las comprobaciones siguientes del panel
+  await evaluate('document.querySelector("#mcpCancel").click()');
+  await judge('cambiar a URL remota oculta el comando local', '(function(){ var t = document.querySelector("#mcpTransport"); t.value = "http"; t.dispatchEvent(new Event("change", { bubbles: true })); var ok1 = document.querySelector("#mcpStdioRows").hidden && !document.querySelector("#mcpHttpRows").hidden; t.value = "stdio"; t.dispatchEvent(new Event("change", { bubbles: true })); return ok1 && !document.querySelector("#mcpStdioRows").hidden; })()');
+  // El flujo de importación tiene su propia entrada (window.prompt NO existe en Electron):
+  // se comprueba que abre y que un JSON inválido se explica en el aviso del panel.
+  await evaluate('document.querySelector("#mcpPaste").click()');
+  await judge('la caja de pegar JSON abre', '(function(){ var b = document.querySelector("#mcpPasteBox"); return !!b && !b.hidden && !!document.querySelector("#mcpPasteText"); })()');
+  await evaluate('(function(){ document.querySelector("#mcpPasteText").value = "no es json"; document.querySelector("#mcpPasteGo").click(); return true; })()');
+  await new Promise(r => setTimeout(r, 600));
+  await judge('un JSON inválido se explica en el aviso del panel', '(function(){ return /Error/.test(document.querySelector("#mcpMsg").textContent); })()');
+  await evaluate('(function(){ document.querySelector("#mcpPasteCancel").click(); return true; })()');
+  // el botón Probar habla con el servidor de prueba y trae sus herramientas reales
+  await evaluate('(function(){ var b = document.querySelector("#mcpList .mcprow [data-mcp=\\"test\\"]"); if (b) b.click(); return true; })()');
+  await new Promise(r => setTimeout(r, 2500));
+  await judge('probar el servidor trae sus herramientas reales',
+    '(function(){ var t = document.querySelector("#mcpList").textContent; return /echo/.test(t) && /Listo/.test(t); })()');
+  // ---- las OTRAS dos superficies del mismo dato: Herramientas y Seguridad ----
+  await evaluate('document.querySelector(\'[data-view="tools"]\').click()');
+  await new Promise(r => setTimeout(r, 600));
+  await judge('la vista Herramientas muestra el grupo con las herramientas MCP',
+    '(function(){ var g = document.querySelector("#toolsGrid"); return !!g && /Servidores MCP/.test(g.textContent) && /echo/.test(g.textContent); })()');
+  await evaluate('document.querySelector(\'[data-view="settings"]\').click(); document.querySelector(\'#setTabs .settab[data-set="security"]\').click()');
+  await new Promise(r => setTimeout(r, 600));
+  await judge('Seguridad tiene una fila de permiso para el servidor MCP',
+    '(function(){ var p = document.querySelector("#permList"); return !!p && /MCP/.test(p.textContent) && !!p.querySelector(\'select[data-tool="mcp__eco__*"]\'); })()');
+  // ---- el interruptor global apaga y enciende el catálogo (de punta a punta) ----
+  await evaluate('document.querySelector(\'#setTabs .settab[data-set="mcp"]\').click()');
+  await new Promise(r => setTimeout(r, 400));
+  await evaluate('document.querySelector("#mcpGlobal").click()');
+  await new Promise(r => setTimeout(r, 1500));
+  await judge('con el interruptor apagado el catálogo no ofrece herramientas MCP',
+    '(function(){ return typeof window.sagitari.mcpList === "function" && document.querySelector("#mcpGlobal") && !document.querySelector("#mcpGlobal").classList.contains("on"); })()');
+  await evaluate('document.querySelector("#mcpGlobal").click()');
+  await new Promise(r => setTimeout(r, 2500));
+  await judge('al reencender, el servidor vuelve a estar listo',
+    '(function(){ return /Listo/.test(document.querySelector("#mcpList").textContent); })()');
+  await evaluate('document.querySelector(\'[data-view="chat"]\').click()');
 
   // errores que la propia interfaz haya detectado (red de seguridad del renderer)
   const propios = await evaluate('Array.isArray(window.__errores) ? window.__errores.slice(0, 5) : null');
