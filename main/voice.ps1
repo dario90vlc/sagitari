@@ -82,7 +82,10 @@ try {
       $res = Await $op ([Windows.Media.SpeechRecognition.SpeechRecognitionResult])
       if ($res -and $res.Text -and $res.Text.Trim()) {
         $consecutiveFails = 0
-        Say ("FINAL::" + $res.Text.Trim())
+        # La confianza de WinRT es un enumerado (High/Medium/Low/Rejected): se pasa a
+        # número para que el proceso principal pueda decidir si avisar al usuario.
+        $c = switch ([string]$res.Confidence) { 'High' { 0.9 } 'Medium' { 0.6 } 'Low' { 0.3 } default { 0.1 } }
+        Say ("FINAL::" + $res.Text.Trim() + [char]31 + $c)
       }
     } catch {
       $hr = ('0x{0:X8}' -f ($_.Exception.HResult -band 0xFFFFFFFF))
@@ -140,7 +143,11 @@ try {
     try { $global:VoiceEvents++; Say ("PART::" + $EventArgs.Result.Text) } catch {}
   } | Out-Null
   Register-ObjectEvent -InputObject $rec -EventName SpeechRecognized -Action {
-    try { $global:VoiceEvents++; Say ("FINAL::" + $EventArgs.Result.Text) } catch {}
+    try {
+      $global:VoiceEvents++
+      $c = [math]::Round([double]$EventArgs.Result.Confidence, 3)
+      Say ("FINAL::" + $EventArgs.Result.Text + [char]31 + $c)
+    } catch {}
   } | Out-Null
 
   $rec.RecognizeAsync([System.Speech.Recognition.RecognizeMode]::Multiple)

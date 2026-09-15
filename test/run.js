@@ -3396,6 +3396,59 @@ test('voz/basura: una palabra repetida en bucle no es una orden', () => {
   ok(!esBasura('aplausos del público al final', 1800).basura, 'y otra igual');
 });
 
+test('voz/stt-windows: arranca el motor moderno (sin caparlo) y traduce el protocolo', async () => {
+  const { createSttWindows } = require('../main/voice/stt-windows');
+  const eventos = [];
+  let argsUsados = null;
+  const spawnFn = (cmd, args) => {
+    argsUsados = args;
+    const listeners = {};
+    const proc = {
+      stdout: { on: (k, f) => { listeners['out:' + k] = f; } },
+      stderr: { on: (k, f) => { listeners['err:' + k] = f; } },
+      on: (k, f) => { listeners[k] = f; },
+      kill: () => { if (listeners.exit) listeners.exit(0); },
+      stdin: { end: () => {} },
+    };
+    setTimeout(() => {
+      listeners['out:data'](Buffer.from('MODE::winrt\nREADY::es-ES\nPART::recuerdame\nFINAL::Recuérdame mañana\u001f0.82\n'));
+    }, 5);
+    return proc;
+  };
+  const engine = createSttWindows({ emit: (e) => eventos.push(e), spawnFn, scriptPath: 'voice.ps1', lang: 'es-ES' });
+  await engine.start();
+  await new Promise((r) => setTimeout(r, 40));
+  ok(!argsUsados.includes('-NoWinrt'), 'no se capa el motor moderno: ' + JSON.stringify(argsUsados));
+  ok(argsUsados.includes('es-ES'), 'se pasa el idioma');
+  eq(eventos.filter((e) => e.type === 'partial').length, 1, 'un parcial');
+  const fin = eventos.find((e) => e.type === 'final');
+  eq(fin.text, 'Recuérdame mañana', 'el texto del final va limpio');
+  eq(fin.confidence, 0.82, 'la confianza llega como número');
+  eq(engine.info().motor, 'winrt', 'se sabe qué motor está detrás');
+
+  const errores = [];
+  const engine2 = createSttWindows({ emit: (e) => errores.push(e), spawnFn: (c, a) => { const l = {}; return { stdout: { on: (k, f) => { l['o' + k] = f; } }, stderr: { on: (k, f) => { l['e' + k] = f; } }, on: (k, f) => { l[k] = f; }, kill() {}, stdin: { end() {} } }; }, scriptPath: 'voice.ps1' });
+  await engine2.start();
+  eq(errores.filter((e) => e.type === 'error').length, 0, 'sin salida no hay error inventado');
+});
+
+test('voz/stt-windows: un ERROR:: del motor se convierte en error con arreglo', async () => {
+  const { createSttWindows } = require('../main/voice/stt-windows');
+  const eventos = [];
+  const spawnFn = () => {
+    const l = {};
+    const proc = { stdout: { on: (k, f) => { l['o' + k] = f; } }, stderr: { on: (k, f) => { l['e' + k] = f; } }, on: (k, f) => { l[k] = f; }, kill() {}, stdin: { end() {} } };
+    setTimeout(() => l['odata'](Buffer.from('ERROR::No hay micrófono\n')), 5);
+    return proc;
+  };
+  const engine = createSttWindows({ emit: (e) => eventos.push(e), spawnFn, scriptPath: 'voice.ps1' });
+  await engine.start();
+  await new Promise((r) => setTimeout(r, 30));
+  const err = eventos.find((e) => e.type === 'error');
+  ok(err && /micrófono/i.test(err.text), 'el error se propaga tal cual: ' + JSON.stringify(err));
+  ok(err.fix && err.fix.includes('ms-settings:sound'), 'y trae un arreglo concreto: ' + err.fix);
+});
+
 /* Cierre de la suite: se ejecutan TODOS los tests registrados, en orden, uno
    detrás de otro, y solo entonces se imprime el resumen. */
 for (const t of QUEUE) {
