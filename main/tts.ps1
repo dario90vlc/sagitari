@@ -12,6 +12,16 @@ try { [Console]::OutputEncoding = [System.Text.Encoding]::UTF8 } catch {}
 try { Add-Type -AssemblyName System.Runtime.WindowsRuntime } catch {}
 function Say([string]$l) { try { [Console]::Out.WriteLine($l); [Console]::Out.Flush() } catch {} }
 
+# Voces de escritorio: las que ve System.Speech. Se usan para listar cuando el almacén
+# moderno no da ninguna (o no está), porque si no el usuario vería cero voces aunque
+# pudiera hablar perfectamente por SAPI.
+function SaySapi {
+  Add-Type -AssemblyName System.Speech
+  $s = New-Object System.Speech.Synthesis.SpeechSynthesizer
+  foreach ($v in $s.GetInstalledVoices()) { Say ("VOICE::" + $v.VoiceInfo.Name + "|" + $v.VoiceInfo.Culture.Name) }
+  $s.Dispose()
+}
+
 function Await($t, $tipo) {
   $m = ([System.WindowsRuntimeSystemExtensions].GetMethods() | Where-Object { $_.Name -eq 'AsTask' -and $_.GetParameters().Count -eq 1 -and $_.GetParameters()[0].ParameterType.Name -eq 'IAsyncOperation`1' })[0]
   $nt = $m.MakeGenericMethod($tipo).Invoke($null, @($t)); $nt.Wait(-1) | Out-Null; $nt.Result
@@ -25,7 +35,12 @@ try {
 
   $todas = [Windows.Media.SpeechSynthesis.SpeechSynthesizer]::AllVoices
   if ($List) {
-    foreach ($v in $todas) { Say ("VOICE::" + $v.DisplayName + "|" + $v.Language + "|" + $v.Gender) }
+    # Se cuentan al vuelo y no con $todas.Count: en PowerShell 5.1 esa colección de WinRT
+    # no expone Count como número, así que `.Count` devuelve un 1 por voz (medido: con tres
+    # voces, «1 1 1») y la comparación con 0 no serviría para decidir el respaldo.
+    $vistas = 0
+    foreach ($v in $todas) { Say ("VOICE::" + $v.DisplayName + "|" + $v.Language + "|" + $v.Gender); $vistas++ }
+    if ($vistas -eq 0) { SaySapi }
     exit 0
   }
 
@@ -52,6 +67,10 @@ try {
   Say ("VOICEUSED::" + $syn.Voice.DisplayName)
   Say ("OK::" + $OutFile + "|" + $ms)
 } catch {
+  # Listar también tiene respaldo: si la proyección de WinRT no está (máquinas sin el
+  # almacén moderno), este catch es el que atiende el -List, y sin esto la lista salía
+  # vacía aunque SAPI pudiera hablar.
+  if ($List) { SaySapi; exit 0 }
   # Respaldo: System.Speech (voces de escritorio). Peor voz, pero nunca deja al usuario mudo.
   try {
     Add-Type -AssemblyName System.Speech
@@ -61,8 +80,13 @@ try {
     $t0 = Get-Date
     $s.SetOutputToWaveFile($OutFile)
     $s.Speak([IO.File]::ReadAllText($TextFile))
+    # El nombre se lee ANTES de Dispose(): después el sintetizador ya no tiene voz que
+    # dar y la línea salía vacía («VOICEUSED::»), con el motor diciendo que no sabía qué
+    # voz usó. Medido con una sonda que fuerza este carril.
+    $usada = 'sistema'
+    try { $usada = $s.Voice.Name } catch {}
     $s.Dispose()
-    Say ("VOICEUSED::" + $(try { $s.Voice.Name } catch { 'sistema' }))
+    Say ("VOICEUSED::" + $usada)
     Say ("OK::" + $OutFile + "|" + [int]((Get-Date) - $t0).TotalMilliseconds)
   } catch {
     Say ("ERROR::" + $_.Exception.Message)

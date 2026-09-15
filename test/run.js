@@ -3483,7 +3483,7 @@ test('voz/stt-windows: si el motor muere solo, avisa al consumidor', async () =>
 
 test('voz/tts-windows: sintetiza una frase, borra el temporal y dice qué voz usó', async () => {
   const fs = require('fs');
-  const os = require('os');
+  const path = require('path');
   const { createTtsWindows } = require('../main/voice/tts-windows');
   const dir = tmpDir('sagi-tts-');
   const llamadas = [];
@@ -3501,7 +3501,10 @@ test('voz/tts-windows: sintetiza una frase, borra el temporal y dice qué voz us
     return proc;
   };
   const tts = createTtsWindows({ spawnFn, dataDir: dir });
-  const cuentaWavs = () => fs.readdirSync(os.tmpdir()).filter((f) => /^sagi-tts-.*\.wav$/.test(f)).length;
+  /* Los temporales van a la carpeta del motor (`<dataDir>/tts`), así que el recuento mira
+     ahí: si mirase a %TEMP% la comprobación no podría fallar nunca y no valdría de nada. */
+  const carpetaTts = path.join(dir, 'tts');
+  const cuentaWavs = () => (fs.existsSync(carpetaTts) ? fs.readdirSync(carpetaTts).filter((f) => /^sagi-tts-.*\.wav$/.test(f)).length : 0);
   const antes = cuentaWavs();
   const r = await tts.sintetizar('Hola, esto es una prueba.', { voice: 'Microsoft Helena', lang: 'es-ES' });
   ok(r.wav.length > 8, 'devuelve bytes de WAV');
@@ -3520,6 +3523,11 @@ test('voz/tts-windows: sintetiza una frase, borra el temporal y dice qué voz us
      y la promesa de sintetizar() no resuelve jamás (pasó: el mock lo tapaba, la voz real
      se quedaba colgada). Por eso se comprueba que se cierra. */
   ok(stdinCerrado, 'cierra la entrada de PowerShell (si no, no termina nunca)');
+  /* dispose() tiene que barrer de verdad: si una síntesis se queda a medias, el .txt con
+     la frase del usuario y el .wav se quedan en la carpeta hasta que alguien los borre. */
+  fs.writeFileSync(path.join(carpetaTts, 'sagi-tts-resto-de-una-sintesis.wav'), 'x');
+  tts.dispose();
+  ok(!fs.existsSync(carpetaTts), 'dispose() borra lo que deje una síntesis interrumpida');
 });
 
 test('voz/tts-windows: sin voz disponible devuelve un error legible, no una excepción', async () => {
@@ -3530,11 +3538,11 @@ test('voz/tts-windows: sin voz disponible devuelve un error legible, no una exce
     setTimeout(() => { l['odata'](Buffer.from('ERROR::No hay voces instaladas\n')); l['exit'](1); }, 5);
     return proc;
   };
-  const tts = createTtsWindows({ spawnFn, dataDir: require('os').tmpdir() });
+  const tts = createTtsWindows({ spawnFn, dataDir: tmpDir('sagi-tts-') });
   let r = null;
   try { r = await tts.sintetizar('hola'); } catch (e) { r = { texto: e.message }; }
-  ok(r === null || typeof r === 'object', 'no revienta el proceso');
-  ok(!r || !r.wav, 'y no devuelve audio inventado');
+  ok(r && typeof r.error === 'string' && r.error, 'no revienta el proceso y explica el fallo');
+  ok(!r.wav, 'y no devuelve audio inventado');
 });
 
 /* Cierre de la suite: se ejecutan TODOS los tests registrados, en orden, uno
