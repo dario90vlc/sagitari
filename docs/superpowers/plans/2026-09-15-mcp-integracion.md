@@ -2156,11 +2156,10 @@ $('#mcpSave').onclick = async () => {
   const nivel = $('#mcpLevel').value;
   const r = await window.sagitari.mcpSave(s);
   if (!r.ok) return mcpMsg('Error: ' + r.error);
-  // El nivel elegido se aplica SIEMPRE al comodín del servidor (el MISMO que edita
-  // Seguridad): `sec:setToolPerm` borra el comodín cuando recibe 'default', así que
-  // también es la forma de volver a «preguntar siempre». Se usa el id que devuelve main
-  // (ya saneado), no el del formulario, que puede traer mayúsculas o símbolos.
-  if (r.id) await window.sagitari.secSetToolPerm('mcp__' + r.id + '__*', nivel);
+  // El nivel elegido se aplica SIEMPRE a la clave que calcula main (`permKey`, ya
+  // normalizada igual que el nombre expuesto): `sec:setToolPerm` borra el comodín
+  // cuando recibe 'default', así que también es la forma de volver a «preguntar».
+  if (r.permKey) await window.sagitari.secSetToolPerm(r.permKey, nivel);
   $('#mcpFormCard').hidden = true;
   mcpMsg('Guardado. Probando la conexión…');
   const t = await window.sagitari.mcpTest(r.id || s.id);
@@ -2337,7 +2336,10 @@ de `mejoraSelects(permBox)`:
   let mcp = { servers: [] };
   try { mcp = await window.sagitari.mcpList(); } catch {}
   for (const s of (mcp.servers || [])) {
-    const wildcard = 'mcp__' + s.id + '__*';
+    // La clave la calcula main (`permKey`): el comodín tiene que usar la MISMA
+    // normalización que el nombre expuesto (`slug(id, 16)`), o con un id con guion o
+    // de más de 16 caracteres no coincidiría con nada y el nivel no se aplicaría.
+    const wildcard = s.permKey || 'mcp__' + s.id + '__*';
     const lvl = (cfg.permissions && cfg.permissions[wildcard]) || 'default';
     const n = (s.discovered || []).length;
     const row = document.createElement('div');
