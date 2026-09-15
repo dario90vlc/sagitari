@@ -825,32 +825,25 @@ function createTtsWindows({ spawnFn = spawn, dataDir = os.tmpdir(), scriptPath =
 module.exports = { createTtsWindows };
 ```
 
-- [ ] **Step 5: Cambiar el manejador de hablar en `main/main.js` y el puente**
+- [ ] **Step 5: Añadir el IPC nuevo en `main/main.js` y el puente**
 
-Se **borra** el bloque que sintetizaba en línea con PowerShell (el que arranca `$v.Speak([Console]::In.ReadToEnd())`) y en su lugar:
+**NO se toca todavía el manejador `tts:speak`.** Ese corte va en la **tarea 9**, que es cuando el renderer ya sabe reproducir una frase: si se hiciera aquí, entre esta tarea y la 9 la app pediría frases que nadie reproduce y la lectura en voz alta del chat quedaría muda (el `VoiceManager` ni siquiera existe hasta la tarea 6). Lo que sí se añade aquí es el resto del camino, listo para usarse:
 
 ```js
-/* Una sola tubería de voz: se sintetiza por frases y se reproducen en el renderer, que
-   es quien tiene el analizador de audio (para el orbe) y quien puede cortar al instante.
-   Se conserva el nombre `tts:speak` y su contrato de silencio en arranques automatizados:
-   hay una comprobación de ui-check que depende de eso. */
-let ttsSeq = 0;
-ipcMain.handle('tts:speak', async (e, text) => {
-  if (HEADLESS) return { ok: false };                       // la regla que ya existía
-  if (!config.settings.ttsEnabled || !text) return { ok: false };
-  if (!voiceManager) return { ok: false };
-  try {
-    voiceManager.say(String(text));
-    return { ok: true };
-  } catch { return { ok: false }; }
-});
+/* Motor de síntesis del sistema. La síntesis por frases la orquesta el VoiceManager
+   (tarea 5) y el audio lo reproduce el renderer (tarea 9); aquí solo se expone. */
+let ttsEngine = null;
+function sintetizador() {
+  if (!ttsEngine) ttsEngine = createTtsWindows({ dataDir: DATA_DIR });
+  return ttsEngine;
+}
 
 ipcMain.handle('tts:list', async () => {
-  try { return { ok: true, voices: await tts.listarVoces() }; } catch { return { ok: false, voices: [] }; }
+  try { return { ok: true, voices: await sintetizador().listarVoces() }; } catch { return { ok: false, voices: [] }; }
 });
 ```
 
-Y en `main/preload.js`, junto a `speak`:
+Y en `main/preload.js`, junto a `speak` (los usa el renderer a partir de la tarea 9):
 
 ```js
   ttsList: () => ipcRenderer.invoke('tts:list'),
@@ -1801,7 +1794,22 @@ Y al cablear la app (después de `wireMic()`):
   window.VoiceMode.setHablar((t) => { if (CFG.settings.ttsNotices) speak(t, { forzar: true }); });
 ```
 
-- [ ] **Step 3: Con el modo abierto, la respuesta siempre se habla**
+- [ ] **Step 3: El corte definitivo del camino de voz y hablar siempre en modo voz**
+
+Aquí es donde se hace el corte que la tarea 4 dejó pendiente: `main/main.js` **borra** el bloque que sintetizaba en línea con PowerShell (el que arranca `$v.Speak([Console]::In.ReadToEnd())`) y lo sustituye por el `VoiceManager`, que ya existe y ya produce frases (tareas 5 y 6). El renderer ya las reproduce por el enganche del paso 2, así que no hay ventana en la que la app pida frases que nadie suena:
+
+```js
+/* Una sola tubería de voz: el VoiceManager trocea y sintetiza por frases; el renderer las
+   reproduce (tiene el analizador de audio para el orbe y puede cortar al instante).
+   Se conserva el nombre `tts:speak` y su contrato de silencio en arranques automatizados:
+   hay una comprobación de ui-check que depende de eso. */
+ipcMain.handle('tts:speak', async (e, text) => {
+  if (HEADLESS) return { ok: false };                       // la regla que ya existía
+  if (!config.settings.ttsEnabled || !text) return { ok: false };
+  if (!voiceManager) return { ok: false };
+  try { voiceManager.say(String(text)); return { ok: true }; } catch { return { ok: false }; }
+});
+```
 
 En el manejador de `assistant_done` (línea ~1117), donde hoy está `speak(ev.text);`:
 
