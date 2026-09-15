@@ -3568,13 +3568,23 @@ test('voz/manager: trocea la respuesta en frases y las sintetiza en orden', asyn
   const tts = { nombre: 'tts-mentira', capacidades: { partials: false, confidence: false, level: false },
     sintetizar: async (t) => { frases.push(t); return { wav: Buffer.from('RIFF'), voz: 'x', ms: 1 }; }, listarVoces: async () => [] };
   const stt = { nombre: 'stt', capacidades: { partials: true, confidence: true, level: false }, start: async () => {}, push: () => {}, stop: async () => {} };
-  let siguienteId = 0;
-  const m = createVoiceManager({ emit: (e) => eventos.push(e), stt, tts, onPhrase: (p) => { siguienteId = p.id; setTimeout(() => m.spoken(p.id), 5); } });
+  const m = createVoiceManager({ emit: (e) => eventos.push(e), stt, tts, onPhrase: (p) => { setTimeout(() => m.spoken(p.id), 5); } });
   await m.open();
   m.say('Hecho. He creado el recordatorio y lo he anotado.');
   await new Promise((r) => setTimeout(r, 80));
   eq(frases.length, 2, 'dos frases: ' + JSON.stringify(frases));
   eq(frases[0], 'Hecho.', 'la primera es la primera');
+  /* Los saltos de línea son frontera de frase: una lista se lee frase a frase. La línea SIN
+     punto final es la que distingue de verdad —con el troceado viejo, que colapsaba los
+     espacios antes de partir, las dos líneas salían pegadas en una sola frase—, y se compara
+     pieza a pieza porque `eq` es estricto (`a !== b`): dos arrays distintos nunca son el mismo
+     objeto, así que `eq(trocear(...), [...])` fallaría siempre, con las dos listas iguales en
+     el mensaje de error. */
+  const { trocear } = require('../main/voice/manager');
+  const lista = trocear('Lista uno\nLista dos sin punto');
+  eq(lista.length, 2, 'los saltos de línea parten la frase: ' + JSON.stringify(lista));
+  eq(lista[0], 'Lista uno', 'la primera línea se queda sola');
+  eq(lista[1], 'Lista dos sin punto', 'y la segunda, sin punto final, es su propia frase');
   ok(eventos.some((e) => e.type === 'state' && e.state === 'hablando'), 'el estado pasa a hablando');
   ok(eventos.some((e) => e.type === 'state' && e.state === 'escuchando'), 'y vuelve a escuchando al terminar');
 });

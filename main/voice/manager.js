@@ -9,14 +9,23 @@
 const { assertEvent } = require('./contract');
 const { esBasura } = require('./junk');
 
-/* Trocea para sintetizar: se corta en final de frase y en saltos de línea, y NADA MÁS.
-   Una versión anterior fusionaba frases cortas («Hecho.» se pegaba a la siguiente), lo que
-   rompe la síntesis por frases —que es justo lo que da la sensación de inmediatez— y
-   contradecía el test de esta tarea. Lo cazó el reconocimiento previo del plan. */
+/* Trocea para sintetizar. Primero por saltos de línea —una respuesta con lista se lee mucho
+   mejor frase a frase que como un párrafo corrido— y luego por final de frase. NO se fusionan
+   frases cortas: una versión anterior lo hacía y contradecía el test de la tarea. Se colapsan
+   los espacios DESPUÉS de partir por líneas, que si no el colapso se come los saltos. */
 function trocear(texto) {
-  const limpio = String(texto || '').replace(/```[\s\S]*?```/g, ' (código) ').replace(/\s+/g, ' ').trim();
+  const limpio = String(texto || '').replace(/```[\s\S]*?```/g, ' (código) ').trim();
   if (!limpio) return [];
-  return (limpio.match(/[^.!?…]+[.!?…]*/g) || [limpio]).map((f) => f.trim()).filter(Boolean);
+  const out = [];
+  for (const linea of limpio.split(/\r?\n/)) {
+    const l = linea.replace(/\s+/g, ' ').trim();
+    if (!l) continue;
+    for (const f of l.match(/[^.!?…]+[.!?…]*/g) || [l]) {
+      const t = f.trim();
+      if (t) out.push(t);
+    }
+  }
+  return out;
 }
 
 function createVoiceManager({ emit, stt, tts, onPhrase = () => {}, settings = {} } = {}) {
