@@ -517,6 +517,16 @@ const AFTER = {
   await judge('el modo voz se abre y se cierra por IPC',
     '(async function(){ const a = await window.sagitari.voiceOpen(); const b = await window.sagitari.voiceClose(); return !!(a && a.ok) && !!(b && b.ok); })()');
 
+  /* El orbe del modo voz: vive en el renderer y se pinta a mano en un canvas. Se
+     comprueban sus dos piezas frágiles. El suavizado, porque es lo que evita que el
+     orbe tiemble (sube rápido, baja despacio); y el dibujo, porque además de pintar
+     tiene que CAMBIAR DE CARA con el estado y dejar el borde del lienzo SIN pintar:
+     si el halo llegara a la esquina se vería un cuadrado tenue sobre el panel. */
+  await judge('el suavizado del orbe sube rápido y baja despacio',
+    '(function(){ const o = window.OrbKit; if (!o) return false; let v = 0; v = o.smoothLevel(v, 1, 0.05); const subida = v; v = o.smoothLevel(v, 0, 0.05); const bajada = subida - v; return subida > 0.4 && bajada < subida / 2; })()');
+  await judge('la malla del orbe pinta y cambia de cara con el estado',
+    '(function(){ const o = window.OrbKit; if (!o) return false; const c = document.createElement("canvas"); c.width = 200; c.height = 200; const ctx = c.getContext("2d"); const cuenta = () => { const d = ctx.getImageData(0, 0, 200, 200).data; let n = 0; for (let i = 3; i < d.length; i += 4) if (d[i] > 12) n++; return n; }; o.draw(ctx, 200, 200, 0.6, "oyendo", 1.2); const a = cuenta(); o.draw(ctx, 200, 200, 0.6, "escuchando", 1.2); const b = cuenta(); o.draw(ctx, 200, 200, 0.6, "pensando", 1.2); const e = cuenta(); const borde = ctx.getImageData(0, 0, 1, 1).data[3]; return a > 500 && b > 500 && e > 500 && Math.abs(a - b) > 50 && borde === 0; })()');
+
   /* La app de prueba arranca OCULTA (--hidden) y su modelo de mentira responde «listo» a
      todo: si además hablara, el usuario oiría una voz salida de la nada, sin ventana que
      la explique (pasó, y se cazó con una sonda de procesos). El perfil de prueba deja el
