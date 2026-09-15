@@ -359,6 +359,34 @@ test('voz/stt-windows: arranca el motor moderno (sin caparlo) y traduce el proto
   eq(errores.filter((e) => e.type === 'error').length, 0, 'sin salida no hay error inventado');
 });
 
+test('voz/stt-windows: si el motor muere solo, avisa al consumidor', async () => {
+  const { createSttWindows } = require('../main/voice/stt-windows');
+  const eventos = [];
+  const spawnFn = () => {
+    const l = {};
+    const proc = { stdout: { on: (k, f) => { l['o' + k] = f; } }, stderr: { on: (k, f) => { l['e' + k] = f; } }, on: (k, f) => { l[k] = f; }, kill() {}, stdin: { end() {} } };
+    setTimeout(() => { l['odata'](Buffer.from('MODE::sapi\nREADY::es-ES\n')); l['exit'](1); }, 5);
+    return proc;
+  };
+  const engine = createSttWindows({ emit: (e) => eventos.push(e), spawnFn, scriptPath: 'voice.ps1' });
+  await engine.start();
+  await new Promise((r) => setTimeout(r, 40));
+  /* Sin este aviso, el consumidor se queda en «escuchando» y el usuario habla al vacío. */
+  ok(eventos.some((e) => e.type === 'error' && /cerr[oó] solo/i.test(e.text)), 'la muerte sin aviso se convierte en error: ' + JSON.stringify(eventos.filter((e) => e.type === 'error')));
+
+  const eventos2 = [];
+  const spawnFn2 = () => {
+    const l = {};
+    const proc = { stdout: { on: (k, f) => { l['o' + k] = f; } }, stderr: { on: (k, f) => { l['e' + k] = f; } }, on: (k, f) => { l[k] = f; }, kill() { setTimeout(() => l['exit'](0), 5); }, stdin: { end() {} } };
+    return proc;
+  };
+  const engine2 = createSttWindows({ emit: (e) => eventos2.push(e), spawnFn: spawnFn2, scriptPath: 'voice.ps1' });
+  await engine2.start();
+  await engine2.stop();
+  await new Promise((r) => setTimeout(r, 30));
+  eq(eventos2.filter((e) => e.type === 'error').length, 0, 'un cierre pedido no es un error');
+});
+
 test('voz/stt-windows: un ERROR:: del motor se convierte en error con arreglo', async () => {
   const { createSttWindows } = require('../main/voice/stt-windows');
   const eventos = [];
@@ -406,6 +434,7 @@ function createSttWindows({ emit, lang = 'es-ES', spawnFn = spawn, scriptPath = 
   let proc = null;
   let buf = '';
   let info = { motor: '', idioma: '' };
+  let detenido = false;   // distingue «lo paramos nosotros» de «se murió solo»
 
   function manejaLinea(linea) {
     if (linea.startsWith('PART::')) emit({ type: 'partial', text: linea.slice(6) });
@@ -423,6 +452,10 @@ function createSttWindows({ emit, lang = 'es-ES', spawnFn = spawn, scriptPath = 
     } else if (linea.startsWith('READY::')) {
       info.idioma = linea.slice(7).trim();
       emit({ type: 'state', state: 'escuchando' });
+    } else if (linea.startsWith('STOPPED::')) {
+      /* El guion avisa de que se para él solo: se suelta el proceso para no quedarnos
+         apuntando a algo que ya terminó. */
+      stop();
     } else if (linea.startsWith('HINT::')) {
       emit({ type: 'notice', text: linea.slice(6) });
     } else if (linea.startsWith('ERROR::')) {
@@ -435,13 +468,22 @@ function createSttWindows({ emit, lang = 'es-ES', spawnFn = spawn, scriptPath = 
   }
 
   function start() {
+    /* Rearma el estado y cierra el proceso anterior: dos arranques seguidos dejarían el
+       PowerShell viejo con el micrófono abierto y su salida se leería como del nuevo. */
+    if (proc) { try { proc.kill(); } catch {} proc = null; }
+    buf = '';
+    info = { motor: '', idioma: '' };
+    detenido = false;
     return new Promise((resolve, reject) => {
+      let p;
       try {
         /* El motor moderno de Windows (WinRT) NO se capa: da parciales y confianza, y
            voice.ps1 ya sabe caer al clásico si en la máquina no hay idioma offline. */
-        proc = spawnFn('powershell.exe', ['-NoProfile', '-ExecutionPolicy', 'Bypass', '-File', scriptPath, '-Lang', lang], { windowsHide: true });
+        p = spawnFn('powershell.exe', ['-NoProfile', '-ExecutionPolicy', 'Bypass', '-File', scriptPath, '-Lang', lang], { windowsHide: true });
       } catch (e) { reject(e); return; }
-      proc.stdout.on('data', (d) => {
+      proc = p;
+      p.stdout.on('data', (d) => {
+        if (proc !== p) return;                  // salida de un proceso que ya no es el vigente
         buf += d.toString('utf8');
         let i;
         while ((i = buf.indexOf('\n')) >= 0) {
@@ -450,11 +492,24 @@ function createSttWindows({ emit, lang = 'es-ES', spawnFn = spawn, scriptPath = 
           if (linea) manejaLinea(linea);
         }
       });
-      proc.stderr.on('data', (d) => {
+      p.stderr.on('data', (d) => {
+        if (proc !== p) return;
         const msg = d.toString('utf8').trim();
         if (msg) emit({ type: 'error', text: 'El motor de voz falló: ' + msg.slice(0, 200), fix: 'Cierra el modo voz y vuelve a abrirlo.' });
       });
-      proc.on('exit', () => { proc = null; });
+      /* `spawn` no lanza cuando no puede arrancar: emite un 'error' asíncrono. Sin este
+         listener, Node lo relanza como excepción no capturada y puede tumbar la app. */
+      p.on('error', (e) => {
+        if (proc === p) proc = null;
+        emit({ type: 'error', text: 'No se pudo arrancar el motor de voz: ' + e.message, fix: 'Vuelve a abrir el modo voz.' });
+      });
+      p.on('exit', () => {
+        const eraElVigente = proc === p;
+        if (eraElVigente) proc = null;
+        /* Si se murió sin que se lo pidiéramos y sin haber dicho ERROR::, el consumidor
+           se quedaría en «escuchando» mientras el usuario habla al vacío. */
+        if (eraElVigente && !detenido) emit({ type: 'error', text: 'El motor de voz se cerró solo.', fix: 'Vuelve a abrir el modo voz.' });
+      });
       resolve();
     });
   }
@@ -463,6 +518,7 @@ function createSttWindows({ emit, lang = 'es-ES', spawnFn = spawn, scriptPath = 
     return new Promise((resolve) => {
       const p = proc;
       proc = null;
+      detenido = true;
       if (!p) { resolve(); return; }
       try { p.stdin.end(); } catch {}
       try { p.kill(); } catch {}
