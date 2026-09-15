@@ -1637,6 +1637,10 @@ function validateServer(raw) {
   if (transport === 'stdio') {
     const command = String(s.command || '').trim();
     if (!command) return { ok: false, error: 'Falta el comando del servidor.' };
+    // Un `args` que no sea lista (pegado de otro cliente o editado a mano) reventaba
+    // en buildCmdLine con «args.map is not a function» y el servidor se descartaba
+    // en silencio al arrancar: se comprueba el tipo como con `env` y `tools`.
+    if (s.args !== undefined && !Array.isArray(s.args)) return { ok: false, error: 'Los argumentos deben ser una lista (ej.: ["-y", "paquete"]).' };
     try { buildCmdLine(command, s.args || []); }
     catch (e) { return { ok: false, error: e.message }; }
     const env = {};
@@ -1740,15 +1744,18 @@ let mcp = null;
 function wireMcp() {
   if (!mcp) mcp = new McpManager({ servers: [], dataDir: CONFIG_DIR, clientVersion: app.getVersion(), log: (e) => runlog.log(e) });
   mcp.configure(config.mcp.servers || []);
-  // el catálogo se pide en cada turno: conectar un servidor no exige reiniciar la app
-  require('../agent/tools').setDynamicToolProvider(() => mcp.toolDefs());
+  // el catálogo se pide en cada turno: conectar un servidor no exige reiniciar la app.
+  // El interruptor global se aplica AQUÍ: apagado, el catálogo que ve el modelo no
+  // incluye ninguna herramienta MCP (el renderer no puede quitarlas por su cuenta).
+  require('../agent/tools').setDynamicToolProvider(() => (config.mcp.enabled === false ? [] : mcp.toolDefs()));
   return mcp;
 }
 ```
    - Llamar a `wireMcp()` en `app.whenReady()` (antes de `wireAgent()`), y arrancar los `autoStart`:
 ```js
   wireMcp();
-  for (const s of config.mcp.servers || []) if (s.autoStart && s.enabled) mcp.ensure(s.id).catch(() => {});
+  // con el interruptor global apagado no se arranca ningún servidor
+  if (config.mcp.enabled !== false) for (const s of config.mcp.servers || []) if (s.autoStart && s.enabled) mcp.ensure(s.id).catch(() => {});
 ```
    - `createAgent(isBackground)`: añadir `mcp: wireMcp(),` al `new Agent({...})`.
 5. IPC (todos validando la entrada; `mcp:delete` limpia overrides):
@@ -1788,6 +1795,12 @@ ipcMain.handle('mcp:save', (e, raw) => {
   if (previo) {
     server.env = mcpConfig.mergeSecrets(previo.env, server.env);
     server.headers = mcpConfig.mergeSecrets(previo.headers, server.headers);
+    // El formulario no reenvía estos campos: se conservan del servidor guardado para
+    // que editar no reactive un servidor apagado ni pierda autoStart/timeout/cwd.
+    if (raw.enabled === undefined) server.enabled = previo.enabled !== false;
+    if (raw.autoStart === undefined) server.autoStart = previo.autoStart === true;
+    if (raw.timeoutMs === undefined) server.timeoutMs = previo.timeoutMs;
+    if (raw.cwd === undefined) server.cwd = previo.cwd || '';
   }
   config.mcp.servers = [...(config.mcp.servers || []).filter(s => s.id !== server.id), server];
   wireMcp();
@@ -1807,8 +1820,9 @@ ipcMain.handle('mcp:delete', (e, id) => {
   }
   if (agent) agent.setPolicy(config.security);
   wireMcp();
-  persistConfig();
-  return { ok: true, servers: mcpState().servers };
+  const r = persistConfig();
+  // si el disco falla, decir «eliminado» sería mentir: el servidor seguiría en config.json
+  return r.ok ? { ok: true, servers: mcpState().servers } : { ok: false, error: r.error };
 });
 
 ipcMain.handle('mcp:toggle', (e, { id, enabled }) => { /* cambia enabled del servidor y reconfigure + persistConfig */ });
