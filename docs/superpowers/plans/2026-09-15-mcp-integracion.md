@@ -2358,6 +2358,25 @@ de `mejoraSelects(permBox)`:
 ```
 (no hace falta un listener aparte: el `onchange` va en cada fila, como en las nativas)
 
+**Además**, `renderSecurity` debe repintarse al entrar en la pestaña y no descartar el
+repintado si ya hay uno en vuelo (sus filas MCP reflejan el estado de la sesión):
+```js
+let securityPainting = false;
+let securityAgain = false;
+async function renderSecurity() {
+  // Si ya hay un pintado en vuelo se ENCOLA otra pasada en vez de descartarla:
+  // descartarla dejaba la lista con los datos viejos justo al entrar, que es el
+  // síntoma que se quería eliminar.
+  if (securityPainting) { securityAgain = true; return; }
+  securityPainting = true;
+  try {
+    do { securityAgain = false; await _renderSecurity(); } while (securityAgain);
+  } finally { securityPainting = false; }
+}
+```
+y en `showSetTab(panel)`: `if (panel === 'security') renderSecurity();`
+(el cuerpo actual de `renderSecurity` pasa a `_renderSecurity`; `initSecurity` sigue llamando a `renderSecurity`)
+
 - [ ] **Step 3: Verificar en vivo**
 
 Run: `npm run uicheck` → sigue en verde (la vista Herramientas y Seguridad no deben romperse cuando no hay servidores MCP configurados: `mcpList` devuelve `{ servers: [] }` y no se añade nada)
@@ -2423,17 +2442,20 @@ y en el JSON que se escribe: `{ providers: [...], active: dummy, mcp: { enabled:
   await new Promise(r => setTimeout(r, 600));
   await judge('Seguridad tiene una fila de permiso para el servidor MCP',
     '(function(){ var p = document.querySelector("#permList"); return !!p && /MCP/.test(p.textContent) && !!p.querySelector(\'select[data-tool="mcp__eco__*"]\'); })()');
-  // ---- el interruptor global apaga y enciende el catálogo (de punta a punta) ----
+  // ---- el interruptor global apaga y enciende el CATÁLOGO (de punta a punta) ----
+  // Estas dos comprobaciones consultan `mcpList()` (async), así que el `evaluate` de
+  // este script necesita `awaitPromise: true` en sus params de Runtime.evaluate; sin
+  // eso devuelve el objeto Promise y el `returnByValue` no sirve para juzgar nada.
   await evaluate('document.querySelector(\'#setTabs .settab[data-set="mcp"]\').click()');
   await new Promise(r => setTimeout(r, 400));
   await evaluate('document.querySelector("#mcpGlobal").click()');
   await new Promise(r => setTimeout(r, 1500));
   await judge('con el interruptor apagado el catálogo no ofrece herramientas MCP',
-    '(function(){ return typeof window.sagitari.mcpList === "function" && document.querySelector("#mcpGlobal") && !document.querySelector("#mcpGlobal").classList.contains("on"); })()');
+    '(async function(){ const l = await window.sagitari.mcpList(); document.querySelector(\'[data-view="tools"]\').click(); await new Promise(r => setTimeout(r, 500)); const g = document.querySelector("#toolsGrid"); const sinGrupo = !!g && !/Servidores MCP/.test(g.textContent); document.querySelector(\'[data-view="settings"]\').click(); document.querySelector(\'#setTabs .settab[data-set="mcp"]\').click(); return l.enabled === false && sinGrupo; })()');
   await evaluate('document.querySelector("#mcpGlobal").click()');
   await new Promise(r => setTimeout(r, 2500));
-  await judge('al reencender, el servidor vuelve a estar listo',
-    '(function(){ return /Listo/.test(document.querySelector("#mcpList").textContent); })()');
+  await judge('al reencender, el catálogo vuelve a ofrecer las herramientas MCP',
+    '(async function(){ const l = await window.sagitari.mcpList(); document.querySelector(\'[data-view="tools"]\').click(); await new Promise(r => setTimeout(r, 500)); const g = document.querySelector("#toolsGrid"); const conGrupo = !!g && /Servidores MCP/.test(g.textContent) && /echo/.test(g.textContent); document.querySelector(\'[data-view="settings"]\').click(); document.querySelector(\'#setTabs .settab[data-set="mcp"]\').click(); return l.enabled === true && conGrupo; })()');
   await evaluate('document.querySelector(\'[data-view="chat"]\').click()');
 ```
 
