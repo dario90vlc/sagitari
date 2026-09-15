@@ -92,6 +92,10 @@ function freePort() {
    por lo que de verdad recibe el modelo. `vistos` guarda un array de nombres por petición. */
 function fakeLlm() {
   const vistos = [];
+  /* La petición CRUDA, además de los nombres de herramientas: es lo único que el modelo
+     recibe de verdad (system prompt, definiciones y el índice de skills), así que es
+     donde se puede comprobar el registro con el que se le habla, sin fiarse del código. */
+  const cuerpos = [];
   const srv = http.createServer((req, res) => {
     let body = '';
     req.on('data', (c) => { body += c; });
@@ -99,13 +103,14 @@ function fakeLlm() {
       let nombres = null;
       try { nombres = (JSON.parse(body).tools || []).map(t => (t.function || {}).name).filter(Boolean); } catch {}
       vistos.push(nombres);      // null = la petición no traía `tools`
+      cuerpos.push(body);
       res.writeHead(200, { 'content-type': 'text/event-stream' });
       res.write('data: ' + JSON.stringify({ choices: [{ delta: { content: 'listo' } }] }) + '\n\n');
       res.write('data: [DONE]\n\n');
       res.end();
     });
   });
-  return new Promise((res) => srv.listen(0, '127.0.0.1', () => res({ srv, port: srv.address().port, vistos })));
+  return new Promise((res) => srv.listen(0, '127.0.0.1', () => res({ srv, port: srv.address().port, vistos, cuerpos })));
 }
 
 /** Comprobaciones sobre la ventana viva. `true` = bien. */
@@ -484,6 +489,23 @@ const AFTER = {
   }
   await evaluate('document.querySelector(\'.navitem[data-view="mcp"]\').click()');
   await evaluate('document.querySelector(\'[data-view="chat"]\').click()');
+
+  /* El registro con el que se le habla al modelo: TODO lo que recibe —system prompt,
+     definiciones de herramientas y el índice de skills— va sin emojis y con la regla de
+     estilo escrita, porque el modelo copia lo que ve y el usuario no quiere un asistente
+     que adorne el texto con caritas. Se mira la petición CRUDA (la última, que ya lleva
+     las herramientas MCP), que es lo único que el modelo recibe de verdad. */
+  const cuerpoModelo = llm.cuerpos[llm.cuerpos.length - 1] || '';
+  const pictograma = /\p{Extended_Pictographic}/u;
+  const emojisEnviados = [...new Set(cuerpoModelo.match(/.\p{Extended_Pictographic}/gu) || [])];
+  if (/NADA de emojis/.test(cuerpoModelo) && !emojisEnviados.length) {
+    console.log('  ok   la petición al modelo va sin emojis y declara la regla de estilo');
+  } else {
+    failed++;
+    console.log('  FALLO la petición al modelo ' + (emojisEnviados.length
+      ? 'lleva emojis: ' + JSON.stringify(emojisEnviados.slice(0, 6))
+      : 'no declara la regla de estilo'));
+  }
 
   /* La app de prueba arranca OCULTA (--hidden) y su modelo de mentira responde «listo» a
      todo: si además hablara, el usuario oiría una voz salida de la nada, sin ventana que

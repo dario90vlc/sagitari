@@ -64,7 +64,8 @@ MEMORIA del usuario — recuerdos relevantes para esta conversación (úsalos si
 - Si la petición es conversacional (saludo, pregunta), responde directamente sin herramientas.
 
 FORMATO
-- Tus respuestas se muestran en un chat con soporte markdown ligero (negrita, listas, código). Sé visual y ordenado.`;
+- Tus respuestas se muestran en un chat con soporte markdown ligero (negrita, listas, código). Sé claro y ordenado.
+- NADA de emojis ni caritas en el texto (tampoco en títulos ni listas): tono profesional y sobrio. La interfaz ya pone sus propios iconos, así que el adorno sobra.`;
 }
 
 const MODE_PROFILES = {
