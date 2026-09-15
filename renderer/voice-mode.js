@@ -186,9 +186,17 @@
     if (bNo) bNo.onclick = () => { if (confirmacion) contestar('no'); };
   }
 
+  /* Cada apertura lleva su número. Con el flag `abierto` no basta: si se cierra y se vuelve
+     a abrir mientras la primera espera sigue viva, `abierto` vuelve a ser `true` y esa
+     apertura abandonada ya no vería el cierre —seguiría adelante y dejaría un micrófono y
+     un bucle huérfanos que nadie puede parar—. */
+  let apertura = 0;
+  const vigente = (gen) => abierto && gen === apertura;
+
   async function abrir() {
     if (abierto) return;
     abierto = true;
+    const gen = ++apertura;
     reducido = !!(window.matchMedia && window.matchMedia('(prefers-reduced-motion: reduce)').matches);
     const panel = $vm('#voiceMode');
     if (panel) panel.hidden = false;
@@ -196,25 +204,40 @@
     setEstado('escuchando');
     document.addEventListener('keydown', alTeclado, true);
     const r = await window.sagitari.voiceOpen().catch(() => null);
-    /* El usuario puede haber pulsado Esc mientras esto se abría. Entonces ya no hay nada
-       que abrir: seguir hasta el final adquiriría un micrófono y un bucle de dibujo para
-       un modo cerrado (micro capturando sin panel, y `cerrar()` ya no podría pararlo),
-       así que se abandona aquí. */
-    if (!abierto) return;
+    /* El usuario puede haber pulsado Esc (o haber cerrado y reabierto) mientras esto se
+       abría. Entonces ya no hay nada que abrir: seguir hasta el final adquiriría un
+       micrófono y un bucle de dibujo para un modo cerrado, así que se abandona aquí. */
+    if (!vigente(gen)) return;
     if (!r || !r.ok) { error('No he podido abrir el modo voz.', 'Cierra y vuelve a abrirlo; si sigue, revisa Ajustes › Voz.'); }
-    await abrirMicro();
+    let rec = null;
+    try { rec = await pedirMicro(); } catch (e) { rec = null; }
     /* Mismo caso, ahora con el micrófono ya pedido: si mientras se concedía el permiso se
-       cerró el modo, se suelta lo adquirido y no se arranca el bucle. */
-    if (!abierto) { soltarMicro(); return; }
+       cerró (o se cerró y se reabrió), esto ya no es la apertura vigente. Se deja el audio
+       como lo dejaría un cierre —primero se para la reproducción, que comparte el
+       `AudioContext`, para no cortarle la frase a nadie sin avisar— y se suelta lo que se
+       acaba de adquirir: sólo eso, porque el micrófono bueno puede ser el de la apertura
+       nueva y pisárselo la dejaría sin micro. */
+    if (!vigente(gen)) { await pararAudio(); soltar(rec); return; }
+    if (!rec) { error('No tengo acceso al micrófono.', 'Revisa el permiso en ms-settings:privacy-microphone y vuelve a abrir el modo voz.'); }
+    else {
+      mic = rec.stream; ctxAudio = rec.ctx; analizadorMic = rec.analizador;
+      sueloRuido = 0.01;
+    }
     arrancarBucle();
   }
 
-  /* Suelta el micrófono y el AudioContext del renderer. Vale para cerrar y para cuando la
-     apertura se abandonó a mitad: el micrófono no puede quedarse capturando sin panel. */
+  /* Suelta un micrófono concreto (el de una apertura que se abandonó) sin tocar los
+     compartidos: cerrar a ciegas los de la sesión viva la dejaría sin micro y sin audio. */
+  function soltar(rec) {
+    if (!rec) return;
+    if (rec.stream) { try { rec.stream.getTracks().forEach((t) => t.stop()); } catch {} }
+    if (rec.ctx && rec.ctx.state !== 'closed') { try { rec.ctx.close(); } catch {} }
+  }
+
+  /* Suelta el micrófono y el AudioContext de la sesión. */
   function soltarMicro() {
-    if (mic) { mic.getTracks().forEach((t) => t.stop()); mic = null; }
-    if (ctxAudio && ctxAudio.state !== 'closed') { try { ctxAudio.close(); } catch {} }
-    ctxAudio = null; analizadorMic = null;
+    soltar({ stream: mic, ctx: ctxAudio });
+    mic = null; ctxAudio = null; analizadorMic = null;
   }
 
   async function cerrar() {
@@ -240,19 +263,17 @@
     cerrar();
   }
 
-  /* Micrófono del renderer: es la fuente del nivel del orbe y de la calibración de ruido. */
-  async function abrirMicro() {
-    try {
-      mic = await navigator.mediaDevices.getUserMedia({ audio: { echoCancellation: true, noiseSuppression: true } });
-      ctxAudio = new (window.AudioContext || window.webkitAudioContext)();
-      const src = ctxAudio.createMediaStreamSource(mic);
-      analizadorMic = ctxAudio.createAnalyser();
-      analizadorMic.fftSize = 1024;
-      src.connect(analizadorMic);
-      sueloRuido = 0.01;
-    } catch (e) {
-      error('No tengo acceso al micrófono.', 'Revisa el permiso en ms-settings:privacy-microphone y vuelve a abrir el modo voz.');
-    }
+  /* Micrófono del renderer: es la fuente del nivel del orbe y de la calibración de ruido.
+     Devuelve lo adquirido SIN tocar el estado compartido: quien llama comprueba que su
+     apertura sigue siendo la vigente antes de quedárselo. Si lo dejara ya puesto, una
+     apertura abandonada tardía pisaría el micrófono bueno y nadie soltaría el suyo. */
+  async function pedirMicro() {
+    const stream = await navigator.mediaDevices.getUserMedia({ audio: { echoCancellation: true, noiseSuppression: true } });
+    const ctx = new (window.AudioContext || window.webkitAudioContext)();
+    const analizador = ctx.createAnalyser();
+    analizador.fftSize = 1024;
+    ctx.createMediaStreamSource(stream).connect(analizador);
+    return { stream, ctx, analizador };
   }
 
   function rms(analizador) {
