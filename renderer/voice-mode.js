@@ -269,11 +269,20 @@
      apertura abandonada tardía pisaría el micrófono bueno y nadie soltaría el suyo. */
   async function pedirMicro() {
     const stream = await navigator.mediaDevices.getUserMedia({ audio: { echoCancellation: true, noiseSuppression: true } });
-    const ctx = new (window.AudioContext || window.webkitAudioContext)();
-    const analizador = ctx.createAnalyser();
-    analizador.fftSize = 1024;
-    ctx.createMediaStreamSource(stream).connect(analizador);
-    return { stream, ctx, analizador };
+    let ctx = null;
+    try {
+      ctx = new (window.AudioContext || window.webkitAudioContext)();
+      const analizador = ctx.createAnalyser();
+      analizador.fftSize = 1024;
+      ctx.createMediaStreamSource(stream).connect(analizador);
+      return { stream, ctx, analizador };
+    } catch (e) {
+      /* Si falla DESPUÉS de que el micrófono se conceda —por ejemplo al topar con el límite
+         de `AudioContext` del navegador— las pistas se quedan capturando y aquí ya no hay
+         estado compartido del que fiarse para pararlas, así que se sueltan estas. */
+      soltar({ stream, ctx });
+      throw e;
+    }
   }
 
   function rms(analizador) {
