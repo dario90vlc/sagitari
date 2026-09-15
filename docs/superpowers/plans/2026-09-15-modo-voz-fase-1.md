@@ -650,8 +650,10 @@ test('voz/tts-windows: sin voz disponible devuelve un error legible, no una exce
   const tts = createTtsWindows({ spawnFn, dataDir: require('os').tmpdir() });
   let r = null;
   try { r = await tts.sintetizar('hola'); } catch (e) { r = { texto: e.message }; }
-  ok(r === null || typeof r === 'object', 'no revienta el proceso');
-  ok(!r || !r.wav, 'y no devuelve audio inventado');
+  /* Antes esta aserción era tautológica (`typeof null === 'object'`): no podía fallar.
+     El contrato es que sintetizar() NO lance y explique el fallo. */
+  ok(r && typeof r.error === 'string' && r.error, 'no revienta el proceso y explica el fallo');
+  ok(!r.wav, 'y no devuelve audio inventado');
 });
 ```
 
@@ -693,6 +695,13 @@ try {
   $todas = [Windows.Media.SpeechSynthesis.SpeechSynthesizer]::AllVoices
   if ($List) {
     foreach ($v in $todas) { Say ("VOICE::" + $v.DisplayName + "|" + $v.Language + "|" + $v.Gender) }
+    # Si el almacén moderno está vacío, las voces de escritorio son las únicas que hay:
+    # sin esta rama, Ajustes diría «sin voces instaladas» aunque la síntesis funcione.
+    if ($todas.Count -eq 0) {
+      $s = New-Object System.Speech.Synthesis.SpeechSynthesizer
+      foreach ($v in $s.GetInstalledVoices()) { Say ("VOICE::" + $v.VoiceInfo.Name + "|" + $v.VoiceInfo.Culture.Name) }
+      $s.Dispose()
+    }
     exit 0
   }
 
@@ -774,6 +783,13 @@ function createTtsWindows({ spawnFn = spawn, dataDir = os.tmpdir(), scriptPath =
         proc = spawnFn('powershell.exe', ['-NoProfile', '-ExecutionPolicy', 'Bypass', '-File', scriptPath,
           '-Lang', args.lang || 'es-ES', '-Voice', args.voice || '', '-TextFile', tmpText, '-OutFile', tmpWav, '-Rate', String(args.rate ?? rate)], { windowsHide: true });
         try { proc.stdin.end(); } catch {}
+        /* `spawn` no lanza cuando no puede arrancar (ENOENT, EACCES): avisa por el evento
+           'error'. Sin listener, Node lo relanza como excepción no capturada y, como en ese
+           caso no llega ningún 'exit', la promesa no resolvería y el .txt se quedaría. */
+        proc.on('error', (e) => {
+          try { fs.unlinkSync(tmpText); } catch {}
+          resolve({ ...salida, error: e.message });
+        });
       } catch (e) {
         try { fs.unlinkSync(tmpText); } catch {}
         resolve({ ...salida, error: e.message });
@@ -792,7 +808,14 @@ function createTtsWindows({ spawnFn = spawn, dataDir = os.tmpdir(), scriptPath =
         }
       });
       proc.stderr.on('data', (d) => { if (!salida.error) salida.error = d.toString('utf8').trim().slice(0, 200); });
+      /* Una síntesis colgada no puede dejar la promesa pendiente para siempre: si PowerShell
+         no termina (Await hace .Wait(-1) sobre una tarea WinRT), se le da un minuto. */
+      const killTimer = setTimeout(() => {
+        salida.error = salida.error || 'la síntesis tardó demasiado';
+        try { proc.kill(); } catch {}
+      }, 60000);
       proc.on('exit', () => {
+        clearTimeout(killTimer);
         try { fs.unlinkSync(tmpText); } catch {}
         resolve(salida);
       });
@@ -816,6 +839,8 @@ function createTtsWindows({ spawnFn = spawn, dataDir = os.tmpdir(), scriptPath =
         proc = spawnFn('powershell.exe', ['-NoProfile', '-ExecutionPolicy', 'Bypass', '-File', scriptPath, '-List'], { windowsHide: true });
         try { proc.stdin.end(); } catch {}   // sin cerrar la entrada, powershell no termina
       } catch { resolve(l); return; }
+      proc.on('error', () => resolve(l));   // sin listener, Node relanzaría el error
+      const killTimer = setTimeout(() => { try { proc.kill(); } catch {} resolve(l); }, 20000);
       let buf = '';
       proc.stdout.on('data', (d) => {
         buf += d.toString('utf8');
@@ -826,7 +851,7 @@ function createTtsWindows({ spawnFn = spawn, dataDir = os.tmpdir(), scriptPath =
           if (linea.startsWith('VOICE::')) { const [nombre, idioma] = linea.slice(7).split('|'); l.push({ nombre, idioma }); }
         }
       });
-      proc.on('exit', () => resolve(l));
+      proc.on('exit', () => { clearTimeout(killTimer); resolve(l); });
     });
     return r;
   }
