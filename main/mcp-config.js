@@ -53,6 +53,11 @@ function validateServer(raw) {
   if (transport === 'stdio') {
     const command = String(s.command || '').trim();
     if (!command) return { ok: false, error: 'Falta el comando del servidor.' };
+    // Un `args` que no sea lista (JSON pegado de otro cliente, config editado a mano)
+    // reventaba en buildCmdLine como «args.map is not a function», que no explica nada.
+    if (s.args !== undefined && !Array.isArray(s.args)) {
+      return { ok: false, error: 'Los argumentos deben ser una lista (ej.: ["-y", "paquete"]).' };
+    }
     try { buildCmdLine(command, s.args || []); }
     catch (e) { return { ok: false, error: e.message }; }
     const env = {};

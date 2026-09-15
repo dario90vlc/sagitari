@@ -452,8 +452,10 @@ let mcp = null;
 function wireMcp() {
   if (!mcp) mcp = new McpManager({ servers: [], dataDir: CONFIG_DIR, clientVersion: app.getVersion(), log: (e) => runlog.log(e) });
   mcp.configure(config.mcp.servers || []);
-  // el catálogo se pide en cada turno: conectar un servidor no exige reiniciar la app
-  require('../agent/tools').setDynamicToolProvider(() => mcp.toolDefs());
+  // El interruptor global se aplica AQUÍ: si está apagado, el catálogo que ve el
+  // modelo no incluye ninguna herramienta MCP (el renderer no puede quitarlas).
+  // Y el catálogo se pide en cada turno: conectar un servidor no exige reiniciar la app.
+  require('../agent/tools').setDynamicToolProvider(() => (config.mcp.enabled === false ? [] : mcp.toolDefs()));
   return mcp;
 }
 
@@ -928,7 +930,8 @@ function mcpExport() {
 ipcMain.handle('mcp:list', () => mcpState());
 
 ipcMain.handle('mcp:save', (e, raw) => {
-  const v = mcpConfig.validateServer(raw || {});
+  const payload = raw && typeof raw === 'object' ? raw : {};
+  const v = mcpConfig.validateServer(payload);
   if (!v.ok) return { ok: false, error: v.error };
   const server = v.value;
   // el formulario no reenvía los secretos: un valor vacío conserva el guardado
@@ -936,11 +939,18 @@ ipcMain.handle('mcp:save', (e, raw) => {
   if (previo) {
     server.env = mcpConfig.mergeSecrets(previo.env, server.env);
     server.headers = mcpConfig.mergeSecrets(previo.headers, server.headers);
+    // El formulario no reenvía estos campos: se conservan del servidor guardado para
+    // que editar no reactive un servidor apagado ni pierda autoStart/timeout/cwd.
+    if (payload.enabled === undefined) server.enabled = previo.enabled !== false;
+    if (payload.autoStart === undefined) server.autoStart = previo.autoStart === true;
+    if (payload.timeoutMs === undefined) server.timeoutMs = previo.timeoutMs;
+    if (payload.cwd === undefined && server.transport === 'stdio') server.cwd = previo.cwd || '';
   }
   config.mcp.servers = [...(config.mcp.servers || []).filter(s => s.id !== server.id), server];
   wireMcp();
   const r = persistConfig();
-  return r.ok ? { ok: true, servers: mcpState().servers } : { ok: false, error: r.error };
+  // el id saneado viaja de vuelta: la UI lo necesita para el permiso mcp__<id>__*
+  return r.ok ? { ok: true, id: server.id, servers: mcpState().servers } : { ok: false, error: r.error };
 });
 
 ipcMain.handle('mcp:delete', (e, id) => {
@@ -953,8 +963,10 @@ ipcMain.handle('mcp:delete', (e, id) => {
   }
   if (agent) agent.setPolicy(config.security);
   wireMcp();
-  persistConfig();
-  return { ok: true, servers: mcpState().servers };
+  // Si el disco falla, el servidor NO está borrado: decirlo ahora evita que el panel
+  // cante «eliminado» y el servidor vuelva a estar ahí al reiniciar.
+  const r = persistConfig();
+  return r.ok ? { ok: true, servers: mcpState().servers } : { ok: false, error: r.error };
 });
 
 ipcMain.handle('mcp:toggle', (e, { id, enabled }) => {
@@ -1336,7 +1348,9 @@ app.whenReady().then(() => {
   // migración a cifrado hecha), y los servidores marcados como automáticos se
   // conectan en segundo plano: uno que tarde en arrancar no retrasa la ventana.
   wireMcp();
-  for (const s of config.mcp.servers || []) if (s.autoStart && s.enabled) mcp.ensure(s.id).catch(() => {});
+  // Con el interruptor global apagado no se conecta nada: arrancar procesos para un
+  // catálogo que no se va a servir es trabajo y ruido inútiles.
+  if (config.mcp.enabled !== false) for (const s of config.mcp.servers || []) if (s.autoStart && s.enabled) mcp.ensure(s.id).catch(() => {});
   createChatWindow();
   createTray();
 

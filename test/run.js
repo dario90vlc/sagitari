@@ -1633,6 +1633,17 @@ test('mcp: la validacion de un servidor rechaza lo que no puede funcionar', () =
   eq(conListas.value.tools.deny.join(','), 'x');
 });
 
+test('mcp: un args que no es lista se rechaza con un mensaje legible', () => {
+  const { validateServer } = require('../main/mcp-config');
+  const base = { id: 'eco', name: 'Eco', transport: 'stdio', command: 'npx' };
+  for (const malo of ['-y paquete', 42, { a: 1 }]) {
+    const r = validateServer({ ...base, args: malo });
+    eq(r.ok, false, 'debe rechazar args = ' + JSON.stringify(malo));
+    ok(/lista/.test(r.error), 'con un motivo entendible: ' + r.error);
+  }
+  ok(validateServer({ ...base, args: ['-y', 'paquete'] }).ok, 'una lista válida sigue pasando');
+});
+
 test('mcp: importar el JSON de otro cliente y conservar secretos al guardar', () => {
   const { parseMcpImport, mergeSecrets } = require('../main/mcp-config');
   const r = parseMcpImport(JSON.stringify({ mcpServers: {
