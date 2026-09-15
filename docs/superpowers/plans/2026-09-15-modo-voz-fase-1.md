@@ -470,7 +470,7 @@ function createSttWindows({ emit, lang = 'es-ES', spawnFn = spawn, scriptPath = 
   function start() {
     /* Rearma el estado y cierra el proceso anterior: dos arranques seguidos dejarían el
        PowerShell viejo con el micrófono abierto y su salida se leería como del nuevo. */
-    if (proc) { try { proc.kill(); } catch {} proc = null; }
+    if (proc) { const viejo = proc; proc = null; try { viejo.kill(); } catch {} }   // anular ANTES de matar
     buf = '';
     info = { motor: '', idioma: '' };
     detenido = false;
@@ -607,7 +607,7 @@ test('voz/tts-windows: sintetiza una frase, borra el temporal y dice qué voz us
   const path = require('path');
   const os = require('os');
   const { createTtsWindows } = require('../main/voice/tts-windows');
-  const dir = fs.mkdtempSync(path.join(os.tmpdir(), 'sagi-tts-'));
+  const dir = tmpDir();   // el ayudante del propio fichero: registra la limpieza al salir
   const llamadas = [];
   const spawnFn = (cmd, args) => {
     llamadas.push(args);
@@ -632,8 +632,11 @@ test('voz/tts-windows: sintetiza una frase, borra el temporal y dice qué voz us
      después. (La primera versión de este test miraba un directorio que nunca se creaba,
      así que no podía fallar; lo cazó el reconocimiento previo del plan.) */
   eq(cuentaWavs(), antes, 'no deja WAV temporales tras sintetizar');
-  ok(llamadas[0].includes('tts.ps1'), 'llama a tts.ps1');
+  /* `includes` compara elementos enteros, y los args llevan rutas absolutas: la
+     comparación correcta es sobre el final del argumento. */
+  ok(llamadas[0].some((a) => String(a).endsWith('tts.ps1')), 'llama a tts.ps1');
   ok(llamadas[0].includes('es-ES'), 'y le pasa el idioma');
+  ok(llamadas[0].includes('-Voice') && llamadas[0].includes('Microsoft Helena'), 'y la voz elegida (si no, el ajuste sería decorativo)');
 });
 
 test('voz/tts-windows: sin voz disponible devuelve un error legible, no una excepción', async () => {
@@ -674,9 +677,11 @@ try { [Console]::OutputEncoding = [System.Text.Encoding]::UTF8 } catch {}
 try { Add-Type -AssemblyName System.Runtime.WindowsRuntime } catch {}
 function Say([string]$l) { try { [Console]::Out.WriteLine($l); [Console]::Out.Flush() } catch {} }
 
-function Await($t, $T) {
+/* OJO con los nombres de parámetro: PowerShell no distingue mayúsculas, así que `$t` y
+   `$T` chocan («El parámetro $T está duplicado»). Se comprobó al ejecutar el guion. */
+function Await($tarea, $tipo) {
   $m = ([System.WindowsRuntimeSystemExtensions].GetMethods() | Where-Object { $_.Name -eq 'AsTask' -and $_.GetParameters().Count -eq 1 -and $_.GetParameters()[0].ParameterType.Name -eq 'IAsyncOperation`1' })[0]
-  $nt = $m.MakeGenericMethod($T).Invoke($null, @($t)); $nt.Wait(-1) | Out-Null; $nt.Result
+  $nt = $m.MakeGenericMethod($tipo).Invoke($null, @($tarea)); $nt.Wait(-1) | Out-Null; $nt.Result
 }
 
 # Las voces modernas (las «móviles», mejores que las de escritorio) solo existen aquí:
@@ -762,8 +767,13 @@ function createTtsWindows({ spawnFn = spawn, dataDir = os.tmpdir(), scriptPath =
       const salida = { voz: '', ms: 0, error: '', file: tmpWav };
       let proc;
       try {
+        /* `-Voice` no es decorativo: sin él, el ajuste «voz de la lectura» de Ajustes no
+           llegaría nunca al guion. Y `stdin.end()` es imprescindible: un powershell al que
+           nadie le cierra la entrada escribe su salida y NO termina (se quedaba colgado y
+           `sintetizar()` no resolvía jamás; lo cazó el implementador con una sonda). */
         proc = spawnFn('powershell.exe', ['-NoProfile', '-ExecutionPolicy', 'Bypass', '-File', scriptPath,
-          '-Lang', args.lang || 'es-ES', '-TextFile', tmpText, '-OutFile', tmpWav, '-Rate', String(args.rate ?? rate)], { windowsHide: true });
+          '-Lang', args.lang || 'es-ES', '-Voice', args.voice || '', '-TextFile', tmpText, '-OutFile', tmpWav, '-Rate', String(args.rate ?? rate)], { windowsHide: true });
+        try { proc.stdin.end(); } catch {}
       } catch (e) {
         try { fs.unlinkSync(tmpText); } catch {}
         resolve({ ...salida, error: e.message });
@@ -790,7 +800,7 @@ function createTtsWindows({ spawnFn = spawn, dataDir = os.tmpdir(), scriptPath =
   }
 
   async function sintetizar(texto, { voice = '', lang = 'es-ES', rate: r } = {}) {
-    const r1 = await correr({ lang, voiceId: voice, rate: r }, texto);
+    const r1 = await correr({ lang, voice, rate: r }, texto);
     const limpio = () => { try { fs.unlinkSync(r1.file); } catch {} };
     if (r1.error || !fs.existsSync(r1.file)) { limpio(); return { wav: null, voz: r1.voz, ms: r1.ms, error: r1.error || 'sin audio' }; }
     const wav = fs.readFileSync(r1.file);
@@ -802,8 +812,10 @@ function createTtsWindows({ spawnFn = spawn, dataDir = os.tmpdir(), scriptPath =
     const r = await new Promise((resolve) => {
       const l = [];
       let proc;
-      try { proc = spawnFn('powershell.exe', ['-NoProfile', '-ExecutionPolicy', 'Bypass', '-File', scriptPath, '-List'], { windowsHide: true }); }
-      catch { resolve(l); return; }
+      try {
+        proc = spawnFn('powershell.exe', ['-NoProfile', '-ExecutionPolicy', 'Bypass', '-File', scriptPath, '-List'], { windowsHide: true });
+        try { proc.stdin.end(); } catch {}   // sin cerrar la entrada, powershell no termina
+      } catch { resolve(l); return; }
       let buf = '';
       proc.stdout.on('data', (d) => {
         buf += d.toString('utf8');
