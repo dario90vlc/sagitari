@@ -38,6 +38,10 @@ contextBridge.exposeInMainWorld('sagitari', {
   onVoiceStopped: on('voice:stopped', () => ['stopped']),
   onVoiceError: on('voice:error', ([t]) => ['error', t]),
   speak: (text) => ipcRenderer.invoke('tts:speak', text),
+  ttsList: () => ipcRenderer.invoke('tts:list'),
+  onTtsPhrase: on('tts:phrase', ([p]) => [p]),      // { id, bytes }
+  ttsPlayed: (id) => ipcRenderer.send('tts:played', id),
+  ttsStop: () => ipcRenderer.send('tts:stop'),
   onTtsDone: on('tts:done', () => []),
   onThemeChanged: on('theme:changed', ([v]) => [v]),
   quit: () => ipcRenderer.invoke('app:quit'),

@@ -1092,6 +1092,7 @@ ipcMain.handle('voice:stop', async () => {
 });
 
 // ---- TTS (SAPI, Spanish voice if available) ----
+const { createTtsWindows } = require('./voice/tts-windows');
 let ttsProc = null;
 ipcMain.handle('tts:speak', (e, text) => {
   /* Un arranque automatizado (--smoke/--hidden/--test) NUNCA habla. Los bancos de
@@ -1129,6 +1130,18 @@ $v.Speak([Console]::In.ReadToEnd())`;
     });
     return { ok: true };
   } catch { return { ok: false }; }
+});
+
+/* Motor de síntesis del sistema. La síntesis por frases la orquesta el VoiceManager
+   (tarea 5) y el audio lo reproduce el renderer (tarea 9); aquí solo se expone. */
+let ttsEngine = null;
+function sintetizador() {
+  if (!ttsEngine) ttsEngine = createTtsWindows({ dataDir: DATA_DIR });
+  return ttsEngine;
+}
+
+ipcMain.handle('tts:list', async () => {
+  try { return { ok: true, voices: await sintetizador().listarVoces() }; } catch { return { ok: false, voices: [] }; }
 });
 
 // ---- misc ----

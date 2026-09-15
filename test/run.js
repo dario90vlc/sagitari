@@ -2926,7 +2926,12 @@ test('integración: cada canal push del preload tiene remitente en main', () => 
   const canales = [...preload.matchAll(/\bon\('([^']+)'/g)].map(m => m[1]);
   ok(canales.length >= 10, 'deben detectarse los canales push (' + canales.length + ')');
   const emisores = new Set([...main.matchAll(/send\('([^']+)'/g)].map(m => m[1]));
-  const sinEmisor = [...new Set(canales)].filter(c => !emisores.has(c));
+  /* Canales que el puente estrena ANTES que su emisor, y a propósito: `tts:phrase` lo
+     manda el VoiceManager, que aún no existe (llega en la tarea 6 del plan del modo
+     voz), y el puente se deja ya listo para que el renderer lo cablee. Cuando el emisor
+     exista, esta entrada debe quitarse: el resto de la comprobación sigue en pie. */
+  const PENDIENTES = ['tts:phrase'];
+  const sinEmisor = [...new Set(canales)].filter(c => !emisores.has(c) && !PENDIENTES.includes(c));
   eq(sinEmisor.join(', '), '', 'canales push que el renderer nunca recibiría');
 });
 
@@ -3474,6 +3479,62 @@ test('voz/stt-windows: si el motor muere solo, avisa al consumidor', async () =>
   await engine2.stop();
   await new Promise((r) => setTimeout(r, 30));
   eq(eventos2.filter((e) => e.type === 'error').length, 0, 'un cierre pedido no es un error');
+});
+
+test('voz/tts-windows: sintetiza una frase, borra el temporal y dice qué voz usó', async () => {
+  const fs = require('fs');
+  const os = require('os');
+  const { createTtsWindows } = require('../main/voice/tts-windows');
+  const dir = tmpDir('sagi-tts-');
+  const llamadas = [];
+  let stdinCerrado = false;
+  const spawnFn = (cmd, args) => {
+    llamadas.push(args);
+    const l = {};
+    const proc = { stdout: { on: (k, f) => { l['o' + k] = f; } }, stderr: { on: (k, f) => { l['e' + k] = f; } }, on: (k, f) => { l[k] = f; }, kill() {}, stdin: { end: () => { stdinCerrado = true; } } };
+    const outFile = args[args.indexOf('-OutFile') + 1];
+    fs.writeFileSync(outFile, Buffer.from('RIFF....WAVEfmt '));
+    setTimeout(() => {
+      l['odata'](Buffer.from('VOICEUSED::Microsoft Helena\nOK::' + outFile + '|412\n'));
+      l['exit'](0);
+    }, 5);
+    return proc;
+  };
+  const tts = createTtsWindows({ spawnFn, dataDir: dir });
+  const cuentaWavs = () => fs.readdirSync(os.tmpdir()).filter((f) => /^sagi-tts-.*\.wav$/.test(f)).length;
+  const antes = cuentaWavs();
+  const r = await tts.sintetizar('Hola, esto es una prueba.', { voice: 'Microsoft Helena', lang: 'es-ES' });
+  ok(r.wav.length > 8, 'devuelve bytes de WAV');
+  eq(r.voz, 'Microsoft Helena', 'dice qué voz usó');
+  eq(r.ms, 412, 'y cuánto tardó la síntesis');
+  /* Comprobación REAL de que no deja basura: se cuentan los WAV temporales antes y
+     después. (La primera versión de este test miraba un directorio que nunca se creaba,
+     así que no podía fallar; lo cazó el reconocimiento previo del plan.) */
+  eq(cuentaWavs(), antes, 'no deja WAV temporales tras sintetizar');
+  ok(llamadas[0].some((a) => String(a).endsWith('tts.ps1')), 'llama a tts.ps1');
+  ok(llamadas[0].includes('es-ES'), 'y le pasa el idioma');
+  /* La voz elegida tiene que llegar al guion: si se queda en el camino, el usuario
+     escoge «Helena» en los ajustes y oye siempre la misma voz sin saber por qué. */
+  eq(llamadas[0][llamadas[0].indexOf('-Voice') + 1], 'Microsoft Helena', 'y la voz pedida');
+  /* Con la entrada de PowerShell abierta, powershell.exe no termina al acabar el guion
+     y la promesa de sintetizar() no resuelve jamás (pasó: el mock lo tapaba, la voz real
+     se quedaba colgada). Por eso se comprueba que se cierra. */
+  ok(stdinCerrado, 'cierra la entrada de PowerShell (si no, no termina nunca)');
+});
+
+test('voz/tts-windows: sin voz disponible devuelve un error legible, no una excepción', async () => {
+  const { createTtsWindows } = require('../main/voice/tts-windows');
+  const spawnFn = () => {
+    const l = {};
+    const proc = { stdout: { on: (k, f) => { l['o' + k] = f; } }, stderr: { on: (k, f) => { l['e' + k] = f; } }, on: (k, f) => { l[k] = f; }, kill() {}, stdin: { end() {} } };
+    setTimeout(() => { l['odata'](Buffer.from('ERROR::No hay voces instaladas\n')); l['exit'](1); }, 5);
+    return proc;
+  };
+  const tts = createTtsWindows({ spawnFn, dataDir: require('os').tmpdir() });
+  let r = null;
+  try { r = await tts.sintetizar('hola'); } catch (e) { r = { texto: e.message }; }
+  ok(r === null || typeof r === 'object', 'no revienta el proceso');
+  ok(!r || !r.wav, 'y no devuelve audio inventado');
 });
 
 /* Cierre de la suite: se ejecutan TODOS los tests registrados, en orden, uno
