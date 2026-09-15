@@ -2059,13 +2059,13 @@ test('chat: todo icono usado por app.js existe en el sistema de iconos', () => {
 });
 
 test('renderer: los scripts conviven en el mismo ámbito (sin redeclaraciones)', () => {
-  // Los tres ficheros son scripts CLÁSICOS: comparten un único ámbito global.
+  // Los cuatro ficheros son scripts CLÁSICOS: comparten un único ámbito global.
   // Un `const MODE_ORDER` repetido es un SyntaxError de compilación y el
   // segundo fichero NO se ejecuta — la app se queda sin iconos, sin botones y
   // sin nada, con el HTML estático aún en pantalla. Se compila el conjunto
   // como un solo script (sin ejecutarlo) para detectarlo antes de arrancar.
   const vm = require('vm');
-  const files = ['icons.js', 'chatkit.js', 'app.js'];
+  const files = ['icons.js', 'chatkit.js', 'orb.js', 'app.js'];
   const code = files
     .map(f => fs.readFileSync(path.join(__dirname, '..', 'renderer', f), 'utf8'))
     .join('\n;\n');
