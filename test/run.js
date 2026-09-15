@@ -3329,6 +3329,34 @@ test('chat: el fallo se explica y la píldora ofrece los modelos de tu API', () 
   eq(K.statusPill, undefined, 'la píldora de estado se retiró del kit');
 });
 
+/* ---------- voz: contrato de motores y eventos ---------- */
+
+test('voz/contrato: un evento bien formado pasa y uno roto se explica', () => {
+  const { assertEvent, TIPOS, ESTADOS } = require('../main/voice/contract');
+  assertEvent({ type: 'state', state: 'escuchando' });
+  assertEvent({ type: 'final', text: 'hola', confidence: 0.8 });
+  assertEvent({ type: 'partial', text: 'ho' });
+  assertEvent({ type: 'level', value: 0.5 });
+  eq(TIPOS.length, 6, 'seis tipos de evento');
+  eq(ESTADOS.length, 6, 'seis estados');
+  let fallo = null;
+  try { assertEvent({ type: 'state', state: 'dormido' }); } catch (e) { fallo = e.message; }
+  ok(fallo && /estado/i.test(fallo), 'un estado inventado se rechaza con un mensaje legible: ' + fallo);
+  fallo = null;
+  try { assertEvent({ type: 'inventado' }); } catch (e) { fallo = e.message; }
+  ok(fallo && /tipo/i.test(fallo), 'un tipo inventado se rechaza: ' + fallo);
+});
+
+test('voz/contrato: un motor necesita nombre, capacidades y los tres métodos', () => {
+  const { assertEngine, CAPACIDADES_BASE } = require('../main/voice/contract');
+  const bueno = { nombre: 'mentira', capacidades: { ...CAPACIDADES_BASE, partials: true }, start() {}, push() {}, stop() {} };
+  assertEngine(bueno);
+  const sinStop = { nombre: 'mentira', capacidades: { ...CAPACIDADES_BASE }, start() {}, push() {} };
+  let fallo = null;
+  try { assertEngine(sinStop); } catch (e) { fallo = e.message; }
+  ok(fallo && /stop/.test(fallo), 'se dice exactamente qué falta: ' + fallo);
+});
+
 /* Cierre de la suite: se ejecutan TODOS los tests registrados, en orden, uno
    detrás de otro, y solo entonces se imprime el resumen. */
 for (const t of QUEUE) {
