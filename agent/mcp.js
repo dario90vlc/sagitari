@@ -23,13 +23,20 @@ function slug(s, max) {
     .replace(/_+$/, '');
 }
 
+/** Segmento del servidor tal y como aparece en el nombre expuesto (`mcp__<esto>__<tool>`).
+    Cualquier clave de permisos por servidor DEBE usar esto, no el id crudo: con un id
+    con guion o de más de 16 caracteres el comodín no coincidiría con el nombre real. */
+function serverSlug(serverId) {
+  return slug(serverId, 16) || 'srv';
+}
+
 /**
  * Nombre con el que la herramienta viaja al modelo: `mcp__<servidor>__<herramienta>`.
  * Es imposible que pise una herramienta nativa (todas empiezan por letra) y cabe en
  * los 64 caracteres que imponen los proveedores.
  */
 function mapToolName(serverId, toolName) {
-  const srv = slug(serverId, 16) || 'srv';
+  const srv = serverSlug(serverId);
   const tool = slug(toolName, 40) || 'tool';
   return `mcp__${srv}__${tool}`.slice(0, MAX_TOOL_NAME).replace(/_+$/, '');
 }
@@ -255,7 +262,7 @@ class McpManager {
   _serverIdOf(exposed) {
     const m = /^mcp__([a-z0-9_]+)__/.exec(String(exposed || ''));
     if (!m) return null;
-    const s = this._servers.find(x => slug(x.id, 16) === m[1]);
+    const s = this._servers.find(x => serverSlug(x.id) === m[1]);
     return s ? s.id : null;
   }
 
@@ -348,4 +355,4 @@ class McpManager {
   }
 }
 
-module.exports = { McpManager, mapToolName, MAX_TOOL_NAME, DEFAULT_TIMEOUT_MS, MAX_RESULT_CHARS };
+module.exports = { McpManager, mapToolName, serverSlug, MAX_TOOL_NAME, DEFAULT_TIMEOUT_MS, MAX_RESULT_CHARS };

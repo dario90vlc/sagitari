@@ -1343,6 +1343,26 @@ test('mcp: el nombre expuesto se sanea y no pasa de 64 caracteres', () => {
   for (const nativa of ['run_command', 'read_file', 'browser_control']) ok(mapToolName('x', nativa) !== nativa);
 });
 
+test('permisos: el comodin del servidor usa la misma normalizacion que el nombre expuesto', () => {
+  const { mapToolName, serverSlug } = require('../agent/mcp');
+  for (const id of ['my-server', 'servidor-con-nombre-muy-largo', 'eco']) {
+    const nombre = mapToolName(id, 'crear_nota');
+    const g = new Guardrails({ permissions: { [`mcp__${serverSlug(id)}__*`]: 'restricted' } });
+    eq(g.decide(nombre, {}).action, 'deny', id + ': el comodin debe bloquear ' + nombre);
+    // `decide().reason` es el mensaje para el usuario, no el nivel: el nivel se comprueba
+    // donde vive (es el mismo dato que consulta decide para negar).
+    eq(g.levelFor(nombre), 'restricted', id + ': el comodin resuelve el nivel del servidor');
+    const g2 = new Guardrails({ permissions: { [`mcp__${id}__*`]: 'restricted' } });
+    /* Con `eco` el id crudo YA es el slug, así que la clave coincide: ese caso fija la
+       igualdad de las dos expresiones. En los que discriminan (guion, o más de 16
+       caracteres) el id crudo NO puede coincidir, y por eso hay que normalizar. */
+    const esperado = serverSlug(id) === id ? 'deny' : 'confirm';
+    eq(g2.decide(nombre, {}).action, esperado, id + ': el id CRUDO no puede coincidir (por eso hay que normalizar)');
+  }
+  eq(serverSlug('my-server'), 'my_server');
+  eq(serverSlug('servidor-con-nombre-muy-largo'), 'servidor_con_nom');
+});
+
 function fakeTransport(tools, { failInit = false } = {}) {
   const calls = [];
   const t = {

@@ -53,13 +53,22 @@ function seedTestConfig(apiPort) {
     id: 'eco', name: 'Eco de prueba', enabled: true, transport: 'stdio',
     command: process.execPath, args: [path.join(APP_DIR, 'test', 'fixtures', 'mcp-echo-server.js')], env: {},
   };
+  /* Y un segundo servidor APAGADO (no arranca nada) cuyo id lleva guion: es el caso en
+     el que el id crudo y el nombre expuesto NO coinciden (`mcp__my-server__*` frente a
+     `mcp__my_server__*`). Con él la comprobación de la fila de permisos discrimina de
+     verdad: con el id crudo, el desplegable de Seguridad no coincidiría con la clave
+     que resuelve el motor de permisos. */
+  const mcpServerConGuion = {
+    id: 'my-server', name: 'Con guion (apagado)', enabled: false, transport: 'stdio',
+    command: process.execPath, args: [path.join(APP_DIR, 'test', 'fixtures', 'mcp-echo-server.js')], env: {},
+  };
   /* SIEMPRE se reescribe. Este perfil es de las pruebas: dar por bueno lo que
      hubiera dejado otro proceso hacía que el ui-check verificara un estado distinto
      cada vez (llegó a comprobar un menú con 16 modelos y otro activo, donde la
      primera fila de la lista quedaba fuera de la parte visible). */
   try {
     fs.mkdirSync(TEST_DATA_DIR, { recursive: true });
-    fs.writeFileSync(file, JSON.stringify({ providers: [{ ...dummy, id: 'ui-check', models: modelos }], active: dummy, mcp: { enabled: true, servers: [mcpServer] } }, null, 2), 'utf8');
+    fs.writeFileSync(file, JSON.stringify({ providers: [{ ...dummy, id: 'ui-check', models: modelos }], active: dummy, mcp: { enabled: true, servers: [mcpServer, mcpServerConGuion] } }, null, 2), 'utf8');
   } catch {}
 }
 
@@ -419,6 +428,13 @@ const AFTER = {
   await new Promise(r => setTimeout(r, 600));
   await judge('Seguridad tiene una fila de permiso para el servidor MCP',
     '(function(){ var p = document.querySelector("#permList"); return !!p && /MCP/.test(p.textContent) && !!p.querySelector(\'select[data-tool="mcp__eco__*"]\'); })()');
+  await judge('la fila de permiso usa la MISMA clave que resuelve el motor de permisos',
+    '(async function(){ const l = await window.sagitari.mcpList(); const s = (l.servers || [])[0]; if (!s || !s.permKey) return false; return !!document.querySelector("#permList select[data-tool=\\"" + s.permKey + "\\"]"); })()');
+  /* La de arriba pasa también con un id sin guion, donde id crudo y slug coinciden; esta
+     usa el servidor `my-server` (id con guion), que es el caso que se rompía: la clave del
+     desplegable tiene que ser la del nombre expuesto, y la del id crudo no puede existir. */
+  await judge('con un id con guion, la fila de permiso usa el slug del nombre expuesto',
+    '(async function(){ const l = await window.sagitari.mcpList(); const s = (l.servers || []).find(x => x.id === "my-server"); if (!s || s.permKey !== "mcp__my_server__*") return false; const q = (k) => !!document.querySelector("#permList select[data-tool=\\"" + k + "\\"]"); return q(s.permKey) && !q("mcp__my-server__*"); })()');
   // ---- el interruptor global apaga y enciende el catálogo (de punta a punta) ----
   await evaluate('document.querySelector(\'#setTabs .settab[data-set="mcp"]\').click()');
   await new Promise(r => setTimeout(r, 400));

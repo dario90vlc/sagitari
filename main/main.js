@@ -37,7 +37,7 @@ const skills = require('../agent/skills');
 const marketplace = require('../agent/marketplace');
 const models = require('../agent/models');
 const habits = require('../agent/habits');
-const { McpManager } = require('../agent/mcp');
+const { McpManager, serverSlug } = require('../agent/mcp');
 const mcpConfig = require('./mcp-config');
 
 // Solo para probar el actualizador: apunta la comprobación a otra API de releases
@@ -895,7 +895,11 @@ ipcMain.handle('logs:recent', (e, n) => runlog.readRecent(Number(n) || 200));
    con el mismo criterio que config:get con las claves de proveedor: el renderer es de
    confianza y sin ellos el formulario de edición no puede editar nada) MÁS el estado
    vivo del gestor. `discovered` es el catálogo REAL descubierto: NO se puede llamar
-   `tools` porque `tools` en la configuración son los filtros allow/deny. */
+   `tools` porque `tools` en la configuración son los filtros allow/deny.
+   `permKey` es el comodín de permisos de TODAS sus herramientas, con la MISMA
+   normalización que el nombre expuesto: se calcula aquí y la UI lo usa tal cual, porque
+   con un id con guion o de más de 16 caracteres el id crudo no coincidiría con el
+   nombre real (y el nivel por servidor no llegaría a aplicarse). */
 function mcpState() {
   const vivo = new Map(wireMcp().status().map(s => [s.id, s]));
   return {
@@ -904,6 +908,7 @@ function mcpState() {
       const v = vivo.get(s.id) || {};
       return {
         ...s,
+        permKey: 'mcp__' + serverSlug(s.id) + '__*',
         enabled: v.enabled !== undefined ? v.enabled : s.enabled,
         state: v.state || 'idle',
         error: v.error || null,
@@ -949,17 +954,23 @@ ipcMain.handle('mcp:save', (e, raw) => {
   config.mcp.servers = [...(config.mcp.servers || []).filter(s => s.id !== server.id), server];
   wireMcp();
   const r = persistConfig();
-  // el id saneado viaja de vuelta: la UI lo necesita para el permiso mcp__<id>__*
-  return r.ok ? { ok: true, id: server.id, servers: mcpState().servers } : { ok: false, error: r.error };
+  // el id saneado y su comodín de permisos viajan de vuelta: la UI necesita el comodín
+  // ya normalizado (el id crudo no vale para `mcp__<id>__*` si trae guiones)
+  return r.ok
+    ? { ok: true, id: server.id, permKey: 'mcp__' + serverSlug(server.id) + '__*', servers: mcpState().servers }
+    : { ok: false, error: r.error };
 });
 
 ipcMain.handle('mcp:delete', (e, id) => {
   const sid = mcpConfig.rawId(id);
   config.mcp.servers = (config.mcp.servers || []).filter(s => s.id !== sid);
   // los permisos de un servidor borrado quedarían huérfanos (y si vuelve, con
-  // los niveles de antes, que el usuario ya no ve en ningún sitio)
+  // los niveles de antes, que el usuario ya no ve en ningún sitio). Las claves se
+  // buscan con el slug del nombre expuesto, NO con el id crudo: si no, un id con
+  // guion o de más de 16 caracteres dejaría sus permisos ahí para siempre.
+  const prefijo = 'mcp__' + serverSlug(sid) + '__';
   for (const k of Object.keys(config.security.permissions || {})) {
-    if (k === `mcp__${sid}__*` || k.startsWith(`mcp__${sid}__`)) delete config.security.permissions[k];
+    if (k.startsWith(prefijo)) delete config.security.permissions[k];   // cubre `mcp__<slug>__*` y cada `mcp__<slug>__<tool>`
   }
   if (agent) agent.setPolicy(config.security);
   wireMcp();

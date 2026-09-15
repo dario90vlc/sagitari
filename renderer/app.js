@@ -1975,12 +1975,14 @@ async function _renderSecurity() {
     };
     permBox.appendChild(row);
   }
-  // ---- v3.1: servidores MCP. El comodín `mcp__<id>__*` gobierna TODAS sus
+  // ---- v3.1: servidores MCP. El comodín del servidor gobierna TODAS sus
   // herramientas de una vez (el override exacto de una herramienta sigue ganando).
+  // La clave la construye main (`permKey`), con la MISMA normalización que el nombre
+  // expuesto: el id crudo no sirve si trae guiones o pasa de 16 caracteres.
   let mcp = { servers: [] };
   try { mcp = await window.sagitari.mcpList(); } catch {}
   for (const s of (mcp.servers || [])) {
-    const wildcard = 'mcp__' + s.id + '__*';
+    const wildcard = s.permKey || 'mcp__' + s.id + '__*';
     const lvl = (cfg.permissions && cfg.permissions[wildcard]) || 'default';
     const n = (s.discovered || []).length;
     const row = document.createElement('div');
@@ -2138,12 +2140,14 @@ async function mcpFormShow(server) {
   $('#mcpHeaders').value = mcpLines(s.headers);
   $('#mcpAllow').value = (s.tools && s.tools.allow || []).join(', ');
   $('#mcpDeny').value = (s.tools && s.tools.deny || []).join(', ');
-  // El nivel real vive en security.permissions['mcp__<id>__*'] (misma fuente que la
+  // El nivel real vive en security.permissions[<comodín del servidor>] (misma fuente que la
   // vista Seguridad: config:get no expone `security`). Sin esto el desplegable mentiría:
-  // diría «Preguntar siempre» con el comodín en 'safe'.
+  // diría «Preguntar siempre» con el comodín en 'safe'. El comodín viene en `permKey`
+  // (misma normalización que el nombre expuesto); el id crudo solo como respaldo.
   let nivel = 'default';
   if (server && server.id) {
-    try { const m = await window.sagitari.metaGet(); nivel = (m.permissions || {})['mcp__' + server.id + '__*'] || 'default'; } catch {}
+    const clave = server.permKey || 'mcp__' + server.id + '__*';
+    try { const m = await window.sagitari.metaGet(); nivel = (m.permissions || {})[clave] || 'default'; } catch {}
   }
   $('#mcpLevel').value = nivel;
   $('#mcpFormDelete').hidden = !server;
@@ -2196,9 +2200,11 @@ $('#mcpSave').onclick = async () => {
   if (!r.ok) return mcpMsg('Error: ' + r.error);
   // El nivel elegido se aplica SIEMPRE al comodín del servidor (el MISMO que edita
   // Seguridad), también con 'default': así el desplegable no es decorativo y se puede
-  // volver atrás (sec:setToolPerm borra el comodín cuando recibe 'default'). Se usa el
-  // id que devuelve main (ya saneado), no el del formulario, que puede traer mayúsculas.
-  if (r.id && nivel) await window.sagitari.secSetToolPerm('mcp__' + r.id + '__*', nivel);
+  // volver atrás (sec:setToolPerm borra el comodín cuando recibe 'default'). La clave la
+  // devuelve main ya normalizada (`permKey`): construirla con el id crudo dejaría el
+  // nivel sin aplicar en cuanto el id traiga guiones o pase de 16 caracteres.
+  const wildcard = r.permKey || (r.id ? 'mcp__' + r.id + '__*' : '');
+  if (wildcard && nivel) await window.sagitari.secSetToolPerm(wildcard, nivel);
   $('#mcpFormCard').classList.remove('on');
   mcpMsg('Guardado. Probando la conexión…');
   const t = await window.sagitari.mcpTest(r.id || s.id);
