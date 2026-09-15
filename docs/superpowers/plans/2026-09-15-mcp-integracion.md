@@ -1972,11 +1972,20 @@ oculta al filtrar):
       <div class="sw on" id="mcpGlobal" role="switch" tabindex="0" aria-label="Activar servidores MCP"></div>
     </div>
     <div id="mcpList" class="mcplist"></div>
-    <div class="srow" data-keys="mcp anadir servidor pegar json exportar mcpServers">
+    <div class="srow" data-keys="mcp anadir servidor pegar json exportar mcpServers importar">
       <div class="btnrow">
         <button class="btn" id="mcpNew"><span class="bi"><i data-i="plus"></i></span> Añadir servidor</button>
         <button class="btn ghost" id="mcpPaste">Pegar JSON de mcpServers</button>
         <button class="btn ghost" id="mcpExportBtn">Exportar</button>
+      </div>
+      <!-- Entrada propia para pegar el JSON: window.prompt NO existe en Electron, así
+           que un botón que lo llame no hace absolutamente nada. -->
+      <div id="mcpPasteBox" hidden>
+        <textarea id="mcpPasteText" rows="5" placeholder='{"mcpServers": { "github": { "command": "npx", "args": ["-y", "@modelcontextprotocol/server-github"] } }}' spellcheck="false"></textarea>
+        <div class="btnrow">
+          <button class="btn" id="mcpPasteGo">Importar</button>
+          <button class="btn ghost" id="mcpPasteCancel">Cancelar</button>
+        </div>
       </div>
     </div>
     <div class="subnote" id="mcpMsg"></div>
@@ -2067,9 +2076,14 @@ async function renderMcp() {
   mejoraSelects(box);
 }
 
-function mcpFormShow(server) {
+async function mcpFormShow(server) {
   const s = server || { transport: 'stdio', tools: {} };
-  $('#mcpFormCard').hidden = false;
+  const card = $('#mcpFormCard');
+  card.classList.add('on');
+  card.hidden = false;
+  // El buscador de Ajustes pone `hidden` en TODAS las filas (también las de una tarjeta
+  // cerrada): sin soltarlas, con una búsqueda activa el formulario se abre a medias.
+  card.querySelectorAll('.srow').forEach(r => { r.hidden = false; });
   $('#mcpFormTitle').textContent = server ? 'Editar servidor' : 'Nuevo servidor';
   $('#mcpId').value = s.id || '';
   $('#mcpId').disabled = !!server;
@@ -2082,9 +2096,19 @@ function mcpFormShow(server) {
   $('#mcpHeaders').value = mcpLines(s.headers);
   $('#mcpAllow').value = (s.tools && s.tools.allow || []).join(', ');
   $('#mcpDeny').value = (s.tools && s.tools.deny || []).join(', ');
+  // El nivel real vive en security.permissions['mcp__<id>__*'] (misma fuente que la
+  // vista Seguridad: config:get no expone `security`). Sin esto el desplegable mentiría
+  // sobre un servidor en «Permitir siempre».
+  let nivel = 'default';
+  if (server && server.id) {
+    try { const m = await window.sagitari.metaGet(); nivel = (m.permissions || {})['mcp__' + server.id + '__*'] || 'default'; } catch {}
+  }
+  $('#mcpLevel').value = nivel;
   $('#mcpFormDelete').hidden = !server;
   mcpTransportRows();
-  mejoraSelects($('#mcpFormCard'));
+  // los desplegables nativos ya están mejorados: hay que repintar SU etiqueta
+  cselPintar($('#mcpTransport'));
+  cselPintar($('#mcpLevel'));
 }
 
 function mcpTransportRows() {
@@ -2132,10 +2156,11 @@ $('#mcpSave').onclick = async () => {
   const nivel = $('#mcpLevel').value;
   const r = await window.sagitari.mcpSave(s);
   if (!r.ok) return mcpMsg('Error: ' + r.error);
-  // El nivel elegido se aplica al comodín del servidor (el MISMO que edita Seguridad):
-  // sin esto el desplegable sería decorativo. Se usa el id que devuelve main (ya
-  // saneado), no el del formulario, que puede traer mayúsculas o símbolos.
-  if (nivel && nivel !== 'default' && r.id) await window.sagitari.secSetToolPerm('mcp__' + r.id + '__*', nivel);
+  // El nivel elegido se aplica SIEMPRE al comodín del servidor (el MISMO que edita
+  // Seguridad): `sec:setToolPerm` borra el comodín cuando recibe 'default', así que
+  // también es la forma de volver a «preguntar siempre». Se usa el id que devuelve main
+  // (ya saneado), no el del formulario, que puede traer mayúsculas o símbolos.
+  if (r.id) await window.sagitari.secSetToolPerm('mcp__' + r.id + '__*', nivel);
   $('#mcpFormCard').hidden = true;
   mcpMsg('Guardado. Probando la conexión…');
   const t = await window.sagitari.mcpTest(r.id || s.id);
@@ -2168,6 +2193,9 @@ $('#mcpList').onclick = async (e) => {
     const yes = await askConfirm(btn, '¿Eliminar «' + id + '»?', 'Se borran su configuración y sus permisos.');
     if (!yes) return;
     await window.sagitari.mcpDelete(id);
+    // si el formulario estaba editando justo ese servidor, se cierra: dejarlo abierto
+    // permitiría recrearlo en silencio con un «Guardar» posterior
+    if ($('#mcpFormCard').classList.contains('on') && $('#mcpId').value.trim() === id) { $('#mcpFormCard').classList.remove('on'); $('#mcpFormCard').hidden = true; }
     return renderMcp();
   }
   if (accion === 'log') {
@@ -2187,16 +2215,19 @@ $('#mcpExportBtn').onclick = async () => {
   if (!r.ok) return smsg('Error: ' + r.error);
   copyText(r.json, 'JSON copiado (contiene tus secretos: no lo compartas).');
 };
-$('#mcpPaste').onclick = async () => {
-  const json = prompt('Pega el bloque mcpServers:');
-  if (!json) return;
+$('#mcpPaste').onclick = () => { const b = $('#mcpPasteBox'); b.hidden = !b.hidden; if (!b.hidden) $('#mcpPasteText').value = ''; };
+$('#mcpPasteCancel').onclick = () => { $('#mcpPasteBox').hidden = true; };
+$('#mcpPasteGo').onclick = async () => {
+  const json = $('#mcpPasteText').value.trim();
+  if (!json) return mcpMsg('Pega el bloque mcpServers en el cuadro.');
   const r = await window.sagitari.mcpImport(json);
-  if (!r.ok) return smsg('Error: ' + r.error);
+  if (!r.ok) return mcpMsg('Error: ' + r.error);
   const resumen = r.servers.map(s => s.id + (s.conflict ? ' (reemplaza el actual)' : '')).join(', ');
-  const yes = await askConfirm($('#mcpPaste'), '¿Añadir estos servidores?', resumen);
+  const yes = await askConfirm($('#mcpPasteBox'), '¿Añadir estos servidores?', resumen);
   if (!yes) return;
   for (const s of r.servers) await window.sagitari.mcpSave(s);
-  smsg('Añadidos: ' + resumen);
+  $('#mcpPasteBox').hidden = true;
+  mcpMsg('Añadidos: ' + resumen);
   renderMcp();
 };
 ```
@@ -2366,7 +2397,7 @@ y en el JSON que se escribe: `{ providers: [...], active: dummy, mcp: { enabled:
   await evaluate('document.querySelector(\'#setTabs .settab[data-set="mcp"]\').click()');
   await new Promise(r => setTimeout(r, 400));
   await judge('la pestaña MCP muestra el servidor de prueba', '(function(){ var rows = document.querySelectorAll("#mcpList .mcprow"); return rows.length >= 1 && /Eco de prueba/.test(document.querySelector("#mcpList").textContent); })()');
-  await judge('el formulario de MCP abre y tiene los campos', '(function(){ document.querySelector("#mcpNew").click(); var c = document.querySelector("#mcpFormCard"); return !c.hidden && !!document.querySelector("#mcpCommand") && !!document.querySelector("#mcpUrl"); })()');
+  await judge('el formulario de MCP abre y tiene los campos', '(function(){ document.querySelector("#mcpNew").click(); var c = document.querySelector("#mcpFormCard"); return c.classList.contains("on") && getComputedStyle(c).display !== "none" && !!document.querySelector("#mcpCommand") && !!document.querySelector("#mcpUrl"); })()');
   await judge('cambiar a URL remota oculta el comando local', '(function(){ var t = document.querySelector("#mcpTransport"); t.value = "http"; t.dispatchEvent(new Event("change", { bubbles: true })); var ok1 = document.querySelector("#mcpStdioRows").hidden && !document.querySelector("#mcpHttpRows").hidden; t.value = "stdio"; t.dispatchEvent(new Event("change", { bubbles: true })); return ok1 && !document.querySelector("#mcpStdioRows").hidden; })()');
   await judge('guardar un servidor inválido explica el motivo', '(function(){ document.querySelector("#mcpCancel").click(); return true; })()');
   // el botón Probar de una fila habla con el servidor y trae sus herramientas
