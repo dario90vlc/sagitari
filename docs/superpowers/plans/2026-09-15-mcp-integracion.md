@@ -1637,10 +1637,10 @@ function validateServer(raw) {
   if (transport === 'stdio') {
     const command = String(s.command || '').trim();
     if (!command) return { ok: false, error: 'Falta el comando del servidor.' };
-    // Un `args` que no sea lista (pegado de otro cliente o editado a mano) reventaba
-    // en buildCmdLine con «args.map is not a function» y el servidor se descartaba
-    // en silencio al arrancar: se comprueba el tipo como con `env` y `tools`.
-    if (s.args !== undefined && !Array.isArray(s.args)) return { ok: false, error: 'Los argumentos deben ser una lista (ej.: ["-y", "paquete"]).' };
+    // Un `args` truthy que no sea lista (pegado de otro cliente o editado a mano)
+    // reventaba en buildCmdLine con «args.map is not a function»; null y '' siguen
+    // valiendo como lista vacía, como hacía el `s.args || []` de antes.
+    if (s.args != null && s.args !== '' && !Array.isArray(s.args)) return { ok: false, error: 'Los argumentos deben ser una lista (ej.: ["-y", "paquete"]).' };
     try { buildCmdLine(command, s.args || []); }
     catch (e) { return { ok: false, error: e.message }; }
     const env = {};
@@ -1825,8 +1825,26 @@ ipcMain.handle('mcp:delete', (e, id) => {
   return r.ok ? { ok: true, servers: mcpState().servers } : { ok: false, error: r.error };
 });
 
-ipcMain.handle('mcp:toggle', (e, { id, enabled }) => { /* cambia enabled del servidor y reconfigure + persistConfig */ });
-ipcMain.handle('mcp:setGlobal', (e, enabled) => { config.mcp.enabled = enabled !== false; wireMcp(); return persistConfig(); });
+ipcMain.handle('mcp:toggle', (e, { id, enabled }) => {
+  const sid = mcpConfig.rawId(id);
+  const server = (config.mcp.servers || []).find(s => s.id === sid);
+  if (!server) return { ok: false, error: 'Servidor no encontrado.' };
+  server.enabled = enabled !== false;
+  wireMcp();
+  // Activar una fila debe dejarla lista, no solo marcar la bandera (si no, el usuario
+  // la activa y no pasa nada hasta pulsar Probar).
+  if (server.enabled && config.mcp.enabled !== false) wireMcp().ensure(sid).catch(() => {});
+  const r = persistConfig();
+  return r.ok ? { ok: true, servers: mcpState().servers } : { ok: false, error: r.error };
+});
+ipcMain.handle('mcp:setGlobal', (e, enabled) => {
+  config.mcp.enabled = enabled !== false;
+  const m = wireMcp();
+  // Al reencender hay que reconectar lo que el arranque no arrancó: sin esto los
+  // servidores autoStart se quedan en 'idle' y MCP no aporta nada al modelo.
+  if (config.mcp.enabled) for (const s of config.mcp.servers || []) if (s.autoStart && s.enabled) m.ensure(s.id).catch(() => {});
+  return persistConfig();
+});
 ipcMain.handle('mcp:refresh', async (e, id) => { /* ensure + devuelve status del servidor */ });
 ipcMain.handle('mcp:test', async (e, id) => { const r = await wireMcp().ensure(mcpConfig.rawId(id)); return { ok: r.ok, error: r.error || null, server: mcpState().servers.find(s => s.id === mcpConfig.rawId(id)) }; });
 ipcMain.handle('mcp:log', (e, id) => { const s = mcpState().servers.find(x => x.id === mcpConfig.rawId(id)); return { ok: !!s, log: (s && s.logTail) || '', error: (s && s.error) || null }; });
