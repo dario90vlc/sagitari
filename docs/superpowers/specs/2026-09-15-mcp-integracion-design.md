@@ -157,10 +157,17 @@ renderer no estrene un segundo bus.
 
 ### 9. Renderer
 
-- **Ajustes › MCP** (pestaña nueva en `SET_TABS`): interruptor global, lista de
-  servidores con punto de estado, formulario guiado, botón **Probar** que enseña las
-  herramientas descubiertas y el error real si falla, botón de log del servidor, y
-  pegar/exportar el JSON de `mcpServers`.
+> **Enmienda (2026-09-16, pedida por el usuario tras implementar):** la gestión de MCP
+> **no** vive en una pestaña de Ajustes, sino en una **sección propia del sidebar**
+> (`#view-mcp`, grupo «Conocimiento», justo antes de Herramientas). Un dato, un sitio:
+> la pestaña de Ajustes se eliminó en lugar de dejar dos entradas con lo mismo. La
+> sección **no** tiene atajo de teclado (`Alt+0` sigue sin hacer nada; los `Alt+1…9`
+> no se tocan). El panel se mudó con el mismo marcado y la misma lógica.
+
+- **Sidebar › MCP** (sección `#view-mcp`): interruptor global, lista de servidores con
+  punto de estado, formulario guiado, botón **Probar** que enseña las herramientas
+  descubiertas y el error real si falla, botón de log del servidor, y pegar/exportar el
+  JSON de `mcpServers`.
 - **Herramientas**: grupo «MCP» con las herramientas descubiertas y su nivel de permiso
   editable ahí mismo (mismo control que las nativas).
 - **Seguridad**: los overrides MCP aparecen con el resto de permisos. Se editan con
