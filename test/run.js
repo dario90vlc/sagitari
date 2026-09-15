@@ -2322,8 +2322,13 @@ test('sidebar: grupos, contadores, pie y atajos coherentes con las vistas', () =
   const groups = [...html.matchAll(/class="navgroup"\s+data-label="([^"]+)"/g)].map(m => m[1]);
   ok(groups.length >= 4, 'grupos del sidebar: ' + groups.join(' / '));
   const views = [...html.matchAll(/class="navitem[^"]*"\s+data-view="([^"]+)"/g)].map(m => m[1]);
-  eq(views.length, 9, 'ítems de navegación (sin Inicio: la app abre en Chat)');
+  eq(views.length, 10, 'ítems de navegación (sin Inicio: la app abre en Chat)');
   eq(new Set(views).size, views.length, 'sin vistas duplicadas en el sidebar');
+  // MCP y Herramientas son hermanas: la sección va en «Conocimiento», justo antes que Tools
+  const conocimiento = html.slice(html.indexOf('data-label="Conocimiento"'), html.indexOf('data-label="Sistema"'));
+  eq([...conocimiento.matchAll(/data-view="([^"]+)"/g)].map(m => m[1]).join(','), 'memory,skills,mcp,tools',
+    'MCP va en Conocimiento, antes que Herramientas');
+  ok(/data-view="mcp"[^>]*title="Servidores MCP"/.test(html), 'el ítem de MCP se llama «Servidores MCP» en el title');
   // cada ítem debe apuntar a una sección real (si no, goto() deja la app en blanco)
   const missing = views.filter(v => !html.includes('id="view-' + v + '"'));
   eq(missing.join(', '), '', 'ítems del sidebar sin sección .view');
@@ -2332,11 +2337,21 @@ test('sidebar: grupos, contadores, pie y atajos coherentes con las vistas', () =
     ok(html.includes('id="' + id + '"'), 'falta el elemento ' + id);
   }
   const js = fs.readFileSync(path.join(__dirname, '..', 'renderer', 'app.js'), 'utf8');
-  // atajos Alt+1..0 prometidos en los tooltips: deben tener destino
+  // atajos Alt+1..9: la tabla debe cumplir EXACTAMENTE lo que prometen los tooltips.
+  // No todos los ítems llevan atajo (MCP no lo tiene): exigir uno por ítem sobraba,
+  // lo que no puede haber es un tooltip que prometa una tecla sin destino ni una
+  // entrada de la tabla que abra algo distinto de lo prometido.
   const hot = js.match(/VIEW_HOTKEY\s*=\s*\[([^\]]+)\]/);
   ok(hot, 'falta la tabla de atajos del sidebar');
-  const n = hot[1].split(',').length;
-  eq(n, views.length, 'atajos y ítems del sidebar deben coincidir');
+  const keys = hot[1].split(',').map(s => s.trim().replace(/^['"]|['"]$/g, ''));
+  eq(new Set(keys).size, keys.length, 'sin atajos repetidos');
+  const promised = [...html.matchAll(/class="navitem[^"]*"\s+data-view="([^"]+)"\s+title="[^"]*\(Alt\+(\d+)\)"/g)];
+  eq(promised.length, keys.length, 'los ítems con «(Alt+N)» en el tooltip y la tabla de atajos deben coincidir');
+  promised.forEach(([, view, num]) => {
+    eq(keys[Number(num) - 1], view, 'Alt+' + num + ' debe abrir la vista prometida en el tooltip');
+  });
+  ok(!keys.includes('mcp'), 'MCP no tiene atajo: no puede estar en VIEW_HOTKEY');
+  for (const v of keys) ok(html.includes('id="view-' + v + '"'), 'atajo sin sección: ' + v);
 });
 
 /* ---------- guardas de integración (regresiones de la auditoría) ---------- */

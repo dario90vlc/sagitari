@@ -71,6 +71,7 @@ function goto(view, opts) {
   if (view === 'memory') renderMemory();
   if (view === 'tasks') renderTasks();
   if (view === 'tools') renderTools();
+  if (view === 'mcp') renderMcp();
   if (view === 'agents') { renderToolTray(); renderHealth(); renderHabits(); }
   if (view === 'skills') { renderMarket(); renderSkills(); }
   if (view === 'projects') window.sagitari.workspaceGet().then(w => { $('#projPath').value = w; });
@@ -2119,15 +2120,8 @@ async function renderMcp() {
 
 async function mcpFormShow(server) {
   const s = server || { transport: 'stdio', tools: {} };
-  // Se oculta con clase (ver styles.css), pero el buscador de Ajustes pudo fijar
-  // [hidden] en esta tarjeta mientras había una búsqueda activa: al abrirla hay
-  // que soltarlo, o "Editar" con una búsqueda puesta no enseñaría nada.
   const card = $('#mcpFormCard');
-  card.hidden = false;
   card.classList.add('on');
-  // Y el buscador también dejó `hidden` en las FILAS de la tarjeta que no casaron:
-  // sin devolverlas, el formulario se abriría a medias (solo la fila que coincidió).
-  card.querySelectorAll('.srow').forEach(r => { r.hidden = false; });
   $('#mcpFormTitle').textContent = server ? 'Editar servidor' : 'Nuevo servidor';
   $('#mcpId').value = s.id || '';
   $('#mcpId').disabled = !!server;
@@ -2239,7 +2233,6 @@ $('#mcpList').onclick = async (e) => {
     // permitiría recrearlo en silencio con un «Guardar» posterior
     if ($('#mcpFormCard').classList.contains('on') && $('#mcpId').value.trim() === id) {
       $('#mcpFormCard').classList.remove('on');
-      $('#mcpFormCard').hidden = true;
     }
     return renderMcp();
   }
@@ -2284,7 +2277,7 @@ $('#mcpPasteGo').onclick = async () => {
 
 /* ============ Ajustes: pestañas, búsqueda y utilidades ============ */
 
-const SET_TABS = ['model', 'prefs', 'security', 'agent', 'mcp', 'data', 'about'];
+const SET_TABS = ['model', 'prefs', 'security', 'agent', 'data', 'about'];
 let setTabName = 'model';
 try { const t = localStorage.getItem('sagi.setTab'); if (SET_TABS.includes(t)) setTabName = t; } catch {}
 
@@ -2305,7 +2298,6 @@ function showSetTab(panel) {
   }
   const wrap = $('#setWrap');
   if (wrap) wrap.querySelectorAll('.setpanel').forEach(p => p.classList.toggle('on', p.dataset.panel === name));
-  if (name === 'mcp') renderMcp();
   // Seguridad también se pinta al entrar: sus filas MCP reflejan los servidores de la
   // sesión (conectados, con su número de herramientas) y al pintarse una sola vez al
   // arrancar mostraban datos viejos.

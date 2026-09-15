@@ -114,7 +114,10 @@ const CHECKS = {
   'iconos inyectados en toda la interfaz': 'document.querySelectorAll("[data-i] svg").length >= 25',
   'ningún icono se quedó sin dibujo': '[...document.querySelectorAll("[data-i]")].every(e => e.querySelector("svg"))',
   'los iconos tienen trazo real (no el punto de reserva)': '[...document.querySelectorAll("[data-i] svg")].filter(s => s.innerHTML.length > 20).length >= 20',
-  'sidebar: 4 grupos y 9 secciones (sin Inicio)': 'document.querySelectorAll(".navgroup").length === 4 && document.querySelectorAll(".navitem").length === 9',
+  'sidebar: 4 grupos y 10 secciones (sin Inicio)': 'document.querySelectorAll(".navgroup").length === 4 && document.querySelectorAll(".navitem").length === 10',
+  'la sección MCP es propia: el ítem del sidebar abre su vista y contiene la lista': '(function(){ const b = document.querySelector(\'.navitem[data-view="mcp"]\'); if (!b) return false; b.click(); const v = document.querySelector("#view-mcp"); const list = document.querySelector("#mcpList"); return !!v && v.classList.contains("on") && b.classList.contains("on") && !!list && v.contains(list) && !document.querySelector("#setTabs .settab[data-set=mcp]"); })()',
+  'Alt+0 sigue sin cambiar de vista': '(function(){ const antes = [...document.querySelectorAll(".view.on")].map(v => v.id).join(","); window.dispatchEvent(new KeyboardEvent("keydown", { key: "0", altKey: true, bubbles: true })); return [...document.querySelectorAll(".view.on")].map(v => v.id).join(",") === antes; })()',
+  'Alt+7 sigue abriendo Herramientas': '(function(){ document.querySelector(\'[data-view="chat"]\').click(); window.dispatchEvent(new KeyboardEvent("keydown", { key: "7", altKey: true, bubbles: true })); return document.querySelector("#view-tools").classList.contains("on"); })()',
   'controles de ventana cableados': '["#btnClose","#btnMin","#btnMax"].every(s => { const e = document.querySelector(s); return e && typeof e.onclick === "function"; })',
   'la navegación responde': '(function(){ document.querySelector(\'[data-view="tasks"]\').click(); const ok1 = document.querySelector("#view-tasks").classList.contains("on"); document.querySelector(\'[data-view="chat"]\').click(); return ok1 && document.querySelector("#view-chat").classList.contains("on"); })()',
   'el selector de modo tiene los tres, con icono': 'document.querySelectorAll("#modeSeg button").length === 3 && [...document.querySelectorAll("#modeSeg button")].every(b => b.querySelector("svg"))',
@@ -396,14 +399,14 @@ const AFTER = {
     '(function(){ return document.documentElement.scrollHeight <= innerHeight + 1; })()');
   await cmd('Emulation.clearDeviceMetricsOverride', {});
 
-  /* ---- MCP: la pestaña existe, el formulario abre y el estado se pinta ----
+  /* ---- MCP: la sección existe, el formulario abre y el estado se pinta ----
      Sobre la app viva y con un servidor de verdad (el de eco de los tests): lo que
      se comprueba es el recorrido completo, no que los elementos existan. */
-  await evaluate('document.querySelector(\'#setTabs .settab[data-set="mcp"]\').click()');
+  await evaluate('document.querySelector(\'.navitem[data-view="mcp"]\').click()');
   await new Promise(r => setTimeout(r, 400));
-  await judge('la pestaña MCP muestra el servidor de prueba', '(function(){ var rows = document.querySelectorAll("#mcpList .mcprow"); return rows.length >= 1 && /Eco de prueba/.test(document.querySelector("#mcpList").textContent); })()');
+  await judge('la sección MCP muestra el servidor de prueba', '(function(){ var rows = document.querySelectorAll("#mcpList .mcprow"); return rows.length >= 1 && /Eco de prueba/.test(document.querySelector("#mcpList").textContent); })()');
   await judge('el formulario de MCP abre y tiene los campos', '(function(){ document.querySelector("#mcpNew").click(); var c = document.querySelector("#mcpFormCard"); return c.classList.contains("on") && getComputedStyle(c).display !== "none" && !!document.querySelector("#mcpCommand") && !!document.querySelector("#mcpUrl"); })()');
-  // se cierra para no interferir con las comprobaciones siguientes del panel
+  // se cierra para no interferir con las comprobaciones siguientes de la sección
   await evaluate('document.querySelector("#mcpCancel").click()');
   await judge('cambiar a URL remota oculta el comando local', '(function(){ var t = document.querySelector("#mcpTransport"); t.value = "http"; t.dispatchEvent(new Event("change", { bubbles: true })); var ok1 = document.querySelector("#mcpStdioRows").hidden && !document.querySelector("#mcpHttpRows").hidden; t.value = "stdio"; t.dispatchEvent(new Event("change", { bubbles: true })); return ok1 && !document.querySelector("#mcpStdioRows").hidden; })()');
   // El flujo de importación tiene su propia entrada (window.prompt NO existe en Electron):
@@ -412,7 +415,7 @@ const AFTER = {
   await judge('la caja de pegar JSON abre', '(function(){ var b = document.querySelector("#mcpPasteBox"); return !!b && !b.hidden && !!document.querySelector("#mcpPasteText"); })()');
   await evaluate('(function(){ document.querySelector("#mcpPasteText").value = "no es json"; document.querySelector("#mcpPasteGo").click(); return true; })()');
   await new Promise(r => setTimeout(r, 600));
-  await judge('un JSON inválido se explica en el aviso del panel', '(function(){ return /Error/.test(document.querySelector("#mcpMsg").textContent); })()');
+  await judge('un JSON inválido se explica en el aviso de la sección', '(function(){ return /Error/.test(document.querySelector("#mcpMsg").textContent); })()');
   await evaluate('(function(){ document.querySelector("#mcpPasteCancel").click(); return true; })()');
   // el botón Probar habla con el servidor de prueba y trae sus herramientas reales
   await evaluate('(function(){ var b = document.querySelector("#mcpList .mcprow [data-mcp=\\"test\\"]"); if (b) b.click(); return true; })()');
@@ -436,7 +439,7 @@ const AFTER = {
   await judge('con un id con guion, la fila de permiso usa el slug del nombre expuesto',
     '(async function(){ const l = await window.sagitari.mcpList(); const s = (l.servers || []).find(x => x.id === "my-server"); if (!s || s.permKey !== "mcp__my_server__*") return false; const q = (k) => !!document.querySelector("#permList select[data-tool=\\"" + k + "\\"]"); return q(s.permKey) && !q("mcp__my-server__*"); })()');
   // ---- el interruptor global apaga y enciende el catálogo (de punta a punta) ----
-  await evaluate('document.querySelector(\'#setTabs .settab[data-set="mcp"]\').click()');
+  await evaluate('document.querySelector(\'.navitem[data-view="mcp"]\').click()');
   await new Promise(r => setTimeout(r, 400));
   /* Y lo que de verdad recibe el MODELO, que no viaja por ningún canal de la interfaz: se
      mira la petición que la app le manda al modelo de mentira. */
@@ -457,7 +460,7 @@ const AFTER = {
   await evaluate('document.querySelector("#mcpGlobal").click()');
   await new Promise(r => setTimeout(r, 1500));
   await judge('con el interruptor apagado el catálogo no ofrece herramientas MCP',
-    '(async function(){ const l = await window.sagitari.mcpList(); document.querySelector(\'[data-view="tools"]\').click(); await new Promise(r => setTimeout(r, 500)); const g = document.querySelector("#toolsGrid"); const sinGrupo = !!g && !/Servidores MCP/.test(g.textContent); document.querySelector(\'[data-view="settings"]\').click(); document.querySelector(\'#setTabs .settab[data-set="mcp"]\').click(); return l.enabled === false && sinGrupo; })()');
+    '(async function(){ const l = await window.sagitari.mcpList(); document.querySelector(\'[data-view="tools"]\').click(); await new Promise(r => setTimeout(r, 500)); const g = document.querySelector("#toolsGrid"); const sinGrupo = !!g && !/Servidores MCP/.test(g.textContent); document.querySelector(\'.navitem[data-view="mcp"]\').click(); return l.enabled === false && sinGrupo; })()');
   const sinMcp = nombresDe(await pedirAlModelo());
   if (sinMcp.length && !mcpDe(sinMcp).length) {
     console.log('  ok   con el interruptor apagado la petición al modelo no lleva herramientas MCP (' + sinMcp.length + ' nativas)');
@@ -465,12 +468,12 @@ const AFTER = {
     failed++;
     console.log('  FALLO la petición al modelo sigue llevando herramientas MCP con el interruptor apagado  ->  ' + JSON.stringify({ ofrecidas: sinMcp.length, mcp: mcpDe(sinMcp) }));
   }
-  await evaluate('document.querySelector(\'[data-view="settings"]\').click(); document.querySelector(\'#setTabs .settab[data-set="mcp"]\').click()');
+  await evaluate('document.querySelector(\'.navitem[data-view="mcp"]\').click()');
   await new Promise(r => setTimeout(r, 400));
   await evaluate('document.querySelector("#mcpGlobal").click()');
   await new Promise(r => setTimeout(r, 2500));
   await judge('al reencender, el catálogo vuelve a ofrecer las herramientas MCP',
-    '(async function(){ const l = await window.sagitari.mcpList(); document.querySelector(\'[data-view="tools"]\').click(); await new Promise(r => setTimeout(r, 500)); const g = document.querySelector("#toolsGrid"); const conGrupo = !!g && /Servidores MCP/.test(g.textContent) && /echo/.test(g.textContent); document.querySelector(\'[data-view="settings"]\').click(); document.querySelector(\'#setTabs .settab[data-set="mcp"]\').click(); return l.enabled === true && conGrupo; })()');
+    '(async function(){ const l = await window.sagitari.mcpList(); document.querySelector(\'[data-view="tools"]\').click(); await new Promise(r => setTimeout(r, 500)); const g = document.querySelector("#toolsGrid"); const conGrupo = !!g && /Servidores MCP/.test(g.textContent) && /echo/.test(g.textContent); document.querySelector(\'.navitem[data-view="mcp"]\').click(); return l.enabled === true && conGrupo; })()');
   await evaluate('document.querySelector(\'[data-view="chat"]\').click()');
   const conMcp = nombresDe(await pedirAlModelo());
   if (mcpDe(conMcp).includes('mcp__eco__echo')) {
@@ -479,7 +482,7 @@ const AFTER = {
     failed++;
     console.log('  FALLO el modelo no recibe las herramientas MCP al reencender  ->  ' + JSON.stringify({ ofrecidas: conMcp.length, mcp: mcpDe(conMcp) }));
   }
-  await evaluate('document.querySelector(\'[data-view="settings"]\').click(); document.querySelector(\'#setTabs .settab[data-set="mcp"]\').click()');
+  await evaluate('document.querySelector(\'.navitem[data-view="mcp"]\').click()');
   await evaluate('document.querySelector(\'[data-view="chat"]\').click()');
 
   // errores que la propia interfaz haya detectado (red de seguridad del renderer)

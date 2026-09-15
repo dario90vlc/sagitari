@@ -783,6 +783,9 @@ input::placeholder, textarea::placeholder { color: var(--dim); }
   border: 1px solid var(--line2); border-radius: 16px; padding: 16px 18px;
   background: linear-gradient(170deg, rgba(var(--face-rgb), 0.42), rgba(var(--deep-rgb), 0.52));
 }
+/* MCP vive en su propia vista, sin el `.setpanel` que separaba las tarjetas (gap 16px) */
+#view-mcp { max-width: 900px; }
+#view-mcp .setcard + .setcard { margin-top: 16px; }
 .sc-head { display: flex; align-items: baseline; gap: 10px; flex-wrap: wrap; margin-bottom: 14px; }
 .sc-head b { font: 600 15px var(--font-display); color: #fff; }
 .sc-hint { color: var(--dim); font-size: 12px; }

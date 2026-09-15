@@ -48,6 +48,7 @@
         <div class="navgroup" data-label="Conocimiento">
           <button class="navitem" data-view="memory" title="Memoria (Alt+5)"><span class="ni"><i data-i="memory"></i></span><span class="nl">Memoria</span><span class="nb" id="nbMemory" hidden>0</span></button>
           <button class="navitem" data-view="skills" title="Skills (Alt+6)"><span class="ni"><i data-i="zap"></i></span><span class="nl">Skills</span><span class="nb" id="nbSkills" hidden>0</span></button>
+          <button class="navitem" data-view="mcp" title="Servidores MCP"><span class="ni"><i data-i="bolt"></i></span><span class="nl">MCP</span></button>
           <button class="navitem" data-view="tools" title="Herramientas (Alt+7)"><span class="ni"><i data-i="tools"></i></span><span class="nl">Herramientas</span></button>
         </div>
 
@@ -227,6 +228,65 @@
         </div>
       </section>
 
+      <!-- MCP (sección propia: los servidores son las herramientas «de fuera», al lado de las nativas) -->
+      <section class="view" id="view-mcp">
+        <h1 class="sr-only">Servidores MCP</h1>
+        <div class="viewhead"><h2>Servidores MCP</h2></div>
+        <div class="setcard">
+          <div class="sc-head"><b>Servidores MCP</b><span class="sc-hint">Conecta herramientas externas (GitHub, Notion, tu propio servidor…) y el agente las usará como las de casa.</span></div>
+          <div class="swrow srow" data-keys="mcp servidores activar conectar herramientas externas apagar">
+            <span class="st"><b>Activar servidores MCP</b><small>Apagado, el agente no ve ninguna herramienta MCP.</small></span>
+            <div class="sw on" id="mcpGlobal" role="switch" tabindex="0" aria-label="Activar servidores MCP"></div>
+          </div>
+          <div id="mcpList" class="mcplist"></div>
+          <div class="srow" data-keys="mcp anadir servidor pegar json exportar mcpServers">
+            <div class="btnrow">
+              <button class="btn" id="mcpNew"><span class="bi"><i data-i="plus"></i></span> Añadir servidor</button>
+              <button class="btn ghost" id="mcpPaste">Pegar JSON de mcpServers</button>
+              <button class="btn ghost" id="mcpExportBtn">Exportar</button>
+            </div>
+            <div id="mcpPasteBox" hidden>
+              <textarea id="mcpPasteText" rows="5" placeholder='{"mcpServers": { "github": { "command": "npx", "args": ["-y", "@modelcontextprotocol/server-github"] } }}' spellcheck="false"></textarea>
+              <div class="btnrow">
+                <button class="btn" id="mcpPasteGo">Importar</button>
+                <button class="btn ghost" id="mcpPasteCancel">Cancelar</button>
+              </div>
+            </div>
+          </div>
+          <div class="subnote" id="mcpMsg"></div>
+        </div>
+
+        <div class="setcard" id="mcpFormCard">
+          <div class="sc-head"><b id="mcpFormTitle">Nuevo servidor</b><span class="sc-hint">Las variables de entorno y las cabeceras se guardan cifradas con el almacén de Windows.</span></div>
+          <div class="field srow" data-keys="mcp identificador nombre id"><label for="mcpId">IDENTIFICADOR</label><input type="text" id="mcpId" placeholder="github" spellcheck="false" /></div>
+          <div class="field srow" data-keys="mcp nombre visible etiqueta"><label for="mcpName">NOMBRE</label><input type="text" id="mcpName" placeholder="GitHub" /></div>
+          <div class="field srow" data-keys="mcp tipo transporte local remoto comando url"><label for="mcpTransport">TIPO</label>
+            <select id="mcpTransport"><option value="stdio">Comando local</option><option value="http">URL remota</option></select>
+          </div>
+          <div id="mcpStdioRows">
+            <div class="field srow" data-keys="mcp comando ejecutable npx node"><label for="mcpCommand">COMANDO</label><input type="text" id="mcpCommand" placeholder="npx" spellcheck="false" /></div>
+            <div class="field srow" data-keys="mcp argumentos args"><label for="mcpArgs">ARGUMENTOS</label><input type="text" id="mcpArgs" placeholder="-y @modelcontextprotocol/server-github" spellcheck="false" /></div>
+            <div class="field srow" data-keys="mcp variables entorno env token secreto"><label for="mcpEnv">VARIABLES DE ENTORNO</label><textarea id="mcpEnv" rows="3" placeholder="GITHUB_TOKEN=ghp_… (una por línea)"></textarea></div>
+          </div>
+          <div id="mcpHttpRows" hidden>
+            <div class="field srow" data-keys="mcp url direccion remota endpoint"><label for="mcpUrl">URL</label><input type="text" id="mcpUrl" placeholder="https://mcp.ejemplo.com/mcp" spellcheck="false" /></div>
+            <div class="field srow" data-keys="mcp cabeceras headers autorizacion token"><label for="mcpHeaders">CABECERAS</label><textarea id="mcpHeaders" rows="3" placeholder="Authorization=Bearer … (una por línea)"></textarea></div>
+          </div>
+          <div class="field srow" data-keys="mcp permiso nivel bloquear permitir preguntar servidor"><label for="mcpLevel">PERMISO DEL SERVIDOR</label>
+            <select id="mcpLevel"><option value="default">Por defecto (preguntar antes)</option><option value="safe">Permitir siempre</option><option value="confirm">Preguntar antes</option><option value="restricted">Bloqueado</option></select>
+          </div>
+          <div class="field srow" data-keys="mcp herramientas permitir allow lista"><label for="mcpAllow">HERRAMIENTAS A PERMITIR (vacío = todas)</label><input type="text" id="mcpAllow" placeholder="create_issue, list_issues" spellcheck="false" /></div>
+          <div class="field srow" data-keys="mcp herramientas bloquear deny lista"><label for="mcpDeny">HERRAMIENTAS A BLOQUEAR</label><input type="text" id="mcpDeny" placeholder="delete_repository" spellcheck="false" /></div>
+          <div class="srow" data-keys="mcp guardar probar cancelar eliminar">
+            <div class="btnrow">
+              <button class="btn" id="mcpSave"><span class="bi"><i data-i="check"></i></span> Guardar y probar</button>
+              <button class="btn ghost" id="mcpCancel">Cancelar</button>
+              <button class="btn ghost" id="mcpFormDelete" hidden>Eliminar</button>
+            </div>
+          </div>
+        </div>
+      </section>
+
       <!-- TOOLS -->
       <section class="view" id="view-tools">
         <h1 class="sr-only">Herramientas</h1>
@@ -309,7 +369,6 @@
           <button class="settab" data-set="prefs"><i data-i="gear"></i> Preferencias</button>
           <button class="settab" data-set="security"><i data-i="key"></i> Seguridad</button>
           <button class="settab" data-set="agent"><i data-i="agents"></i> Agente</button>
-          <button class="settab" data-set="mcp"><i data-i="bolt"></i> MCP</button>
           <button class="settab" data-set="data"><i data-i="history"></i> Datos y atajos</button>
           <button class="settab" data-set="about"><i data-i="spark"></i> Acerca de</button>
         </div>
@@ -491,63 +550,6 @@
               <div class="sc-head"><b>Diagnóstico</b><span class="sc-hint">Para depurar el comportamiento del agente</span></div>
               <div class="swrow srow" data-keys="modo desarrollador metricas debug tokens latencia coste"><span class="st"><b>Modo desarrollador</b><small>Muestra métricas en vivo (tokens, latencia, coste) bajo el chat.</small></span>
                 <div class="sw" id="devModeSw" aria-label="Modo desarrollador"></div></div>
-            </div>
-          </div>
-
-          <!-- ===== MCP ===== -->
-          <div class="setpanel" data-panel="mcp">
-            <div class="setcard">
-              <div class="sc-head"><b>Servidores MCP</b><span class="sc-hint">Conecta herramientas externas (GitHub, Notion, tu propio servidor…) y el agente las usará como las de casa.</span></div>
-              <div class="swrow srow" data-keys="mcp servidores activar conectar herramientas externas apagar">
-                <span class="st"><b>Activar servidores MCP</b><small>Apagado, el agente no ve ninguna herramienta MCP.</small></span>
-                <div class="sw on" id="mcpGlobal" role="switch" tabindex="0" aria-label="Activar servidores MCP"></div>
-              </div>
-              <div id="mcpList" class="mcplist"></div>
-              <div class="srow" data-keys="mcp anadir servidor pegar json exportar mcpServers">
-                <div class="btnrow">
-                  <button class="btn" id="mcpNew"><span class="bi"><i data-i="plus"></i></span> Añadir servidor</button>
-                  <button class="btn ghost" id="mcpPaste">Pegar JSON de mcpServers</button>
-                  <button class="btn ghost" id="mcpExportBtn">Exportar</button>
-                </div>
-                <div id="mcpPasteBox" hidden>
-                  <textarea id="mcpPasteText" rows="5" placeholder='{"mcpServers": { "github": { "command": "npx", "args": ["-y", "@modelcontextprotocol/server-github"] } }}' spellcheck="false"></textarea>
-                  <div class="btnrow">
-                    <button class="btn" id="mcpPasteGo">Importar</button>
-                    <button class="btn ghost" id="mcpPasteCancel">Cancelar</button>
-                  </div>
-                </div>
-              </div>
-              <div class="subnote" id="mcpMsg"></div>
-            </div>
-
-            <div class="setcard" id="mcpFormCard">
-              <div class="sc-head"><b id="mcpFormTitle">Nuevo servidor</b><span class="sc-hint">Las variables de entorno y las cabeceras se guardan cifradas con el almacén de Windows.</span></div>
-              <div class="field srow" data-keys="mcp identificador nombre id"><label for="mcpId">IDENTIFICADOR</label><input type="text" id="mcpId" placeholder="github" spellcheck="false" /></div>
-              <div class="field srow" data-keys="mcp nombre visible etiqueta"><label for="mcpName">NOMBRE</label><input type="text" id="mcpName" placeholder="GitHub" /></div>
-              <div class="field srow" data-keys="mcp tipo transporte local remoto comando url"><label for="mcpTransport">TIPO</label>
-                <select id="mcpTransport"><option value="stdio">Comando local</option><option value="http">URL remota</option></select>
-              </div>
-              <div id="mcpStdioRows">
-                <div class="field srow" data-keys="mcp comando ejecutable npx node"><label for="mcpCommand">COMANDO</label><input type="text" id="mcpCommand" placeholder="npx" spellcheck="false" /></div>
-                <div class="field srow" data-keys="mcp argumentos args"><label for="mcpArgs">ARGUMENTOS</label><input type="text" id="mcpArgs" placeholder="-y @modelcontextprotocol/server-github" spellcheck="false" /></div>
-                <div class="field srow" data-keys="mcp variables entorno env token secreto"><label for="mcpEnv">VARIABLES DE ENTORNO</label><textarea id="mcpEnv" rows="3" placeholder="GITHUB_TOKEN=ghp_… (una por línea)"></textarea></div>
-              </div>
-              <div id="mcpHttpRows" hidden>
-                <div class="field srow" data-keys="mcp url direccion remota endpoint"><label for="mcpUrl">URL</label><input type="text" id="mcpUrl" placeholder="https://mcp.ejemplo.com/mcp" spellcheck="false" /></div>
-                <div class="field srow" data-keys="mcp cabeceras headers autorizacion token"><label for="mcpHeaders">CABECERAS</label><textarea id="mcpHeaders" rows="3" placeholder="Authorization=Bearer … (una por línea)"></textarea></div>
-              </div>
-              <div class="field srow" data-keys="mcp permiso nivel bloquear permitir preguntar servidor"><label for="mcpLevel">PERMISO DEL SERVIDOR</label>
-                <select id="mcpLevel"><option value="default">Por defecto (preguntar antes)</option><option value="safe">Permitir siempre</option><option value="confirm">Preguntar antes</option><option value="restricted">Bloqueado</option></select>
-              </div>
-              <div class="field srow" data-keys="mcp herramientas permitir allow lista"><label for="mcpAllow">HERRAMIENTAS A PERMITIR (vacío = todas)</label><input type="text" id="mcpAllow" placeholder="create_issue, list_issues" spellcheck="false" /></div>
-              <div class="field srow" data-keys="mcp herramientas bloquear deny lista"><label for="mcpDeny">HERRAMIENTAS A BLOQUEAR</label><input type="text" id="mcpDeny" placeholder="delete_repository" spellcheck="false" /></div>
-              <div class="srow" data-keys="mcp guardar probar cancelar eliminar">
-                <div class="btnrow">
-                  <button class="btn" id="mcpSave"><span class="bi"><i data-i="check"></i></span> Guardar y probar</button>
-                  <button class="btn ghost" id="mcpCancel">Cancelar</button>
-                  <button class="btn ghost" id="mcpFormDelete" hidden>Eliminar</button>
-                </div>
-              </div>
             </div>
           </div>
 
