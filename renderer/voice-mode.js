@@ -1,0 +1,291 @@
+'use strict';
+
+/* El panel del modo voz: dueño del estado que ve el usuario y punto ÚNICO de entrada
+   del renderer. Habla el mismo vocabulario que el proceso principal (el contrato de
+   main/voice/contract.js), así que el banco de pruebas puede inyectar voz sintética
+   por handle() y probar todo esto sin micrófono.
+ *
+ * El nivel del orbe sale de DOS sitios, y es a propósito: mientras escucha, del
+ * micrófono (que captura el renderer); mientras habla, del audio que está sonando. Así
+ * el orbe siempre late con la voz que importa en ese momento.
+ */
+(function () {
+  const ESTADOS = { escuchando: 'Escuchando', oyendo: 'Oyendo', pensando: 'Pensando', hablando: 'Hablando', confirmando: 'Esperando tu permiso', error: 'Atención' };
+  let abierto = false;
+  let estado = 'escuchando';
+  let nivel = 0, objetivo = 0;
+  let raf = 0, t0 = 0, prev = 0;
+  let mic = null, ctxAudio = null, analizadorMic = null;
+  let reproductor = null, analizadorSalida = null, fraseActual = null;
+  let sueloRuido = 0.01, calibrado = false;
+  let reducido = false;
+
+  const $vm = (s) => document.querySelector(s);
+  let ENVIAR = () => {};
+  let HABLAR = () => {};
+
+  function setEstado(s) {
+    if (!ESTADOS[s] || estado === s) return;
+    estado = s;
+    const el = $vm('#vmEstado');
+    if (el) el.textContent = ESTADOS[s];
+    if (s === 'escuchando' || s === 'oyendo' || s === 'pensando' || s === 'error') {
+      const c = $vm('#vmConfirm'); if (c) c.hidden = true;
+    }
+  }
+
+  /* Punto único: todo lo que ocurre en el modo voz entra por aquí. */
+  function handle(ev) {
+    if (!ev || !ev.type) return;
+    if (ev.type === 'state') { setEstado(ev.state); return; }
+    if (ev.type === 'level') { objetivo = Math.max(0, Math.min(1, ev.value)); return; }
+    if (ev.type === 'partial') {
+      setEstado('oyendo');
+      const p = $vm('#vmParcial'); if (p) p.textContent = ev.text;
+      return;
+    }
+    if (ev.type === 'final') {
+      const p = $vm('#vmParcial'); if (p) p.textContent = '';
+      /* Antes de mandar nada al agente hay tres cosas que se atienden aquí:
+         1) la respuesta a una confirmación pendiente («sí»/«no»);
+         2) la orden de salir («adiós», «cierra»);
+         3) lo demás, que sí es una petición. */
+      if (responder(ev.text)) return;
+      if (/^(adi[oó]s|hasta luego|cierra|para el modo voz)\b/i.test(String(ev.text).trim())) { cerrar(); return; }
+      /* La confianza se muestra: con menos de 0,5 la frase queda marcada y se puede
+         corregir pinchando en ella. El motor falla sobre todo en nombres propios. */
+      escribir('Tú', ev.text, ev.confidence);
+      setEstado('pensando');
+      ENVIAR(ev.text);
+      return;
+    }
+    /* Los avisos van a la franja; si el usuario ha pedido oírlos, el renderer los habla
+       (aquí no se decide: el panel no conoce los ajustes). */
+    if (ev.type === 'notice') { pista(ev.text); HABLAR(ev.text); return; }
+    if (ev.type === 'error') { error(ev.text, ev.fix || ''); return; }
+  }
+
+  function escribir(quien, texto, confianza) {
+    const h = $vm('#vmHistorial');
+    if (!h) return;
+    const fila = document.createElement('div');
+    fila.className = 'vm-fila vm-' + (quien === 'Tú' ? 'tu' : 'sagitari');
+    if (quien === 'Tú' && typeof confianza === 'number' && confianza < 0.5) fila.classList.add('vm-dudoso');
+    const q = document.createElement('span'); q.className = 'vm-quien'; q.textContent = quien;
+    const t = document.createElement('span'); t.className = 'vm-dice'; t.textContent = texto;
+    if (quien === 'Tú') { t.title = 'Pincha para corregir; Enter reenvía'; t.onclick = () => editar(t, texto); }
+    fila.appendChild(q); fila.appendChild(t);
+    h.appendChild(fila);
+    h.scrollTop = h.scrollHeight;
+  }
+
+  /* Corregir lo dictado: se pincha la frase, se arregla y Enter la reenvía por el MISMO
+     camino (es la red de seguridad frente a un nombre propio mal oído). */
+  function editar(nodo, original) {
+    const campo = document.createElement('input');
+    campo.className = 'vm-editar'; campo.type = 'text'; campo.value = original;
+    nodo.replaceWith(campo);
+    campo.focus(); campo.select();
+    campo.onkeydown = (e) => {
+      if (e.key === 'Enter') {
+        const nuevo = campo.value.trim();
+        nodo.textContent = nuevo || original;
+        campo.replaceWith(nodo);
+        if (nuevo && nuevo !== original) { setEstado('pensando'); ENVIAR(nuevo); }
+      } else if (e.key === 'Escape') {
+        nodo.textContent = original;
+        campo.replaceWith(nodo);
+      }
+    };
+  }
+
+  function pista(texto) { const p = $vm('#vmPista'); if (p) p.textContent = texto; }
+  function error(texto, fix) {
+    setEstado('error');
+    const caja = $vm('#vmError'); if (!caja) return;
+    caja.hidden = false;
+    $vm('#vmErrorTexto').textContent = texto;
+    $vm('#vmErrorFix').textContent = fix || '';
+  }
+
+  function pasos(lista) {
+    const c = $vm('#vmPasos');
+    if (!c) return;
+    c.innerHTML = '';
+    for (const p of lista || []) {
+      const d = document.createElement('div');
+      d.className = 'vm-paso';
+      d.textContent = (p.ok === false ? '✗ ' : '▸ ') + (p.label || '');
+      c.appendChild(d);
+    }
+  }
+
+  /* Confirmación (permiso de una herramienta): se contesta con el ratón o diciendo
+     «sí»/«no», que llega como un `final` normal y se reconoce aquí. */
+  let confirmacion = null;
+  function pedirConfirmacion({ texto, si, no }) {
+    setEstado('confirmando');
+    confirmacion = { si, no };
+    const caja = $vm('#vmConfirm'); if (!caja) return;
+    $vm('#vmConfirmTexto').textContent = texto;
+    caja.hidden = false;
+  }
+  function responder(texto) {
+    if (!confirmacion) return false;
+    const t = String(texto || '').toLowerCase().trim();
+    /* La frontera NO puede ser `\b`: en JavaScript la «í» no cuenta como carácter de
+       palabra, así que «sí» —la respuesta natural— no hacía frontera y se colaba al
+       agente como si fuera una petición. Se exige final o un carácter que no sea letra,
+       número ni guion bajo detrás, con `u` para que el acento se trate como letra. */
+    const si = /^(s[ií]|vale|hazlo|adelante|confirma|de acuerdo|ok)(?=$|[^\p{L}\p{N}_])/u.test(t);
+    const no = /^(no|cancela|para|detente|mejor no)(?=$|[^\p{L}\p{N}_])/u.test(t);
+    if (!si && !no) return false;
+    const fn = si ? confirmacion.si : confirmacion.no;
+    confirmacion = null;
+    const caja = $vm('#vmConfirm'); if (caja) caja.hidden = true;
+    setEstado('pensando');
+    if (fn) fn();
+    return true;
+  }
+
+  async function abrir() {
+    if (abierto) return;
+    abierto = true;
+    reducido = !!(window.matchMedia && window.matchMedia('(prefers-reduced-motion: reduce)').matches);
+    const panel = $vm('#voiceMode');
+    if (panel) panel.hidden = false;
+    setEstado('escuchando');
+    document.addEventListener('keydown', alTeclado, true);
+    const r = await window.sagitari.voiceOpen().catch(() => null);
+    if (!r || !r.ok) { error('No he podido abrir el modo voz.', 'Cierra y vuelve a abrirlo; si sigue, revisa Ajustes › Voz.'); }
+    await abrirMicro();
+    arrancarBucle();
+  }
+
+  async function cerrar() {
+    if (!abierto) return;
+    abierto = false;
+    pararBucle();
+    document.removeEventListener('keydown', alTeclado, true);
+    await pararAudio();
+    if (mic) { mic.getTracks().forEach((t) => t.stop()); mic = null; }
+    if (ctxAudio && ctxAudio.state !== 'closed') { try { ctxAudio.close(); } catch {} }
+    ctxAudio = null; analizadorMic = null;
+    const panel = $vm('#voiceMode');
+    if (panel) panel.hidden = true;
+    try { await window.sagitari.voiceClose(); } catch {}
+  }
+
+  function alTeclado(e) { if (e.key === 'Escape' && abierto) { e.preventDefault(); cerrar(); } }
+
+  /* Micrófono del renderer: es la fuente del nivel del orbe y de la calibración de ruido. */
+  async function abrirMicro() {
+    try {
+      mic = await navigator.mediaDevices.getUserMedia({ audio: { echoCancellation: true, noiseSuppression: true } });
+      ctxAudio = new (window.AudioContext || window.webkitAudioContext)();
+      const src = ctxAudio.createMediaStreamSource(mic);
+      analizadorMic = ctxAudio.createAnalyser();
+      analizadorMic.fftSize = 1024;
+      src.connect(analizadorMic);
+      sueloRuido = 0.01;
+    } catch (e) {
+      error('No tengo acceso al micrófono.', 'Revisa el permiso en ms-settings:privacy-microphone y vuelve a abrir el modo voz.');
+    }
+  }
+
+  function rms(analizador) {
+    if (!analizador) return 0;
+    const buf = new Uint8Array(analizador.fftSize);
+    analizador.getByteTimeDomainData(buf);
+    let s = 0;
+    for (let i = 0; i < buf.length; i++) { const v = (buf[i] - 128) / 128; s += v * v; }
+    return Math.sqrt(s / buf.length);
+  }
+
+  /* Audio de la respuesta: bytes del proceso principal → WebAudio. Va por WebAudio y no
+     por un <audio src> a propósito: se decodifica en memoria (sin CSP de por medio) y se
+     puede cortar en el acto, además de dar el nivel del orbe. */
+  async function reproducir({ id, bytes }) {
+    try {
+      if (!ctxAudio) ctxAudio = new (window.AudioContext || window.webkitAudioContext)();
+      const datos = (bytes instanceof Uint8Array ? bytes : new Uint8Array(bytes)).buffer;
+      const audio = await ctxAudio.decodeAudioData(datos.slice(0));
+      await pararAudio();
+      reproductor = ctxAudio.createBufferSource();
+      reproductor.buffer = audio;
+      analizadorSalida = ctxAudio.createAnalyser();
+      analizadorSalida.fftSize = 1024;
+      reproductor.connect(analizadorSalida);
+      analizadorSalida.connect(ctxAudio.destination);
+      fraseActual = id;
+      setEstado('hablando');
+      reproductor.onended = () => {
+        if (fraseActual !== id) return;
+        fraseActual = null;
+        window.sagitari.ttsPlayed(id);
+      };
+      reproductor.start();
+    } catch (e) {
+      pista('No he podido reproducir la voz.');
+      if (fraseActual === id) { fraseActual = null; window.sagitari.ttsPlayed(id); }
+    }
+  }
+
+  async function pararAudio() {
+    if (reproductor) {
+      const id = fraseActual;
+      try { reproductor.onended = null; reproductor.stop(); } catch {}
+      reproductor = null; analizadorSalida = null;
+      /* Cortar de verdad: la frase que sonaba ya no va a terminar, así que se le dice al
+         proceso principal que la dé por dicha para que no se quede esperando. */
+      if (id !== null) window.sagitari.ttsPlayed(id);
+      fraseActual = null;
+    }
+  }
+
+  function arrancarBucle() {
+    const c = $vm('#vmOrbe');
+    if (!c || !window.OrbKit) return;
+    const ctx = c.getContext('2d');
+    t0 = performance.now(); prev = t0;
+    const paso = (now) => {
+      const t = (now - t0) / 1000;
+      const dt = Math.min(0.05, (now - prev) / 1000); prev = now;
+      /* El nivel que se pinta: el del audio que suena si estamos hablando, el del
+         micrófono si estamos escuchando u oyendo. */
+      const fuente = estado === 'hablando' ? rms(analizadorSalida) : rms(analizadorMic);
+      if (fuente > 0 && !calibrado) { sueloRuido = sueloRuido * 0.9 + fuente * 0.1; }
+      const objetivoReal = Math.max(objetivo, fuente * 2.2);
+      nivel = window.OrbKit.smoothLevel(nivel, reducido ? window.OrbKit.nivelDeFondo(estado, t) : Math.max(objetivoReal, window.OrbKit.nivelDeFondo(estado, t)), dt);
+      window.OrbKit.draw(ctx, c.width, c.height, nivel, estado, t);
+      if (estado === 'hablando') vigilarInterrupcion(fuente, now);
+      raf = requestAnimationFrame(paso);
+    };
+    raf = requestAnimationFrame(paso);
+  }
+  function pararBucle() { if (raf) cancelAnimationFrame(raf); raf = 0; }
+
+  /* Interrupción (barge-in): si hablas mientras el asistente habla, se calla. Se exige
+     voz sostenida (250 ms) para que un golpe de ruido no corte una respuesta. */
+  let vozDesde = 0;
+  function vigilarInterrupcion(fuente, now) {
+    const umbral = Math.max(0.02, sueloRuido * 3.5);
+    if (fuente > umbral) {
+      if (!vozDesde) vozDesde = now;
+      if (now - vozDesde > 250) { vozDesde = 0; interrumpir(); }
+    } else vozDesde = 0;
+  }
+  async function interrumpir() {
+    await pararAudio();
+    window.sagitari.ttsStop();
+    setEstado('oyendo');
+  }
+
+  window.VoiceMode = {
+    abrir, cerrar, handle, pasos, pedirConfirmacion, responder,
+    estado: () => estado, abierto: () => abierto,
+    audio: { reproducir, parar: pararAudio },
+    setEnviar: (fn) => { ENVIAR = fn; },
+    setHablar: (fn) => { HABLAR = fn; },
+  };
+})();

@@ -531,6 +531,10 @@ const AFTER = {
   await judge('la malla del orbe pinta, cambia de cara y no corta el halo en el borde',
     '(function(){ const o = window.OrbKit; if (!o) return false; const c = document.createElement("canvas"); c.width = 200; c.height = 200; const ctx = c.getContext("2d"); const cuenta = () => { const d = ctx.getImageData(0, 0, 200, 200).data; let n = 0; for (let i = 3; i < d.length; i += 4) if (d[i] > 12) n++; return n; }; o.draw(ctx, 200, 200, 0.6, "oyendo", 1.2); const a = cuenta(); o.draw(ctx, 200, 200, 0.6, "escuchando", 1.2); const b = cuenta(); o.draw(ctx, 200, 200, 0.6, "pensando", 1.2); const e = cuenta(); const alfa = (x, y) => ctx.getImageData(x, y, 1, 1).data[3]; const borde = [alfa(0, 0), alfa(199, 0), alfa(0, 199), alfa(199, 199), alfa(100, 0), alfa(0, 100), alfa(199, 100), alfa(100, 199)]; return a > 500 && b > 500 && e > 500 && Math.abs(a - b) > 50 && borde.every((v) => v === 0); })()');
 
+  /* El panel del modo voz: se abre, se cierra con Esc y no deja rastro cuando está cerrado. */
+  await judge('el modo voz abre con el micro y cierra con Esc',
+    '(async function(){ const vm = window.VoiceMode; if (!vm) return false; await vm.abrir(); const abierto = vm.abierto() && !document.querySelector("#voiceMode").hidden; document.dispatchEvent(new KeyboardEvent("keydown", { key: "Escape", bubbles: true })); await new Promise(r => setTimeout(r, 60)); const cerrado = !vm.abierto() && document.querySelector("#voiceMode").hidden; return abierto && cerrado; })()');
+
   /* La app de prueba arranca OCULTA (--hidden) y su modelo de mentira responde «listo» a
      todo: si además hablara, el usuario oiría una voz salida de la nada, sin ventana que
      la explique (pasó, y se cazó con una sonda de procesos). El perfil de prueba deja el

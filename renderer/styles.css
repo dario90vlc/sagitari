@@ -1456,3 +1456,29 @@ input[type="range"].glowslider::-webkit-slider-thumb:active { transform: scale(1
   .compline .cbtn { width: 30px; height: 30px; }
   .compline .cbtn .ic { width: 15px; height: 15px; }
 }
+
+/* ---- modo voz ---- */
+/* La paleta del proyecto no tiene `--accent` (el acento rico es `--vio`, que además
+   sigue el tema elegido): se define aquí, dentro del panel, para que la cabecera y el
+   nombre de quien habla pinten de acento en vez de heredar el color del texto. */
+#voiceMode { --accent: var(--vio); position: absolute; inset: 0; z-index: 40; display: flex; flex-direction: column; align-items: center; justify-content: center; gap: 10px; background: radial-gradient(120% 120% at 50% 30%, #14121f 0%, #0b0a12 70%); }
+#voiceMode[hidden] { display: none; }
+#vmOrbe { width: 190px; height: 190px; }              /* el lienzo va sin fondo: se ve el panel */
+.vm-cabecera { letter-spacing: .06em; text-transform: uppercase; font-size: 11px; color: var(--accent); }
+.vm-texto { width: min(680px, 86%); max-height: 34vh; overflow: auto; }
+.vm-parcial { opacity: .55; font-style: italic; margin: 4px 0; }
+.vm-fila { display: flex; gap: 8px; margin: 4px 0; }
+.vm-quien { min-width: 62px; font-weight: 600; color: var(--accent); }
+.vm-pasos { font-size: 12px; opacity: .85; min-height: 18px; }
+.vm-confirm { border: 1px solid rgba(251,191,36,.5); background: rgba(251,191,36,.08); border-radius: 10px; padding: 10px; width: min(560px, 84%); }
+.vm-botones { display: flex; gap: 8px; margin-top: 6px; }
+/* Los botones de la confirmación llevan TEXTO («Sí, hazlo»), y `.cbtn` es el cuadro
+   redondo de 34×34 de los iconos del compositor: sin esta regla la etiqueta se partía en
+   dos líneas dentro de un cuadrado de 34px. */
+#voiceMode .vm-botones .cbtn { width: auto; height: auto; border-radius: 9px; padding: 7px 14px; white-space: nowrap; }
+.vm-error { border: 1px solid rgba(248,113,113,.5); border-radius: 10px; padding: 10px; width: min(560px, 84%); }
+.vm-pie { font-size: 11px; opacity: .6; display: flex; gap: 18px; }
+.vm-dudoso .vm-dice { color: #fcd34d; }              /* confianza baja: se ve que dudó */
+.vm-editar { background: #17141f; color: inherit; border: 1px solid rgba(139,92,246,.5); border-radius: 6px; padding: 2px 6px; font: inherit; min-width: 60%; }
+kbd { border: 1px solid rgba(255,255,255,.25); border-radius: 5px; padding: 1px 6px; }
+@media (prefers-reduced-motion: reduce) { #vmOrbe { transition: none; } }

@@ -629,12 +629,38 @@
       </div>
 
     </aside>
+
+      <!-- Modo voz: se superpone al área del chat. El orbe es decorativo (aria-hidden) y
+           todo lo que importa es texto, para que quien use lector de pantalla no dependa
+           del dibujo. `hidden` de verdad cuando está cerrado: nada animando de fondo. -->
+      <div id="voiceMode" hidden>
+        <div class="vm-cabecera"><span id="vmEstado">Escuchando</span></div>
+        <canvas id="vmOrbe" width="380" height="380" aria-hidden="true"></canvas>
+        <div class="vm-texto">
+          <p id="vmParcial" class="vm-parcial" aria-live="polite"></p>
+          <div id="vmHistorial"></div>
+        </div>
+        <div id="vmPasos" class="vm-pasos"></div>
+        <div id="vmConfirm" class="vm-confirm" hidden>
+          <p id="vmConfirmTexto"></p>
+          <div class="vm-botones">
+            <button class="cbtn" id="vmSi">Sí, hazlo</button>
+            <button class="cbtn" id="vmNo">No</button>
+          </div>
+        </div>
+        <div id="vmError" class="vm-error" hidden>
+          <p id="vmErrorTexto"></p>
+          <p id="vmErrorFix" class="vm-hint"></p>
+        </div>
+        <div class="vm-pie"><span><kbd>Esc</kbd> para salir</span><span id="vmPista">habla cuando quieras, te escucho</span></div>
+      </div>
   </div>
 </div>
 <script src="icons.js"></script>
 <script src="marked.min.js"></script>
 <script src="chatkit.js"></script>
 <script src="orb.js"></script>
+<script src="voice-mode.js"></script>
 <script src="app.js"></script>
 </body>
 </html>
