@@ -988,6 +988,9 @@ test('voz/manager: trocea la respuesta en frases y las sintetiza en orden', asyn
   await new Promise((r) => setTimeout(r, 80));
   eq(frases.length, 2, 'dos frases: ' + JSON.stringify(frases));
   eq(frases[0], 'Hecho.', 'la primera es la primera');
+  /* Los saltos de línea son frontera de frase: una lista se lee frase a frase. */
+  const { trocear } = require('../main/voice/manager');
+  eq(trocear('Lista uno.\nLista dos sin punto'), ['Lista uno.', 'Lista dos sin punto'], 'los saltos de línea parten la frase');
   ok(eventos.some((e) => e.type === 'state' && e.state === 'hablando'), 'el estado pasa a hablando');
   ok(eventos.some((e) => e.type === 'state' && e.state === 'escuchando'), 'y vuelve a escuchando al terminar');
 });
@@ -1028,14 +1031,23 @@ Expected: FAIL con `Cannot find module '../main/voice/manager'`
 const { assertEvent } = require('./contract');
 const { esBasura } = require('./junk');
 
-/* Trocea para sintetizar: se corta en final de frase y en saltos de línea, y NADA MÁS.
-   Una versión anterior fusionaba frases cortas («Hecho.» se pegaba a la siguiente), lo que
-   rompe la síntesis por frases —que es justo lo que da la sensación de inmediatez— y
-   contradecía el test de esta tarea. Lo cazó el reconocimiento previo del plan. */
+/* Trocea para sintetizar. Primero por saltos de línea —una respuesta con lista se lee mucho
+   mejor frase a frase que como un párrafo corrido— y luego por final de frase. NO se fusionan
+   frases cortas: una versión anterior lo hacía y contradecía el test de la tarea. Se colapsan
+   los espacios DESPUÉS de partir por líneas, que si no el colapso se come los saltos. */
 function trocear(texto) {
-  const limpio = String(texto || '').replace(/```[\s\S]*?```/g, ' (código) ').replace(/\s+/g, ' ').trim();
+  const limpio = String(texto || '').replace(/```[\s\S]*?```/g, ' (código) ').trim();
   if (!limpio) return [];
-  return (limpio.match(/[^.!?…]+[.!?…]*/g) || [limpio]).map((f) => f.trim()).filter(Boolean);
+  const out = [];
+  for (const linea of limpio.split(/\r?\n/)) {
+    const l = linea.replace(/\s+/g, ' ').trim();
+    if (!l) continue;
+    for (const f of l.match(/[^.!?…]+[.!?…]*/g) || [l]) {
+      const t = f.trim();
+      if (t) out.push(t);
+    }
+  }
+  return out;
 }
 
 function createVoiceManager({ emit, stt, tts, onPhrase = () => {}, settings = {} } = {}) {
@@ -1068,7 +1080,11 @@ function createVoiceManager({ emit, stt, tts, onPhrase = () => {}, settings = {}
     if (ev.type === 'final') {
       if (!ev.text || !ev.text.trim()) return;
       const j = esBasura(ev.text, ev.ms || 0);
-      if (j.basura) { setEstado('escuchando'); pon({ type: 'notice', text: 'No te he entendido (' + j.motivo + ').' }); return; }
+      /* La basura es ruido del motor, no una frase del usuario: se avisa y se descarta, pero
+         NO se reescribe el estado. Con el `setEstado('escuchando')` que llegué a escribir, una
+         alucinación devolvía el orbe a «escuchando» mientras el agente seguía trabajando; lo
+         cazó el test de la propia tarea. */
+      if (j.basura) { pon({ type: 'notice', text: 'No te he entendido (' + j.motivo + ').' }); return; }
       setEstado('oyendo');
       emit(ev);
       return;
