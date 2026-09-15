@@ -93,5 +93,17 @@ contextBridge.exposeInMainWorld('sagitari', {
   updateDownload: () => ipcRenderer.invoke('update:download'),
   updateInstall: () => ipcRenderer.invoke('update:install'),
   updatePage: () => ipcRenderer.invoke('update:page'),
-  onUpdate: on('update:event', ([ev]) => [ev])
+  onUpdate: on('update:event', ([ev]) => [ev]),
+
+  // ---- v3.1: servidores MCP del usuario ----
+  mcpList: () => ipcRenderer.invoke('mcp:list'),
+  mcpSave: (server) => ipcRenderer.invoke('mcp:save', server),
+  mcpDelete: (id) => ipcRenderer.invoke('mcp:delete', id),
+  mcpToggle: (id, enabled) => ipcRenderer.invoke('mcp:toggle', { id, enabled }),
+  mcpSetGlobal: (enabled) => ipcRenderer.invoke('mcp:setGlobal', enabled),
+  mcpTest: (id) => ipcRenderer.invoke('mcp:test', id),
+  mcpRefresh: (id) => ipcRenderer.invoke('mcp:refresh', id),
+  mcpLog: (id) => ipcRenderer.invoke('mcp:log', id),
+  mcpImport: (json) => ipcRenderer.invoke('mcp:import', json),
+  mcpExport: () => ipcRenderer.invoke('mcp:export')
 });
