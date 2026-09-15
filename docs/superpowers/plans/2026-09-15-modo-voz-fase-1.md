@@ -561,11 +561,16 @@ test('voz/tts-windows: sintetiza una frase, borra el temporal y dice qué voz us
     return proc;
   };
   const tts = createTtsWindows({ spawnFn, dataDir: dir });
+  const cuentaWavs = () => fs.readdirSync(os.tmpdir()).filter((f) => /^sagi-tts-.*\.wav$/.test(f)).length;
+  const antes = cuentaWavs();
   const r = await tts.sintetizar('Hola, esto es una prueba.', { voice: 'Microsoft Helena', lang: 'es-ES' });
   ok(r.wav.length > 8, 'devuelve bytes de WAV');
   eq(r.voz, 'Microsoft Helena', 'dice qué voz usó');
   eq(r.ms, 412, 'y cuánto tardó la síntesis');
-  ok(!fs.existsSync(path.join(dir, 'tts')), 'no deja WAV temporal en disco');
+  /* Comprobación REAL de que no deja basura: se cuentan los WAV temporales antes y
+     después. (La primera versión de este test miraba un directorio que nunca se creaba,
+     así que no podía fallar; lo cazó el reconocimiento previo del plan.) */
+  eq(cuentaWavs(), antes, 'no deja WAV temporales tras sintetizar');
   ok(llamadas[0].includes('tts.ps1'), 'llama a tts.ps1');
   ok(llamadas[0].includes('es-ES'), 'y le pasa el idioma');
 });
