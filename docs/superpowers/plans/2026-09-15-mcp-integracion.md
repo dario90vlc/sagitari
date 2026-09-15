@@ -1469,7 +1469,12 @@ Para no reescribir el `switch`, la forma mínima y legible es ponerlo **antes** 
   // gestor, que ya pasó por el motor de permisos en _runToolCall.
   if (String(name).startsWith('mcp__')) {
     if (!ctx.mcp) return 'Error: no hay servidores MCP en esta ejecución.';
-    return ctx.mcp.callTool(name, args);
+    // `_mcp` es la etiqueta interna de la tarjeta de confirmación (servidor y nombre
+    // reales): NO es un argumento de la herramienta, así que no puede viajar al
+    // servidor (uno con inputSchema estricto rechazaría el campo de más).
+    const { _mcp, ...rest } = args;
+    // onExit: Detener corta SOLO la llamada en vuelo (el gancho que expone callTool).
+    return ctx.mcp.callTool(name, rest, { onExit: ctx.registerKillable });
   }
 ```
 
@@ -1479,9 +1484,10 @@ Para no reescribir el `switch`, la forma mínima y legible es ponerlo **antes** 
 - `:875`: `tools: toolsOverride || allToolDefs(),`
 - constructor: `this.mcp = opts.mcp || null;`
 - `_delegate` pasa `mcp: this.mcp` al subagente (aunque su catálogo filtrado no incluya MCP, `executeTool` necesita el gestor si alguna vez se habilita).
-- En `_runToolCall`, antes de `decide`, la etiqueta real para la tarjeta y para el prompt:
+- En `_runToolCall`, la etiqueta real de la herramienta MCP se añade ANTES de la llamada a `onStatus(statusFor(...))` (si se añade después, la rama `args._mcp` de `statusFor` es código muerto y el rail muestra el slug en vez del nombre real):
 
 ```js
+    // …justo antes de `if (onStatus) onStatus(statusFor(name, args));`:
     if (String(name).startsWith('mcp__') && this.mcp) {
       const info = this.mcp.describe(name);
       if (info) args = { ...args, _mcp: { serverName: info.serverName, toolName: info.toolName } };
@@ -1509,7 +1515,10 @@ Para no reescribir el `switch`, la forma mínima y legible es ponerlo **antes** 
 - `describeAction`: en el `default`, antes del texto genérico:
 ```js
     default: {
-      if (a._mcp) return 'Usar la herramienta «' + a._mcp.toolName + '» del servidor MCP «' + a._mcp.serverName + '»';
+      // la etiqueta solo vale para nombres MCP: los argumentos llegan sin filtrar del
+      // modelo, y un `_mcp` inyectado en una herramienta nativa haría que la tarjeta
+      // de confirmación describiera otra cosa (y ocultara la ruta a escribir)
+      if (String(name).startsWith('mcp__') && a._mcp) return 'Usar la herramienta «' + a._mcp.toolName + '» del servidor MCP «' + a._mcp.serverName + '»';
       if (String(name).startsWith('mcp__')) return 'Usar una herramienta MCP (' + name.slice(5).replace(/__/g, ' · ') + ')';
       return 'Usar herramienta ' + name;
     }
@@ -1517,7 +1526,7 @@ Para no reescribir el `switch`, la forma mínima y legible es ponerlo **antes** 
 - `summarizeArgs`: en el `default`:
 ```js
     default: {
-      if (a._mcp) return `${a._mcp.serverName} → ${a._mcp.toolName}`;
+      if (String(name).startsWith('mcp__') && a._mcp) return `${a._mcp.serverName} → ${a._mcp.toolName}`;
       return Object.keys(a).length ? JSON.stringify(a).slice(0, 160) : '';
     }
 ```
