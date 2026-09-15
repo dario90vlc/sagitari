@@ -1028,22 +1028,14 @@ Expected: FAIL con `Cannot find module '../main/voice/manager'`
 const { assertEvent } = require('./contract');
 const { esBasura } = require('./junk');
 
-/* Trocea para sintetizar: se corta en final de frase y también en saltos de línea.
-   Los puntos de cifras («9.30») y las abreviaturas no deben partir una frase. */
+/* Trocea para sintetizar: se corta en final de frase y en saltos de línea, y NADA MÁS.
+   Una versión anterior fusionaba frases cortas («Hecho.» se pegaba a la siguiente), lo que
+   rompe la síntesis por frases —que es justo lo que da la sensación de inmediatez— y
+   contradecía el test de esta tarea. Lo cazó el reconocimiento previo del plan. */
 function trocear(texto) {
   const limpio = String(texto || '').replace(/```[\s\S]*?```/g, ' (código) ').replace(/\s+/g, ' ').trim();
   if (!limpio) return [];
-  const partes = limpio.match(/[^.!?…\n]+[.!?…]*/g) || [limpio];
-  const out = [];
-  for (const p of partes) {
-    const t = p.trim();
-    if (!t) continue;
-    const previa = out[out.length - 1];
-    /* «9.» seguido de cifras, o una lista («1.»), no cierran frase. */
-    if (previa && /(\d|[A-ZÁÉÍÓÚÑ])\.$/.test(previa) === false && previa.length < 12) out[out.length - 1] = previa + ' ' + t;
-    else out.push(t);
-  }
-  return out;
+  return (limpio.match(/[^.!?…]+[.!?…]*/g) || [limpio]).map((f) => f.trim()).filter(Boolean);
 }
 
 function createVoiceManager({ emit, stt, tts, onPhrase = () => {}, settings = {} } = {}) {
