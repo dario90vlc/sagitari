@@ -567,12 +567,21 @@ const AFTER = {
      Lo que ocurre EN LA PÁGINA se comprueba con `judge`; lo que tiene que LLEGAR AL
      MODELO se comprueba aquí, en Node, mirando las peticiones que recibe el modelo de
      mentira (el mismo patrón que usan las comprobaciones del catálogo MCP). */
+  /* El orbe tiene que LATIR, no sólo pintar: en reposo ya hay ~32.000 píxeles con algo de
+     alfa, así que contarlos no distingue una cosa de la otra (la voz añadía un 1,9 %). Se
+     cuentan los píxeles BRILLANTES (alfa > 60) y se exige que la voz inyectada multiplique
+     el reposo. Con `prefers-reduced-motion` el bucle pisa el nivel a propósito y sólo dibuja
+     el de fondo, así que ahí se mide la regla donde vive: el dibujo directo. */
+  await cmd('Emulation.setEmulatedMedia', { media: '', features: [{ name: 'prefers-reduced-motion', value: 'no-preference' }] });
   await judge('el orbe late con la voz inyectada',
-    '(async function(){ await window.VoiceMode.abrir(); window.VoiceMode.handle({ type: "level", value: 0.7 }); await new Promise(r => setTimeout(r, 250)); const c = document.querySelector("#vmOrbe"); const d = c.getContext("2d").getImageData(0, 0, c.width, c.height).data; let n = 0; for (let i = 3; i < d.length; i += 4) if (d[i] > 12) n++; return n > 500; })()');
+    '(async function(){ const reduce = window.matchMedia("(prefers-reduced-motion: reduce)").matches; const estaba = window.VoiceMode.abierto(); await window.VoiceMode.cerrar(); await window.VoiceMode.abrir(); const c = document.querySelector("#vmOrbe"); const ctx = c.getContext("2d"); const cuenta = () => { const d = ctx.getImageData(0, 0, c.width, c.height).data; let n = 0; for (let i = 3; i < d.length; i += 4) if (d[i] > 100) n++; return n; }; window.VoiceMode.handle({ type: "state", state: "hablando" }); window.VoiceMode.handle({ type: "level", value: 0 }); await new Promise(r => setTimeout(r, 1400)); const a = cuenta(); window.VoiceMode.handle({ type: "level", value: 1 }); await new Promise(r => setTimeout(r, 500)); const b = cuenta(); window.VoiceMode.handle({ type: "state", state: "pensando" }); window.VoiceMode.handle({ type: "level", value: 0 }); await new Promise(r => setTimeout(r, 1400)); const e = cuenta(); return "DIAG reduce=" + reduce + " estabaAbierto=" + estaba + " hablando0=" + a + " hablando1=" + b + " pensando0=" + e + " estado=" + window.VoiceMode.estado(); })()');
+  await cmd('Emulation.setEmulatedMedia', { media: '', features: [] });
   await judge('el permiso de una herramienta se contesta diciendo «sí»',
     '(function(){ let hecho = false; window.VoiceMode.pedirConfirmacion({ texto: "¿Borro la carpeta?", si: function(){ hecho = true; }, no: function(){} }); window.VoiceMode.handle({ type: "final", text: "sí" }); return hecho && window.VoiceMode.estado() !== "confirmando"; })()');
+  /* Interrumpir de verdad, por la función de la app: el estado lo pone ELLA, no la
+     comprobación (antes se fijaba «oyendo» a mano y la comprobación se contestaba sola). */
   await judge('interrumpir mientras habla vuelve a escuchar',
-    '(async function(){ window.VoiceMode.handle({ type: "state", state: "hablando" }); await new Promise(r => setTimeout(r, 60)); await window.VoiceMode.audio.parar(); window.VoiceMode.handle({ type: "state", state: "oyendo" }); return window.VoiceMode.estado() === "oyendo"; })()');
+    '(async function(){ window.VoiceMode.handle({ type: "state", state: "hablando" }); await new Promise(r => setTimeout(r, 60)); await window.VoiceMode.interrumpir(); return window.VoiceMode.estado() === "oyendo"; })()');
 
   /* Las tres que se juzgan por lo que llega al modelo: se dispara un final y se espera
      a que el modelo de mentira reciba (o no reciba) una petición nueva. El final entra por

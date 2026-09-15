@@ -364,7 +364,11 @@
       const objetivoReal = Math.max(objetivo, fuente * 2.2);
       nivel = window.OrbKit.smoothLevel(nivel, reducido ? window.OrbKit.nivelDeFondo(estado, t) : Math.max(objetivoReal, window.OrbKit.nivelDeFondo(estado, t)), dt);
       window.OrbKit.draw(ctx, c.width, c.height, nivel, estado, t);
-      if (estado === 'hablando') vigilarInterrupcion(fuente, now);
+      /* La interrupción la decide el MICRÓFONO, no lo que suena: mirando la salida, la
+         propia voz del asistente cuenta como «el usuario está hablando» y bastan ~250 ms
+         de su respuesta para que se corte a sí mismo. El nivel del orbe mientras habla SÍ
+         sigue saliendo de la salida (eso no se toca). */
+      if (estado === 'hablando') vigilarInterrupcion(rms(analizadorMic), now);
       raf = requestAnimationFrame(paso);
     };
     raf = requestAnimationFrame(paso);
@@ -399,7 +403,7 @@
   cablearConfirmacion();
 
   window.VoiceMode = {
-    abrir, cerrar, handle, pasos, respuesta, pedirConfirmacion, responder,
+    abrir, cerrar, handle, pasos, respuesta, pedirConfirmacion, responder, interrumpir,
     estado: () => estado, abierto: () => abierto,
     audio: { reproducir, parar: pararAudio },
     setEnviar: (fn) => { ENVIAR = fn; },
