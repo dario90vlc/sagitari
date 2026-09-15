@@ -29,3 +29,6 @@ Thumbs.db
 _*.js
 _*.png
 _*.html
+
+# Compañero visual de brainstorming (maquetas locales, no se versionan)
+.superpowers/
