@@ -76,27 +76,44 @@
     if (quien === 'Tú') { t.title = 'Pincha para corregir; Enter reenvía'; t.onclick = () => editar(t, texto); }
     fila.appendChild(q); fila.appendChild(t);
     h.appendChild(fila);
-    h.scrollTop = h.scrollHeight;
+    /* Quien desborda y tiene el `overflow: auto` es la caja de texto, no la lista:
+       desplazar la lista no movía nada y la frase recién dictada quedaba fuera de la vista. */
+    const caja = h.closest('.vm-texto') || h;
+    caja.scrollTop = caja.scrollHeight;
   }
 
   /* Corregir lo dictado: se pincha la frase, se arregla y Enter la reenvía por el MISMO
      camino (es la red de seguridad frente a un nombre propio mal oído). */
+  let edicion = null;   // { campo, nodo, original } mientras hay una corrección en curso
   function editar(nodo, original) {
     const campo = document.createElement('input');
     campo.className = 'vm-editar'; campo.type = 'text'; campo.value = original;
     nodo.replaceWith(campo);
     campo.focus(); campo.select();
+    edicion = { campo, nodo, original };
     campo.onkeydown = (e) => {
       if (e.key === 'Enter') {
         const nuevo = campo.value.trim();
+        edicion = null;
         nodo.textContent = nuevo || original;
         campo.replaceWith(nodo);
         if (nuevo && nuevo !== original) { setEstado('pensando'); ENVIAR(nuevo); }
       } else if (e.key === 'Escape') {
-        nodo.textContent = original;
-        campo.replaceWith(nodo);
+        /* Normalmente ya lo ha cancelado alTeclado (va en captura, antes que esto); se
+           repite aquí para que la edición siga siendo cancelable sin el panel montado. */
+        cancelarEdicion();
       }
     };
+    /* Si el foco se va a otro sitio, la corrección se abandona: dejar el campo vivo sin
+       foco haría que el siguiente Esc cancelase una edición que el usuario ya no ve. */
+    campo.onblur = () => { if (edicion && edicion.campo === campo) cancelarEdicion(); };
+  }
+  function cancelarEdicion() {
+    if (!edicion) return;
+    const { campo, nodo, original } = edicion;
+    edicion = null;
+    nodo.textContent = original;
+    if (campo.parentNode) campo.replaceWith(nodo);
   }
 
   function pista(texto) { const p = $vm('#vmPista'); if (p) p.textContent = texto; }
@@ -106,6 +123,13 @@
     caja.hidden = false;
     $vm('#vmErrorTexto').textContent = texto;
     $vm('#vmErrorFix').textContent = fix || '';
+  }
+  /* Apaga el aviso de error. Se llama al abrir: si el permiso de micrófono se denegó, al
+     cerrar y volver a abrir seguía a la vista el aviso de la sesión anterior. */
+  function olvidarError() {
+    const caja = $vm('#vmError'); if (caja) caja.hidden = true;
+    const t = $vm('#vmErrorTexto'); if (t) t.textContent = '';
+    const f = $vm('#vmErrorFix'); if (f) f.textContent = '';
   }
 
   function pasos(lista) {
@@ -121,7 +145,9 @@
   }
 
   /* Confirmación (permiso de una herramienta): se contesta con el ratón o diciendo
-     «sí»/«no», que llega como un `final` normal y se reconoce aquí. */
+     «sí»/«no», que llega como un `final` normal y se reconoce aquí. Las dos formas de
+     contestar acaban en el MISMO sitio (contestar), para que no haya dos maneras distintas
+     de resolver el permiso. */
   let confirmacion = null;
   function pedirConfirmacion({ texto, si, no }) {
     setEstado('confirmando');
@@ -129,6 +155,14 @@
     const caja = $vm('#vmConfirm'); if (!caja) return;
     $vm('#vmConfirmTexto').textContent = texto;
     caja.hidden = false;
+  }
+  /* Cierra la confirmación y ejecuta la decisión elegida. */
+  function contestar(cual) {
+    const fn = confirmacion && confirmacion[cual];
+    confirmacion = null;
+    const caja = $vm('#vmConfirm'); if (caja) caja.hidden = true;
+    setEstado('pensando');
+    if (fn) fn();
   }
   function responder(texto) {
     if (!confirmacion) return false;
@@ -140,12 +174,16 @@
     const si = /^(s[ií]|vale|hazlo|adelante|confirma|de acuerdo|ok)(?=$|[^\p{L}\p{N}_])/u.test(t);
     const no = /^(no|cancela|para|detente|mejor no)(?=$|[^\p{L}\p{N}_])/u.test(t);
     if (!si && !no) return false;
-    const fn = si ? confirmacion.si : confirmacion.no;
-    confirmacion = null;
-    const caja = $vm('#vmConfirm'); if (caja) caja.hidden = true;
-    setEstado('pensando');
-    if (fn) fn();
+    contestar(si ? 'si' : 'no');
     return true;
+  }
+  /* Los botones de la confirmación hacen lo mismo que decir «sí» o «no»: llaman a su
+     callback, esconden la caja y el estado pasa a `pensando`. Sin confirmación pendiente
+     no hacen nada (la caja no está a la vista, así que no hay nada que contestar). */
+  function cablearConfirmacion() {
+    const bSi = $vm('#vmSi'), bNo = $vm('#vmNo');
+    if (bSi) bSi.onclick = () => { if (confirmacion) contestar('si'); };
+    if (bNo) bNo.onclick = () => { if (confirmacion) contestar('no'); };
   }
 
   async function abrir() {
@@ -154,12 +192,29 @@
     reducido = !!(window.matchMedia && window.matchMedia('(prefers-reduced-motion: reduce)').matches);
     const panel = $vm('#voiceMode');
     if (panel) panel.hidden = false;
+    olvidarError();
     setEstado('escuchando');
     document.addEventListener('keydown', alTeclado, true);
     const r = await window.sagitari.voiceOpen().catch(() => null);
+    /* El usuario puede haber pulsado Esc mientras esto se abría. Entonces ya no hay nada
+       que abrir: seguir hasta el final adquiriría un micrófono y un bucle de dibujo para
+       un modo cerrado (micro capturando sin panel, y `cerrar()` ya no podría pararlo),
+       así que se abandona aquí. */
+    if (!abierto) return;
     if (!r || !r.ok) { error('No he podido abrir el modo voz.', 'Cierra y vuelve a abrirlo; si sigue, revisa Ajustes › Voz.'); }
     await abrirMicro();
+    /* Mismo caso, ahora con el micrófono ya pedido: si mientras se concedía el permiso se
+       cerró el modo, se suelta lo adquirido y no se arranca el bucle. */
+    if (!abierto) { soltarMicro(); return; }
     arrancarBucle();
+  }
+
+  /* Suelta el micrófono y el AudioContext del renderer. Vale para cerrar y para cuando la
+     apertura se abandonó a mitad: el micrófono no puede quedarse capturando sin panel. */
+  function soltarMicro() {
+    if (mic) { mic.getTracks().forEach((t) => t.stop()); mic = null; }
+    if (ctxAudio && ctxAudio.state !== 'closed') { try { ctxAudio.close(); } catch {} }
+    ctxAudio = null; analizadorMic = null;
   }
 
   async function cerrar() {
@@ -167,16 +222,23 @@
     abierto = false;
     pararBucle();
     document.removeEventListener('keydown', alTeclado, true);
+    cancelarEdicion();
     await pararAudio();
-    if (mic) { mic.getTracks().forEach((t) => t.stop()); mic = null; }
-    if (ctxAudio && ctxAudio.state !== 'closed') { try { ctxAudio.close(); } catch {} }
-    ctxAudio = null; analizadorMic = null;
+    soltarMicro();
     const panel = $vm('#voiceMode');
     if (panel) panel.hidden = true;
     try { await window.sagitari.voiceClose(); } catch {}
   }
 
-  function alTeclado(e) { if (e.key === 'Escape' && abierto) { e.preventDefault(); cerrar(); } }
+  /* Esc sale del modo… salvo que haya una corrección en curso: ahí Esc cancela la
+     corrección. El listener va en captura (antes que el del campo), así que es aquí donde
+     se decide, o el campo nunca llegaría a ver su propio Escape. */
+  function alTeclado(e) {
+    if (e.key !== 'Escape' || !abierto) return;
+    e.preventDefault();
+    if (edicion) { cancelarEdicion(); return; }
+    cerrar();
+  }
 
   /* Micrófono del renderer: es la fuente del nivel del orbe y de la calibración de ruido. */
   async function abrirMicro() {
@@ -206,12 +268,14 @@
      por un <audio src> a propósito: se decodifica en memoria (sin CSP de por medio) y se
      puede cortar en el acto, además de dar el nivel del orbe. */
   async function reproducir({ id, bytes }) {
+    let mio = false;   // ¿la fuente que se está montando es la de ESTA llamada?
     try {
       if (!ctxAudio) ctxAudio = new (window.AudioContext || window.webkitAudioContext)();
       const datos = (bytes instanceof Uint8Array ? bytes : new Uint8Array(bytes)).buffer;
       const audio = await ctxAudio.decodeAudioData(datos.slice(0));
       await pararAudio();
       reproductor = ctxAudio.createBufferSource();
+      mio = true;
       reproductor.buffer = audio;
       analizadorSalida = ctxAudio.createAnalyser();
       analizadorSalida.fftSize = 1024;
@@ -227,7 +291,19 @@
       reproductor.start();
     } catch (e) {
       pista('No he podido reproducir la voz.');
-      if (fraseActual === id) { fraseActual = null; window.sagitari.ttsPlayed(id); }
+      /* La frase no va a sonar, así que se avisa SIEMPRE —también cuando el fallo ocurre
+         ANTES de asignarla (unos bytes que `decodeAudioData` rechaza): sin ese aviso el
+         proceso principal se queda esperando una frase que nunca termina y la cola de voz
+         no avanza nunca. */
+      if (mio) {
+        /* Sólo se desmonta lo que montó esta llamada: si el que falla es el `decode`, la
+           fuente que suena es todavía la de la frase anterior y cortarla en silencio
+           dejaría a esa frase sin su aviso de «ya sonó». */
+        try { reproductor.onended = null; reproductor.stop(); } catch {}
+        reproductor = null; analizadorSalida = null;
+      }
+      if (fraseActual === id) fraseActual = null;
+      window.sagitari.ttsPlayed(id);
     }
   }
 
@@ -281,8 +357,19 @@
     setEstado('oyendo');
   }
 
+  /* La respuesta del agente, en TEXTO. El panel es opaco y tapa el chat, así que mientras
+     el modo está abierto lo único que se puede leer es esto: sin esta fila la respuesta
+     sólo se oiría. La llama el renderer cuando llega la respuesta del agente (es el enganche
+     que usará la tarea 9); aquí no se habla con el agente. */
+  function respuesta(texto) {
+    if (!texto) return;
+    escribir('Sagitari', texto);
+  }
+
+  cablearConfirmacion();
+
   window.VoiceMode = {
-    abrir, cerrar, handle, pasos, pedirConfirmacion, responder,
+    abrir, cerrar, handle, pasos, respuesta, pedirConfirmacion, responder,
     estado: () => estado, abierto: () => abierto,
     audio: { reproducir, parar: pararAudio },
     setEnviar: (fn) => { ENVIAR = fn; },
