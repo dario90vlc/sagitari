@@ -1933,7 +1933,17 @@ const PERM_TOOLS = [
    realidad significa «se ejecuta SIN preguntar». El nombre dice ahora su efecto. */
 const RISK_LABEL = { safe: 'permitir siempre', confirm: 'confirmar', restricted: 'bloqueado' };
 
+/* Seguridad se pinta al arrancar (initSecurity) Y al entrar en su pestaña, así que dos
+   pasadas pueden solaparse (al arrancar con «Seguridad» recordada como última pestaña, por
+   ejemplo): las dos empiezan vaciando `#permList` y las filas se duplicarían o quedarían a
+   medias. Un repintado en vuelo ya dejará la lista al día, así que el segundo no arranca. */
+let securityPainting = false;
 async function renderSecurity() {
+  if (securityPainting) return;
+  securityPainting = true;
+  try { await _renderSecurity(); } finally { securityPainting = false; }
+}
+async function _renderSecurity() {
   let cfg = { permissions: {}, riskDefaults: {} };
   try {
     const m = await window.sagitari.metaGet();
@@ -2286,6 +2296,10 @@ function showSetTab(panel) {
   const wrap = $('#setWrap');
   if (wrap) wrap.querySelectorAll('.setpanel').forEach(p => p.classList.toggle('on', p.dataset.panel === name));
   if (name === 'mcp') renderMcp();
+  // Seguridad también se pinta al entrar: sus filas MCP reflejan los servidores de la
+  // sesión (conectados, con su número de herramientas) y al pintarse una sola vez al
+  // arrancar mostraban datos viejos.
+  if (name === 'security') renderSecurity();
   // la pestaña «Acerca de» ya enseña el aviso: el punto del sidebar sobra
   // (solo si Ajustes está a la vista: fillSettings llama aquí al arrancar)
   if (name === 'about' && $('#view-settings').classList.contains('on')) setBadge('#nbUpdate', 0);
