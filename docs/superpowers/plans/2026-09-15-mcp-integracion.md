@@ -1754,7 +1754,28 @@ function wireMcp() {
 5. IPC (todos validando la entrada; `mcp:delete` limpia overrides):
 ```js
 /* ---------- v3.1: servidores MCP del usuario ---------- */
-function mcpState() { return { enabled: config.mcp.enabled !== false, servers: (wireMcp().status() || []) }; }
+/* Estado para la UI: la configuración completa del servidor (command/args/env/headers,
+   con el mismo criterio que config:get con las claves de proveedor: el renderer es de
+   confianza y sin ellos el formulario de edición no puede editar nada) MÁS el estado
+   vivo del gestor. `discovered` es el catálogo REAL descubierto: NO se puede llamar
+   `tools` porque `tools` en la configuración son los filtros allow/deny. */
+function mcpState() {
+  const vivo = new Map(wireMcp().status().map(s => [s.id, s]));
+  return {
+    enabled: config.mcp.enabled !== false,
+    servers: (config.mcp.servers || []).map(s => {
+      const v = vivo.get(s.id) || {};
+      return {
+        ...s,
+        enabled: v.enabled !== undefined ? v.enabled : s.enabled,
+        state: v.state || 'idle',
+        error: v.error || null,
+        logTail: v.logTail || '',
+        discovered: v.tools || [],
+      };
+    }),
+  };
+}
 
 ipcMain.handle('mcp:list', () => mcpState());
 
@@ -1771,7 +1792,9 @@ ipcMain.handle('mcp:save', (e, raw) => {
   config.mcp.servers = [...(config.mcp.servers || []).filter(s => s.id !== server.id), server];
   wireMcp();
   const r = persistConfig();
-  return r.ok ? { ok: true, servers: mcpState().servers } : { ok: false, error: r.error };
+  // `id` sale en la respuesta: la UI lo necesita YA saneado para aplicar el permiso
+  // del servidor (el del formulario puede traer mayúsculas o símbolos).
+  return r.ok ? { ok: true, id: server.id, servers: mcpState().servers } : { ok: false, error: r.error };
 });
 
 ipcMain.handle('mcp:delete', (e, id) => {
@@ -1899,55 +1922,64 @@ git commit -m "mcp: puente del renderer para los canales mcp:*"
 En la barra de pestañas de Ajustes (junto a las existentes `data-set="model|prefs|security|agent|data|about"`):
 
 ```html
-<button class="settab" data-set="mcp"><span data-i="plug"></span>MCP</button>
+<button class="settab" data-set="mcp"><i data-i="bolt"></i> MCP</button>
 ```
 
-Y el panel, siguiendo la estructura de los demás (`class="setpanel" data-panel="mcp"`):
+Y el panel, con la MISMA estructura que los demás (`.setcard` + `.sc-head` + filas
+`.field srow` con `data-keys`, que es lo que usan el buscador de ajustes y el filtrado
+de tarjetas; una fila sin `.srow` no se puede buscar y una tarjeta sin `.setcard` no se
+oculta al filtrar):
 
 ```html
-<section class="setpanel" data-panel="mcp">
-  <div class="card">
-    <div class="srow">
-      <div class="slabel"><b>Servidores MCP</b><span>Conecta herramientas externas (GitHub, Notion, tu propio servidor…) y el agente las usará como las suyas.</span></div>
+<!-- ===== MCP ===== -->
+<div class="setpanel" data-panel="mcp">
+  <div class="setcard">
+    <div class="sc-head"><b>Servidores MCP</b><span class="sc-hint">Conecta herramientas externas (GitHub, Notion, tu propio servidor…) y el agente las usará como las de casa.</span></div>
+    <div class="swrow srow" data-keys="mcp servidores activar conectar herramientas externas apagar">
+      <span class="st"><b>Activar servidores MCP</b><small>Apagado, el agente no ve ninguna herramienta MCP.</small></span>
       <div class="switch on" id="mcpGlobal" role="switch" tabindex="0" aria-label="Activar servidores MCP"></div>
     </div>
     <div id="mcpList" class="mcplist"></div>
-    <div class="mcpbtns">
-      <button class="btn" id="mcpNew">Añadir servidor</button>
-      <button class="btn ghost" id="mcpPaste">Pegar JSON de mcpServers</button>
-      <button class="btn ghost" id="mcpExportBtn">Exportar</button>
+    <div class="srow" data-keys="mcp anadir servidor pegar json exportar mcpServers">
+      <div class="btnrow">
+        <button class="btn" id="mcpNew"><span class="bi"><i data-i="plus"></i></span> Añadir servidor</button>
+        <button class="btn ghost" id="mcpPaste">Pegar JSON de mcpServers</button>
+        <button class="btn ghost" id="mcpExportBtn">Exportar</button>
+      </div>
     </div>
-    <div id="mcpMsg" class="smsg"></div>
+    <div class="subnote" id="mcpMsg"></div>
   </div>
 
-  <div class="card" id="mcpFormCard" hidden>
-    <div class="srow"><div class="slabel"><b id="mcpFormTitle">Nuevo servidor</b><span>Los valores marcados como secreto se cifran con el almacén de Windows.</span></div></div>
-    <div class="srow"><div class="slabel">Identificador</div><input id="mcpId" class="sinput" placeholder="github" spellcheck="false"></div>
-    <div class="srow"><div class="slabel">Nombre visible</div><input id="mcpName" class="sinput" placeholder="GitHub" spellcheck="false"></div>
-    <div class="srow"><div class="slabel">Tipo</div>
+  <div class="setcard" id="mcpFormCard" hidden>
+    <div class="sc-head"><b id="mcpFormTitle">Nuevo servidor</b><span class="sc-hint">Las variables de entorno y las cabeceras se guardan cifradas con el almacén de Windows.</span></div>
+    <div class="field srow" data-keys="mcp identificador nombre id"><label for="mcpId">IDENTIFICADOR</label><input type="text" id="mcpId" placeholder="github" spellcheck="false" /></div>
+    <div class="field srow" data-keys="mcp nombre visible etiqueta"><label for="mcpName">NOMBRE</label><input type="text" id="mcpName" placeholder="GitHub" /></div>
+    <div class="field srow" data-keys="mcp tipo transporte local remoto comando url"><label for="mcpTransport">TIPO</label>
       <select id="mcpTransport"><option value="stdio">Comando local</option><option value="http">URL remota</option></select>
     </div>
     <div id="mcpStdioRows">
-      <div class="srow"><div class="slabel">Comando</div><input id="mcpCommand" class="sinput" placeholder="npx" spellcheck="false"></div>
-      <div class="srow"><div class="slabel">Argumentos</div><input id="mcpArgs" class="sinput" placeholder="-y @modelcontextprotocol/server-github" spellcheck="false"></div>
-      <div class="srow"><div class="slabel">Variables de entorno</div><textarea id="mcpEnv" class="sinput" rows="3" placeholder="GITHUB_TOKEN=ghp_… (una por línea)"></textarea></div>
+      <div class="field srow" data-keys="mcp comando ejecutable npx node"><label for="mcpCommand">COMANDO</label><input type="text" id="mcpCommand" placeholder="npx" spellcheck="false" /></div>
+      <div class="field srow" data-keys="mcp argumentos args"><label for="mcpArgs">ARGUMENTOS</label><input type="text" id="mcpArgs" placeholder="-y @modelcontextprotocol/server-github" spellcheck="false" /></div>
+      <div class="field srow" data-keys="mcp variables entorno env token secreto"><label for="mcpEnv">VARIABLES DE ENTORNO</label><textarea id="mcpEnv" rows="3" placeholder="GITHUB_TOKEN=ghp_… (una por línea)"></textarea></div>
     </div>
     <div id="mcpHttpRows" hidden>
-      <div class="srow"><div class="slabel">URL</div><input id="mcpUrl" class="sinput" placeholder="https://mcp.ejemplo.com/mcp" spellcheck="false"></div>
-      <div class="srow"><div class="slabel">Cabeceras</div><textarea id="mcpHeaders" class="sinput" rows="3" placeholder="Authorization=Bearer … (una por línea)"></textarea></div>
+      <div class="field srow" data-keys="mcp url direccion remota endpoint"><label for="mcpUrl">URL</label><input type="text" id="mcpUrl" placeholder="https://mcp.ejemplo.com/mcp" spellcheck="false" /></div>
+      <div class="field srow" data-keys="mcp cabeceras headers autorizacion token"><label for="mcpHeaders">CABECERAS</label><textarea id="mcpHeaders" rows="3" placeholder="Authorization=Bearer … (una por línea)"></textarea></div>
     </div>
-    <div class="srow"><div class="slabel">Permiso por defecto</div>
-      <select id="mcpLevel"><option value="">Preguntar siempre (recomendado)</option><option value="restricted">Bloqueado</option><option value="safe">Permitir siempre</option></select>
+    <div class="field srow" data-keys="mcp permiso nivel bloquear permitir preguntar servidor"><label for="mcpLevel">PERMISO DEL SERVIDOR</label>
+      <select id="mcpLevel"><option value="default">Preguntar siempre (recomendado)</option><option value="safe">Permitir siempre</option><option value="restricted">Bloqueado</option></select>
     </div>
-    <div class="srow"><div class="slabel">Herramientas a permitir (vacío = todas)</div><input id="mcpAllow" class="sinput" placeholder="create_issue, list_issues"></div>
-    <div class="srow"><div class="slabel">Herramientas a bloquear</div><input id="mcpDeny" class="sinput" placeholder="delete_repository"></div>
-    <div class="mcpbtns">
-      <button class="btn" id="mcpSave">Guardar y probar</button>
-      <button class="btn ghost" id="mcpCancel">Cancelar</button>
-      <button class="btn ghost" id="mcpFormDelete" hidden>Eliminar</button>
+    <div class="field srow" data-keys="mcp herramientas permitir allow lista"><label for="mcpAllow">HERRAMIENTAS A PERMITIR (vacío = todas)</label><input type="text" id="mcpAllow" placeholder="create_issue, list_issues" spellcheck="false" /></div>
+    <div class="field srow" data-keys="mcp herramientas bloquear deny lista"><label for="mcpDeny">HERRAMIENTAS A BLOQUEAR</label><input type="text" id="mcpDeny" placeholder="delete_repository" spellcheck="false" /></div>
+    <div class="srow" data-keys="mcp guardar probar cancelar eliminar">
+      <div class="btnrow">
+        <button class="btn" id="mcpSave"><span class="bi"><i data-i="check"></i></span> Guardar y probar</button>
+        <button class="btn ghost" id="mcpCancel">Cancelar</button>
+        <button class="btn ghost" id="mcpFormDelete" hidden>Eliminar</button>
+      </div>
     </div>
   </div>
-</section>
+</div>
 ```
 
 - [ ] **Step 2: Añadir la lógica en `renderer/app.js`**
@@ -1963,7 +1995,8 @@ const mcpLines = (obj) => Object.entries(obj || {}).map(([k, v]) => k + '=' + v)
 /** Estados del servidor, tal y como los ve el usuario. */
 function mcpStatusLabel(s) {
   if (!s.enabled) return { text: 'Desactivado', cls: 'off' };
-  if (s.state === 'ready') return { text: 'Listo (' + s.tools.length + ' herramienta' + (s.tools.length === 1 ? '' : 's') + ')', cls: 'ok' };
+  const n = (s.discovered || []).length;
+  if (s.state === 'ready') return { text: 'Listo (' + n + ' herramienta' + (n === 1 ? '' : 's') + ')', cls: 'ok' };
   if (s.state === 'starting') return { text: 'Conectando…', cls: 'wait' };
   if (s.state === 'dead') return { text: 'Error: ' + (s.error || 'no arrancó'), cls: 'err' };
   return { text: 'Sin probar', cls: 'off' };
@@ -1980,7 +2013,7 @@ async function renderMcp() {
   }
   box.innerHTML = MCP_STATE.servers.map(s => {
     const st = mcpStatusLabel(s);
-    const lista = (s.tools || []).map(t => `<span class="mcptool" title="${esc(t.description || '')}">${esc(t.tool)}</span>`).join('');
+    const lista = (s.discovered || []).map(t => `<span class="mcptool" title="${esc(t.description || '')}">${esc(t.tool)}</span>`).join('');
     return `<div class="mcprow" data-id="${esc(s.id)}">
       <div class="mcphead">
         <span class="mcpdot ${st.cls}"></span>
@@ -2060,13 +2093,17 @@ $('#mcpGlobal').onclick = async (e) => {
 };
 $('#mcpSave').onclick = async () => {
   const s = mcpFormValue();
-  const id = s.id;
+  const nivel = $('#mcpLevel').value;
   const r = await window.sagitari.mcpSave(s);
-  if (!r.ok) return smsg('Error: ' + r.error);
+  if (!r.ok) return mcpMsg('Error: ' + r.error);
+  // El nivel elegido se aplica al comodín del servidor (el MISMO que edita Seguridad):
+  // sin esto el desplegable sería decorativo. Se usa el id que devuelve main (ya
+  // saneado), no el del formulario, que puede traer mayúsculas o símbolos.
+  if (nivel && nivel !== 'default' && r.id) await window.sagitari.secSetToolPerm('mcp__' + r.id + '__*', nivel);
   $('#mcpFormCard').hidden = true;
-  smsg('Guardado. Probando la conexión…');
-  const t = await window.sagitari.mcpTest(id);
-  smsg(t.ok ? 'Conectado: ' + (t.server ? t.server.tools.length : 0) + ' herramientas.' : 'No conecta: ' + t.error);
+  mcpMsg('Guardado. Probando la conexión…');
+  const t = await window.sagitari.mcpTest(r.id || s.id);
+  mcpMsg(t.ok ? 'Conectado: ' + (t.server ? t.server.discovered.length : 0) + ' herramientas.' : 'No conecta: ' + t.error);
   renderMcp();
 };
 $('#mcpFormDelete').onclick = async () => {
@@ -2103,7 +2140,7 @@ $('#mcpList').onclick = async (e) => {
     btn.textContent = 'Probando…';
     const r = await window.sagitari.mcpTest(id);
     btn.textContent = 'Probar';
-    smsg(r.ok ? 'Conectado: ' + (r.server ? r.server.tools.length : 0) + ' herramientas.' : 'No conecta: ' + r.error);
+    mcpMsg(r.ok ? 'Conectado: ' + (r.server ? r.server.discovered.length : 0) + ' herramientas.' : 'No conecta: ' + r.error);
     return renderMcp();
   }
 };
