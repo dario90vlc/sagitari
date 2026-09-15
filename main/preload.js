@@ -37,6 +37,12 @@ contextBridge.exposeInMainWorld('sagitari', {
   onVoiceHint: on('voice:hint', ([t]) => ['hint', t]),
   onVoiceStopped: on('voice:stopped', () => ['stopped']),
   onVoiceError: on('voice:error', ([t]) => ['error', t]),
+  /* Modo voz (fase 1) del VoiceManager. Los `voiceStart`/`voiceStop` de arriba siguen
+     siendo el dictado al compositor (Alt+clic): son cosas distintas y no se tocan. */
+  voiceOpen: () => ipcRenderer.invoke('voice:open'),
+  voiceClose: () => ipcRenderer.invoke('voice:close'),
+  voiceEvent: (ev) => ipcRenderer.send('voice:event', ev),
+  onVoiceEvent: on('voice:event', ([ev]) => [ev]),
   speak: (text) => ipcRenderer.invoke('tts:speak', text),
   ttsList: () => ipcRenderer.invoke('tts:list'),
   onTtsPhrase: on('tts:phrase', ([p]) => [p]),      // { id, bytes }

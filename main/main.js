@@ -3,7 +3,7 @@
 // SAGITARI — Electron main process
 // Chat window + click-through screen-edge glow overlay + agent + voice + settings.
 
-const { app, BrowserWindow, ipcMain, desktopCapturer, screen, globalShortcut, shell, dialog, Tray, Menu, safeStorage } = require('electron');
+const { app, BrowserWindow, ipcMain, desktopCapturer, screen, globalShortcut, shell, dialog, Tray, Menu, safeStorage, session } = require('electron');
 const path = require('path');
 const { pathToFileURL } = require('url');
 const fs = require('fs');
@@ -1144,6 +1144,70 @@ ipcMain.handle('tts:list', async () => {
   try { return { ok: true, voices: await sintetizador().listarVoces() }; } catch { return { ok: false, voices: [] }; }
 });
 
+// ---- modo voz (fase 1: motores de Windows) ----
+const { createVoiceManager } = require('./voice/manager');
+const { createSttWindows } = require('./voice/stt-windows');
+/* `createTtsWindows` y `ttsEngine` ya están declarados arriba (sección TTS): el motor de
+   síntesis es UNO, compartido por `tts:list` y por el modo voz, así que aquí no se vuelven
+   a declarar — repetir la declaración en este mismo ámbito sería un error de sintaxis. */
+
+let voiceManager = null;
+
+/* El permiso de micrófono se concede SOLO a nuestra propia página. Hoy el renderer es
+   un fichero local nuestro, pero la comprobación deja escrito el límite: si mañana
+   carga contenido de fuera, ese contenido no hereda el micrófono del usuario. */
+function esNuestraPagina(url) {
+  try {
+    const u = new URL(String(url));
+    return u.protocol === 'file:' && decodeURIComponent(u.pathname).toLowerCase().endsWith('renderer/index.html');
+  } catch { return false; }
+}
+
+app.whenReady().then(() => {
+  session.defaultSession.setPermissionRequestHandler((wc, permission, cb, details) => {
+    const url = (details && details.requestingUrl) || wc.getURL();
+    const soloAudio = !details || !details.mediaTypes || details.mediaTypes.every((t) => t === 'audio');
+    cb(permission === 'media' && soloAudio && esNuestraPagina(url));
+  });
+  /* El de comprobación responde a las consultas internas de Chromium: solo se limita
+     'media' (lo demás sigue como estaba) para no romper nada más. */
+  session.defaultSession.setPermissionCheckHandler((wc, permission, origin, details) => {
+    if (permission !== 'media') return true;
+    const url = (details && details.requestingUrl) || origin || '';
+    return esNuestraPagina(url) && (!details || !details.mediaType || details.mediaType === 'audio');
+  });
+});
+
+function emitVoz(ev) { try { if (win && !win.isDestroyed()) win.webContents.send('voice:event', ev); } catch {} }
+
+ipcMain.handle('voice:open', async () => {
+  try {
+    if (!voiceManager) {
+      ttsEngine = createTtsWindows({ dataDir: DATA_DIR });
+      voiceManager = createVoiceManager({
+        emit: emitVoz,
+        stt: createSttWindows({ emit: (ev) => voiceManager.ingest(ev), lang: config.settings.voiceLang || 'es-ES' }),
+        tts: ttsEngine,
+        onPhrase: (p) => { try { if (win && !win.isDestroyed()) win.webContents.send('tts:phrase', p); } catch {} },
+        settings: config.settings,
+      });
+    }
+    await voiceManager.open();
+    return { ok: true, motores: { escuchar: 'windows', hablar: 'windows' } };
+  } catch (e) { return { ok: false, error: e.message }; }
+});
+
+ipcMain.handle('voice:close', async () => {
+  try { if (voiceManager) await voiceManager.close(); } catch {}
+  voiceManager = null;
+  ttsEngine = null;
+  return { ok: true };
+});
+
+ipcMain.on('voice:event', (e, ev) => { if (voiceManager) voiceManager.ingest(ev); });
+ipcMain.on('tts:played', (e, id) => { if (voiceManager) voiceManager.spoken(id); });
+ipcMain.on('tts:stop', () => { if (voiceManager) voiceManager.stopSpeaking(); });
+
 // ---- misc ----
 ipcMain.handle('app:quit', () => app.quit());
 ipcMain.handle('app:minimize', () => win && win.minimize());   // minimizado real: sigue en la barra de tareas
@@ -1419,13 +1483,18 @@ app.whenReady().then(() => {
 });
 
 app.on('window-all-closed', () => app.quit());
-app.on('before-quit', () => {
+app.on('before-quit', async () => {
   globalShortcut.unregisterAll();
   if (tray) { try { tray.destroy(); } catch {} tray = null; }
   if (taskManager) { try { taskManager.stopAll(); } catch {} }      // tareas en background → interrupted
   if (agent && agent.isBusy()) { try { agent.stop(); } catch {} }   // chat en curso
   if (whisper) { try { whisper.kill(); } catch {} }            // dictado en marcha
   if (ttsProc) { try { ttsProc.kill(); } catch {} ttsProc = null; }  // voz en curso: si no, quedaba huérfana
+  /* Modo voz: cierra también el proceso de escuchar (su PowerShell) y el motor de
+     síntesis. `close()` resuelve en microtareas (mata y libera, sin esperar a nadie),
+     así que el resto del cierre de abajo sigue corriendo antes de que la app salga. */
+  try { if (voiceManager) await voiceManager.close(); } catch {}
+  voiceManager = null;
   if (mcp) { try { mcp.shutdown(); } catch {} }                 // servidores MCP: procesos hijos fuera
   try { browser.ws && browser.send('Browser.close'); } catch {} // Chrome/Edge lanzado por CDP
   try { runlog.close(); } catch {}                              // logs de sesión

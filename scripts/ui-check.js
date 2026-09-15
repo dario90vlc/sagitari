@@ -150,7 +150,9 @@ const AFTER = {
   const port = await freePort();
   // --hidden: la ventana NO se muestra. Antes se abría y se cerraba sola durante
   // probar.bat, y eso se ve idéntico a «la app se cierra sola».
-  const child = spawn(electron, ['--remote-debugging-port=' + port, '--hidden', '.'], { cwd: APP_DIR, stdio: ['ignore', 'pipe', 'pipe'] });
+  /* --use-fake-device-for-media-stream: micrófono sintético (tono), para que la
+     comprobación de permiso y de nivel no dependa del hardware de quien ejecute esto. */
+  const child = spawn(electron, ['--remote-debugging-port=' + port, '--hidden', '--use-fake-device-for-media-stream', '.'], { cwd: APP_DIR, stdio: ['ignore', 'pipe', 'pipe'] });
   let childOut = '';
   child.stdout.on('data', (d) => { childOut += d; });
   child.stderr.on('data', (d) => { childOut += d; });
@@ -506,6 +508,14 @@ const AFTER = {
       ? 'lleva emojis: ' + JSON.stringify(emojisEnviados.slice(0, 6))
       : 'no declara la regla de estilo'));
   }
+
+  /* El modo voz necesita micrófono y dos canales nuevos. Se prueba con el dispositivo
+     de mentira de Chromium (--use-fake-device-for-media-stream), así que pasa también
+     en una máquina sin micrófono, como el runner de CI. */
+  await judge('el micrófono se concede a la app y solo a ella',
+    '(async function(){ const s = await navigator.mediaDevices.getUserMedia({ audio: true }); const ok = !!s && s.getAudioTracks().length === 1; s.getTracks().forEach(t => t.stop()); return ok; })()');
+  await judge('el modo voz se abre y se cierra por IPC',
+    '(async function(){ const a = await window.sagitari.voiceOpen(); const b = await window.sagitari.voiceClose(); return !!(a && a.ok) && !!(b && b.ok); })()');
 
   /* La app de prueba arranca OCULTA (--hidden) y su modelo de mentira responde «listo» a
      todo: si además hablara, el usuario oiría una voz salida de la nada, sin ventana que

@@ -2926,12 +2926,7 @@ test('integración: cada canal push del preload tiene remitente en main', () => 
   const canales = [...preload.matchAll(/\bon\('([^']+)'/g)].map(m => m[1]);
   ok(canales.length >= 10, 'deben detectarse los canales push (' + canales.length + ')');
   const emisores = new Set([...main.matchAll(/send\('([^']+)'/g)].map(m => m[1]));
-  /* Canales que el puente estrena ANTES que su emisor, y a propósito: `tts:phrase` lo
-     manda el VoiceManager, que aún no existe (llega en la tarea 6 del plan del modo
-     voz), y el puente se deja ya listo para que el renderer lo cablee. Cuando el emisor
-     exista, esta entrada debe quitarse: el resto de la comprobación sigue en pie. */
-  const PENDIENTES = ['tts:phrase'];
-  const sinEmisor = [...new Set(canales)].filter(c => !emisores.has(c) && !PENDIENTES.includes(c));
+  const sinEmisor = [...new Set(canales)].filter(c => !emisores.has(c));
   eq(sinEmisor.join(', '), '', 'canales push que el renderer nunca recibiría');
 });
 
