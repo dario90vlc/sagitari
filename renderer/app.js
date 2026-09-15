@@ -1026,6 +1026,35 @@ function scheduleStreamRender(holder) {
   });
 }
 
+/* ---- pasos del turno, en la franja del panel de voz --------------------------------
+   El panel TAPA el chat, así que la tarjeta de herramienta —y su «completado»— se queda
+   detrás: la franja de pasos es lo único que dice por dónde va el agente mientras
+   trabaja. Se alimenta de los mismos eventos que ya usa el chat y con LA MISMA etiqueta
+   humana (`K.tool`), para que diga lo mismo en los dos sitios. */
+const PASOS_VOZ_MAX = 5;   // la franja es un estado, no un historial: sin tope, una tarea
+                           // de cien herramientas la haría crecer sin fin (y sin verse)
+let pasosVoz = [];
+
+function pasoVoz(ev, ok) {
+  const label = K.tool(ev.name).label + (ev.subagent && K.subagent(ev.subagent) ? ' · ' + K.subagent(ev.subagent).label : '');
+  /* El `tool` abre el paso (queda «en curso») y el `tool_result` lo CIERRA marcándolo, en
+     vez de añadir una fila nueva: el mismo trabajo saldría dos veces y, con cinco huecos,
+     se comería él solo la franja. Si no hay paso abierto que cerrar —porque se recortó o
+     porque el resultado llega suelto— se añade igual, para no perder el dato. */
+  const ultimo = pasosVoz[pasosVoz.length - 1];
+  if (ok === undefined) pasosVoz.push({ label });
+  else if (ultimo && ultimo.label === label && ultimo.ok === undefined) ultimo.ok = ok;
+  else pasosVoz.push({ label, ok });
+  if (pasosVoz.length > PASOS_VOZ_MAX) pasosVoz = pasosVoz.slice(-PASOS_VOZ_MAX);
+  if (window.VoiceMode && window.VoiceMode.abierto()) window.VoiceMode.pasos(pasosVoz);
+}
+
+/* Turno nuevo, franja nueva: lo que hizo el anterior no dice nada de este. */
+function limpiarPasosVoz() {
+  pasosVoz = [];
+  if (window.VoiceMode && window.VoiceMode.abierto()) window.VoiceMode.pasos([]);
+}
+
 window.sagitari.onAgentEvent((ev) => {
   // v1.3: los eventos de una tarea en segundo plano NO deben tocar el chat
   // interactivo (ni sus burbujas ni el estado busy/detener): solo el feed,
@@ -1033,8 +1062,8 @@ window.sagitari.onAgentEvent((ev) => {
   if (ev.bg) {
     switch (ev.type) {
       case 'status': feed(ev.text, 'pur'); break;
-      case 'tool': feed(ev.name || 'herramienta', 'pur'); break;
-      case 'tool_result': feed((ev.name || '') + ' — ' + String(ev.result || 'ok').slice(0, 90), (String(ev.result || '').startsWith('Error') ? 'err' : 'ok')); break;
+      case 'tool': feed(ev.name || 'herramienta', 'pur'); pasoVoz(ev); break;
+      case 'tool_result': feed((ev.name || '') + ' — ' + String(ev.result || 'ok').slice(0, 90), (String(ev.result || '').startsWith('Error') ? 'err' : 'ok')); pasoVoz(ev, ev.ok !== false); break;
       case 'task_done':
         feed('Tarea en segundo plano completada', 'ok');
         if ($('#view-tasks').classList.contains('on')) renderTasks();
@@ -1085,6 +1114,7 @@ window.sagitari.onAgentEvent((ev) => {
       toolCard(ev);
       setChatStatus(K.tool(ev.name).verb + (ev.subagent && K.subagent(ev.subagent) ? ' — ' + K.subagent(ev.subagent).label : '') + '…');
       feed(K.tool(ev.name).label + (ev.subagent ? ' · ' + K.subagent(ev.subagent).label : ''), 'pur');
+      pasoVoz(ev);
       agentStart(ev.name);
       break;
     case 'status':
@@ -1096,6 +1126,7 @@ window.sagitari.onAgentEvent((ev) => {
       completeToolCard(ev);
       agentStop();
       feed(K.tool(ev.name).label + (ev.ok === false ? ' — falló' : ' — completado'), ev.ok === false ? 'err' : 'ok');
+      pasoVoz(ev, ev.ok !== false);
       setChatStatus('Herramienta completada, continuando…');
       refreshAgentsPanels();
       break;
@@ -1256,6 +1287,33 @@ function glowOffSoon() { setTimeout(() => window.sagitari.glow('off'), 2600); }
 const confirmQueue = [];
 let currentConfirm = null;
 
+/* El panel del modo voz TAPA el chat (es opaco y se superpone al área de mensajes), así
+   que la barra de confirmación de abajo queda oculta detrás: con el modo abierto el permiso
+   del agente no se podía contestar —ni con el ratón ni por voz— y el turno se quedaba
+   esperando hasta el timeout. Por eso la MISMA confirmación se pinta también en el panel
+   mientras el modo esté abierto: los dos botones del panel y su «sí»/«no» por voz acaban
+   los dos en `resolveConfirm`, que es el único sitio que responde al proceso principal.
+   No hay dos caminos de respuesta: hay uno con dos puertas. */
+function pedirConfirmacionEnVoz(ev) {
+  if (!ev || !window.VoiceMode || !window.VoiceMode.abierto()) return;
+  const texto = 'El agente quiere: ' + (ev.description || ev.tool)
+    + (confirmQueue.length > 1 ? ' · 1 de ' + confirmQueue.length : '')
+    + (ev.summary ? ' — ' + String(ev.summary).slice(0, 240) : '');
+  window.VoiceMode.pedirConfirmacion({
+    texto,
+    si: () => resolveConfirm(true),
+    no: () => resolveConfirm(false),
+  });
+}
+
+/* Esconde la caja del panel SIN contestarla. Se llama cuando el permiso ya se ha resuelto
+   por la otra puerta (la barra del chat, o el fin del turno): si la caja se quedara a la
+   vista, sus botones seguirían armados y contestarían con una decisión que el usuario no
+   tomó la confirmación que ahora toca (la siguiente de la cola). */
+function olvidarConfirmacionEnVoz() {
+  if (window.VoiceMode && window.VoiceMode.olvidarConfirmacion) window.VoiceMode.olvidarConfirmacion();
+}
+
 function showConfirm(ev) {
   confirmQueue.push(ev);
   if (confirmQueue.length > 1) feed('Confirmación en cola (' + confirmQueue.length + ' pendientes): ' + ev.tool, 'blu');
@@ -1268,6 +1326,7 @@ function paintConfirm() {
   const ev = confirmQueue[0];
   currentConfirm = ev || null;
   if (!ev) { if (bar) bar.hidden = true; return; }
+  pedirConfirmacionEnVoz(ev);
   const who = ev.runId ? ' (tarea en segundo plano)' : '';
   // con varias esperando se dice cuál se está viendo: «1 de 3»
   const prog = confirmQueue.length > 1 ? ' · 1 de ' + confirmQueue.length : '';
@@ -1293,6 +1352,9 @@ function hideConfirm() {
   currentConfirm = null;
   const bar = $('#confirmBar');
   if (bar) bar.hidden = true;
+  // también la del panel de voz: si no, seguiría a la vista una confirmación que
+  // ya no existe detrás (y al abrir el chat tapado ya no se puede contestar)
+  olvidarConfirmacionEnVoz();
   if (confirmQueue.length) paintConfirm();
 }
 async function resolveConfirm(allow) {
@@ -1300,6 +1362,10 @@ async function resolveConfirm(allow) {
   const c = confirmQueue.shift() || currentConfirm;
   currentConfirm = null;
   const bar = $('#confirmBar');
+  // la caja del panel se apaga ANTES de repintar: contestar por la barra del chat (o por
+  // voz) tiene que quitar de enmedio la puerta que ya se usó, y si queda otra confirmación
+  // en la cola, `paintConfirm` vuelve a armarla con ESA (no con la ya contestada)
+  olvidarConfirmacionEnVoz();
   if (confirmQueue.length) paintConfirm();
   else if (bar) bar.hidden = true;
   if (c) await window.sagitari.secResolve(c.id, allow, c.runId);
@@ -1430,6 +1496,8 @@ async function enviarTexto(text, atts = []) {
   pinned = true;
   scroll(true);
   window.sagitari.glow('think');
+  // turno nuevo: la franja de pasos del panel arranca vacía (es lo del turno que empieza)
+  limpiarPasosVoz();
   // optimista: el evento `busy` del agente tarda en llegar y hasta entonces un
   // segundo Enter lanzaba otro turno que moría con «SAGITARI está ocupado» y
   // devolvía el botón a «Enviar» con el agente aún trabajando.
@@ -1696,7 +1764,14 @@ function wireMic(btnId) {
     // El micro es la puerta del modo voz. Con Alt se conserva el dictado de siempre,
     // que sigue siendo lo cómodo para escribir un prompt largo y revisarlo.
     if (!e.altKey) {
-      if (window.VoiceMode.abierto()) await window.VoiceMode.cerrar(); else await window.VoiceMode.abrir();
+      if (window.VoiceMode.abierto()) await window.VoiceMode.cerrar();
+      else {
+        await window.VoiceMode.abrir();
+        /* Si el agente ya está esperando permiso, la barra del chat acaba de quedar tapada
+           por el panel: sin volver a armarla ahí, esta confirmación se quedaría sin poder
+           contestarse hasta que el turno muriera por timeout. */
+        if (currentConfirm) pedirConfirmacionEnVoz(currentConfirm);
+      }
       return;
     }
     if (listening) {

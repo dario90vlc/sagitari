@@ -39,6 +39,11 @@ function createSttWindows({ emit, lang = 'es-ES', spawnFn = spawn, scriptPath = 
       emit({ type: 'state', state: 'escuchando' });
     } else if (linea.startsWith('HINT::')) {
       emit({ type: 'notice', text: linea.slice(6) });
+    } else if (linea.startsWith('NOTE::')) {
+      /* `voice.ps1` avisa por aquí de por qué cae al motor clásico (por ejemplo: WinRT no
+         disponible). Es una explicación, no un fallo: viaja como aviso, igual que HINT::,
+         para que el usuario sepa por qué oye peor sin ver un error en pantalla. */
+      emit({ type: 'notice', text: linea.slice(6) });
     } else if (linea.startsWith('STOPPED::')) {
       /* El motor avisa de que se apaga él mismo: no es un fallo, pero hay que soltar
          el proceso para que un arranque posterior no herede nada de este. */

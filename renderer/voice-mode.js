@@ -19,6 +19,10 @@
   let reproductor = null, analizadorSalida = null, fraseActual = null;
   let sueloRuido = 0.01, calibrado = false;
   let reducido = false;
+  /* Confirmación en curso ({ si, no }) o null. Se declara aquí arriba y no junto a
+     `pedirConfirmacion` porque `setEstado` (que respeta una confirmación viva) la consulta
+     y vive antes en el fichero. */
+  let confirmacion = null;
 
   const $vm = (s) => document.querySelector(s);
   let ENVIAR = () => {};
@@ -29,7 +33,13 @@
     estado = s;
     const el = $vm('#vmEstado');
     if (el) el.textContent = ESTADOS[s];
-    if (s === 'escuchando' || s === 'oyendo' || s === 'pensando' || s === 'error') {
+    /* Los estados que no son «confirmando» esconden la caja …salvo que haya una
+       confirmación VIVA pendiente. Con el panel abierto la caja es la única puerta con
+       ratón para contestar el permiso, y el motor de voz cambia de estado a cada frase
+       oída —«oyendo»— con el permiso todavía en el aire: esconderla ahí dejaba al usuario
+       sin nada que pulsar (y el turno esperando). Cuando la confirmación se contesta o se
+       olvida, `confirmacion` queda a null y el siguiente cambio de estado la esconde. */
+    if (!confirmacion && (s === 'escuchando' || s === 'oyendo' || s === 'pensando' || s === 'error')) {
       const c = $vm('#vmConfirm'); if (c) c.hidden = true;
     }
   }
@@ -148,7 +158,6 @@
      «sí»/«no», que llega como un `final` normal y se reconoce aquí. Las dos formas de
      contestar acaban en el MISMO sitio (contestar), para que no haya dos maneras distintas
      de resolver el permiso. */
-  let confirmacion = null;
   function pedirConfirmacion({ texto, si, no }) {
     setEstado('confirmando');
     confirmacion = { si, no };
@@ -163,6 +172,17 @@
     const caja = $vm('#vmConfirm'); if (caja) caja.hidden = true;
     setEstado('pensando');
     if (fn) fn();
+  }
+  /* Esconde la confirmación sin contestarla: la llama la app cuando el permiso ya se ha
+     resuelto por la otra puerta (la barra del chat, que el panel tapa) o cuando el turno
+     se acabó. Sin esto la caja seguiría a la vista con sus botones armados, y pulsarlos
+     contestaría —con una decisión que el usuario no tomó para ella— la confirmación
+     siguiente de la cola. */
+  function olvidarConfirmacion() {
+    if (!confirmacion) return;
+    confirmacion = null;
+    const caja = $vm('#vmConfirm'); if (caja) caja.hidden = true;
+    setEstado('pensando');
   }
   function responder(texto) {
     if (!confirmacion) return false;
@@ -246,6 +266,10 @@
     pararBucle();
     document.removeEventListener('keydown', alTeclado, true);
     cancelarEdicion();
+    /* Al cerrar se suelta también la confirmación: con el panel fuera de la vista la barra
+       del chat vuelve a verse y es ella la que manda, así que la copia del panel no puede
+       seguir armada por si vuelve a sonar un «sí» en una sesión posterior. */
+    olvidarConfirmacion();
     await pararAudio();
     soltarMicro();
     const panel = $vm('#voiceMode');
@@ -403,7 +427,7 @@
   cablearConfirmacion();
 
   window.VoiceMode = {
-    abrir, cerrar, handle, pasos, respuesta, pedirConfirmacion, responder, interrumpir,
+    abrir, cerrar, handle, pasos, respuesta, pedirConfirmacion, olvidarConfirmacion, responder, interrumpir,
     estado: () => estado, abierto: () => abierto,
     audio: { reproducir, parar: pararAudio },
     setEnviar: (fn) => { ENVIAR = fn; },

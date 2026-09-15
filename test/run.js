@@ -3411,7 +3411,7 @@ test('voz/stt-windows: arranca el motor moderno (sin caparlo) y traduce el proto
       stdin: { end: () => {} },
     };
     setTimeout(() => {
-      listeners['out:data'](Buffer.from('MODE::winrt\nREADY::es-ES\nPART::recuerdame\nFINAL::Recuérdame mañana\u001f0.82\n'));
+      listeners['out:data'](Buffer.from('MODE::winrt\nREADY::es-ES\nNOTE::WinRT no disponible, usando motor clasico\nPART::recuerdame\nFINAL::Recuérdame mañana\u001f0.82\n'));
     }, 5);
     return proc;
   };
@@ -3425,6 +3425,10 @@ test('voz/stt-windows: arranca el motor moderno (sin caparlo) y traduce el proto
   eq(fin.text, 'Recuérdame mañana', 'el texto del final va limpio');
   eq(fin.confidence, 0.82, 'la confianza llega como número');
   eq(engine.info().motor, 'winrt', 'se sabe qué motor está detrás');
+  /* El `NOTE::` es la explicación de por qué se cae al motor clásico: si no se traduce,
+     en el modo voz nadie sabe que oye peor por eso (se perdía en silencio). */
+  ok(eventos.some((e) => e.type === 'notice' && /WinRT no disponible/.test(e.text)),
+    'el NOTE:: del motor llega como aviso: ' + JSON.stringify(eventos.filter((e) => e.type === 'notice')));
 
   const errores = [];
   const engine2 = createSttWindows({ emit: (e) => errores.push(e), spawnFn: (c, a) => { const l = {}; return { stdout: { on: (k, f) => { l['o' + k] = f; } }, stderr: { on: (k, f) => { l['e' + k] = f; } }, on: (k, f) => { l[k] = f; }, kill() {}, stdin: { end() {} } }; }, scriptPath: 'voice.ps1' });
