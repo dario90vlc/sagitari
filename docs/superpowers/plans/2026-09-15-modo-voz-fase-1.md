@@ -514,8 +514,13 @@ Expected: PASS
 
 - [ ] **Step 6: Comprobar el motor de verdad contra Windows (una vez, a mano)**
 
-Run: `powershell -NoProfile -ExecutionPolicy Bypass -File main/voice.ps1 -Lang es-ES` y habla 3 segundos; pega la salida.
-Expected: `MODE::sapi` (en este equipo el moderno no tiene idioma offline) y al hablar una línea `FINAL::<lo que dijiste>␟<confianza>`.
+**NUNCA lo lances a pelo**: `main/voice.ps1` se queda escuchando en un bucle infinito y la llamada se cuelga para siempre (pasó dos veces durante la ejecución de este plan). Hay que acotarlo por proceso:
+
+```bash
+powershell -NoProfile -Command "$p = Start-Process -FilePath powershell -ArgumentList '-NoProfile','-ExecutionPolicy','Bypass','-File','main/voice.ps1','-Lang','es-ES' -PassThru -RedirectStandardOutput 'voicetest.txt' -RedirectStandardError 'voicetest.err' -WindowStyle Hidden; Start-Sleep -Seconds 6; if (-not $p.HasExited) { Stop-Process -Id $p.Id -Force }; Get-Content 'voicetest.txt'; Get-Content 'voicetest.err'"
+```
+
+Expected en esta máquina: `MODE::winrt` → `ERROR::…reconocimiento de voz en línea…` → `MODE::sapi` → `READY::es-ES`. La línea `FINAL::…␟confianza` **solo se puede ver hablando al micrófono**, así que deja constancia de que no está verificada (se comprueba en el cierre de la fase). Borra `voicetest.txt` y `voicetest.err` al terminar.
 
 - [ ] **Step 7: Commit**
 
