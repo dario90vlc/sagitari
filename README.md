@@ -64,6 +64,7 @@ The recommended option is the Windows installer:
 - Six accent palettes plus live glow color and intensity controls.
 - Separate conversations, live agent telemetry, structured local run logs, and optional developer metrics.
 - Voice input through Windows speech recognition and text-to-speech output.
+- **Voice mode**: press the mic and talk; the assistant hears you, does the work and answers out loud. Hands-free: it sends when you stop talking, and if you speak while it talks, it shuts up and listens. Everything stays on your machine. `Alt`+click on the mic keeps the classic dictation into the text box.
 
 ## Safety first
 
