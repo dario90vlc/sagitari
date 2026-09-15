@@ -37,6 +37,8 @@ const skills = require('../agent/skills');
 const marketplace = require('../agent/marketplace');
 const models = require('../agent/models');
 const habits = require('../agent/habits');
+const { McpManager } = require('../agent/mcp');
+const mcpConfig = require('./mcp-config');
 
 // Solo para probar el actualizador: apunta la comprobación a otra API de releases
 // (p. ej. un JSON local con una versión inventada) y hace que también se compruebe
@@ -76,7 +78,8 @@ const CONFIG_FILE = path.join(CONFIG_DIR, 'config.json');
 let config = {
   providers: [],                 // [{id, name, baseUrl, apiKey, models:[], activeModel}]
   active: null,                  // {providerId, name, baseUrl, apiKey, model, temperature, vision}
-  settings: { theme: 'violet', uiColor: 'violet', glowColor: 'match', glowStrength: 1, ttsEnabled: true, voiceLang: 'es-ES', glowEnabled: true, userName: 'Darío', mode: 'act', maxConcurrentTasks: 1, autoResumeTasks: true, llmTimeoutMs: 120000 }
+  settings: { theme: 'violet', uiColor: 'violet', glowColor: 'match', glowStrength: 1, ttsEnabled: true, voiceLang: 'es-ES', glowEnabled: true, userName: 'Darío', mode: 'act', maxConcurrentTasks: 1, autoResumeTasks: true, llmTimeoutMs: 120000 },
+  mcp: { enabled: true, servers: [] },   // servidores MCP del usuario (ver main/mcp-config.js)
 };
 
 /* ---- v1.1 seguridad: permisos por herramienta + guardarraíles (configurables) ---- */
@@ -122,16 +125,35 @@ function revealKey(k) {
     return k;
   }
 }
+/** Cifra los valores de env/headers de un servidor MCP (pueden ser tokens). */
+function protectServerSecrets(s) {
+  const paint = (obj) => Object.fromEntries(Object.entries(obj || {}).map(([k, v]) => [k, protectKey(String(v))]));
+  return { ...s, env: paint(s.env), headers: paint(s.headers) };
+}
+function revealServerSecrets(s) {
+  const paint = (obj) => Object.fromEntries(Object.entries(obj || {}).map(([k, v]) => [k, revealKey(String(v))]));
+  return { ...s, env: paint(s.env), headers: paint(s.headers) };
+}
 /** Copia del config con las claves cifradas, tal y como va a disco. */
 function configParaDisco() {
   const paint = (p) => (p && typeof p === 'object' ? { ...p, apiKey: protectKey(p.apiKey) } : p);
-  return { ...config, providers: (config.providers || []).map(paint), active: paint(config.active) };
+  return {
+    ...config,
+    providers: (config.providers || []).map(paint),
+    active: paint(config.active),
+    // los tokens de los servidores MCP viven en env/headers: mismo trato que las claves
+    mcp: { ...config.mcp, servers: ((config.mcp && config.mcp.servers) || []).map(protectServerSecrets) },
+  };
 }
 /** Alguna clave sin cifrar en memoria → hay que reescribir el fichero. */
 function needsKeyEncryption() {
   if (!encryptionAvailable()) return false;
   const sinCifrar = (p) => !!(p && typeof p.apiKey === 'string' && p.apiKey && !p.apiKey.startsWith(KEY_PREFIX));
-  return sinCifrar(config.active) || (config.providers || []).some(sinCifrar);
+  if (sinCifrar(config.active) || (config.providers || []).some(sinCifrar)) return true;
+  // los secretos de un servidor MCP también cuentan: si se quedaran en claro, un
+  // config.json copiado expondría los tokens igual que antes con las claves
+  return ((config.mcp && config.mcp.servers) || []).some(s => [...Object.values(s.env || {}), ...Object.values(s.headers || {})]
+    .some(v => v && !String(v).startsWith(KEY_PREFIX)));
 }
 
 function applyConfig(raw) {
@@ -143,6 +165,14 @@ function applyConfig(raw) {
     permissions: { ...(raw.security && raw.security.permissions || {}) },
     guardrails: { ...securityDefaults.guardrails, ...(raw.security && raw.security.guardrails || {}) },
   };
+  // MCP: la lista de servidores la valida el módulo puro (comando, URL, timeout)
+  const mcpRaw = (raw.mcp && Array.isArray(raw.mcp.servers)) ? raw.mcp.servers : [];
+  const servers = [];
+  for (const s of mcpRaw) {
+    const v = mcpConfig.validateServer(s);
+    if (v.ok) servers.push(revealServerSecrets(v.value));
+  }
+  config.mcp = { enabled: raw.mcp ? raw.mcp.enabled !== false : true, servers };
 }
 function loadConfig() {
   try { applyConfig(JSON.parse(fs.readFileSync(CONFIG_FILE, 'utf8'))); return; } catch (e) {
@@ -417,6 +447,16 @@ function agentEmit(e, isBackground) {
   }
 }
 
+/* ---- MCP: el gestor vive aquí y el catálogo lo consulta tools.js por turno ---- */
+let mcp = null;
+function wireMcp() {
+  if (!mcp) mcp = new McpManager({ servers: [], dataDir: CONFIG_DIR, clientVersion: app.getVersion(), log: (e) => runlog.log(e) });
+  mcp.configure(config.mcp.servers || []);
+  // el catálogo se pide en cada turno: conectar un servidor no exige reiniciar la app
+  require('../agent/tools').setDynamicToolProvider(() => mcp.toolDefs());
+  return mcp;
+}
+
 function createAgent(isBackground = false) {
   return new Agent({
     guardrailsPolicy: config.security,
@@ -428,7 +468,8 @@ function createAgent(isBackground = false) {
       const b64 = 'data:image/png;base64,' + png.toString('base64');
       return { dataUrl: b64, w: s.thumbnail.getSize().width, h: s.thumbnail.getSize().height };
     },
-    browser
+    browser,
+    mcp: wireMcp(),   // el ejecutor despacha mcp__*: sin esto, «no hay servidores MCP en esta ejecución»
   });
 }
 
@@ -847,6 +888,119 @@ ipcMain.handle('meta:get', () => {
 });
 ipcMain.handle('logs:recent', (e, n) => runlog.readRecent(Number(n) || 200));
 
+/* ---------- v3.1: servidores MCP del usuario ---------- */
+/* Estado para la UI: la configuración completa del servidor (command/args/env/headers,
+   con el mismo criterio que config:get con las claves de proveedor: el renderer es de
+   confianza y sin ellos el formulario de edición no puede editar nada) MÁS el estado
+   vivo del gestor. `discovered` es el catálogo REAL descubierto: NO se puede llamar
+   `tools` porque `tools` en la configuración son los filtros allow/deny. */
+function mcpState() {
+  const vivo = new Map(wireMcp().status().map(s => [s.id, s]));
+  return {
+    enabled: config.mcp.enabled !== false,
+    servers: (config.mcp.servers || []).map(s => {
+      const v = vivo.get(s.id) || {};
+      return {
+        ...s,
+        enabled: v.enabled !== undefined ? v.enabled : s.enabled,
+        state: v.state || 'idle',
+        error: v.error || null,
+        logTail: v.logTail || '',
+        discovered: v.tools || [],
+      };
+    }),
+  };
+}
+
+/* Exporta los servidores en el formato `mcpServers` de otros clientes, con los
+   valores EN CLARO: el usuario los pide justo para copiarlos en otra app y en disco
+   ya viven cifrados. La UI avisa de que el texto contiene sus secretos. */
+function mcpExport() {
+  const mcpServers = {};
+  for (const s of config.mcp.servers || []) {
+    mcpServers[s.id] = s.transport === 'http'
+      ? { url: s.url, headers: { ...(s.headers || {}) } }
+      : { command: s.command, args: [...(s.args || [])], env: { ...(s.env || {}) } };
+  }
+  return { mcpServers };
+}
+
+ipcMain.handle('mcp:list', () => mcpState());
+
+ipcMain.handle('mcp:save', (e, raw) => {
+  const v = mcpConfig.validateServer(raw || {});
+  if (!v.ok) return { ok: false, error: v.error };
+  const server = v.value;
+  // el formulario no reenvía los secretos: un valor vacío conserva el guardado
+  const previo = (config.mcp.servers || []).find(s => s.id === server.id);
+  if (previo) {
+    server.env = mcpConfig.mergeSecrets(previo.env, server.env);
+    server.headers = mcpConfig.mergeSecrets(previo.headers, server.headers);
+  }
+  config.mcp.servers = [...(config.mcp.servers || []).filter(s => s.id !== server.id), server];
+  wireMcp();
+  const r = persistConfig();
+  return r.ok ? { ok: true, servers: mcpState().servers } : { ok: false, error: r.error };
+});
+
+ipcMain.handle('mcp:delete', (e, id) => {
+  const sid = mcpConfig.rawId(id);
+  config.mcp.servers = (config.mcp.servers || []).filter(s => s.id !== sid);
+  // los permisos de un servidor borrado quedarían huérfanos (y si vuelve, con
+  // los niveles de antes, que el usuario ya no ve en ningún sitio)
+  for (const k of Object.keys(config.security.permissions || {})) {
+    if (k === `mcp__${sid}__*` || k.startsWith(`mcp__${sid}__`)) delete config.security.permissions[k];
+  }
+  if (agent) agent.setPolicy(config.security);
+  wireMcp();
+  persistConfig();
+  return { ok: true, servers: mcpState().servers };
+});
+
+ipcMain.handle('mcp:toggle', (e, { id, enabled }) => {
+  const sid = mcpConfig.rawId(id);
+  const s = (config.mcp.servers || []).find(x => x.id === sid);
+  if (!s) return { ok: false, error: 'servidor MCP desconocido' };
+  s.enabled = enabled !== false;
+  // reconfigure aplica el cambio: apagado suelta el proceso y deja de ofrecer herramientas
+  wireMcp();
+  const r = persistConfig();
+  return r.ok ? { ok: true, servers: mcpState().servers } : { ok: false, error: r.error };
+});
+
+ipcMain.handle('mcp:setGlobal', (e, enabled) => {
+  config.mcp.enabled = enabled !== false;
+  wireMcp();
+  return persistConfig();
+});
+
+ipcMain.handle('mcp:refresh', async (e, id) => {
+  const sid = mcpConfig.rawId(id);
+  const r = await wireMcp().ensure(sid);
+  return { ok: r.ok, error: r.error || null, server: mcpState().servers.find(s => s.id === sid) };
+});
+
+ipcMain.handle('mcp:test', async (e, id) => {
+  const sid = mcpConfig.rawId(id);
+  const r = await wireMcp().ensure(sid);
+  return { ok: r.ok, error: r.error || null, server: mcpState().servers.find(s => s.id === sid) };
+});
+
+ipcMain.handle('mcp:log', (e, id) => {
+  const s = mcpState().servers.find(x => x.id === mcpConfig.rawId(id));
+  return { ok: !!s, log: (s && s.logTail) || '', error: (s && s.error) || null };
+});
+
+ipcMain.handle('mcp:export', () => ({ ok: true, json: JSON.stringify(mcpExport(), null, 2) }));
+
+ipcMain.handle('mcp:import', (e, json) => {
+  // NO escribe: devuelve la vista previa con conflictos para que el usuario confirme
+  const r = mcpConfig.parseMcpImport(String(json || ''));
+  if (!r.ok) return r;
+  const existentes = new Set((config.mcp.servers || []).map(s => s.id));
+  return { ok: true, servers: r.servers.map(s => ({ ...s, conflict: existentes.has(s.id) })) };
+});
+
 ipcMain.on('glow:set', (e, { mode, color }) => glow(mode, color));
 
 // ---- voice (Windows dictation: WinRT engine + SAPI fallback, UTF-8 protocol) ----
@@ -1178,6 +1332,11 @@ app.whenReady().then(() => {
     wireTaskManager().autoResume();
   } catch {}
   runlog.log({ agent: 'sagitari', event: 'app_boot', version: app.getVersion() });
+  // MCP: el gestor y su catálogo se montan con la configuración ya cargada (y su
+  // migración a cifrado hecha), y los servidores marcados como automáticos se
+  // conectan en segundo plano: uno que tarde en arrancar no retrasa la ventana.
+  wireMcp();
+  for (const s of config.mcp.servers || []) if (s.autoStart && s.enabled) mcp.ensure(s.id).catch(() => {});
   createChatWindow();
   createTray();
 
@@ -1217,6 +1376,7 @@ app.on('before-quit', () => {
   if (agent && agent.isBusy()) { try { agent.stop(); } catch {} }   // chat en curso
   if (whisper) { try { whisper.kill(); } catch {} }            // dictado en marcha
   if (ttsProc) { try { ttsProc.kill(); } catch {} ttsProc = null; }  // voz en curso: si no, quedaba huérfana
+  if (mcp) { try { mcp.shutdown(); } catch {} }                 // servidores MCP: procesos hijos fuera
   try { browser.ws && browser.send('Browser.close'); } catch {} // Chrome/Edge lanzado por CDP
   try { runlog.close(); } catch {}                              // logs de sesión
 });

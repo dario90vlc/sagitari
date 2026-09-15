@@ -1609,6 +1609,47 @@ test('mcp: Detener corta una llamada MCP en vuelo', async () => {
   await mcp.shutdown();
 });
 
+/* ---------- MCP: configuración del usuario (validación pura, sin Electron) ---------- */
+
+test('mcp: la validacion de un servidor rechaza lo que no puede funcionar', () => {
+  const { validateServer } = require('../main/mcp-config');
+  const base = { id: 'eco', name: 'Eco', transport: 'stdio', command: 'npx', args: ['-y', 'x'] };
+  ok(validateServer(base).ok, 'un servidor stdio válido pasa');
+  eq(validateServer({ ...base, id: 'Con Espacios!' }).value.id, 'con_espacios', 'el id se sanea');
+  for (const malo of [
+    { ...base, id: '' },
+    { ...base, id: '../fuera' },
+    { ...base, transport: 'carrier-pigeon' },
+    { ...base, transport: 'stdio', command: '' },
+    { ...base, transport: 'http', url: 'http://mcp.ejemplo.com/mcp' },
+    { ...base, transport: 'http', url: 'file:///C:/x' },
+    { ...base, transport: 'stdio', timeoutMs: -5 },
+    { ...base, command: 'npx', args: ['a', 'b"c'] },
+  ]) ok(validateServer(malo).ok === false, 'debe rechazar ' + JSON.stringify(malo).slice(0, 90));
+  ok(validateServer({ ...base, transport: 'http', url: 'https://x/mcp' }).ok, 'https remoto vale');
+  ok(validateServer({ ...base, transport: 'http', url: 'http://127.0.0.1:9/mcp' }).ok, 'http en localhost vale');
+  const conListas = validateServer({ ...base, tools: { allow: 'echo', deny: ['x', '', 2] } });
+  eq(conListas.value.tools.allow.join(','), 'echo');
+  eq(conListas.value.tools.deny.join(','), 'x');
+});
+
+test('mcp: importar el JSON de otro cliente y conservar secretos al guardar', () => {
+  const { parseMcpImport, mergeSecrets } = require('../main/mcp-config');
+  const r = parseMcpImport(JSON.stringify({ mcpServers: {
+    github: { command: 'npx', args: ['-y', '@modelcontextprotocol/server-github'], env: { GITHUB_TOKEN: 'ghp_x' } },
+    remoto: { url: 'https://mcp.ejemplo.com/mcp', headers: { Authorization: 'Bearer t' } },
+    roto: { command: '' },
+  } }));
+  ok(r.ok, JSON.stringify(r));
+  eq(r.servers.map(s => s.id).sort().join(','), 'github,remoto', 'la entrada inválida se descarta');
+  eq(r.servers.find(s => s.id === 'github').transport, 'stdio');
+  eq(r.servers.find(s => s.id === 'remoto').transport, 'http');
+  // guardar con el campo de secreto vacío no puede borrar el que ya había
+  eq(mergeSecrets({ TOKEN: 'viejo' }, { TOKEN: '' }).TOKEN, 'viejo');
+  eq(mergeSecrets({ TOKEN: 'viejo' }, { TOKEN: 'nuevo' }).TOKEN, 'nuevo');
+  eq(mergeSecrets({}, { TOKEN: 'nuevo' }).TOKEN, 'nuevo');
+});
+
 test('agent: la cadena elige el protocolo del modelo (Qwen en Go → /messages)', async () => {
   const { Agent } = require('../agent/agent');
   const seen = [];
