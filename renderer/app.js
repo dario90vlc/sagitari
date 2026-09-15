@@ -1936,12 +1936,16 @@ const RISK_LABEL = { safe: 'permitir siempre', confirm: 'confirmar', restricted:
 /* Seguridad se pinta al arrancar (initSecurity) Y al entrar en su pestaña, así que dos
    pasadas pueden solaparse (al arrancar con «Seguridad» recordada como última pestaña, por
    ejemplo): las dos empiezan vaciando `#permList` y las filas se duplicarían o quedarían a
-   medias. Un repintado en vuelo ya dejará la lista al día, así que el segundo no arranca. */
+   medias. La segunda no se descarta: se ENCOLA, porque descartarla dejaba la lista con los
+   datos viejos justo cuando el usuario acababa de entrar. */
 let securityPainting = false;
+let securityAgain = false;
 async function renderSecurity() {
-  if (securityPainting) return;
+  if (securityPainting) { securityAgain = true; return; }
   securityPainting = true;
-  try { await _renderSecurity(); } finally { securityPainting = false; }
+  try {
+    do { securityAgain = false; await _renderSecurity(); } while (securityAgain);
+  } finally { securityPainting = false; }
 }
 async function _renderSecurity() {
   let cfg = { permissions: {}, riskDefaults: {} };
@@ -3045,9 +3049,11 @@ async function renderTools() {
     }
   }
   // ---- v3.1: herramientas MCP reales del usuario (no están en el catálogo nativo) ----
+  // Con el interruptor global apagado el modelo NO recibe ninguna herramienta MCP (main no
+  // ofrece el catálogo dinámico): pintarlas aquí diría que el agente puede usarlas.
   let mcp = { servers: [] };
   try { mcp = await window.sagitari.mcpList(); } catch {}
-  const conHerramientas = (mcp.servers || []).filter(s => s.enabled && (s.discovered || []).length);
+  const conHerramientas = mcp.enabled === false ? [] : (mcp.servers || []).filter(s => s.enabled && (s.discovered || []).length);
   if (conHerramientas.length) {
     const total = conHerramientas.reduce((n, s) => n + s.discovered.length, 0);
     const h = document.createElement('div');

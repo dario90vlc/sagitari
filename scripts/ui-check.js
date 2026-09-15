@@ -34,18 +34,19 @@ const CHECK_DEADLINE_MS = 8000;
    --hidden/--test). Se le deja un config mínimo para que la interfaz se vea como
    una instalación configurada: sin proveedor activo la app arranca con la
    bienvenida «ve a Ajustes» y el estado vacío no está visible, que es justo lo
-   que se comprueba aquí. No lleva ninguna credencial: el endpoint apunta a un
-   puerto local cerrado, así que cualquier llamada al modelo falla al instante
-   sin tocar la red ni las claves reales. */
+   que se comprueba aquí. No lleva ninguna credencial: el «modelo» es un servidor
+   local de mentira (`fakeLlm`), así que las llamadas al modelo no salen a la red
+   ni tocan claves reales — y de paso enseñan qué herramientas le ofrece la app
+   al modelo, que no viaja por ningún canal de la interfaz. */
 const TEST_DATA_DIR = path.join(process.env.APPDATA || path.join(os.homedir(), 'AppData', 'Roaming'), 'SagitariAI-test');
-function seedTestConfig() {
+function seedTestConfig(apiPort) {
   const file = path.join(TEST_DATA_DIR, 'config.json');
   /* Proveedor con lista larga y el modelo en uso al final: es el caso que hace
      desplazarse al menú de modelos, así que las comprobaciones de interfaz se
      enfrentan al mismo escenario que el usuario (lista desplazada, cabecera y pie
      fijos) y no al caso fácil de una sola fila. */
   const modelos = Array.from({ length: 12 }, (_, i) => 'test-model-' + (i + 1));
-  const dummy = { providerId: 'ui-check', name: 'Prueba (sin conexión)', baseUrl: 'http://127.0.0.1:9/v1', apiKey: '', model: 'test-model-10', vision: false };
+  const dummy = { providerId: 'ui-check', name: 'Prueba (sin conexión)', baseUrl: 'http://127.0.0.1:' + apiPort + '/v1', apiKey: '', model: 'test-model-10', vision: false };
   // Servidor MCP de prueba: el mismo que usan los tests unitarios. Sin red y sin
   // instalar nada, así que la comprobación de interfaz no depende del entorno.
   const mcpServer = {
@@ -73,6 +74,29 @@ function freePort() {
     srv.on('error', rej);
     srv.listen(0, '127.0.0.1', () => { const p = srv.address().port; srv.close(() => res(p)); });
   });
+}
+
+/* Un «modelo» de mentira, en local: contesta cada petición con un turno SSE de una línea y
+   apunta qué herramientas (`tools`) le ofreció la app. Es la ÚNICA ventana al catálogo real
+   que ve el modelo (`allToolDefs`): no viaja por ningún canal de la interfaz, así que sin
+   esto el interruptor global sólo se podía comprobar por lo que la app dice de sí misma, no
+   por lo que de verdad recibe el modelo. `vistos` guarda un array de nombres por petición. */
+function fakeLlm() {
+  const vistos = [];
+  const srv = http.createServer((req, res) => {
+    let body = '';
+    req.on('data', (c) => { body += c; });
+    req.on('end', () => {
+      let nombres = null;
+      try { nombres = (JSON.parse(body).tools || []).map(t => (t.function || {}).name).filter(Boolean); } catch {}
+      vistos.push(nombres);      // null = la petición no traía `tools`
+      res.writeHead(200, { 'content-type': 'text/event-stream' });
+      res.write('data: ' + JSON.stringify({ choices: [{ delta: { content: 'listo' } }] }) + '\n\n');
+      res.write('data: [DONE]\n\n');
+      res.end();
+    });
+  });
+  return new Promise((res) => srv.listen(0, '127.0.0.1', () => res({ srv, port: srv.address().port, vistos })));
 }
 
 /** Comprobaciones sobre la ventana viva. `true` = bien. */
@@ -103,7 +127,9 @@ const AFTER = {
 };
 
 (async () => {
-  seedTestConfig();
+  // El modelo de mentira primero: su puerto va en el config que se siembra.
+  const llm = await fakeLlm();
+  seedTestConfig(llm.port);
   const port = await freePort();
   // --hidden: la ventana NO se muestra. Antes se abría y se cerraba sola durante
   // probar.bat, y eso se ve idéntico a «la app se cierra sola».
@@ -118,6 +144,7 @@ const AFTER = {
   const done = (code) => {
     let salido = false;
     const salir = () => { if (!salido) { salido = true; process.exit(code); } };
+    try { llm.srv.close(); } catch {}
     child.once('exit', salir);
     try { child.kill(); } catch {}
     setTimeout(() => { try { child.kill('SIGKILL'); } catch {} salir(); }, 4000);
@@ -170,7 +197,8 @@ const AFTER = {
     // job colgado para siempre — que es justo lo que este script debe detectar.
     const timer = setTimeout(() => { pending.delete(myId); res(undefined); }, CHECK_DEADLINE_MS);
     pending.set(myId, (m) => { clearTimeout(timer); res(m.result && m.result.result ? m.result.result.value : undefined); });
-    ws.send(JSON.stringify({ id: myId, method: 'Runtime.evaluate', params: { expression: expr, returnByValue: true } }));
+    // awaitPromise: las comprobaciones que consultan el estado por IPC son async
+    ws.send(JSON.stringify({ id: myId, method: 'Runtime.evaluate', params: { expression: expr, returnByValue: true, awaitPromise: true } }));
   });
   /* Comando CDP cualquiera (se usa para emular el tamaño mínimo de ventana). */
   const cmd = (method, params = {}) => new Promise((res) => {
@@ -394,14 +422,48 @@ const AFTER = {
   // ---- el interruptor global apaga y enciende el catálogo (de punta a punta) ----
   await evaluate('document.querySelector(\'#setTabs .settab[data-set="mcp"]\').click()');
   await new Promise(r => setTimeout(r, 400));
+  /* Y lo que de verdad recibe el MODELO, que no viaja por ningún canal de la interfaz: se
+     mira la petición que la app le manda al modelo de mentira. */
+  const pedirAlModelo = async () => {
+    const antes = llm.vistos.length;
+    const libre = async () => (await evaluate('(async function(){ return !(await window.sagitari.getAgentsLive()).running; })()')) === true;
+    // con el agente ocupado, enviar sólo detendría el turno anterior
+    for (let i = 0; i < 40 && !(await libre()); i++) await new Promise(r => setTimeout(r, 200));
+    await evaluate('document.querySelector(\'[data-view="chat"]\').click(); document.querySelector("#chatInput").value = "hola"; document.querySelector("#chatSend").click()');
+    const limite = Date.now() + 10000;
+    while (llm.vistos.length === antes && Date.now() < limite) await new Promise(r => setTimeout(r, 150));
+    const llegadas = llm.vistos.slice(antes);
+    for (let i = 0; i < 40 && !(await libre()); i++) await new Promise(r => setTimeout(r, 200));
+    return llegadas;
+  };
+  const nombresDe = (peticiones) => [...new Set(peticiones.flat().filter(Boolean))];
+  const mcpDe = (nombres) => nombres.filter(n => n.startsWith('mcp__'));
   await evaluate('document.querySelector("#mcpGlobal").click()');
   await new Promise(r => setTimeout(r, 1500));
   await judge('con el interruptor apagado el catálogo no ofrece herramientas MCP',
-    '(function(){ return typeof window.sagitari.mcpList === "function" && document.querySelector("#mcpGlobal") && !document.querySelector("#mcpGlobal").classList.contains("on"); })()');
+    '(async function(){ const l = await window.sagitari.mcpList(); document.querySelector(\'[data-view="tools"]\').click(); await new Promise(r => setTimeout(r, 500)); const g = document.querySelector("#toolsGrid"); const sinGrupo = !!g && !/Servidores MCP/.test(g.textContent); document.querySelector(\'[data-view="settings"]\').click(); document.querySelector(\'#setTabs .settab[data-set="mcp"]\').click(); return l.enabled === false && sinGrupo; })()');
+  const sinMcp = nombresDe(await pedirAlModelo());
+  if (sinMcp.length && !mcpDe(sinMcp).length) {
+    console.log('  ok   con el interruptor apagado la petición al modelo no lleva herramientas MCP (' + sinMcp.length + ' nativas)');
+  } else {
+    failed++;
+    console.log('  FALLO la petición al modelo sigue llevando herramientas MCP con el interruptor apagado  ->  ' + JSON.stringify({ ofrecidas: sinMcp.length, mcp: mcpDe(sinMcp) }));
+  }
+  await evaluate('document.querySelector(\'[data-view="settings"]\').click(); document.querySelector(\'#setTabs .settab[data-set="mcp"]\').click()');
+  await new Promise(r => setTimeout(r, 400));
   await evaluate('document.querySelector("#mcpGlobal").click()');
   await new Promise(r => setTimeout(r, 2500));
-  await judge('al reencender, el servidor vuelve a estar listo',
-    '(function(){ return /Listo/.test(document.querySelector("#mcpList").textContent); })()');
+  await judge('al reencender, el catálogo vuelve a ofrecer las herramientas MCP',
+    '(async function(){ const l = await window.sagitari.mcpList(); document.querySelector(\'[data-view="tools"]\').click(); await new Promise(r => setTimeout(r, 500)); const g = document.querySelector("#toolsGrid"); const conGrupo = !!g && /Servidores MCP/.test(g.textContent) && /echo/.test(g.textContent); document.querySelector(\'[data-view="settings"]\').click(); document.querySelector(\'#setTabs .settab[data-set="mcp"]\').click(); return l.enabled === true && conGrupo; })()');
+  await evaluate('document.querySelector(\'[data-view="chat"]\').click()');
+  const conMcp = nombresDe(await pedirAlModelo());
+  if (mcpDe(conMcp).includes('mcp__eco__echo')) {
+    console.log('  ok   al reencender, el modelo vuelve a recibir las herramientas MCP (' + mcpDe(conMcp).join(', ') + ')');
+  } else {
+    failed++;
+    console.log('  FALLO el modelo no recibe las herramientas MCP al reencender  ->  ' + JSON.stringify({ ofrecidas: conMcp.length, mcp: mcpDe(conMcp) }));
+  }
+  await evaluate('document.querySelector(\'[data-view="settings"]\').click(); document.querySelector(\'#setTabs .settab[data-set="mcp"]\').click()');
   await evaluate('document.querySelector(\'[data-view="chat"]\').click()');
 
   // errores que la propia interfaz haya detectado (red de seguridad del renderer)
