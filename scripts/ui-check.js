@@ -572,10 +572,14 @@ const AFTER = {
      cuentan los píxeles BRILLANTES (alfa > 60) y se exige que la voz inyectada multiplique
      el reposo. Con `prefers-reduced-motion` el bucle pisa el nivel a propósito y sólo dibuja
      el de fondo, así que ahí se mide la regla donde vive: el dibujo directo. */
-  await cmd('Emulation.setEmulatedMedia', { media: '', features: [{ name: 'prefers-reduced-motion', value: 'no-preference' }] });
+  /* El orbe tiene que NOTAR el nivel, no sólo pintar: en reposo ya hay ~32.000 píxeles con
+     algo de alfa, así que contarlos no distingue nada (la voz añadía un 1,9 %). Se cuentan
+     los BRILLANTES (alfa > 60): ~916 en reposo frente a ~5.146 con voz. Se mide sobre el
+     dibujo directo, no en el lienzo de la app, para que valga también con
+     prefers-reduced-motion (allí el bucle pisa el nivel a propósito). */
   await judge('el orbe late con la voz inyectada',
-    '(async function(){ const reduce = window.matchMedia("(prefers-reduced-motion: reduce)").matches; const estaba = window.VoiceMode.abierto(); await window.VoiceMode.cerrar(); await window.VoiceMode.abrir(); const c = document.querySelector("#vmOrbe"); const ctx = c.getContext("2d"); const cuenta = () => { const d = ctx.getImageData(0, 0, c.width, c.height).data; let n = 0; for (let i = 3; i < d.length; i += 4) if (d[i] > 100) n++; return n; }; window.VoiceMode.handle({ type: "state", state: "hablando" }); window.VoiceMode.handle({ type: "level", value: 0 }); await new Promise(r => setTimeout(r, 1400)); const a = cuenta(); window.VoiceMode.handle({ type: "level", value: 1 }); await new Promise(r => setTimeout(r, 500)); const b = cuenta(); window.VoiceMode.handle({ type: "state", state: "pensando" }); window.VoiceMode.handle({ type: "level", value: 0 }); await new Promise(r => setTimeout(r, 1400)); const e = cuenta(); return "DIAG reduce=" + reduce + " estabaAbierto=" + estaba + " hablando0=" + a + " hablando1=" + b + " pensando0=" + e + " estado=" + window.VoiceMode.estado(); })()');
-  await cmd('Emulation.setEmulatedMedia', { media: '', features: [] });
+    '(function(){ const o = window.OrbKit; if (!o) return false; const c = document.createElement("canvas"); c.width = 380; c.height = 380; const ctx = c.getContext("2d"); const brillantes = function (nivel) { o.draw(ctx, 380, 380, nivel, "oyendo", 1.2); const d = ctx.getImageData(0, 0, 380, 380).data; let n = 0; for (let i = 3; i < d.length; i += 4) if (d[i] > 60) n++; return n; }; const reposo = brillantes(0.05); const voz = brillantes(0.7); return reposo > 0 && voz > reposo * 1.5; })()');
+
   await judge('el permiso de una herramienta se contesta diciendo «sí»',
     '(function(){ let hecho = false; window.VoiceMode.pedirConfirmacion({ texto: "¿Borro la carpeta?", si: function(){ hecho = true; }, no: function(){} }); window.VoiceMode.handle({ type: "final", text: "sí" }); return hecho && window.VoiceMode.estado() !== "confirmando"; })()');
   /* Interrumpir de verdad, por la función de la app: el estado lo pone ELLA, no la
@@ -589,6 +593,10 @@ const AFTER = {
      vive el filtro de basura, así que sólo por ahí se puede comprobar que el ruido que se
      inventa el motor no llega al agente. Llamando a `VoiceMode.handle` desde la página el
      filtro se saltaría y la comprobación mediría una tubería que la app no tiene. */
+  /* Esperar a que el agente esté libre: desde que el modo voz no envía con el turno
+     ocupado (a propósito), disparar un dictado mientras trabaja lo dejaría sin enviar. */
+  await evaluate('window.VoiceMode.abrir()');   // el manager del proceso principal nace al abrir el modo
+  for (let i = 0; i < 60; i++) { const libre = await evaluate('(async function(){ return !(await window.sagitari.getAgentsLive()).running; })()'); if (libre === true) break; await new Promise((r) => setTimeout(r, 250)); }
   const vozDice = async (texto) => {
     const antes = llm.vistos.length;
     await evaluate('window.sagitari.voiceEvent({ type: "final", text: ' + JSON.stringify(texto) + ' })');
