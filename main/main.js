@@ -1093,8 +1093,11 @@ ipcMain.handle('voice:stop', async () => {
 
 // ---- TTS (SAPI, Spanish voice if available) ----
 const { createTtsWindows } = require('./voice/tts-windows');
-let ttsProc = null;
-ipcMain.handle('tts:speak', (e, text) => {
+/* Una sola tubería de voz: el VoiceManager trocea y sintetiza por frases; el renderer las
+   reproduce (tiene el analizador de audio para el orbe y puede cortar al instante).
+   Se conserva el nombre `tts:speak` y su contrato de silencio en arranques automatizados:
+   hay una comprobación de ui-check que depende de eso. */
+ipcMain.handle('tts:speak', async (e, text) => {
   /* Un arranque automatizado (--smoke/--hidden/--test) NUNCA habla. Los bancos de
      prueba conducen conversaciones simuladas —el modelo de ui-check contesta «listo»—
      con la ventana OCULTA, así que la voz salía por los altavoces del usuario sin nada
@@ -1103,33 +1106,8 @@ ipcMain.handle('tts:speak', (e, text) => {
      sonido sale del equipo. */
   if (HEADLESS) return { ok: false };
   if (!config.settings.ttsEnabled || !text) return { ok: false };
-  try {
-    if (ttsProc) { try { ttsProc.kill(); } catch {} ttsProc = null; }
-    const ps = `
-Add-Type -AssemblyName System.Speech
-$v = (New-Object System.Speech.Synthesis.SpeechSynthesizer)
-$es = $v.GetInstalledVoices() | Where-Object { $_.VoiceInfo.Culture.Name -like 'es*' } | Select-Object -First 1
-if ($es) { $v.SelectVoice($es.VoiceInfo.Name) }
-$v.Rate = 0
-$v.Speak([Console]::In.ReadToEnd())`;
-    const p = spawn('powershell.exe', ['-NoProfile', '-Command', ps], { windowsHide: true });
-    ttsProc = p;
-    // Red de seguridad: una síntesis colgada no puede dejar el proceso vivo (y el
-    // glow encendido) para siempre; el 'exit' siempre limpia el temporizador.
-    const killTimer = setTimeout(() => { try { p.kill(); } catch {} }, 60000);
-    p.stdin.write(String(text).slice(0, 1500));
-    p.stdin.end();
-    p.on('error', (err) => { console.error('tts:speak', err.message); });
-    // al terminar de hablar (o al cortarlo con otra lectura), avisamos al
-    // renderer para que el glow de 'speaking' vuelva a su calma
-    p.once('exit', () => {
-      clearTimeout(killTimer);
-      if (ttsProc !== p) return;   // ya lo reemplazó otra lectura: avisará ella
-      ttsProc = null;
-      try { if (win && !win.isDestroyed()) win.webContents.send('tts:done'); } catch {}
-    });
-    return { ok: true };
-  } catch { return { ok: false }; }
+  if (!voiceManager) return { ok: false };
+  try { voiceManager.say(String(text)); return { ok: true }; } catch { return { ok: false }; }
 });
 
 /* Motor de síntesis del sistema. La síntesis por frases la orquesta el VoiceManager
@@ -1209,7 +1187,15 @@ ipcMain.handle('voice:close', async () => {
 });
 
 ipcMain.on('voice:event', (e, ev) => { if (voiceManager) voiceManager.ingest(ev); });
-ipcMain.on('tts:played', (e, id) => { if (voiceManager) voiceManager.spoken(id); });
+ipcMain.on('tts:played', (e, id) => {
+  if (!voiceManager) return;
+  voiceManager.spoken(id);
+  /* El fin de la lectura, que es el aviso del que depende que el glow vuelva a su calma
+     en el renderer: el manager se queda en «escuchando» cuando vacía su cola de frases.
+     Antes lo emitía la salida del proceso de PowerShell de `tts:speak`, que ya no existe
+     porque la lectura entera la orquesta el manager. */
+  if (voiceManager.estado() === 'escuchando') { try { if (win && !win.isDestroyed()) win.webContents.send('tts:done'); } catch {} }
+});
 ipcMain.on('tts:stop', () => { if (voiceManager) voiceManager.stopSpeaking(); });
 
 // ---- misc ----
@@ -1493,9 +1479,9 @@ app.on('before-quit', async () => {
   if (taskManager) { try { taskManager.stopAll(); } catch {} }      // tareas en background → interrupted
   if (agent && agent.isBusy()) { try { agent.stop(); } catch {} }   // chat en curso
   if (whisper) { try { whisper.kill(); } catch {} }            // dictado en marcha
-  if (ttsProc) { try { ttsProc.kill(); } catch {} ttsProc = null; }  // voz en curso: si no, quedaba huérfana
   /* Modo voz: cierra también el proceso de escuchar (su PowerShell) y el motor de
-     síntesis. `close()` resuelve en microtareas (mata y libera, sin esperar a nadie),
+     síntesis —la lectura en curso, si la había, se corta ahí y su PowerShell no queda
+     huérfano—. `close()` resuelve en microtareas (mata y libera, sin esperar a nadie),
      así que el resto del cierre de abajo sigue corriendo antes de que la app salga. */
   try { if (voiceManager) await voiceManager.close(); } catch {}
   voiceManager = null;

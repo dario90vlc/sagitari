@@ -1114,7 +1114,14 @@ window.sagitari.onAgentEvent((ev) => {
       setSendMode();
       syncChatBadge();
       glowOffSoon();
-      speak(ev.text);
+      /* En el modo voz la respuesta se dice SIEMPRE, aunque el TTS esté apagado en
+         Ajustes: es un modo de oído, y negarse a hablar ahí sería absurdo. La regla de
+         los arranques automatizados sigue mandando por encima (la aplica el proceso
+         principal). */
+      speak(ev.text, { forzar: window.VoiceMode && window.VoiceMode.abierto() });
+      /* Y además se LEE: el panel tapa el chat, así que la respuesta tiene que aparecer ahí
+         también. Sin esto, con el modo voz abierto la respuesta solo se podía oír. */
+      if (window.VoiceMode && window.VoiceMode.abierto()) window.VoiceMode.respuesta(ev.text);
       setChatStatus('Listo · ' + lastTurnLabel(), 'done');
       feed('Respuesta lista', 'cy');
       if (devMode) paintMeta();
@@ -1404,26 +1411,12 @@ function setSendMode() {
 }
 
 // ============ sending ============
-async function sendFrom(elId) {
-  const el = $(elId);
-  // Mientras el agente trabaja, el botón es «Detener»: debe funcionar aunque el
-  // campo esté vacío (lo habitual, porque el texto se limpió al enviarlo).
-  // Por eso este caso va ANTES de la comprobación de texto vacío.
-  if (busy) { window.sagitari.stopChat(); feed('Deteniendo…', 'err'); return; }
-  const text = el.value.trim();
-  const atts = pendingAttachments.slice();
-  if (!text && !atts.length) return;
-  el.value = ''; el.style.height = '';
-  clearAttachments();
-  // si el dictado estaba activo, detenerlo y limpiar su estado visual
-  if (listening) {
-    listening = false;
-    voiceBuffer = ''; lastPartial = '';
-    $$('.cbtn').forEach(b => b.classList.remove('on'));
-    el.classList.remove('rec');
-    window.sagitari.glow('off');
-    await window.sagitari.voiceStop();
-  }
+/* Enviar un texto al agente por el camino de siempre. Existe aparte de sendFrom porque
+   el modo voz manda texto que no viene del compositor, y tiene que recorrer EXACTAMENTE
+   el mismo camino: la misma burbuja, el mismo sello de modo, el mismo estado ocupado y
+   el mismo chat:send. Si hubiera dos caminos, el modo voz dejaría de heredar permisos,
+   guardarraíles e historial. */
+async function enviarTexto(text, atts = []) {
   goto('chat');
   // el turno del usuario queda sellado con el modo con el que se envió: en el
   // historial se ve de un vistazo qué respondió cada modo
@@ -1452,6 +1445,29 @@ async function sendFrom(elId) {
     syncChatBadge();
     showToast('No se pudo enviar: ' + ((e && e.message) || e));
   }
+}
+
+async function sendFrom(elId) {
+  const el = $(elId);
+  // Mientras el agente trabaja, el botón es «Detener»: debe funcionar aunque el
+  // campo esté vacío (lo habitual, porque el texto se limpió al enviarlo).
+  // Por eso este caso va ANTES de la comprobación de texto vacío.
+  if (busy) { window.sagitari.stopChat(); feed('Deteniendo…', 'err'); return; }
+  const text = el.value.trim();
+  const atts = pendingAttachments.slice();
+  if (!text && !atts.length) return;
+  el.value = ''; el.style.height = '';
+  clearAttachments();
+  // si el dictado estaba activo, detenerlo y limpiar su estado visual
+  if (listening) {
+    listening = false;
+    voiceBuffer = ''; lastPartial = '';
+    $$('.cbtn').forEach(b => b.classList.remove('on'));
+    el.classList.remove('rec');
+    window.sagitari.glow('off');
+    await window.sagitari.voiceStop();
+  }
+  await enviarTexto(text, atts);
 }
 
 // ============ adjuntos: archivos, documentos e imágenes ============
@@ -1676,7 +1692,13 @@ function paintVoice(partial) {
 }
 function wireMic(btnId) {
   const btn = $(btnId);
-  btn.addEventListener('click', async () => {
+  btn.addEventListener('click', async (e) => {
+    // El micro es la puerta del modo voz. Con Alt se conserva el dictado de siempre,
+    // que sigue siendo lo cómodo para escribir un prompt largo y revisarlo.
+    if (!e.altKey) {
+      if (window.VoiceMode.abierto()) await window.VoiceMode.cerrar(); else await window.VoiceMode.abrir();
+      return;
+    }
     if (listening) {
       listening = false; btn.classList.remove('on');
       window.sagitari.glow('off');
@@ -1690,6 +1712,17 @@ function wireMic(btnId) {
   });
 }
 wireMic('#chatMic');
+
+/* Modo voz: el panel es el único que sabe del modo (y su único punto de entrada es
+   `handle`), así que aquí solo se le dan las tres cosas que no puede saber por sí mismo
+   —por dónde se envía, por dónde se reproduce una frase y si hay que hablar los avisos—
+   y se le pasa todo lo que llega del proceso principal. */
+window.VoiceMode.setEnviar(enviarTexto);
+window.sagitari.onVoiceEvent((ev) => window.VoiceMode.handle(ev));
+window.sagitari.onTtsPhrase((p) => window.VoiceMode.audio.reproducir(p));
+/* Los avisos solo se hablan si el usuario lo ha pedido en Ajustes. La decisión se toma
+   aquí, que es donde se conocen los ajustes; el panel solo pide que se diga. */
+window.VoiceMode.setHablar((t) => { if (CFG.settings.ttsNotices) speak(t, { forzar: true }); });
 
 window.sagitari.onVoiceReady((k, lang) => showToast('Dictado activo (' + lang + '). Habla ahora; pulsa el micro o envía para terminar.'));
 // motor clásico = precisión inferior: avisar que con el reconocimiento online mejora mucho
@@ -1756,6 +1789,25 @@ async function fillSettings() {
   $('#swGlow').classList.toggle('on', !!CFG.settings.glowEnabled);
   $('#swTts').classList.toggle('on', !!CFG.settings.ttsEnabled);
   $('#voiceLang').value = CFG.settings.voiceLang || 'es-ES';
+  // La lista de voces sale del motor real: si no hay ninguna, se dice, no se deja vacío.
+  window.sagitari.ttsList().then((r) => {
+    const sel = $('#ttsVoice');
+    if (!sel) return;
+    sel.innerHTML = '';
+    const voces = (r && r.voices) || [];
+    if (!voces.length) { const o = document.createElement('option'); o.textContent = 'Sin voces instaladas'; o.value = ''; sel.appendChild(o); return; }
+    for (const v of voces) {
+      const o = document.createElement('option');
+      o.value = v.nombre; o.textContent = v.nombre + ' (' + v.idioma + ')';
+      if (CFG.settings.ttsVoice === v.nombre) o.selected = true;
+      sel.appendChild(o);
+    }
+  }).catch(() => {});
+  if ($('#ttsRate')) $('#ttsRate').value = String(CFG.settings.ttsRate ?? 0);
+  /* El estado visual del interruptor de avisos se pinta aquí y no solo al cablearlo: los
+     ajustes llegan de disco después de que el script se ejecute, así que pintarlo al
+     cablear mostraba «apagado» aunque estuviera encendido. */
+  if ($('#swAvisos')) $('#swAvisos').classList.toggle('on', !!CFG.settings.ttsNotices);
   $('#setUserName').value = CFG.settings.userName || '';
   // apariencia: color de interfaz, color del glow e intensidad
   $('#uiColor').value = PALETTES[CFG.settings.uiColor] ? CFG.settings.uiColor : 'violet';
@@ -1879,6 +1931,12 @@ $('#voiceLang').onchange = async (e) => {
   try { await window.sagitari.setSettings({ voiceLang: e.target.value }); }
   catch (err) { showToast('No se pudo guardar el idioma de voz'); }
 };
+if ($('#ttsVoice')) $('#ttsVoice').onchange = async (e) => { await window.sagitari.setSettings({ ttsVoice: e.target.value }); };
+if ($('#ttsRate')) $('#ttsRate').oninput = async (e) => { await window.sagitari.setSettings({ ttsRate: Number(e.target.value) }); };
+if ($('#swAvisos')) {
+  $('#swAvisos').classList.toggle('on', !!CFG.settings.ttsNotices);
+  $('#swAvisos').onclick = async (e) => { const on = !e.currentTarget.classList.contains('on'); e.currentTarget.classList.toggle('on', on); await window.sagitari.setSettings({ ttsNotices: on }); };
+}
 
 // ---- apariencia: aplicar al vuelo y persistir ----
 function refreshGlowLabels() {
@@ -3250,8 +3308,8 @@ $('#projPick').onclick = async () => {
 };
 
 // ============ misc ============
-function speak(text) {
-  if (!CFG.settings.ttsEnabled || !text) return;
+function speak(text, { forzar = false } = {}) {
+  if ((!forzar && !CFG.settings.ttsEnabled) || !text) return;
   const clean = text.replace(/```[\s\S]*?```/g, ' (código) ').replace(/[*_`#>«»]/g, '').replace(/\s+/g, ' ').trim();
   if (clean) {
     window.sagitari.glow('speak');            // el marco late mientras habla
