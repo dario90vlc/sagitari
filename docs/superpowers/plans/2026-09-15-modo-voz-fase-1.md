@@ -1610,8 +1610,12 @@ Y al final del cuerpo, junto a los otros scripts del renderer:
   function responder(texto) {
     if (!confirmacion) return false;
     const t = String(texto || '').toLowerCase().trim();
-    const si = /^(s[ií]|vale|hazlo|adelante|confirma|de acuerdo|ok)\b/.test(t);
-    const no = /^(no|cancela|para|detente|mejor no)\b/.test(t);
+    /* OJO con el `\b` de JavaScript: la «í» no es carácter de palabra, así que
+       `/^(s[ií]|…)\b/` NUNCA casa con «sí» — y decir «sí» a una confirmación pendiente
+       acababa enviándose al agente como una petición, justo el fallo que este código
+       existe para evitar. Se usa una frontera que sí entiende Unicode. */
+    const si = /^(s[ií]|vale|hazlo|adelante|confirma|de acuerdo|ok)(?=$|[^\p{L}\p{N}_])/u.test(t);
+    const no = /^(no|cancela|para|detente|mejor no)(?=$|[^\p{L}\p{N}_])/u.test(t);
     if (!si && !no) return false;
     const fn = si ? confirmacion.si : confirmacion.no;
     confirmacion = null;
@@ -1768,7 +1772,10 @@ Y al final del cuerpo, junto a los otros scripts del renderer:
 
 ```css
 /* ---- modo voz ---- */
-#voiceMode { position: absolute; inset: 0; z-index: 40; display: flex; flex-direction: column; align-items: center; justify-content: center; gap: 10px; background: radial-gradient(120% 120% at 50% 30%, #14121f 0%, #0b0a12 70%); }
+/* La paleta del proyecto NO tiene `--accent`: el acento rico es `--vio` (styles.css:98),
+   que además sigue el tema elegido. Se define una vez aquí dentro para no inventar
+   variables globales ni romper el tema. Lo cazó el implementador al pintarlo de verdad. */
+#voiceMode { --accent: var(--vio); position: absolute; inset: 0; z-index: 40; display: flex; flex-direction: column; align-items: center; justify-content: center; gap: 10px; background: radial-gradient(120% 120% at 50% 30%, #14121f 0%, #0b0a12 70%); }
 #voiceMode[hidden] { display: none; }
 #vmOrbe { width: 190px; height: 190px; }              /* el lienzo va sin fondo: se ve el panel */
 .vm-cabecera { letter-spacing: .06em; text-transform: uppercase; font-size: 11px; color: var(--accent); }
@@ -1779,6 +1786,10 @@ Y al final del cuerpo, junto a los otros scripts del renderer:
 .vm-pasos { font-size: 12px; opacity: .85; min-height: 18px; }
 .vm-confirm { border: 1px solid rgba(251,191,36,.5); background: rgba(251,191,36,.08); border-radius: 10px; padding: 10px; width: min(560px, 84%); }
 .vm-botones { display: flex; gap: 8px; margin-top: 6px; }
+/* Los botones de la confirmación llevan TEXTO («Sí, hazlo»), y `.cbtn` es el cuadro
+   redondo de 34x34 de los iconos del compositor: sin esta regla la etiqueta se partía en
+   dos líneas (medido: 34x34) y el botón parecía roto. */
+#voiceMode .vm-botones .cbtn { width: auto; height: auto; border-radius: 9px; padding: 7px 14px; white-space: nowrap; }
 .vm-error { border: 1px solid rgba(248,113,113,.5); border-radius: 10px; padding: 10px; width: min(560px, 84%); }
 .vm-pie { font-size: 11px; opacity: .6; display: flex; gap: 18px; }
 .vm-dudoso .vm-dice { color: #fcd34d; }              /* confianza baja: se ve que dudó */
