@@ -61,7 +61,7 @@ function summarizeArgs(name, args = {}) {
     case 'clipboard': return a.action === 'write' ? 'escribir en el portapapeles' : 'leer el portapapeles';
     case 'window_manage': return String(a.action || '');
     default: {
-      if (a._mcp) return `${a._mcp.serverName} → ${a._mcp.toolName}`;
+      if (String(name).startsWith('mcp__') && a._mcp) return `${a._mcp.serverName} → ${a._mcp.toolName}`;
       return Object.keys(a).length ? JSON.stringify(a).slice(0, 160) : '';
     }
   }
@@ -83,7 +83,7 @@ function describeAction(name, args = {}) {
     case 'clipboard': return a.action === 'write' ? 'Escribir en el portapapeles' : 'Leer el portapapeles';
     case 'window_manage': return 'Gestionar ventanas';
     default: {
-      if (a._mcp) return 'Usar la herramienta «' + a._mcp.toolName + '» del servidor MCP «' + a._mcp.serverName + '»';
+      if (String(name).startsWith('mcp__') && a._mcp) return 'Usar la herramienta «' + a._mcp.toolName + '» del servidor MCP «' + a._mcp.serverName + '»';
       if (String(name).startsWith('mcp__')) return 'Usar una herramienta MCP (' + name.slice(5).replace(/__/g, ' · ') + ')';
       return 'Usar herramienta ' + name;
     }

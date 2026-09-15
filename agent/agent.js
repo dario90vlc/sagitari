@@ -659,6 +659,13 @@ class Agent {
       argsError = 'Error: los argumentos de la herramienta deben ser un objeto JSON. Reenvía la llamada con argumentos correctos.';
     }
     this.emit({ type: 'tool', name, args });
+    // Etiqueta real de una herramienta MCP (servidor y nombre tal cual los ve el
+    // usuario): se resuelve ANTES de pintar el rail —que también la usa— y es
+    // informativa, no funcional (el ejecutor despacha sólo con el nombre).
+    if (String(name).startsWith('mcp__') && this.mcp) {
+      const info = this.mcp.describe(name);
+      if (info) args = { ...args, _mcp: { serverName: info.serverName, toolName: info.toolName } };
+    }
     if (onStatus) onStatus(statusFor(name, args));
 
     // Argumentos ilegibles: NO se ejecuta nada (antes se ejecutaba con {} y
@@ -689,13 +696,6 @@ class Agent {
     // sensibles (comprar/pagar/eliminar) que sí exige el clic por texto.
     if (name === 'browser_control' && args.action === 'click_index' && this.browser && typeof this.browser.labelForIndex === 'function') {
       args = { ...args, _label: this.browser.labelForIndex(args.index) };
-    }
-    // Etiqueta real de una herramienta MCP (servidor y nombre tal cual los ve el
-    // usuario) para la tarjeta de confirmación y el rail: es informativa, no
-    // funcional — el ejecutor despacha sólo con el nombre.
-    if (String(name).startsWith('mcp__') && this.mcp) {
-      const info = this.mcp.describe(name);
-      if (info) args = { ...args, _mcp: { serverName: info.serverName, toolName: info.toolName } };
     }
     const decision = this.guardrails.decide(name, args);
     let confirmed = false;
