@@ -85,6 +85,9 @@ test('voz/contrato: un evento bien formado pasa y uno roto se explica', () => {
   fallo = null;
   try { assertEvent({ type: 'inventado' }); } catch (e) { fallo = e.message; }
   ok(fallo && /tipo/i.test(fallo), 'un tipo inventado se rechaza: ' + fallo);
+  fallo = null;
+  try { assertEvent({ type: 'level', value: NaN }); } catch (e) { fallo = e.message; }
+  ok(fallo && /nivel/i.test(fallo), 'un nivel NaN se rechaza: ' + fallo);
 });
 
 test('voz/contrato: un motor necesita nombre, capacidades y los tres métodos', () => {
@@ -127,7 +130,9 @@ function assertEvent(ev) {
       if (!ESTADOS.includes(ev.state)) throw new Error('estado de voz desconocido: ' + ev.state);
       break;
     case 'level':
-      if (typeof ev.value !== 'number' || ev.value < 0 || ev.value > 1) throw new Error('nivel fuera de 0..1: ' + ev.value);
+      /* Number.isFinite y no typeof: `typeof NaN === 'number'` es cierto y NaN no falla
+         ninguna comparación, así que un nivel NaN llegaría al canvas y no dibujaría nada. */
+      if (!Number.isFinite(ev.value) || ev.value < 0 || ev.value > 1) throw new Error('nivel fuera de 0..1: ' + ev.value);
       break;
     case 'partial':
     case 'notice':
@@ -196,6 +201,11 @@ test('voz/basura: rechaza frases vacías, golpes y ruido del motor de dictado', 
   ok(esBasura('eh', 120).basura, 'un golpe de 120 ms con dos letras');
   ok(!esBasura('Recuérdame mañana llamar a Álvaro', 1200).basura, 'una frase de verdad pasa');
   ok(!esBasura('sí', 400).basura, 'un «sí» corto pero con voz real pasa: es una respuesta');
+  /* Sin duración (el motor de Windows no la manda) no se puede concluir «sin voz»:
+     estas dos pruebas son las que habrían cazado el fallo que encontró la revisión. */
+  ok(!esBasura('sí').basura, 'sin saber la duración, un «sí» no es basura');
+  ok(!esBasura('no').basura, 'ni un «no»');
+  ok(!esBasura('ok').basura, 'ni un «ok»');
 });
 
 test('voz/basura: las alucinaciones conocidas no llegan al agente', () => {
@@ -212,6 +222,9 @@ test('voz/basura: una palabra repetida en bucle no es una orden', () => {
   const { esBasura } = require('../main/voice/junk');
   ok(esBasura('no no no no no', 2000).basura, 'repetición');
   ok(!esBasura('no, gracias', 800).basura, 'una negativa normal pasa');
+  /* La lista negra no puede comerse una orden real que empiece como una alucinación. */
+  ok(!esBasura('música a todo volumen', 1500).basura, 'una orden que empieza por una palabra de la lista pasa');
+  ok(!esBasura('aplausos del público al final', 1800).basura, 'y otra igual');
 });
 ```
 
@@ -258,9 +271,14 @@ const REGLAS = [
      tildes, así que «sí» no casaba con [aeiou] y se descartaba una respuesta legítima
      (lo cazó el implementador al ejecutar el propio test del brief). */
   { motivo: 'sin vocales: no es una palabra', prueba: (t) => !/[aeiou]/.test(normalizar(t)) },
-  { motivo: 'demasiado corto y sin voz suficiente', prueba: (t, ms) => normalizar(t).replace(/ /g, '').length < 4 && ms < 350 },
+  /* `ms` = 0 significa «no se sabe», y el motor de Windows NO manda duración: sin el
+     `ms > 0`, toda respuesta corta («sí», «no», «ok») se descartaría como basura y el modo
+     voz no podría confirmar nada. Lo cazó la revisión de la tarea. */
+  { motivo: 'demasiado corto y sin voz suficiente', prueba: (t, ms) => normalizar(t).replace(/ /g, '').length < 4 && ms > 0 && ms < 350 },
   { motivo: 'palabra repetida en bucle', prueba: (t) => { const w = normalizar(t).split(' '); return w.length >= 4 && new Set(w).size === 1; } },
-  { motivo: 'está en la lista negra de alucinaciones', prueba: (t) => { const n = normalizar(t); return BASURA.some((b) => n === b || n.startsWith(b)); } },
+  /* El prefijo solo se aplica a entradas de varias palabras: si no, «música a todo
+     volumen» o «risas aparte, abre el navegador» caerían por empezar como una alucinación. */
+  { motivo: 'está en la lista negra de alucinaciones', prueba: (t) => { const n = normalizar(t); return BASURA.some((b) => n === b || (b.includes(' ') && n.startsWith(b))); } },
 ];
 
 function esBasura(text, ms = 0) {
