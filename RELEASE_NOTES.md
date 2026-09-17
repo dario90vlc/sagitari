@@ -22,6 +22,16 @@ development there is no asar—, which is exactly where it went unnoticed.
   the content is cached at a real path before handing it to PowerShell. This covers both
   scripts —speaking and dictation— and also the app's classic dictation, which pointed to the
   same place.
+- **Los servidores MCP locales funcionan sin tener Node.js instalado.** Un servidor con
+  `"command": "node"` —lo que traen los ajustes importados de otros clientes— moría con un
+  «spawn node ENOENT» en cualquier equipo sin Node. Ahora se usa el Node del equipo si existe
+  y, si no, el que la propia app lleva dentro; y si el comando es `npx`/`npm`, que sí necesitan
+  una instalación real, se dice qué falta y cómo resolverlo en vez de fallar dentro de cmd.exe.
+  / **Local MCP servers work without Node.js installed.** A server with `"command": "node"`
+  —what imported settings from other clients contain— died with a “spawn node ENOENT” on any
+  machine without Node. Now the machine's Node is used when it exists and otherwise the one
+  the app itself carries; and if the command is `npx`/`npm`, which do need a real install, the
+  app says what is missing and how to fix it instead of failing inside cmd.exe.
 
 # SAGITARI 3.1.0
 

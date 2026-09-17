@@ -5,6 +5,8 @@
 
 const { StringDecoder } = require('string_decoder');
 const { spawn } = require('child_process');
+const path = require('path');
+const fs = require('fs');
 const { killTree } = require('./proc');
 
 const DEFAULT_TIMEOUT_MS = 60000;
@@ -134,17 +136,86 @@ function needsShell(command) {
   return process.platform === 'win32' && /\.(cmd|bat)$/i.test(String(command || ''));
 }
 
-function resolveCommand(command, args) {
+/* ¿Es el intérprete de Node? Los servidores MCP de stdio se configuran así en TODOS
+   los clientes (`"command": "node"`), y es además lo que sugiere la propia interfaz. */
+const ES_NODE = /^node(\.exe|\.cmd)?$/i;
+/* Gestores de paquetes: son guiones de Node, así que sin Node.js no hay nada que hacer. */
+const ES_GESTOR = /^(npx|npm|yarn|pnpm)$/i;
+
+/** El valor del PATH, que en Windows viene como `Path` y en el resto como `PATH`. */
+function valorPath(env) {
+  if (!env) return '';
+  for (const clave of ['PATH', 'Path', 'path']) if (env[clave]) return String(env[clave]);
+  return '';
+}
+
+/**
+ * ¿Existe este ejecutable en el PATH? Se comprueba a mano (sin lanzar `where.exe` ni
+ * nada parecido) para que sea barato, puro y testeable: aquí se decide si un servidor
+ * MCP arranca con el Node del equipo o con el que la app ya trae dentro.
+ */
+function buscarEnPath(nombre, { env = process.env, fsMod = fs } = {}) {
+  const dirs = valorPath(env).split(path.delimiter).filter(Boolean);
+  const conExt = /\.[a-z0-9]+$/i.test(nombre);   // si ya trae extensión no se prueba a añadirle otra
+  const exts = (!conExt && process.platform === 'win32')
+    ? String(env.PATHEXT || '.COM;.EXE;.BAT;.CMD').split(';').filter(Boolean)
+    : [''];
+  for (const d of dirs) {
+    for (const ext of exts) {
+      const p = path.join(d, nombre + ext);
+      try { if (fsMod.existsSync(p)) return p; } catch {}
+    }
+  }
+  return null;
+}
+
+/** El nombre con el que se llama a Node EN ESTE sistema. */
+const nombreNode = () => (process.platform === 'win32' ? 'node.exe' : 'node');
+
+/** ¿Tiene este equipo Node.js instalado (en el PATH)? De eso depende `npx`/`npm`; el
+    Node que trae la app no sirve para eso, porque npm no viene dentro de Electron. */
+function hayNodeEnPath(opts = {}) {
+  return !!buscarEnPath(nombreNode(), opts);
+}
+
+/** El Node que YA viaja dentro de la app (Electron lo lleva): sirve para levantar un
+    servidor MCP local sin que el usuario instale nada. `null` si esto no es Electron. */
+function nodeDeLaApp({ esElectron = !!process.versions.electron, execPath = process.execPath } = {}) {
+  return esElectron && execPath ? execPath : null;
+}
+
+function resolveCommand(command, args, opts = {}) {
   const cmd = String(command || '').trim();
   if (!cmd) throw new Error('Falta el comando del servidor MCP.');
-  if (needsShell(cmd) || /^(npx|npm|yarn|pnpm)$/i.test(cmd)) {
+
+  /* Node: primero el que tenga el EQUIPO (no se cambia lo que ya funciona, ni su
+     versión, ni el ABI de sus módulos nativos). Solo si no hay ninguno se usa el que
+     la propia app trae dentro —`ELECTRON_RUN_AS_NODE` arranca SAGITARI como Node—
+     para que un servidor MCP local funcione sin instalar nada. En desarrollo no hace
+     falta casi nunca; en la app instalada, donde el usuario puede no tener Node, es
+     la diferencia entre que el servidor arranque o muera con «spawn node ENOENT». */
+  if (ES_NODE.test(cmd)) {
+    const enPath = buscarEnPath(nombreNode(), opts);
+    if (enPath) return { file: enPath, argv: args.map(String), verbatim: false, env: {} };
+    const bundled = nodeDeLaApp(opts);
+    if (bundled) return { file: bundled, argv: args.map(String), verbatim: false, env: { ELECTRON_RUN_AS_NODE: '1' } };
+    throw new Error('No encuentro Node.js en este equipo. Instálalo (nodejs.org) o apunta el comando a un ejecutable concreto.');
+  }
+
+  if (needsShell(cmd) || ES_GESTOR.test(cmd)) {
+    /* `npx`/`npm` son guiones que interpreta Node: sin Node.js el único resultado
+       posible es un «no se reconoce como un comando» de cmd.exe que el usuario no
+       puede arreglar sin saber qué falta. Se dice antes y con el arreglo. */
+    if (ES_GESTOR.test(cmd) && !hayNodeEnPath(opts)) {
+      throw new Error('«' + cmd + '» necesita Node.js instalado en este equipo (la app no incluye npm). Instala Node.js desde nodejs.org y vuelve a probar; si el servidor es un archivo .js local, pon el COMANDO como «node» y su ruta en los argumentos.');
+    }
     const com = process.env.ComSpec || 'cmd.exe';
     // `verbatim` es imprescindible: si Node vuelve a citar por su cuenta, escapa las
     // comillas internas con \" y cmd.exe no entiende ese escape, así que un argumento
     // con espacios llegaba partido. cmd.exe espera /d /s /c "<línea>" tal cual.
-    return { file: com, argv: ['/d', '/s', '/c', `"${buildCmdLine(cmd, args)}"`], verbatim: true };
+    return { file: com, argv: ['/d', '/s', '/c', `"${buildCmdLine(cmd, args)}"`], verbatim: true, env: {} };
   }
-  return { file: cmd, argv: args.map(String), verbatim: false };
+  return { file: cmd, argv: args.map(String), verbatim: false, env: {} };
 }
 
 /**
@@ -152,10 +223,13 @@ function resolveCommand(command, args) {
  * porque es donde los servidores explican por qué no arrancan.
  */
 function createStdioTransport({ command, args = [], cwd, env = {}, defaultTimeoutMs, onNotice }) {
-  const { file, argv, verbatim } = resolveCommand(command, args);
+  const { file, argv, verbatim, env: envDelResolver = {} } = resolveCommand(command, args);
   const child = spawn(file, argv, {
     cwd: cwd || undefined,
-    env: { ...process.env, ...env },
+    /* Lo que decida el resolver (por ejemplo `ELECTRON_RUN_AS_NODE` cuando se usa el
+       Node que trae la app) va ANTES del entorno del servidor: lo que configure el
+       usuario manda sobre nuestra decisión. */
+    env: { ...process.env, ...envDelResolver, ...env },
     windowsHide: true,
     windowsVerbatimArguments: verbatim,
     stdio: ['pipe', 'pipe', 'pipe'],
@@ -276,4 +350,4 @@ function createHttpTransport({ url, headers = {}, defaultTimeoutMs, fetchFn = fe
   };
 }
 
-module.exports = { DEFAULT_TIMEOUT_MS, createLineReader, Rpc, buildCmdLine, resolveCommand, createStdioTransport, httpUrlAllowed, parseSseText, createHttpTransport };
+module.exports = { DEFAULT_TIMEOUT_MS, createLineReader, Rpc, buildCmdLine, resolveCommand, buscarEnPath, createStdioTransport, httpUrlAllowed, parseSseText, createHttpTransport };

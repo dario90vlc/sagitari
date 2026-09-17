@@ -1141,6 +1141,62 @@ test('mcp: la linea de comandos de cmd.exe cita los argumentos', () => {
   }
 });
 
+/* Los servidores MCP de stdio se configuran con `"command": "node"` en todos los
+   clientes (y es lo que sugiere la propia interfaz). En la app instalada eso dependía de
+   que el EQUIPO tuviera Node.js en el PATH: sin él el servidor moría con un «spawn node
+   ENOENT» que el usuario no podía arreglar sin saber qué faltaba. Estos tests fijan las
+   tres salidas: Node del equipo → el suyo (no se cambia lo que ya funciona), sin Node →
+   el que trae la app dentro, y sin ninguno de los dos → un error que dice qué hacer. */
+test('mcp: un servidor con command «node» usa el Node del equipo cuando existe', () => {
+  const dirFalso = tmpDir('sagi-nodepath-');
+  const exeFalso = path.join(dirFalso, process.platform === 'win32' ? 'node.exe' : 'node');
+  fs.writeFileSync(exeFalso, 'x');
+  const env = { PATH: dirFalso };
+  const r = mcpTransport.resolveCommand('node', ['servidor.js'], { env });
+  eq(r.file, exeFalso, 'se usa el Node instalado, no el de la app');
+  eq(r.env.ELECTRON_RUN_AS_NODE, undefined, 'y no se le mete el modo Node de Electron');
+  eq(mcpTransport.buscarEnPath(process.platform === 'win32' ? 'node.exe' : 'node', { env }), exeFalso, 'la búsqueda en el PATH encuentra el ejecutable');
+  eq(mcpTransport.buscarEnPath(process.platform === 'win32' ? 'node.exe' : 'node', { env: { PATH: '' } }), null, 'y con el PATH vacío no inventa nada');
+});
+
+test('mcp: sin Node en el equipo se levanta con el Node que la app trae dentro', () => {
+  const r = mcpTransport.resolveCommand('node', ['servidor.js'], { env: { PATH: '' }, esElectron: true, execPath: 'C:\\Apps\\SAGITARI.exe' });
+  eq(r.file, 'C:\\Apps\\SAGITARI.exe', 'el propio ejecutable de la app hace de Node');
+  eq(r.env.ELECTRON_RUN_AS_NODE, '1', 'con la marca que lo arranca como Node en vez de como app');
+  eq(r.argv.length, 1, 'y los argumentos del servidor llegan tal cual');
+});
+
+test('mcp: sin Node ni app Electron el error dice qué hacer', () => {
+  let err = null;
+  try { mcpTransport.resolveCommand('node', ['x.js'], { env: { PATH: '' }, esElectron: false }); } catch (e) { err = e; }
+  ok(err && /Node\.js/.test(err.message), 'se explica que falta Node.js: ' + (err && err.message));
+});
+
+test('mcp: «npx» sin Node.js avisa en claro en vez de morir dentro de cmd.exe', () => {
+  let err = null;
+  try { mcpTransport.resolveCommand('npx', ['-y', 'paquete'], { env: { PATH: '' } }); } catch (e) { err = e; }
+  ok(err && /Node\.js/.test(err.message) && /nodejs\.org/.test(err.message), 'el aviso trae el arreglo concreto: ' + (err && err.message));
+  /* Y con Node instalado no cambia nada: sigue saliendo por cmd.exe (en Windows), que es
+     la única forma de lanzar los .cmd de npm. */
+  const dirFalso = tmpDir('sagi-nodepath2-');
+  fs.writeFileSync(path.join(dirFalso, process.platform === 'win32' ? 'node.exe' : 'node'), 'x');
+  const r = mcpTransport.resolveCommand('npx', ['-y', 'paquete'], { env: { PATH: dirFalso } });
+  if (process.platform === 'win32') ok(r.verbatim && /cmd\.exe$/i.test(r.file), 'con Node presente, npx sale por cmd.exe: ' + r.file);
+  else eq(r.file, 'npx', 'fuera de Windows se lanza tal cual');
+});
+
+test('mcp: el entorno del resolver no pisa lo que configure el usuario', async () => {
+  /* El merge del entorno se comprueba con un servidor de verdad: si el usuario define
+     ELECTRON_RUN_AS_NODE por su cuenta, manda él. */
+  const rutaEco = path.join(__dirname, 'fixtures', 'mcp-echo-server.js');
+  const tr = mcpTransport.createStdioTransport({
+    command: process.execPath, args: [rutaEco], env: { ELECTRON_RUN_AS_NODE: '1' }, cwd: tmpDir('sagi-mcp-env-'),
+  });
+  const init = await tr.rpc.request('initialize', { protocolVersion: '2025-06-18', capabilities: {}, clientInfo: { name: 'SAGITARI', version: 'test' } }, { timeoutMs: 5000 });
+  ok(init && init.serverInfo, 'el servidor arranca igual con ese entorno: ' + JSON.stringify(init && init.serverInfo));
+  tr.kill();
+});
+
 test('mcp: transporte stdio completo contra un servidor real', async () => {
   const path2 = path.join(__dirname, 'fixtures', 'mcp-echo-server.js');
   const tr = mcpTransport.createStdioTransport({
