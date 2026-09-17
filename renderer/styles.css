@@ -1478,6 +1478,10 @@ input[type="range"].glowslider::-webkit-slider-thumb:active { transform: scale(1
 #voiceMode .vm-botones .cbtn { width: auto; height: auto; border-radius: 9px; padding: 7px 14px; white-space: nowrap; }
 .vm-error { border: 1px solid rgba(248,113,113,.5); border-radius: 10px; padding: 10px; width: min(560px, 84%); }
 .vm-pie { font-size: 11px; opacity: .6; display: flex; gap: 18px; }
+/* Aparte del pie (y no dentro): `.vm-pie` lleva `opacity: .6` y un hijo no puede subir la
+   opacidad de su padre, así que el botón de parar quedaría casi invisible — y este botón
+   tiene que verse, porque es la única forma de detener al agente con el panel abierto. */
+.vm-parar { width: auto; height: auto; border-radius: 9px; padding: 6px 16px; white-space: nowrap; border-color: rgba(248,113,113,.55); color: #fca5a5; }
 .vm-dudoso .vm-dice { color: #fcd34d; }              /* confianza baja: se ve que dudó */
 .vm-editar { background: #17141f; color: inherit; border: 1px solid rgba(139,92,246,.5); border-radius: 6px; padding: 2px 6px; font: inherit; min-width: 60%; }
 kbd { border: 1px solid rgba(255,255,255,.25); border-radius: 5px; padding: 1px 6px; }

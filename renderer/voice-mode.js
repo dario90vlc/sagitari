@@ -17,8 +17,22 @@
   let raf = 0, t0 = 0, prev = 0;
   let mic = null, ctxAudio = null, analizadorMic = null;
   let reproductor = null, analizadorSalida = null, fraseActual = null;
-  let sueloRuido = 0.01, calibrado = false;
+  /* Suelo de ruido de la sala y cuánto se ha medido ya. Se mide SOLO del micrófono y
+     SOLO mientras el asistente no habla, y se congela: antes se adaptaba sin fin y
+     con la fuente que estuviera sonando, así que la propia voz del asistente lo iba
+     subiendo y el umbral de interrupción se iba con él hasta no dispararse nunca. */
+  let sueloRuido = 0.01, mediciones = 0;
   let reducido = false;
+  /* La calibración dura ~1,5 s (90 fotogramas a 60 Hz): suficiente para medir el
+     ambiente y corta para que el orbe no tarde en reaccionar. */
+  const MEDICIONES_SUELO = 90;
+  /* Un ambiente más ruidoso que esto no debe seguir subiendo el umbral: si no, en una
+     sala con aire acondicionado el umbral se come la voz del usuario. */
+  const SUELO_MAX = 0.05;
+  /* Porción del nivel que está sonando por debajo de la cual el micrófono solo está
+     recogiendo el eco de los altavoces, no una voz que se superpone (ver
+     `vigilarInterrupcion`). */
+  const ECO = 0.6;
   /* Confirmación en curso ({ si, no }) o null. Se declara aquí arriba y no junto a
      `pedirConfirmacion` porque `setEstado` (que respeta una confirmación viva) la consulta
      y vive antes en el fichero. */
@@ -27,6 +41,13 @@
   const $vm = (s) => document.querySelector(s);
   let ENVIAR = () => {};
   let HABLAR = () => {};
+  /* Parar el turno en curso y saber si lo hay: los pone la app (es ella la que conoce el
+     estado del agente). Con el panel abierto el chat está tapado, así que el botón de
+     Detener del compositor queda detrás: esta es la ÚNICA puerta para parar. */
+  let PARAR = () => {};
+  let HAY_TRABAJO = () => false;
+  /* Interrupción del usuario (barge-in): la app deja de leer el resto de la respuesta. */
+  let AL_INTERRUMPIR = () => {};
 
   function setEstado(s) {
     if (!ESTADOS[s] || estado === s) return;
@@ -42,6 +63,11 @@
     if (!confirmacion && (s === 'escuchando' || s === 'oyendo' || s === 'pensando' || s === 'error')) {
       const c = $vm('#vmConfirm'); if (c) c.hidden = true;
     }
+    /* El botón de parar sólo tiene sentido mientras hay algo que parar: pensando (el agente
+       trabaja) o hablando (está leyendo). En los demás estados no hay nada que detener y un
+       botón inerte invita a pulsarlo sin que pase nada. */
+    const parar = $vm('#vmParar');
+    if (parar) parar.hidden = !(s === 'pensando' || s === 'hablando');
   }
 
   /* Punto único: todo lo que ocurre en el modo voz entra por aquí. */
@@ -50,18 +76,37 @@
     if (ev.type === 'state') { setEstado(ev.state); return; }
     if (ev.type === 'level') { objetivo = Math.max(0, Math.min(1, ev.value)); return; }
     if (ev.type === 'partial') {
+      textoVisto = true;   // para el vigía: texto del motor = no está sordo
       setEstado('oyendo');
       const p = $vm('#vmParcial'); if (p) p.textContent = ev.text;
       return;
     }
     if (ev.type === 'final') {
+      textoVisto = true;   // para el vigía: el motor oyó algo de verdad
       const p = $vm('#vmParcial'); if (p) p.textContent = '';
       /* Antes de mandar nada al agente hay tres cosas que se atienden aquí:
          1) la respuesta a una confirmación pendiente («sí»/«no»);
          2) la orden de salir («adiós», «cierra»);
          3) lo demás, que sí es una petición. */
       if (responder(ev.text)) return;
-      if (/^(adi[oó]s|hasta luego|cierra|para el modo voz)\b/i.test(String(ev.text).trim())) { cerrar(); return; }
+      /* Parar lo que está haciendo: con el agente trabajando, «para»/«detente»/«cancela» es
+         una orden sobre el TURNO EN CURSO, no una petición nueva. Va DESPUÉS de
+         `responder`: con un permiso pendiente, «para» significa denegarlo (que es lo que el
+         usuario quiere), no abortar el turno entero. */
+      if (HAY_TRABAJO() && /^(para|p[aá]rate|detente|det[eé]n|cancela|aborta|basta|olv[ií]dalo)\b/i.test(String(ev.text).trim())) {
+        escribir('Tú', ev.text, ev.confidence);
+        escribir('Sagitari', 'Vale, lo dejo.');
+        pista('Deteniendo lo que estaba haciendo…');
+        setEstado('pensando');
+        PARAR();
+        return;
+      }
+      /* Sólo se cierra con frases QUE HABLAN del modo («cierra el modo voz»): un «cierra
+         la ventana» o un «cierra el navegador» es una ORDEN para el agente y tenía que
+         llegarle — el prefijo suelto «cierra» se comía todas esas peticiones y el usuario
+         veía cómo su dictado apagaba el panel en vez de hacer el trabajo. */
+      if (/^(adi[oó]s|hasta luego|salir|cierra|cerrar|para|apaga)\s+(el\s+|la\s+)?(modo\s+)?(voz|dictado)\b/i.test(String(ev.text).trim())
+        || /^(adi[oó]s|hasta luego|salir)\b/i.test(String(ev.text).trim())) { cerrar(); return; }
       /* La confianza se muestra: con menos de 0,5 la frase queda marcada y se puede
          corregir pinchando en ella. El motor falla sobre todo en nombres propios. */
       escribir('Tú', ev.text, ev.confidence);
@@ -71,7 +116,12 @@
     }
     /* Los avisos van a la franja; si el usuario ha pedido oírlos, el renderer los habla
        (aquí no se decide: el panel no conoce los ajustes). */
-    if (ev.type === 'notice') { pista(ev.text); HABLAR(ev.text); return; }
+    if (ev.type === 'notice') {
+      /* La basura («No te he entendido…») prueba que el motor SÍ oyó audio: para el
+         vigía cuenta como texto visto. Los HINT del guion no (los suelta un motor sordo). */
+      if (/no te he entendido/i.test(ev.text)) textoVisto = true;
+      pista(ev.text); HABLAR(ev.text); return;
+    }
     if (ev.type === 'error') { error(ev.text, ev.fix || ''); return; }
   }
 
@@ -187,12 +237,10 @@
   function responder(texto) {
     if (!confirmacion) return false;
     const t = String(texto || '').toLowerCase().trim();
-    /* La frontera NO puede ser `\b`: en JavaScript la «í» no cuenta como carácter de
-       palabra, así que «sí» —la respuesta natural— no hacía frontera y se colaba al
-       agente como si fuera una petición. Se exige final o un carácter que no sea letra,
-       número ni guion bajo detrás, con `u` para que el acento se trate como letra. */
-    const si = /^(s[ií]|vale|hazlo|adelante|confirma|de acuerdo|ok)(?=$|[^\p{L}\p{N}_])/u.test(t);
-    const no = /^(no|cancela|para|detente|mejor no)(?=$|[^\p{L}\p{N}_])/u.test(t);
+    /* Reconocimiento natural y robusto de confirmación («sí»/«no») en español:
+       acepta variantes coloquiales y compuestas («sí por favor», «claro», «adelante», «cancela», etc.) */
+    const si = /^(s[ií]|vale|hazlo|adelante|confirma|de acuerdo|ok|correcto|claro|por supuesto|acepto|dale|ejecuta|procede|afirmativo|seguro)(?=$|[^\p{L}\p{N}_])/u.test(t);
+    const no = /^(no|cancela|para|detente|mejor no|rechaza|deniega|alto|espera|ni de coña|no gracias|no lo hagas|negativo)(?=$|[^\p{L}\p{N}_])/u.test(t);
     if (!si && !no) return false;
     contestar(si ? 'si' : 'no');
     return true;
@@ -204,6 +252,79 @@
     const bSi = $vm('#vmSi'), bNo = $vm('#vmNo');
     if (bSi) bSi.onclick = () => { if (confirmacion) contestar('si'); };
     if (bNo) bNo.onclick = () => { if (confirmacion) contestar('no'); };
+  }
+  /* Botón de parar del panel: la misma orden que decir «para» (y la misma que el botón
+     Detener del chat, que el panel tapa). */
+  function cablearParar() {
+    const b = $vm('#vmParar');
+    if (b) b.onclick = () => { pista('Deteniendo lo que estaba haciendo…'); PARAR(); };
+  }
+
+  /* ---- Vigía del motor sordo ----
+     El motor de dictado oye SIEMPRE el micrófono predeterminado de Windows, pero en
+     algunas máquinas (NVIDIA Broadcast y similares) el camino de audio moderno que usa
+     su motor WinRT no recibe nada: el motor arranca, declara que escucha… y no
+     transcribe jamás. El renderer es el ÚNICO que sabe que hay voz real —su getUserMedia
+     sí oye el micro, por eso el orbe late—, así que él detecta la paradoja y pide el
+     rescate: rearma el motor con el clásico, que usa otro camino de audio y sí oye.
+     La señal: voz NETA sobre el suelo del ruido, sostenida, sin que NINGÚN texto haya
+     entrado del motor en toda la sesión (ni parciales ni finales ni basura — «No te he
+     entendido» prueba que oyó audio). Ni barge-in (sólo se vigila mientras nadie
+     habla) ni gracia al abrir: nadie habla en los primeros segundos por arte de magia. */
+  const PRIMERA_FRASE_MS = 8000;    // margen de gracia tras abrir la sesión
+  const MODO_CALMA_MS = 1500;       // voz sostenida mínima para juzgar (una palmada no)
+  const VOZ_MAX_SIN_TEXTO = 45000;  // voz sostenida y NADA de texto: aviso humano
+  let textoVisto = false;           // ¿llegó ya algún texto (parcial/final) del motor?
+  let vozCalmaDesde = 0;            // acumulador de voz sostenida sobre el suelo
+  let rescateHecho = false;         // el rescate se pide UNA vez por sesión
+  let vozDeCada = 0;                // ms acumulados de voz sin ni un solo texto
+  let vigia = 0;                    // id del intervalo de vigilancia
+  let tAbierto = 0;                 // cuándo arrancó la sesión (para la gracia inicial)
+
+  function vigilancia(ahora, nivelMicro) {
+    if (ahora === undefined) ahora = Date.now();
+    if (nivelMicro === undefined) nivelMicro = rms(analizadorMic);
+    /* Mientras el asistente habla el micro recoge su propia voz: eso es barge-in, no
+       prueba de sordera — fuera del alcance del vigía. */
+    if (!abierto || !mic || estado === 'hablando') { vozCalmaDesde = 0; return; }
+    if (ahora - tAbierto < PRIMERA_FRASE_MS) return;            // gracia al abrir
+    if (textoVisto) { vozCalmaDesde = 0; vozDeCada = 0; return; } // hay texto: no está sordo
+    const umbral = Math.max(0.02, sueloRuido * 3.5);
+    if (!(nivelMicro > umbral)) { vozCalmaDesde = 0; return; }   // silencio: no se juzga
+    if (!vozCalmaDesde) { vozCalmaDesde = ahora; return; }
+    if (ahora - vozCalmaDesde < MODO_CALMA_MS) return;
+    vozCalmaDesde = ahora;                    // recalibra: cada tramo sostenido cuenta una vez
+    if (!rescateHecho) {
+      rescateHecho = true;
+      /* El dictado local (whisper) se alimenta del tap del RENDERER: si hay voz y el
+         proceso principal no ve ni audio ni frase en marcha, el tap está muerto — se
+         reabre (era la 2.ª causa de «orbe se mueve y no transcribe»). Los motores de
+         Windows capturan por su cuenta: para ellos el rescate sigue siendo el clásico. */
+      if (typeof window.__reabrirTap === 'function' && window.__tapEstado && !window.__tapEstado()) {
+        pista('Reconectando el micrófono del dictado…');
+        window.__reabrirTap().catch(() => {});
+        return;
+      }
+      pista('Te oigo pero el motor no transcribe: cambio al motor clásico…');
+      window.sagitari.voiceRescue().catch(() => {});
+      return;
+    }
+    /* La sesión sigue sorda tras el rescate: se deja la preferencia ENCENDIDA para la
+       siguiente (Ajustes › Personal › «Motor de escucha clásico») — este equipo arranca
+       mejor con el clásico. La sesión actual ya va en clásico por el rescate; esto es
+       para que la PRÓXIMA no repita el tramo sordo. */
+    if (!window.__vigiaClasicoAvisado) {
+      window.__vigiaClasicoAvisado = true;
+      try { window.sagitari.setSettings({ sttClasico: true }); } catch {}
+      const sw = document.querySelector('#swSttClasico');
+      if (sw) sw.classList.add('on');
+    }
+    vozDeCada += MODO_CALMA_MS;
+    if (vozDeCada >= VOZ_MAX_SIN_TEXTO) {
+      vozDeCada = 0;
+      error('Sigo oyendo tu voz pero el motor de voz no transcribe nada.',
+        'Pon tu micrófono real como predeterminado en ms-settings:sound (si usas NVIDIA Broadcast u otro filtro, ese es el problema) y vuelve a abrir el modo voz.');
+    }
   }
 
   /* Cada apertura lleva su número. Con el flag `abierto` no basta: si se cierra y se vuelve
@@ -228,7 +349,18 @@
        abría. Entonces ya no hay nada que abrir: seguir hasta el final adquiriría un
        micrófono y un bucle de dibujo para un modo cerrado, así que se abandona aquí. */
     if (!vigente(gen)) return;
-    if (!r || !r.ok) { error('No he podido abrir el modo voz.', 'Cierra y vuelve a abrirlo; si sigue, revisa Ajustes › Voz.'); }
+    if (!r || !r.ok) {
+      error('No he podido abrir el modo voz.', 'Cierra y vuelve a abrirlo; si sigue, revisa Ajustes › Voz.');
+      /* Si el proceso principal no pudo arrancar sus motores, ABRIR el micrófono y el
+         bucle del orbe era comprar micro para una tienda cerrada: el panel quedaba
+         «Escuchando» para siempre y el micro del usuario capturando en vano. Se cierra
+         el panel y se limpia, como haría un cierre. */
+      pararBucle();
+      document.removeEventListener('keydown', alTeclado, true);
+      abierto = false;
+      if (panel) panel.hidden = true;
+      return;
+    }
     let rec = null;
     try { rec = await pedirMicro(); } catch (e) { rec = null; }
     /* Mismo caso, ahora con el micrófono ya pedido: si mientras se concedía el permiso se
@@ -241,9 +373,18 @@
     if (!rec) { error('No tengo acceso al micrófono.', 'Revisa el permiso en ms-settings:privacy-microphone y vuelve a abrir el modo voz.'); }
     else {
       mic = rec.stream; ctxAudio = rec.ctx; analizadorMic = rec.analizador;
-      sueloRuido = 0.01;
+      sueloRuido = 0.01; mediciones = 0;
     }
     arrancarBucle();
+    /* Hook simétrico al de cierre: la app engancha aquí sus recursos de sesión (el tap
+       de micrófono del dictado local). Un único dueño del ciclo de vida — el panel —
+       evita dos micros abiertos por dobles llamadas desde fuera. */
+    if (typeof window.__alAbrirModoVoz === 'function') { try { window.__alAbrirModoVoz(); } catch {} }
+    /* El vigía vive y muere con la sesión: se rearma aquí (apertura nueva, gracia nueva). */
+    textoVisto = false; rescateHecho = false; vozDeCada = 0; vozCalmaDesde = 0;
+    tAbierto = Date.now();
+    if (vigia) clearInterval(vigia);
+    vigia = setInterval(() => vigilancia(), 500);
   }
 
   /* Suelta un micrófono concreto (el de una apertura que se abandonó) sin tocar los
@@ -263,7 +404,12 @@
   async function cerrar() {
     if (!abierto) return;
     abierto = false;
+    /* Hook de la app: el tap de micrófono del dictado local (y cualquier recurso que la
+       app ate a la sesión) debe soltarse SIEMPRE que el panel se cierra — por su botón,
+       por Esc o por despedida. Se llama primero, en cuanto se sabe que se cierra. */
+    if (typeof window.__alCerrarModoVoz === 'function') { try { window.__alCerrarModoVoz(); } catch {} }
     pararBucle();
+    if (vigia) { clearInterval(vigia); vigia = 0; }
     document.removeEventListener('keydown', alTeclado, true);
     cancelarEdicion();
     /* Al cerrar se suelta también la confirmación: con el panel fuera de la vista la barra
@@ -382,9 +528,17 @@
       const t = (now - t0) / 1000;
       const dt = Math.min(0.05, (now - prev) / 1000); prev = now;
       /* El nivel que se pinta: el del audio que suena si estamos hablando, el del
-         micrófono si estamos escuchando u oyendo. */
-      const fuente = estado === 'hablando' ? rms(analizadorSalida) : rms(analizadorMic);
-      if (fuente > 0 && !calibrado) { sueloRuido = sueloRuido * 0.9 + fuente * 0.1; }
+         micrófono si estamos escuchando u oyendo. Cada analizador se lee UNA vez por
+         fotograma: antes se leía el del micro dos veces más la salida en cada vuelta. */
+      const nivelMicro = rms(analizadorMic);
+      const nivelSalida = estado === 'hablando' ? rms(analizadorSalida) : 0;
+      const fuente = estado === 'hablando' ? nivelSalida : nivelMicro;
+      /* El suelo se mide del micrófono y solo mientras escuchamos: con la voz del
+         asistente de por medio medía su propia respuesta, no el ambiente. */
+      if (mic && mediciones < MEDICIONES_SUELO && (estado === 'escuchando' || estado === 'oyendo')) {
+        mediciones++;
+        sueloRuido = Math.min(SUELO_MAX, sueloRuido * 0.9 + nivelMicro * 0.1);
+      }
       const objetivoReal = Math.max(objetivo, fuente * 2.2);
       nivel = window.OrbKit.smoothLevel(nivel, reducido ? window.OrbKit.nivelDeFondo(estado, t) : Math.max(objetivoReal, window.OrbKit.nivelDeFondo(estado, t)), dt);
       window.OrbKit.draw(ctx, c.width, c.height, nivel, estado, t);
@@ -392,27 +546,40 @@
          propia voz del asistente cuenta como «el usuario está hablando» y bastan ~250 ms
          de su respuesta para que se corte a sí mismo. El nivel del orbe mientras habla SÍ
          sigue saliendo de la salida (eso no se toca). */
-      if (estado === 'hablando') vigilarInterrupcion(rms(analizadorMic), now);
+      if (estado === 'hablando') vigilarInterrupcion(nivelMicro, nivelSalida, now);
+      else vozDesde = 0;   // la voz sostenida se cuenta dentro de una misma frase
       raf = requestAnimationFrame(paso);
     };
     raf = requestAnimationFrame(paso);
   }
   function pararBucle() { if (raf) cancelAnimationFrame(raf); raf = 0; }
 
-  /* Interrupción (barge-in): si hablas mientras el asistente habla, se calla. Se exige
-     voz sostenida (250 ms) para que un golpe de ruido no corte una respuesta. */
+  /* Interrupción (barge-in): si hablas mientras el asistente habla, se calla. Dos
+     condiciones, y las dos hacen falta. Voz sostenida —250 ms— para que un golpe de
+     ruido no corte una respuesta; y que el micrófono SUPERe una porción de lo que está
+     sonando, porque sin auriculares la voz del asistente sale por los altavoces y vuelve
+     por el micrófono: sin esa segunda condición, el eco se tomaba por una persona
+     hablando encima y la respuesta se cortaba sola. */
   let vozDesde = 0;
-  function vigilarInterrupcion(fuente, now) {
+  function vigilarInterrupcion(nivelMicro, nivelSalida, now) {
     const umbral = Math.max(0.02, sueloRuido * 3.5);
-    if (fuente > umbral) {
+    if (nivelMicro > umbral && nivelMicro > nivelSalida * ECO) {
       if (!vozDesde) vozDesde = now;
       if (now - vozDesde > 250) { vozDesde = 0; interrumpir(); }
     } else vozDesde = 0;
   }
+  /* Interrumpir REINICIA el contador de frases del proceso principal: si no, la primera
+     frase de la respuesta siguiente llevaba un id viejo, `spoken()` la descartaba al
+     terminar y la cola se detenía — se oía una frase y la respuesta se cortaba. */
   async function interrumpir() {
     await pararAudio();
     window.sagitari.ttsStop();
+    window.sagitari.ttsReset();
     setEstado('oyendo');
+    /* Y el resto de la respuesta deja de leerse: esto corta la frase que suena, pero el
+       texto sigue llegando mientras el agente trabaja — sin avisar a la app, la lectura
+       continuaba con la frase siguiente y la interrupción se quedaba a medias. */
+    try { AL_INTERRUMPIR(); } catch {}
   }
 
   /* La respuesta del agente, en TEXTO. El panel es opaco y tapa el chat, así que mientras
@@ -425,12 +592,19 @@
   }
 
   cablearConfirmacion();
+  cablearParar();
 
   window.VoiceMode = {
     abrir, cerrar, handle, pasos, respuesta, pedirConfirmacion, olvidarConfirmacion, responder, interrumpir,
     estado: () => estado, abierto: () => abierto,
+    /* Interno del banco de pruebas: estado del vigía y vigilancia inyectada (sin micro). */
+    vigia: () => ({ textoVisto, rescateHecho, vozDeCada, calma: !!vozCalmaDesde, abierto }),
+    probarRescate: (now, nivel) => vigilancia(now, nivel),
     audio: { reproducir, parar: pararAudio },
     setEnviar: (fn) => { ENVIAR = fn; },
     setHablar: (fn) => { HABLAR = fn; },
+    setParar: (fn) => { PARAR = fn; },
+    setOcupado: (fn) => { HAY_TRABAJO = fn; },
+    setInterrumpido: (fn) => { AL_INTERRUMPIR = fn; },
   };
 })();

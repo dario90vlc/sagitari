@@ -64,7 +64,7 @@ La opción recomendada es el instalador de Windows:
 - Seis paletas de acento y controles de color e intensidad del glow en tiempo real.
 - Conversaciones separadas, telemetría de agentes, logs locales estructurados y métricas opcionales para desarrolladores.
 - Entrada por voz mediante el reconocimiento de Windows y salida por texto a voz.
-- **Modo voz**: pulsa el micrófono y habla; el asistente te oye, hace el trabajo y te contesta en voz alta. Manos libres: al callar, se envía; si hablas mientras responde, se calla y te escucha. Todo en tu equipo. `Alt`+clic en el micrófono mantiene el dictado clásico al cuadro de texto.
+- **Modo voz**: pulsa el micrófono y habla; el asistente te oye, hace el trabajo y te contesta en voz alta. Manos libres: al callar, se envía; te enseña el texto mientras hablas y empieza a responder en voz alta en cuanto tiene la primera frase, sin esperar a terminar. Si hablas mientras responde, se calla y te escucha; y puedes detenerlo diciendo «para» o con el botón **Parar** del panel. Todo en tu equipo, con voz neuronal local (Piper) y dictado local de alta precisión (Whisper) instalables desde Ajustes. `Alt`+clic en el micrófono mantiene el dictado clásico al cuadro de texto.
 
 ## Seguridad primero
 

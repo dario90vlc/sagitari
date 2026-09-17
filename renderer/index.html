@@ -2,7 +2,7 @@
 <html lang="es">
 <head>
 <meta charset="UTF-8" />
-<meta http-equiv="Content-Security-Policy" content="default-src 'self' data: blob:; style-src 'self' 'unsafe-inline'; font-src 'self'; script-src 'self'" />
+<meta http-equiv="Content-Security-Policy" content="default-src 'self' data: blob:; style-src 'self' 'unsafe-inline'; font-src 'self'; script-src 'self' blob:" />
 <link rel="stylesheet" href="styles.css" />
 <title>SAGITARI</title>
 </head>
@@ -434,14 +434,27 @@
                 <select id="voiceLang" aria-label="Idioma de voz" style="width:200px">
                   <option value="es-ES">Español (España)</option>
                   <option value="es-MX">Español (México)</option>
+                  <option value="es-AR">Español (Argentina)</option>
                   <option value="en-US">English (US)</option>
+                  <option value="en-GB">English (UK)</option>
                 </select></div>
               <div class="swrow srow" data-keys="voz altavoz voz del sistema leer"><span class="st"><b>Voz de la lectura</b><small>Cuál de las voces instaladas usa SAGITARI.</small></span>
                 <select id="ttsVoice" aria-label="Voz de la lectura" style="width:240px"></select></div>
+              <div class="swrow srow" data-keys="piper voz local natural ligera offline instalar"><span class="st"><b>Voz local de alta calidad (Piper)</b><small>Neuronal, 100% local y ligera (≈80 MB). Se usa sola cuando está instalada; si no, Windows.</small></span>
+                <div style="display:flex;flex-direction:column;gap:6px;align-items:flex-end">
+                  <button class="wb" id="btnInstalarPiper" title="Instalar la voz local" style="min-width:150px">Instalar voz</button>
+                  <small id="lblPiperEstado" style="max-width:260px;text-align:right;opacity:.75">no instalada — se usa la voz de Windows</small>
+                </div></div>
               <div class="swrow srow" data-keys="velocidad voz ritmo leer"><span class="st"><b>Velocidad de la voz</b><small>De más lenta a más rápida.</small></span>
                 <input type="range" id="ttsRate" min="-40" max="40" step="5" style="width:200px"></div>
               <div class="swrow srow" data-keys="avisos voz leer todo permisos"><span class="st"><b>Leer también los avisos</b><small>Permisos, errores y avisos cortos, además de la respuesta.</small></span>
                 <div class="sw" id="swAvisos" aria-label="Leer también los avisos"></div></div>
+              <div class="swrow srow" data-keys="motor clasico dictado escucha reconocimiento micro sordo oye"><span class="st"><b>Motor de escucha clásico</b><small>Si al dictar no se escribe nada aunque el orbe se mueva, enciéndelo: usa el reconocedor clásico de Windows, que por donde escucha es distinto del moderno.</small></span>
+                <div class="sw" id="swSttClasico" aria-label="Motor de escucha clásico"></div></div>                <div class="swrow srow" data-keys="whisper dictado local transcribir preciso inteligencia artificial offline"><span class="st"><b>Dictado local (Whisper)</b><small>Transcripción de alta precisión, 100% local y sin internet, con transcripción en vivo mientras hablas. Instala el motor (≈190 MB) y SAGITARI lo usará automáticamente para entender mucho mejor lo que dices.</small></span>
+                <div style="display:flex;flex-direction:column;gap:6px;align-items:flex-end">
+                  <button class="wb" id="btnInstalarWhisper" title="Instalar el motor de dictado local" style="min-width:150px">Instalar motor</button>
+                  <small id="lblWhisperEstado" style="max-width:260px;text-align:right;opacity:.75">no instalado — se usa el motor de Windows</small>
+                </div></div>
           </div>
 
           <div class="setcard">
@@ -659,9 +672,14 @@
           <p id="vmErrorFix" class="vm-hint"></p>
         </div>
         <div class="vm-pie"><span><kbd>Esc</kbd> para salir</span><span id="vmPista">habla cuando quieras, te escucho</span></div>
+        <!-- Parar el turno en curso: el panel tapa el chat, así que el botón de Detener del
+             compositor no se puede pulsar mientras el modo voz está abierto. Se enseña sólo
+             cuando hay algo que parar (lo decide el panel; ver setEstado). -->
+        <button class="cbtn vm-parar" id="vmParar" hidden>Parar</button>
       </div>
   </div>
 </div>
+<script src="frases.js"></script>
 <script src="icons.js"></script>
 <script src="marked.min.js"></script>
 <script src="chatkit.js"></script>

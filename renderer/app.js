@@ -1046,7 +1046,7 @@ function pasoVoz(ev, ok) {
   else if (ultimo && ultimo.label === label && ultimo.ok === undefined) ultimo.ok = ok;
   else pasosVoz.push({ label, ok });
   if (pasosVoz.length > PASOS_VOZ_MAX) pasosVoz = pasosVoz.slice(-PASOS_VOZ_MAX);
-  if (window.VoiceMode && window.VoiceMode.abierto()) window.VoiceMode.pasos(pasosVoz);
+  if (window.VoiceMode && window.VoiceMode.abierto()) window.VoiceMode.pasos(pasosConMotor(pasosVoz));
 }
 
 /* Turno nuevo, franja nueva: lo que hizo el anterior no dice nada de este. */
@@ -1060,10 +1060,14 @@ window.sagitari.onAgentEvent((ev) => {
   // interactivo (ni sus burbujas ni el estado busy/detener): solo el feed,
   // el panel de Tareas, las confirmaciones y los avisos.
   if (ev.bg) {
+    /* OJO: las tareas en segundo plano NO pintan pasos de voz. El panel tapa el chat y
+       sus guiones (investigar, codificar, navegar) usan las mismas herramientas que un
+       turno de voz: sin este filtro, una tarea que sigue corriendo pinta «Navegador» o
+       «Captura de pantalla» en el panel mientras el usuario habla de otra cosa. */
     switch (ev.type) {
       case 'status': feed(ev.text, 'pur'); break;
-      case 'tool': feed(ev.name || 'herramienta', 'pur'); pasoVoz(ev); break;
-      case 'tool_result': feed((ev.name || '') + ' — ' + String(ev.result || 'ok').slice(0, 90), (String(ev.result || '').startsWith('Error') ? 'err' : 'ok')); pasoVoz(ev, ev.ok !== false); break;
+      case 'tool': feed(ev.name || 'herramienta', 'pur'); break;
+      case 'tool_result': feed((ev.name || '') + ' — ' + String(ev.result || 'ok').slice(0, 90), (String(ev.result || '').startsWith('Error') ? 'err' : 'ok')); break;
       case 'task_done':
         feed('Tarea en segundo plano completada', 'ok');
         if ($('#view-tasks').classList.contains('on')) renderTasks();
@@ -1107,6 +1111,9 @@ window.sagitari.onAgentEvent((ev) => {
         }
       }
       scheduleStreamRender(b);
+      /* Y en voz alta según se escribe (ver hablarEnFlujo): la respuesta empieza a sonar en
+         cuanto hay una frase, sin esperar a que el turno entero termine. */
+      hablarEnFlujo(b._stream, false);
       break;
     }
     // cada llamada a herramienta abre su propia tarjeta con argumentos y estado
@@ -1139,7 +1146,11 @@ window.sagitari.onAgentEvent((ev) => {
       scroll();
       break;
     }
-    case 'assistant_done':
+    case 'assistant_done': {
+      /* El texto del STREAM es el que se ha estado leyendo por frases (y puede traer más
+         que el markdown final): se guarda ANTES de cerrar la burbuja, porque
+         `finishAssistant` reemplaza el stream por el texto final y suelta la referencia. */
+      const leidoHastaAqui = (pendingAssistant && pendingAssistant._stream) || ev.text;
       finishAssistant(ev.text);
       busy = false;
       setSendMode();
@@ -1148,15 +1159,18 @@ window.sagitari.onAgentEvent((ev) => {
       /* En el modo voz la respuesta se dice SIEMPRE, aunque el TTS esté apagado en
          Ajustes: es un modo de oído, y negarse a hablar ahí sería absurdo. La regla de
          los arranques automatizados sigue mandando por encima (la aplica el proceso
-         principal). */
-      speak(ev.text, { forzar: window.VoiceMode && window.VoiceMode.abierto() });
+         principal).
+         Aquí sólo queda la COLA (lo que no hubiera cerrado frase mientras se escribía). */
+      hablarEnFlujo(leidoHastaAqui, true);
       /* Y además se LEE: el panel tapa el chat, así que la respuesta tiene que aparecer ahí
          también. Sin esto, con el modo voz abierto la respuesta solo se podía oír. */
       if (window.VoiceMode && window.VoiceMode.abierto()) window.VoiceMode.respuesta(ev.text);
       setChatStatus('Listo · ' + lastTurnLabel(), 'done');
       feed('Respuesta lista', 'cy');
       if (devMode) paintMeta();
+      vaciarColaVoz();
       break;
+    }
     case 'guardrail':
       toolChip('Límite de seguridad — ' + ev.reason.slice(0, 100), 'err');
       feed('Límite de seguridad', 'err');
@@ -1210,6 +1224,7 @@ window.sagitari.onAgentEvent((ev) => {
         if (devMode) paintMeta();
         refreshAgentsPanels();
         if (!currentConfirm || !currentConfirm.runId) hideConfirm();
+        vaciarColaVoz();
       }
       break;
     case 'stopped':
@@ -1221,6 +1236,15 @@ window.sagitari.onAgentEvent((ev) => {
       agentStop();
       setChatStatus('Detenido por el usuario');
       feed('Detenido por el usuario', 'err');
+      /* Parar es también CALLAR: si el usuario detuvo el turno (con el botón del panel o
+         diciendo «para»), no tiene sentido que la voz siga leyendo lo que ya se generó.
+         Y el panel vuelve a «escuchando»: si se quedara en «pensando», el orbe y su botón
+         de parar seguirían diciendo que el agente trabaja cuando ya no hay nadie. */
+      silenciarLecturaVoz();
+      if (window.VoiceMode && window.VoiceMode.abierto()) {
+        window.sagitari.ttsStop();
+        window.VoiceMode.handle({ type: 'state', state: 'escuchando' });
+      }
       if (devMode) paintMeta();
       break;
     case 'toast':
@@ -1497,7 +1521,9 @@ async function enviarTexto(text, atts = []) {
   scroll(true);
   window.sagitari.glow('think');
   // turno nuevo: la franja de pasos del panel arranca vacía (es lo del turno que empieza)
+  // y la lectura en voz alta arranca de cero (la del turno anterior ya no cuenta)
   limpiarPasosVoz();
+  reiniciarLecturaVoz();
   // optimista: el evento `busy` del agente tarda en llegar y hasta entonces un
   // segundo Enter lanzaba otro turno que moría con «SAGITARI está ocupado» y
   // devolvía el botón a «Enviar» con el agente aún trabajando.
@@ -1529,7 +1555,7 @@ async function sendFrom(elId) {
   // si el dictado estaba activo, detenerlo y limpiar su estado visual
   if (listening) {
     listening = false;
-    voiceBuffer = ''; lastPartial = '';
+    voiceBuffer = ''; lastPartial = ''; vozBase = '';
     $$('.cbtn').forEach(b => b.classList.remove('on'));
     el.classList.remove('rec');
     window.sagitari.glow('off');
@@ -1751,9 +1777,13 @@ $('#chatInput').addEventListener('input', () => autoGrow($('#chatInput')));
 // se envía solo a mitad de frase.
 let voiceBuffer = '';      // texto ya confirmado (de finales anteriores)
 let lastPartial = '';      // hipótesis en curso (para reemplazar en el input)
+/* Lo que ya había escrito el usuario al empezar a dictar: el dictado se compone SOBRE
+   ello. El comentario de arriba prometía no sobrescribir el input, pero la primera
+   hipótesis parcial lo vaciaba y se comía el prompt a medio escribir. */
+let vozBase = '';
 function paintVoice(partial) {
   const el = $('#chatInput');
-  const text = (voiceBuffer + (partial || '')).trimStart();
+  const text = (vozBase + voiceBuffer + (partial || '')).trimStart();
   if (el.value !== text) { el.value = text; }
   el.classList.toggle('rec', true);
   autoGrow(el);
@@ -1764,8 +1794,13 @@ function wireMic(btnId) {
     // El micro es la puerta del modo voz. Con Alt se conserva el dictado de siempre,
     // que sigue siendo lo cómodo para escribir un prompt largo y revisarlo.
     if (!e.altKey) {
-      if (window.VoiceMode.abierto()) await window.VoiceMode.cerrar();
+      if (window.VoiceMode.abierto()) { await window.VoiceMode.cerrar(); await cerrarTapPcm(); }
       else {
+        /* La lectura del chat comparte el AudioContext de la sesión, y al abrir el modo
+           voz se reutiliza: sin soltar antes lo que estuviera sonando, una frase a medias
+           del chat seguía colgada de un buffer source sin dueño y la primera frase del
+           modo voz podía salir corrompida. Es el mismo corte que hace reproducir(). */
+        if (window.VoiceMode.audio && window.VoiceMode.audio.parar) await window.VoiceMode.audio.parar();
         await window.VoiceMode.abrir();
         /* Si el agente ya está esperando permiso, la barra del chat acaba de quedar tapada
            por el panel: sin volver a armarla ahí, esta confirmación se quedaría sin poder
@@ -1776,11 +1811,14 @@ function wireMic(btnId) {
     }
     if (listening) {
       listening = false; btn.classList.remove('on');
+      vozBase = '';
       window.sagitari.glow('off');
       await window.sagitari.voiceStop();
     } else {
       listening = true; btn.classList.add('on');
       voiceBuffer = ''; lastPartial = '';
+      const ya = $('#chatInput').value.replace(/\s+$/, '');
+      vozBase = ya ? ya + ' ' : '';
       window.sagitari.glow('listen', 'voice');
       await window.sagitari.voiceStart();
     }
@@ -1792,16 +1830,147 @@ wireMic('#chatMic');
    `handle`), así que aquí solo se le dan las tres cosas que no puede saber por sí mismo
    —por dónde se envía, por dónde se reproduce una frase y si hay que hablar los avisos—
    y se le pasa todo lo que llega del proceso principal. */
-/* El turno dictado no puede salir mientras el agente trabaja: `agent.chat` lo rechazaría, y
-   el panel ya lo habría dado por enviado (solo saldría la tarjeta de error del chat). Se le
-   avisa por su franja y no se envía nada; a diferencia del botón Enviar, aquí no se detiene
-   al agente: dictar no es pedir que pare. */
+/* El turno dictado no puede salir mientras el agente trabaja: `agent.chat` lo
+   rechazaría. Antes se tiraba con un aviso y la frase se perdía (el usuario veía su
+   frase en el panel y el agente nunca la hacía: "transcribe pero no actúa"). Ahora se
+   guarda UNA frase en cola y sale sola cuando el agente queda libre. */
+let vozEnEspera = null;
+function vaciarColaVoz() {
+  if (vozEnEspera && !busy) { const t = vozEnEspera; vozEnEspera = null; enviarTexto(t); }
+}
 window.VoiceMode.setEnviar((text) => {
-  if (busy) { window.VoiceMode.handle({ type: 'notice', text: 'El agente está trabajando; no he enviado lo dictado.' }); return; }
+  if (busy) { vozEnEspera = text; window.VoiceMode.handle({ type: 'notice', text: 'Te he oído; lo envío en cuanto termine lo anterior.' }); return; }
   return enviarTexto(text);
 });
-window.sagitari.onVoiceEvent((ev) => window.VoiceMode.handle(ev));
+window.sagitari.onVoiceEvent((ev) => {
+  /* El proceso principal puede ordenar reabrir el tap (voice:rescue con whisper de
+     guardia): su captura es la única fuente de audio del dictado local. */
+  if (ev && ev.type === 'reabrir-tap') { reabrirTapVoz(); return; }
+  window.VoiceMode.handle(ev);
+  if (ev && (ev.type === 'notice' || ev.type === 'state')) actualizarEstadoMotorEscucha();
+});
 window.sagitari.onTtsPhrase((p) => window.VoiceMode.audio.reproducir(p));
+
+/* ---- Tap de micrófono para el dictado local (whisper) ----
+   El audio crudo (Int16 mono 16 kHz) viaja al proceso principal SOLO mientras el motor
+   local está de guardia: es SU única fuente (los de Windows capturan por su cuenta).
+   Va por AudioWorklet para no meter el ruido del hilo principal en la señal. Se abre y
+   se cierra con la sesión del modo voz: sin panel, no hay nadie transcribiendo. */
+let __tapPcm = null;
+let __tapFallos = 0;
+/* Float32 del micro → Int16 mono 16 kHz para whisper, con REMUESTREO.
+   Antes se forzaba el AudioContext a 16 kHz y Chromium en Windows entrega SILENCIO
+   con algunos micrófonos cuando se le pide una tasa que no es la del dispositivo:
+   el orbe latía (ese contexto es otro) y el dictado local no recibía NI UNA muestra.
+   Ahora se captura a la tasa NATIVA —la que se sabe buena— y el remuestreo lineal
+   con memoria de fracción viaja aquí, sin deriva acumulada. */
+function enviarPcmAlMotor(f, srOrigen, estadoPcm) {
+  const srDestino = 16000;
+  const comb = new Float32Array(estadoPcm.resto.length + f.length);
+  comb.set(estadoPcm.resto, 0); comb.set(f, estadoPcm.resto.length);
+  const fuera = [];
+  while (estadoPcm.pos + 1 < comb.length) {
+    const i0 = Math.floor(estadoPcm.pos), frac = estadoPcm.pos - i0;
+    const v0 = comb[i0], v1 = comb[i0 + 1];
+    fuera.push(Math.max(-32768, Math.min(32767, Math.round((v0 + (v1 - v0) * frac) * 32767))));
+    estadoPcm.pos += RATIO_PCM(srOrigen, srDestino);
+  }
+  const corta = Math.floor(estadoPcm.pos);
+  estadoPcm.resto = comb.slice(corta); estadoPcm.pos -= corta;
+  if (!fuera.length) return;
+  const b = new Int16Array(fuera.length);
+  for (let i = 0; i < fuera.length; i++) b[i] = fuera[i];
+  window.sagitari.voicePcm(b.buffer);
+}
+/* Cada muestra de SALIDA avanza pos tantas muestras de ENTRADA como dicta el cociente
+   de tasas (48k→16k: 3 de entrada por cada salida). La razón invertida estiraba el
+   audio 9× y Whisper transcribía la voz estirada como «[Música]» — cazado con la
+   telemetría pcmMs (648 s de audio en 76 s de sesión). */
+const RATIO_PCM = (srOrigen, srDestino) => srOrigen / srDestino;
+async function abrirTapPcm() {
+  if (__tapPcm) return;
+  let stream = null, ctx = null;
+  try {
+    if (!window.VoiceMode || !window.VoiceMode.abierto()) return;
+    if (!(await window.sagitari.voicePcmActivo())) return;
+    actualizarEstadoMotorEscucha();
+    stream = await navigator.mediaDevices.getUserMedia({ audio: { echoCancellation: true, noiseSuppression: true, channelCount: 1 } });
+    const AudioCtx = window.AudioContext || window.webkitAudioContext;
+    /* SIN sampleRate forzado (ver enviarPcmAlMotor) y con resume: un contexto
+       suspendido no procesa el grafo ni entrega un solo chunk. */
+    ctx = new AudioCtx();
+    if (ctx.state === 'suspended') { try { await ctx.resume(); } catch {} }
+    const fuente = ctx.createMediaStreamSource(stream);
+    /* Gain a CERO entre el tap y el destino: el nodo cuelga del grafo (Chromium lo
+       procesa siempre) pero devuelve ni un mito del micro a los altavoces. Antes el
+       nodo quedaba colgando solo — un grafo sin destino puede no procesarse nunca. */
+    const mudo = ctx.createGain(); mudo.gain.value = 0;
+    const estadoPcm = { resto: new Float32Array(0), pos: 0 };
+    const enviar = (f) => enviarPcmAlMotor(f, ctx.sampleRate, estadoPcm);
+    let nodo;
+    try {
+      await ctx.audioWorklet.addModule(URL.createObjectURL(new Blob([
+        'class TapPCM extends AudioWorkletProcessor {' +
+        '  process(inputs) {' +
+        '    const ch = inputs[0] && inputs[0][0];' +
+        '    if (ch) this.port.postMessage(ch.slice(0));' +
+        '    return true;' +
+        '  }' +
+        '}' +
+        'registerProcessor("tap-pcm", TapPCM);'
+      ], { type: 'text/javascript' })));
+      nodo = new AudioWorkletNode(ctx, 'tap-pcm');
+      /* Un procesador que revienta en el hilo de audio no lanza aquí: lo cuenta y
+         lo dice — sin esto, un tap muerto era un panel «Escuchando» para siempre. */
+      nodo.onprocessorerror = () => { __tapFallos++; showToast('Dictado local: el capturador de audio falló; cierra y reabre el modo voz.'); };
+      nodo.port.onmessage = (e) => enviar(e.data);
+      fuente.connect(nodo);
+    } catch (eWorklet) {
+      /* Respaldo (CSP restrictiva o Chromium viejo): ScriptProcessor hace el mismo
+         trabajo en el hilo principal — algo más de ruido, pero audio de verdad. */
+      nodo = ctx.createScriptProcessor(1024, 1, 1);
+      nodo.onaudioprocess = (ev) => { const ch = ev.inputBuffer.getChannelData(0); enviar(ch); };
+      fuente.connect(nodo);
+    }
+    nodo.connect(mudo); mudo.connect(ctx.destination);
+    __tapPcm = { stream, ctx, nodo, mudo };
+    __tapFallos = 0;
+  } catch (e) {
+    /* ANTES este catch referenciaba variables fuera de su ámbito y moría en silencio:
+       el tap moría y el panel se quedaba «Escuchando» sin una sola pista. Ahora se
+       suelta SOLO lo que se llegó a adquirir y el fallo SE MUESTRA. */
+    try { if (stream) stream.getTracks().forEach((t) => t.stop()); } catch {}
+    try { if (ctx && ctx.state !== 'closed') ctx.close(); } catch {}
+    __tapFallos++;
+    showToast('Dictado local: no he podido enganchar el micrófono (' + (e && e.message ? e.message : e) + ').');
+    console.error('[tap-pcm] fallo al abrir:', e);
+  }
+}
+
+/* Cierra el tap: sin panel abierto no hay nadie transcribiendo, y el micro no debe
+   quedar capturando para nadie. */
+async function cerrarTapPcm() {
+  const tap = __tapPcm; __tapPcm = null;
+  if (!tap) return;
+  try { tap.nodo.port.onmessage = null; } catch {}
+  try { tap.nodo.onaudioprocess = null; } catch {}
+  try { tap.nodo.disconnect(); } catch {}
+  try { tap.mudo.disconnect(); } catch {}
+  try { tap.stream.getTracks().forEach((t) => t.stop()); } catch {}
+  try { if (tap.ctx.state !== 'closed') await tap.ctx.close(); } catch {}
+}
+
+/* El panel avisa al abrir y al cerrar (botón, Esc, «adiós»): aquí se engancha y se
+   suelta el tap de micrófono del dictado local, sea cual sea la puerta. Un único dueño
+   del ciclo de vida — el panel — evita dos micros abiertos por llamadas dobles. */
+window.__alAbrirModoVoz = () => { abrirTapPcm(); };
+window.__alCerrarModoVoz = () => { cerrarTapPcm(); };
+/* Reapertura del tap (rescate del vigía u orden del proceso principal): cerrar y
+   volver a enganchar la captura sin tocar la sesión del panel. */
+async function reabrirTapVoz() { await cerrarTapPcm(); await abrirTapPcm(); }
+window.__reabrirTap = reabrirTapVoz;
+window.__tapEstado = () => !!__tapPcm;
+
 /* Los avisos solo se hablan si el usuario lo ha pedido en Ajustes. La decisión se toma
    aquí, que es donde se conocen los ajustes; el panel solo pide que se diga.
    Y el aviso de que NO se ha podido leer no se habla nunca: lo emite el propio fallo de la
@@ -1811,21 +1980,37 @@ window.sagitari.onTtsPhrase((p) => window.VoiceMode.audio.reproducir(p));
 const AVISO_SIN_VOZ = 'No he podido leer la respuesta en voz alta.';
 window.VoiceMode.setHablar((t) => { if (CFG.settings.ttsNotices && t !== AVISO_SIN_VOZ) speak(t, { forzar: true }); });
 
-window.sagitari.onVoiceReady((k, lang) => showToast('Dictado activo (' + lang + '). Habla ahora; pulsa el micro o envía para terminar.'));
+/* Lo que el panel necesita saber de la app para poder parar de verdad: si el agente está
+   trabajando (para reconocer «para»/«detente» como una orden sobre el turno EN CURSO) y
+   por dónde pararlo (el mismo `stopChat` del botón Detener del compositor, que el panel
+   tapa). Antes, con el modo voz abierto, la única forma de detener al agente era esperar. */
+window.VoiceMode.setOcupado(() => busy);
+window.VoiceMode.setParar(() => { feed('Deteniendo…', 'err'); window.sagitari.stopChat(); });
+/* Interrupción (barge-in): lo que queda de la respuesta deja de leerse. Sin esto, callar la
+   frase en curso no callaba la lectura — la siguiente frase del stream volvía a sonar. */
+window.VoiceMode.setInterrumpido(() => silenciarLecturaVoz());
+
+/* El canal manda UN dato por evento (el puente lo aplana), no un par «clave, valor»:
+   estos manejadores declaraban dos parámetros y leían el segundo, así que el aviso de
+   «dictado activo» decía «undefined», el del motor clásico no salía nunca (comparaba
+   `undefined` con 'sapi'), las hipótesis parciales borraban el compositor —llegaban
+   vacías— y lo dictado NUNCA se acumulaba: el dictado no escribía nada. */
+window.sagitari.onVoiceReady((lang) => showToast('Dictado activo (' + lang + '). Habla ahora; pulsa el micro o envía para terminar.'));
 // motor clásico = precisión inferior: avisar que con el reconocimiento online mejora mucho
-window.sagitari.onVoiceMode((k, mode) => {
+window.sagitari.onVoiceMode((mode) => {
   if (mode === 'sapi') showToast('Motor de voz clásico activo. Activa "Reconocimiento de voz en línea" en Windows (Privacidad > Voz) para máxima precisión.');
 });
-window.sagitari.onVoiceHint((k, m) => showToast('Dictado: ' + m));
-window.sagitari.onVoice((k, text) => { lastPartial = text ? text + ' ' : ''; paintVoice(lastPartial); });
-window.sagitari.onVoiceFinal((k, text) => {
+window.sagitari.onVoiceHint((m) => showToast('Dictado: ' + m));
+window.sagitari.onVoice((text) => { lastPartial = text ? text + ' ' : ''; paintVoice(lastPartial); });
+window.sagitari.onVoiceFinal((text) => {
   if (text && text.trim()) voiceBuffer += text.trim() + ' ';
   lastPartial = '';
   paintVoice('');
 });
-window.sagitari.onVoiceError((k, m) => {
+window.sagitari.onVoiceError((m) => {
   showToast('Dictado: ' + m);
   listening = false;
+  vozBase = '';
   $$('.cbtn').forEach(b => b.classList.remove('on'));
   const rec = document.querySelector('.rec'); if (rec) rec.classList.remove('rec');
 });
@@ -1877,6 +2062,13 @@ async function fillSettings() {
   $('#swTts').classList.toggle('on', !!CFG.settings.ttsEnabled);
   $('#voiceLang').value = CFG.settings.voiceLang || 'es-ES';
   // La lista de voces sale del motor real: si no hay ninguna, se dice, no se deja vacío.
+  // Las NATURALES ya vienen primero del motor (tts.ps1 las ordena arriba) y se marcan:
+  // son las voces modernas de Windows 11, que suenan a persona, frente a las de escritorio
+  // (Helena y compañía), que son las robóticas que se oían antes.
+  // Piper (voz local) va PRIMERO si está instalada: es la mejor que hay.
+  refrescarVocesTts();
+
+function refrescarVocesTts() {
   window.sagitari.ttsList().then((r) => {
     const sel = $('#ttsVoice');
     if (!sel) return;
@@ -1885,16 +2077,71 @@ async function fillSettings() {
     if (!voces.length) { const o = document.createElement('option'); o.textContent = 'Sin voces instaladas'; o.value = ''; sel.appendChild(o); return; }
     for (const v of voces) {
       const o = document.createElement('option');
-      o.value = v.nombre; o.textContent = v.nombre + ' (' + v.idioma + ')';
+      o.value = v.nombre;
+      o.textContent = v.nombre + ' (' + v.idioma + (v.natural ? ' · natural' : '') + ')';
       if (CFG.settings.ttsVoice === v.nombre) o.selected = true;
       sel.appendChild(o);
     }
+    /* La voz LOCAL (Piper) manda cuando está instalada: es la única neuronal del equipo y
+       no depende del almacén de Windows (que en muchas máquinas sólo tiene voces de
+       escritorio, las robóticas). Sólo se respeta otra voz guardada si el usuario la
+       eligió a mano (`ttsVoiceFijo`): la que elige la propia app —la primera natural, la
+       que se autoasigna al instalar— no puede condenar a la voz buena a no sonar nunca. */
+    const local = voces.find((v) => /^piper/i.test(v.nombre));
+    if (local && !CFG.settings.ttsVoiceFijo && CFG.settings.ttsVoice !== local.nombre) {
+      const antesSonabaWindows = !!CFG.settings.ttsVoice;
+      sel.value = local.nombre;
+      CFG.settings.ttsVoice = local.nombre;
+      window.sagitari.setSettings({ ttsVoice: local.nombre });
+      if (antesSonabaWindows) showToast('Voz local activa: «' + local.nombre + '» suena mejor que la voz de Windows.');
+    }
+    /* Sin voz GUARDADA, se elige sola la primera NATURAL del idioma de voz: es la que
+       suena bien. Antes el desplegable se quedaba con la primera de la lista — una voz de
+       escritorio robótica — y el usuario tenía que saber que existían las naturales y
+       buscarlas a mano. */
+    if (!CFG.settings.ttsVoice) {
+      const lang = (CFG.settings.voiceLang || 'es-ES').split('-')[0];
+      const buena = voces.find(v => v.natural && (v.idioma || '').toLowerCase().startsWith(lang))
+        || voces.find(v => (v.idioma || '').toLowerCase().startsWith(lang))
+        || voces.find(v => v.natural);
+      if (buena) {
+        sel.value = buena.nombre;
+        window.sagitari.setSettings({ ttsVoice: buena.nombre });
+      }
+    } else {
+      /* La voz guardada puede haberse quedado en una de escritorio (era el default antes
+         de preferir naturales): si hay una natural del idioma, se migra sola UNA vez por
+         sesión. Una elección manual a otra voz de escritorio no se distingue, pero oír una
+         natural siempre es mejor que oír una robótica por un default viejo. */
+      const lang = (CFG.settings.voiceLang || 'es-ES').split('-')[0];
+      const actual = voces.find(v => v.nombre === CFG.settings.ttsVoice);
+      const natural = voces.find(v => v.natural && (v.idioma || '').toLowerCase().startsWith(lang));
+      if (actual && !actual.natural && natural && !window.__migracionVozNatural) {
+        window.__migracionVozNatural = true;
+        sel.value = natural.nombre;
+        CFG.settings.ttsVoice = natural.nombre;
+        window.sagitari.setSettings({ ttsVoice: natural.nombre });
+        showToast('Voz mejorada a «' + natural.nombre + '» (natural): suena mucho más humana que la anterior.');
+      }
+    }
+    /* Sin NINGUNA voz natural para el idioma, la calidad que queda es la robótica de
+       siempre: decir cómo se instalan las buenas (gratis, vienen con Windows 11) es la
+       única mejora que de verdad cambia lo que oye el usuario. Una sola vez por sesión. */
+      const lang2 = (CFG.settings.voiceLang || 'es-ES').split('-')[0];
+      const hayNatural = voces.some(v => v.natural && (v.idioma || '').toLowerCase().startsWith(lang2));
+      if (!hayNatural && !window.__avisoVocesNaturales) {
+        window.__avisoVocesNaturales = true;
+        showToast('Para una voz más natural: Configuración de Windows > Accesibilidad > Narrador > «Voces naturales» (descarga gratuita), y vuelve a abrir SAGITARI.');
+      }
   }).catch(() => {});
-  if ($('#ttsRate')) $('#ttsRate').value = String(CFG.settings.ttsRate ?? 0);
+}
   /* El estado visual del interruptor de avisos se pinta aquí y no solo al cablearlo: los
      ajustes llegan de disco después de que el script se ejecute, así que pintarlo al
      cablear mostraba «apagado» aunque estuviera encendido. */
   if ($('#swAvisos')) $('#swAvisos').classList.toggle('on', !!CFG.settings.ttsNotices);
+  /* Motor de escucha clásico: el estado visual se pinta aquí y no solo al cablear, por la
+     misma razón que el de avisos — los ajustes pueden llegar de disco después del script. */
+  if ($('#swSttClasico')) $('#swSttClasico').classList.toggle('on', !!CFG.settings.sttClasico);
   $('#setUserName').value = CFG.settings.userName || '';
   // apariencia: color de interfaz, color del glow e intensidad
   $('#uiColor').value = PALETTES[CFG.settings.uiColor] ? CFG.settings.uiColor : 'violet';
@@ -2018,13 +2265,112 @@ $('#voiceLang').onchange = async (e) => {
   try { await window.sagitari.setSettings({ voiceLang: e.target.value }); }
   catch (err) { showToast('No se pudo guardar el idioma de voz'); }
 };
-if ($('#ttsVoice')) $('#ttsVoice').onchange = async (e) => { await window.sagitari.setSettings({ ttsVoice: e.target.value }); };
+/* Elegir voz a mano marca la elección como FIJA: a partir de ahí manda la del usuario y la
+   app deja de preferir la voz local por su cuenta (ver `usarVozLocal` en el motor). */
+if ($('#ttsVoice')) $('#ttsVoice').onchange = async (e) => {
+  CFG.settings.ttsVoiceFijo = true;
+  await window.sagitari.setSettings({ ttsVoice: e.target.value, ttsVoiceFijo: true });
+};
 if ($('#ttsRate')) $('#ttsRate').oninput = async (e) => { await window.sagitari.setSettings({ ttsRate: Number(e.target.value) }); };
 if ($('#swAvisos')) {
   $('#swAvisos').classList.toggle('on', !!CFG.settings.ttsNotices);
   $('#swAvisos').onclick = async (e) => { const on = !e.currentTarget.classList.contains('on'); e.currentTarget.classList.toggle('on', on); await window.sagitari.setSettings({ ttsNotices: on }); };
 }
-
+/* Dictado local (whisper): estado, instalación con progreso y etiqueta de Ajustes. */
+let __whisperProgreso = false;
+/* Motor de escucha DE GUARDIA (para la franja de pasos del panel): se refresca en los
+   momentos que pueden cambiarlo — arranque, apertura del modo, aviso de rescate — y se
+   lee de forma SÍNCRONA al pintar los pasos (los manejadores de eventos no son async). */
+let __estadoMotorEscucha = '';
+async function actualizarEstadoMotorEscucha() {
+  try {
+    const r = await window.sagitari.voiceInstallStatus();
+    if (!r || !r.ok) return;
+    if (r.disponible) __estadoMotorEscucha = 'dictado local (Whisper)';
+    else if (r.motor === 'sapi') __estadoMotorEscucha = 'Windows (clásico)';
+    else if (r.motor === 'winrt') __estadoMotorEscucha = 'Windows (moderno)';
+    else if (r.motor) __estadoMotorEscucha = 'Windows';
+    else __estadoMotorEscucha = '';
+  } catch {}
+}
+function pasosConMotor(lista) {
+  return __estadoMotorEscucha ? [{ label: 'Escucha: ' + __estadoMotorEscucha }, ...lista] : lista;
+}
+async function refrescarWhisperUi() {
+  const lbl = $('#lblWhisperEstado');
+  const btn = $('#btnInstalarWhisper');
+  if (!lbl || !btn) return;
+  try {
+    const r = await window.sagitari.voiceInstallStatus();
+    actualizarEstadoMotorEscucha();
+    const instalado = !!(r && r.ok && r.disponible);
+    btn.textContent = instalado ? 'Reinstalar' : 'Instalar motor';
+    if (r && r.ok && r.transcribiendo) lbl.textContent = 'transcribiendo…';
+    else if (r && r.ok && instalado) lbl.textContent = 'instalado (' + r.modeloNombre + ') — activo';
+  } catch {}
+}
+if ($('#btnInstalarWhisper')) {
+  $('#btnInstalarWhisper').onclick = async () => {
+    if (__whisperProgreso) return;
+    __whisperProgreso = true;
+    const lbl = $('#lblWhisperEstado'), btn = $('#btnInstalarWhisper');
+    btn.disabled = true;
+    window.sagitari.onVoiceInstall((p) => {
+      if (!p) return;
+      if (p.tipo === 'binario') lbl.textContent = 'descargando motor… ' + Math.round((p.recibido / (p.total || 1)) * 100) + '%';
+      else if (p.tipo === 'modelo') lbl.textContent = 'descargando modelo… ' + Math.round((p.recibido / (p.total || 1)) * 100) + '%';
+      else if (p.tipo === 'extrayendo') lbl.textContent = 'extrayendo motor…';
+      else if (p.tipo === 'listo') { lbl.textContent = 'instalado — activo'; btn.disabled = false; btn.textContent = 'Reinstalar'; __whisperProgreso = false; showToast('Dictado local instalado: SAGITARI ahora entiende mucho mejor lo que dices.'); }
+      else if (p.tipo === 'error') { lbl.textContent = 'error: ' + (p.error || 'descarga fallida'); btn.disabled = false; __whisperProgreso = false; }
+    });
+    try { await window.sagitari.voiceInstall(); } catch (e) { lbl.textContent = 'error: ' + (e.message || 'instalación'); __whisperProgreso = false; }
+    btn.disabled = false;
+    __whisperProgreso = false;
+  };
+};
+/* Voz local (Piper): mismo patrón que el dictado local — progreso en vivo por evento,
+   botón que se desactiva mientras descarga, etiqueta que dice qué suena ahora. */
+let __piperProgreso = false;
+async function refrescarPiperUi() {
+  const lbl = $('#lblPiperEstado');
+  const btn = $('#btnInstalarPiper');
+  if (!lbl || !btn) return;
+  try {
+    const r = await window.sagitari.voiceInstallStatus();
+    const instalado = !!(r && r.ok && r.piperDisponible);
+    btn.textContent = instalado ? 'Reinstalar' : 'Instalar voz';
+    if (instalado) lbl.textContent = 'instalada (Piper davefx) — activa';
+  } catch {}
+}
+if ($('#btnInstalarPiper')) {
+  $('#btnInstalarPiper').onclick = async () => {
+    if (__piperProgreso) return;
+    __piperProgreso = true;
+    const lbl = $('#lblPiperEstado'), btn = $('#btnInstalarPiper');
+    btn.disabled = true;
+    window.sagitari.onTtsInstall((p) => {
+      if (!p) return;
+      if (p.tipo === 'binario') lbl.textContent = 'descargando voz… ' + Math.round((p.recibido / (p.total || 1)) * 100) + '%';
+      else if (p.tipo === 'voz') lbl.textContent = 'descargando modelo de voz… ' + Math.round((p.recibido / (p.total || 1)) * 100) + '%';
+      else if (p.tipo === 'config') lbl.textContent = 'configurando voz…';
+      else if (p.tipo === 'extrayendo') lbl.textContent = 'extrayendo motor…';
+      else if (p.tipo === 'listo') { lbl.textContent = 'instalada (Piper davefx) — activa'; btn.disabled = false; btn.textContent = 'Reinstalar'; __piperProgreso = false; showToast('Voz local instalada: SAGITARI ahora suena mucho más natural.'); refrescarVocesTts(); }
+      else if (p.tipo === 'error') { lbl.textContent = 'error: ' + (p.error || 'descarga fallida'); btn.disabled = false; __piperProgreso = false; }
+    });
+    try { await window.sagitari.ttsInstall(); } catch (e) { lbl.textContent = 'error: ' + (e.message || 'instalación'); __piperProgreso = false; }
+    btn.disabled = false;
+    __piperProgreso = false;
+  };
+}
+/* Motor de escucha clásico: sólo cambia CÓMO se escucha (el reconocedor de Windows que
+   se usa). No toca la síntesis — esa es la de «Leer en voz alta» y su desplegable de voz. */
+if ($('#swSttClasico')) {
+  $('#swSttClasico').onclick = async (e) => {
+    const on = !e.currentTarget.classList.contains('on');
+    e.currentTarget.classList.toggle('on', on);
+    await window.sagitari.setSettings({ sttClasico: on });
+  };
+}
 // ---- apariencia: aplicar al vuelo y persistir ----
 function refreshGlowLabels() {
   const v = Number($('#glowStrength').value) || 1;
@@ -3395,14 +3741,61 @@ $('#projPick').onclick = async () => {
 };
 
 // ============ misc ============
-function speak(text, { forzar = false } = {}) {
+function speak(text, { forzar = false, encolar = false } = {}) {
   if ((!forzar && !CFG.settings.ttsEnabled) || !text) return;
   const clean = text.replace(/```[\s\S]*?```/g, ' (código) ').replace(/[*_`#>«»]/g, '').replace(/\s+/g, ' ').trim();
   if (clean) {
     window.sagitari.glow('speak');            // el marco late mientras habla
     /* El `forzar` viaja al proceso principal: es él quien conoce el ajuste del TTS y el
-       silencio de los arranques de prueba, y quien decide si esta lectura sale. */
-    window.sagitari.speak(clean, { forzar });
+       silencio de los arranques de prueba, y quien decide si esta lectura sale.
+       `encolar` es lo que permite leer la respuesta por frases SIN cortar la que está
+       sonando: con la cola, la lectura avanza sola mientras el modelo sigue escribiendo. */
+    window.sagitari.speak(clean, { forzar, encolar });
+  }
+}
+
+/* ---- La respuesta se lee MIENTRAS se escribe --------------------------------------
+   Antes la voz salía entera al terminar el turno (`assistant_done`): en un turno con
+   herramientas eso eran decenas de segundos de silencio y luego un monólogo — nada que ver
+   con los modos de voz de los asistentes, donde el asistente empieza a hablar en cuanto
+   tiene la primera frase. Aquí cada trozo del stream se manda frase a frase.
+
+   El estado de la lectura es POR TURNO: `lecturaLeida` son los caracteres del stream ya
+   mandados a la voz, `lecturaSuena` distingue la primera frase (que sí corta la lectura
+   anterior, de otro turno) de las siguientes (que se encolan), y `lecturaMuda` apaga el
+   resto del turno cuando el usuario interrumpe. */
+let lecturaLeida = 0;
+let lecturaSuena = false;
+let lecturaMuda = false;
+function reiniciarLecturaVoz() { lecturaLeida = 0; lecturaSuena = false; lecturaMuda = false; }
+function silenciarLecturaVoz() { lecturaMuda = true; }
+
+/* El troceado (fin de frase sin partir decimales, saltos de línea, código fuera) vive en
+   renderer/frases.js: es la pieza delicada de esta lectura y así se puede probar desde
+   Node, sin navegador. */
+const FRASES = window.SagiFrases || { corteDeFrase: () => 0, limpiarParaVoz: (t) => String(t || ''), diceAlgo: () => false };
+
+/* Manda a la voz lo que ya esté completo. `fin` = la respuesta terminó: entonces también
+   va la cola sin punto (una frase suelta al final se lee, no se pierde). */
+function hablarEnFlujo(texto, fin) {
+  if (lecturaMuda) return;
+  const bruto = String(texto || '');
+  if (!bruto) return;
+  /* El stream puede ACORTARSE: en modo Plan el texto del plan se pinta como tarjeta y sale
+     del stream. Ahí no se relee nada (se saltan los caracteres que ya no existen) — el
+     error contrario, repetir en voz alta lo mismo, se oiría como un tartamudeo. */
+  if (bruto.length < lecturaLeida) lecturaLeida = bruto.length;
+  const abierto = !!(window.VoiceMode && window.VoiceMode.abierto());
+  for (;;) {
+    if (lecturaMuda) return;
+    const corte = FRASES.corteDeFrase(bruto.slice(lecturaLeida), fin);
+    if (corte <= 0) return;
+    const trozo = bruto.slice(lecturaLeida, lecturaLeida + corte);
+    lecturaLeida += corte;
+    const limpio = FRASES.limpiarParaVoz(trozo);
+    if (!FRASES.diceAlgo(limpio)) continue;   // una línea de signos no gasta una síntesis
+    speak(limpio, { forzar: abierto, encolar: lecturaSuena });
+    lecturaSuena = true;
   }
 }
 // cuando la voz termina (el proceso TTS sale), el glow vuelve a su calma
@@ -3865,7 +4258,8 @@ window.sagitari.onThemeChanged && window.sagitari.onThemeChanged(() => applyThem
 // ============ init ============
 (async function init() {
   await fillSettings();
-  // paneles que leen CFG/metaGet: van DESPUÉS de cargar la configuración real
+  try { refrescarWhisperUi(); } catch {}
+  try { refrescarPiperUi(); } catch {}
   fillMemorySens();
   await initSecurity();
   // los desplegables nativos (selects) pasan a ser controles con el estilo de la app

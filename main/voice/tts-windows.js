@@ -32,7 +32,7 @@ function createTtsWindows({ spawnFn = spawn, dataDir = os.tmpdir(), scriptPath =
       const tmpText = path.join(base, 'sagi-tts-' + Date.now() + '-' + Math.random().toString(36).slice(2) + '.txt');
       const tmpWav = path.join(base, 'sagi-tts-' + Date.now() + '-' + Math.random().toString(36).slice(2) + '.wav');
       fs.writeFileSync(tmpText, String(texto || ''), 'utf8');
-      const salida = { voz: '', ms: 0, error: '', file: tmpWav };
+      const salida = { voz: '', ms: 0, error: '', file: tmpWav, natural: false };
       let proc;
       try {
         proc = spawnFn('powershell.exe', ['-NoProfile', '-ExecutionPolicy', 'Bypass', '-File', scriptPath,
@@ -71,7 +71,11 @@ function createTtsWindows({ spawnFn = spawn, dataDir = os.tmpdir(), scriptPath =
           const linea = buf.slice(0, i).replace(/\r$/, '').trim();
           buf = buf.slice(i + 1);
           if (linea.startsWith('VOICEUSED::')) salida.voz = linea.slice(11).trim();
-          else if (linea.startsWith('OK::')) salida.ms = Number(linea.split('|')[1]) || 0;
+          else if (linea.startsWith('VOICEOK::')) {
+            const p = linea.slice(9).split('|');
+            salida.voz = (p[0] || '').trim();
+            salida.natural = (p[1] || '').trim() === 'natural';
+          } else if (linea.startsWith('OK::')) salida.ms = Number(linea.split('|')[1]) || 0;
           else if (linea.startsWith('ERROR::')) salida.error = linea.slice(7).trim();
         }
       });
@@ -87,10 +91,21 @@ function createTtsWindows({ spawnFn = spawn, dataDir = os.tmpdir(), scriptPath =
   async function sintetizar(texto, { voice = '', lang = 'es-ES', rate: r } = {}) {
     const r1 = await correr({ lang, voice, rate: r }, texto);
     const limpio = () => { try { fs.unlinkSync(r1.file); } catch {} };
-    if (r1.error || !fs.existsSync(r1.file)) { limpio(); return { wav: null, voz: r1.voz, ms: r1.ms, error: r1.error || 'sin audio' }; }
+    if (r1.error || !fs.existsSync(r1.file)) {
+      limpio();
+      /* Una voz NATURAL que falla no se sustituye en silencio: el carril de respaldo
+         (SAPI) sólo tiene voces de escritorio robóticas, y cambiar la voz buena por la
+         mala sin decir nada era exactamente la queja «las voces son horribles». Aquí el
+         error sube con la causa y el renderer decide avisar; sin voz pedida natural, el
+         respaldo sigue siendo válido y este caso no se diferencia del resto. */
+      if (r1.error && /natural/i.test(String(voice || ''))) {
+        return { wav: null, voz: voice, ms: r1.ms, natural: false, error: 'la voz natural no ha podido sintetizar (no la sustituyo por una robótica): ' + r1.error };
+      }
+      return { wav: null, voz: r1.voz, ms: r1.ms, natural: r1.natural, error: r1.error || 'sin audio' };
+    }
     const wav = fs.readFileSync(r1.file);
     limpio();
-    return { wav, voz: r1.voz, ms: r1.ms, error: '' };
+    return { wav, voz: r1.voz, ms: r1.ms, natural: r1.natural, error: '' };
   }
 
   async function listarVoces() {
@@ -112,7 +127,12 @@ function createTtsWindows({ spawnFn = spawn, dataDir = os.tmpdir(), scriptPath =
         while ((i = buf.indexOf('\n')) >= 0) {
           const linea = buf.slice(0, i).replace(/\r$/, '').trim();
           buf = buf.slice(i + 1);
-          if (linea.startsWith('VOICE::')) { const [nombre, idioma] = linea.slice(7).split('|'); l.push({ nombre, idioma }); }
+          /* El tercer campo es la marca «natural» (voces modernas de Windows 11): el
+             desplegable de Ajustes la muestra y puede preferirla. Con SAPI no hay marca. */
+          if (linea.startsWith('VOICE::')) {
+            const [nombre, idioma, marca] = linea.slice(7).split('|');
+            l.push({ nombre, idioma, natural: marca === 'natural' });
+          }
         }
       });
       proc.on('exit', () => { clearTimeout(killTimer); resolve(l); });

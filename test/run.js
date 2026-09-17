@@ -3331,6 +3331,80 @@ test('chat: el fallo se explica y la píldora ofrece los modelos de tu API', () 
 
 /* ---------- voz: contrato de motores y eventos ---------- */
 
+/* El protocolo del motor de dictado. Se cortaba el prefijo a mano (`slice(6)` para un
+   prefijo de 7) y el «fallo» no se veía como un error sino como un «:» de más dentro de
+   lo dictado: por eso se prueba el corte, y no que la función exista. */
+test('voz/protocolo: cada prefijo se corta por su largo y la confianza no se cuela', () => {
+  const { partirLinea, PREFIJOS } = require('../main/voice/protocolo');
+  eq(PREFIJOS.every((p) => p.endsWith('::')), true, 'todos los prefijos terminan en ::');
+  const fin = partirLinea('FINAL::Recuérdame llamar a Álvaro\u001f0.82');
+  eq(fin.prefijo, 'FINAL::', 'se reconoce el final');
+  eq(fin.cuerpo, 'Recuérdame llamar a Álvaro', 'sin el prefijo delante ni la confianza detrás');
+  eq(partirLinea('READY::es-ES').cuerpo, 'es-ES', 'el idioma llega limpio');
+  eq(partirLinea('MODE::sapi').cuerpo, 'sapi', 'el motor llega tal cual (y por eso se puede avisar del clásico)');
+  eq(partirLinea('PART::recuérdame').cuerpo, 'recuérdame', 'la hipótesis en curso también');
+  eq(partirLinea('NOTE::WinRT no disponible').prefijo, 'NOTE::', 'la explicación del motor es del protocolo');
+  /* Una traza suelta de PowerShell no puede convertirse en una frase dictada. */
+  eq(partirLinea('At line:1 char:1'), null, 'lo que no es del protocolo no dice nada');
+  eq(partirLinea(''), null, 'ni una línea vacía');
+  eq(partirLinea('FINAL::   hola   \u001f0.3').cuerpo, 'hola', 'se recortan los espacios de sobra');
+});
+
+test('voz/protocolo: el troceado no parte los números decimales ni pierde dígitos', () => {
+  const { trocear } = require('../main/voice/protocolo');
+  /* «versión 3.5» es UNA frase: el punto es decimal, no final (antes se leía «versión
+     tres» y «cinco» por separado). */
+  const d = trocear('La versión 3.5 está lista.');
+  eq(d.length, 1, 'el decimal se queda dentro: ' + JSON.stringify(d));
+  eq(d[0], 'La versión 3.5 está lista.');
+  /* Un final de frase tras un número SÍ corta, y el dígito no se pierde: «tarea 3».
+     (Una primera formulación de esta regla se comía el dígito antes del punto.) */
+  const n = trocear('Termina la tarea 3. Mañana seguimos.');
+  eq(n[0], 'Termina la tarea 3.', 'el número antes del punto final no se come: ' + JSON.stringify(n));
+  eq(n.length, 2, 'y el punto cierra igual la frase');
+  /* Y el troceado de siempre sigue igual: líneas, puntos, sin fusionar frases cortas. */
+  const lista = trocear('Lista uno\nLista dos sin punto');
+  eq(lista.length, 2, 'los saltos de línea parten la frase: ' + JSON.stringify(lista));
+  eq(lista[0], 'Lista uno');
+  const simple = trocear('Hecho. He creado el recordatorio y lo he anotado.');
+  eq(simple.length, 2, 'dos frases normales siguen siendo dos');
+  eq(simple[0], 'Hecho.');
+  eq(trocear('').length, 0, 'texto vacío: ninguna frase');
+});
+
+test('voz/tts: el protocolo de voces llega con su marca natural', async () => {
+  const { createTtsWindows } = require('../main/voice/tts-windows');
+  const dir = tmpDir('sagi-tts-nat-');
+  const voces = [];
+  const spawnFn = () => {
+    const l = {};
+    const proc = { stdout: { on: (k, f) => { l['o' + k] = f; } }, stderr: { on: (k, f) => { l['e' + k] = f; } }, on: (k, f) => { l[k] = f; }, kill() {}, stdin: { end() {} } };
+    setTimeout(() => { l['odata'](Buffer.from('VOICE::Microsoft Elena Natural|es-ES|natural\nVOICE::Microsoft Helena Desktop|es-ES|\n')); l['exit'](0); }, 5);
+    return proc;
+  };
+  const tts = createTtsWindows({ spawnFn, dataDir: dir });
+  const l = await tts.listarVoces();
+  eq(l.length, 2, 'dos voces');
+  eq(l[0].natural, true, 'la natural viene marcada');
+  eq(l[0].nombre, 'Microsoft Elena Natural');
+  eq(l[1].natural, false, 'la de escritorio no');
+  eq(l[1].idioma, 'es-ES');
+});
+
+test('voz/tts: un fallo de síntesis con la marca natural cae en el resultado, no en una excepción', async () => {
+  const { createTtsWindows } = require('../main/voice/tts-windows');
+  const spawnFn = () => {
+    const l = {};
+    const proc = { stdout: { on: (k, f) => { l['o' + k] = f; } }, stderr: { on: (k, f) => { l['e' + k] = f; } }, on: (k, f) => { l[k] = f; }, kill() {}, stdin: { end() {} } };
+    setTimeout(() => { l['odata'](Buffer.from('ERROR::No hay voces instaladas\n')); l['exit'](1); }, 5);
+    return proc;
+  };
+  const tts = createTtsWindows({ spawnFn, dataDir: tmpDir('sagi-tts-nat2-') });
+  const r = await tts.sintetizar('hola');
+  ok(typeof r.error === 'string' && r.error);
+  eq(r.natural, false, 'sin voz no hay marca natural');
+});
+
 test('voz/contrato: un evento bien formado pasa y uno roto se explica', () => {
   const { assertEvent, TIPOS, ESTADOS } = require('../main/voice/contract');
   assertEvent({ type: 'state', state: 'escuchando' });
@@ -3375,6 +3449,13 @@ test('voz/basura: rechaza frases vacías, golpes y ruido del motor de dictado', 
   ok(!esBasura('sí').basura, 'sin saber la duración, un «sí» no es basura');
   ok(!esBasura('no').basura, 'ni un «no»');
   ok(!esBasura('ok').basura, 'ni un «ok»');
+  ok(!esBasura('2026').basura, 'números son válidos');
+  ok(!esBasura('3.5').basura, 'decimales son válidos');
+  ok(!esBasura('pdf').basura, 'acrónimo técnico PDF pasa');
+  ok(!esBasura('css').basura, 'acrónimo técnico CSS pasa');
+  ok(!esBasura('sql').basura, 'acrónimo técnico SQL pasa');
+  ok(!esBasura('gpt').basura, 'acrónimo técnico GPT pasa');
+  ok(!esBasura('npm test').basura, 'comando de desarrollo pasa');
 });
 
 test('voz/basura: las alucinaciones conocidas no llegan al agente', () => {
@@ -3453,10 +3534,12 @@ test('voz/stt-windows: un ERROR:: del motor se convierte en error con arreglo', 
   ok(err.fix && err.fix.includes('ms-settings:sound'), 'y trae un arreglo concreto: ' + err.fix);
 });
 
-test('voz/stt-windows: si el motor muere solo, avisa al consumidor', async () => {
+test('voz/stt-windows: si el motor muere insistentemente, se rinde y avisa al consumidor', async () => {
   const { createSttWindows } = require('../main/voice/stt-windows');
   const eventos = [];
+  let nacidos = 0;
   const spawnFn = () => {
+    nacidos++;
     const l = {};
     const proc = { stdout: { on: (k, f) => { l['o' + k] = f; } }, stderr: { on: (k, f) => { l['e' + k] = f; } }, on: (k, f) => { l[k] = f; }, kill() {}, stdin: { end() {} } };
     setTimeout(() => { l['odata'](Buffer.from('MODE::sapi\nREADY::es-ES\n')); l['exit'](1); }, 5);
@@ -3464,8 +3547,11 @@ test('voz/stt-windows: si el motor muere solo, avisa al consumidor', async () =>
   };
   const engine = createSttWindows({ emit: (e) => eventos.push(e), spawnFn, scriptPath: 'voice.ps1' });
   await engine.start();
-  await new Promise((r) => setTimeout(r, 40));
-  ok(eventos.some((e) => e.type === 'error' && /cerr[oó] solo/i.test(e.text)), 'la muerte sin aviso se convierte en error: ' + JSON.stringify(eventos.filter((e) => e.type === 'error')));
+  /* Dos rearranques a 1,2 s y el tercero cae igual: ahí sí toca rendirse y avisar.
+     (Una muerte PUNTUAL ya no es error: se rearranca — ver el test de abajo.) */
+  await new Promise((r) => setTimeout(r, 3000));
+  eq(nacidos, 3, 'arranque inicial + dos reintentos: ' + nacidos);
+  ok(eventos.some((e) => e.type === 'error' && /cerr[oó] solo/i.test(e.text)), 'la caída insistente se convierte en error: ' + JSON.stringify(eventos.filter((e) => e.type === 'error')));
 
   const eventos2 = [];
   const spawnFn2 = () => {
@@ -3544,6 +3630,50 @@ test('voz/tts-windows: sin voz disponible devuelve un error legible, no una exce
   ok(!r.wav, 'y no devuelve audio inventado');
 });
 
+test('voz/tts-local: sin instalar devuelve error legible y estado no disponible', async () => {
+  const { createTtsLocal } = require('../main/voice/tts-local');
+  const tts = createTtsLocal({ dataDir: tmpDir('sagi-piper-vacio-') });
+  ok(!tts.estado().disponible, 'sin binario ni voz: no disponible');
+  eq((await tts.listarVoces()).length, 0, 'sin voces que listar');
+  const r = await tts.sintetizar('hola');
+  ok(!r.wav && r.error, 'error legible, no excepción ni audio inventado');
+});
+
+test('voz/tts-local: sintetiza por stdin, mapea rate a length_scale y limpia', async () => {
+  const fs = require('fs');
+  const path = require('path');
+  const { createTtsLocal } = require('../main/voice/tts-local');
+  const dir = tmpDir('sagi-piper-');
+  const raiz = path.join(dir, 'voice-engine', 'tts');
+  fs.mkdirSync(raiz, { recursive: true });
+  fs.writeFileSync(path.join(raiz, 'piper.exe'), 'x');
+  fs.writeFileSync(path.join(raiz, 'voz-davefx.onnx'), 'x');
+  fs.writeFileSync(path.join(raiz, 'voz-davefx.onnx.json'), '{}');
+  let vistos = null;
+  let entrada = '';
+  const spawnFn = (cmd, args) => {
+    vistos = { cmd, args };
+    const l = {};
+    const proc = { stdin: { write: (d) => { entrada += d.toString('utf8'); }, end: () => {} }, stderr: { on: () => {} }, on: (k, f) => { l[k] = f; }, kill() {} };
+    setTimeout(() => {
+      const iF = args.indexOf('-f');
+      fs.writeFileSync(args[iF + 1], Buffer.from('RIFF....WAVEfmt '));
+      l['exit'](0);
+    }, 5);
+    return proc;
+  };
+  const tts = createTtsLocal({ spawnFn, dataDir: dir });
+  ok(tts.estado().disponible, 'binario + voz + config: disponible');
+  const r = await tts.sintetizar('Hola, prueba.', { rate: 20 });
+  ok(r.wav && r.wav.length > 8, 'devuelve bytes de WAV');
+  eq(r.voz, 'Piper davefx (es-ES)', 'dice qué voz usó');
+  ok(r.natural, 'marcada como natural (neuronal, no SAPI)');
+  ok(entrada.includes('Hola, prueba.'), 'la frase entra por stdin');
+  const iL = vistos.args.indexOf('--length_scale');
+  eq(vistos.args[iL + 1], '0.8', 'rate +20 → length 0.8 (más rápido)');
+  const sobran = fs.readdirSync(raiz).filter((f) => /^sagi-piper-.*\.(txt|wav)$/.test(f));
+  eq(sobran.length, 0, 'no deja temporales: ' + JSON.stringify(sobran));
+});
 test('voz/manager: un final limpio pasa, la basura se avisa y no se envía', async () => {
   const { createVoiceManager } = require('../main/voice/manager');
   const eventos = [];
@@ -3588,6 +3718,82 @@ test('voz/manager: trocea la respuesta en frases y las sintetiza en orden', asyn
   ok(eventos.some((e) => e.type === 'state' && e.state === 'escuchando'), 'y vuelve a escuchando al terminar');
 });
 
+test('voz/manager: un parcial mientras el asistente habla es eco, no una orden', async () => {
+  const { createVoiceManager } = require('../main/voice/manager');
+  const eventos = [];
+  let ultima = 0;
+  const tts = { nombre: 'tts', capacidades: { partials: false, confidence: false, level: false },
+    sintetizar: async () => ({ wav: Buffer.from('RIFF'), voz: 'x', ms: 1 }), listarVoces: async () => [] };
+  const stt = { nombre: 'stt', capacidades: { partials: true, confidence: true, level: false }, start: async () => {}, push: () => {}, stop: async () => {} };
+  const m = createVoiceManager({ emit: (e) => eventos.push(e), stt, tts, onPhrase: (p) => { ultima = p.id; } });
+  await m.open();
+  m.say('He abierto la carpeta de descargas.');
+  await new Promise((r) => setTimeout(r, 20));
+  eq(m.estado(), 'hablando', 'el asistente habla');
+  m.ingest({ type: 'partial', text: 'he abierto la carpeta' });
+  eq(eventos.filter((e) => e.type === 'partial').length, 0, 'su propia voz no se pinta como si el usuario hablara');
+  eq(m.estado(), 'hablando', 'y el estado sigue siendo «hablando»');
+  /* Callado, el parcial sí pasa: es la vista previa del dictado local. */
+  m.stopSpeaking();
+  m.ingest({ type: 'partial', text: 'recuérdame' });
+  eq(eventos.filter((e) => e.type === 'partial').length, 1, 'con el asistente callado, el parcial entra');
+  eq(m.estado(), 'oyendo', 'y el orbe pasa a «oyendo»');
+});
+
+test('voz/manager: el asistente no toma su propia voz por una orden del usuario', async () => {
+  const { createVoiceManager } = require('../main/voice/manager');
+  const eventos = [];
+  let ultima = 0;
+  const tts = { nombre: 'tts', capacidades: { partials: false, confidence: false, level: false },
+    sintetizar: async () => ({ wav: Buffer.from('RIFF'), voz: 'x', ms: 1 }), listarVoces: async () => [] };
+  const stt = { nombre: 'stt', capacidades: { partials: true, confidence: true, level: false }, start: async () => {}, push: () => {}, stop: async () => {} };
+  const m = createVoiceManager({ emit: (e) => eventos.push(e), stt, tts, onPhrase: (p) => { ultima = p.id; } });
+  const dichos = () => eventos.filter((e) => e.type === 'final').length;
+  await m.open();
+  m.ingest({ type: 'final', text: 'recuérdame llamar a Álvaro' });
+  eq(dichos(), 1, 'con el asistente callado una frase pasa');
+
+  /* Lo que el motor oye mientras el asistente habla: sus propios altavoces. */
+  m.say('He abierto la carpeta de descargas.');
+  await new Promise((r) => setTimeout(r, 20));
+  eq(m.estado(), 'hablando', 'el asistente está hablando');
+  m.ingest({ type: 'final', text: 'He abierto la carpeta de descargas' });
+  eq(dichos(), 1, 'lo que oye de sí mismo mientras habla no llega al agente');
+  eq(m.estado(), 'hablando', 'y no le cambia el estado al asistente');
+  /* La frase termina de sonar, pero el motor no cierra la suya hasta 1,6 s después: lo que
+     llegue en esa cola sigue siendo eco. */
+  m.spoken(ultima);
+  await new Promise((r) => setTimeout(r, 20));
+  m.ingest({ type: 'final', text: 'He abierto la carpeta de descargas' });
+  eq(dichos(), 1, 'la cola de eco tampoco deja pasar el eco');
+  await new Promise((r) => setTimeout(r, 2000));   // la cola se agota
+  m.ingest({ type: 'final', text: 'ahora abre el navegador' });
+  eq(dichos(), 2, 'pasada la cola, lo que diga el usuario vuelve a entrar');
+});
+
+test('voz/manager: tras interrumpir, el siguiente id reiniciado no queda huérfano', async () => {
+  /* Este test documenta el contrato del renderer: al interrumpir, el renderer manda
+     tts:reset y el proceso principal recrea el manager (seq vuelve a 0). Sin eso, la
+     frase siguiente a una interrupción llevaba un id viejo y se descartaba al terminar
+     (la respuesta se quedaba muda tras una frase). */
+  const { createVoiceManager } = require('../main/voice/manager');
+  const dichos = [];
+  const tts = { nombre: 'tts', capacidades: { partials: false, confidence: false, level: false },
+    sintetizar: async (t) => ({ wav: Buffer.from('RIFF'), voz: 'x', ms: 1 }), listarVoces: async () => [] };
+  const stt = { nombre: 'stt', capacidades: { partials: true, confidence: true, level: false }, start: async () => {}, push: () => {}, stop: async () => {} };
+  const m = createVoiceManager({ emit: () => {}, stt, tts, onPhrase: (p) => dichos.push(p.id) });
+  await m.open();
+  m.say('Frase uno. Frase dos.');
+  await new Promise((r) => setTimeout(r, 20));
+  ok(dichos.length >= 1, 'hay frases con id');
+  // el reset del proceso principal (tts:reset) es exactamente esto: un manager nuevo
+  const m2 = createVoiceManager({ emit: () => {}, stt, tts, onPhrase: (p) => dichos.push('nuevo:' + p.id) });
+  await m2.open();
+  m2.say('Frase nueva.');
+  await new Promise((r) => setTimeout(r, 20));
+  eq(dichos.find((x) => x === 'nuevo:1'), 'nuevo:1', 'el manager nuevo arranca en id 1');
+});
+
 test('voz/manager: interrumpir corta la cola y no sintetiza lo que queda', async () => {
   const { createVoiceManager } = require('../main/voice/manager');
   const frases = [];
@@ -3603,6 +3809,454 @@ test('voz/manager: interrumpir corta la cola y no sintetiza lo que queda', async
   eq(frases.length, 1, 'sólo se sintetizó la que ya estaba en marcha');
   eq(m.estado(), 'escuchando', 'y vuelve a escuchar');
 });
+
+/* ---------- voz: reparaciones del modo voz (detección y calidad) ---------- */
+
+/* «Cierra el navegador» es una ORDEN para el agente: el prefijo suelto de antes la
+   cazaba y apagaba el modo voz en vez de enviarla. La decisión vive en el regex de
+   voice-mode.js, así que se prueba el fichero fuente (la lógica del panel no está
+   exportada y el resto de la suite ya comprueba así el cableado del renderer). */
+test('voz/salida: sólo se cierra el modo con frases que hablan del modo voz', () => {
+  const fs = require('fs');
+  const src = fs.readFileSync(path.join(__dirname, '..', 'renderer', 'voice-mode.js'), 'utf8');
+  const regexDe = (linea) => {
+    const ini = linea.indexOf('/^(');
+    const fin = linea.indexOf('/i.test');
+    ok(ini >= 0 && fin > ini, 'el regex de salida está completo en la línea');
+    return new RegExp(linea.slice(ini + 1, fin), 'i');   // sin el «/» inicial ni la bandera
+  };
+  /* Las DOS líneas se buscan por su contenido, no por su posición: la primera línea del
+     fichero que empiece por `/^(` ya no es la del modo voz — hay otras órdenes por voz
+     («para», «detente»…) que también son un regex y que, tomadas por la del cierre, hacían
+     fallar esta comprobación por un motivo que no tiene nada que ver con lo que vigila. */
+  const lineas = src.split(/\r?\n/).filter((l) => l.includes('/^(') && l.includes('/i.test'));
+  const lineaModo = lineas.find((l) => l.includes('voz|dictado'));
+  /* Ojo con la clave de búsqueda: el regex del modo TAMBIÉN contiene «hasta luego|salir»
+     (dentro de su propia alternancia), así que hay que buscar por lo que sólo tiene la
+     línea de las despedidas — el `\b` que cierra su grupo. */
+  const lineaAdios = lineas.find((l) => l.includes('salir)\\b'));
+  if (!lineaModo || !lineaAdios) { ok(false, 'no se encuentran los dos regex de salida en voice-mode.js'); return; }
+  const reModo = regexDe(lineaModo);
+  const reAdios = regexDe(lineaAdios);
+  ok(reModo.test('cierra el modo voz'), '«cierra el modo voz» cierra');
+  ok(reModo.test('apaga el modo voz'), '«apaga el modo voz» cierra');
+  ok(reModo.test('cierra la voz'), '«cierra la voz» cierra');
+  ok(reModo.test('para el dictado'), '«para el dictado» cierra');
+  ok(reAdios.test('adiós'), '«adiós» cierra');
+  ok(reAdios.test('hasta luego'), '«hasta luego» cierra');
+  ok(!reModo.test('cierra el navegador'), '«cierra el navegador» NO cierra: es una orden');
+  ok(!reModo.test('cierra la ventana'), '«cierra la ventana» NO cierra: es una orden');
+  ok(!reModo.test('para el proyecto de ley'), '«para el proyecto de ley» NO cierra');
+  ok(!reAdios.test('cierra el navegador'), 'y las despedidas tampoco lo cazan');
+});
+
+test('voz/stt-windows: si el motor muere solo se rearranca y no se rinde a la primera', async () => {
+  const { createSttWindows } = require('../main/voice/stt-windows');
+  const eventos = [];
+  let nacidos = 0;
+  const spawnFn = () => {
+    nacidos++;
+    const l = {};
+    const proc = { stdout: { on: (k, f) => { l['o' + k] = f; } }, stderr: { on: (k, f) => { l['e' + k] = f; } }, on: (k, f) => { l[k] = f; }, kill() {}, stdin: { end() {} } };
+    setTimeout(() => { l['odata'](Buffer.from('MODE::winrt\nREADY::es-ES\n')); l['exit'](1); }, 5);
+    return proc;
+  };
+  const engine = createSttWindows({ emit: (e) => eventos.push(e), spawnFn, scriptPath: 'voice.ps1' });
+  await engine.start();
+  // 2 rearranques programados a 1,2 s: se espera lo justo y se comprueba que nació otro
+  await new Promise((r) => setTimeout(r, 1600));
+  ok(nacidos >= 2, 'el motor se rearranca tras morir: nacidos=' + nacidos);
+  ok(eventos.some((e) => e.type === 'notice' && /reiniciado/.test(e.text)), 'se avisa que sigue escuchando');
+  ok(!eventos.some((e) => e.type === 'error' && /cerr[oó] solo/.test(e.text)), 'no se rinde a la primera caída');
+  await engine.stop();
+});
+
+test('voz/tts-windows: el resultado de sintetizar lleva la marca natural REAL (VOICEOK)', async () => {
+  const { createTtsWindows } = require('../main/voice/tts-windows');
+  const fs = require('fs');
+  const dir = tmpDir('sagi-tts-ok-');
+  const spawnFn = (cmd, args) => {
+    const l = {};
+    const proc = { stdout: { on: (k, f) => { l['o' + k] = f; } }, stderr: { on: (k, f) => { l['e' + k] = f; } }, on: (k, f) => { l[k] = f; }, kill() {}, stdin: { end() {} } };
+    const outFile = args[args.indexOf('-OutFile') + 1];
+    fs.writeFileSync(outFile, Buffer.from('RIFF....WAVEfmt '));
+    setTimeout(() => { l['odata'](Buffer.from('VOICEOK::Microsoft Elena Natural|natural\nOK::' + outFile + '|100\n')); l['exit'](0); }, 5);
+    return proc;
+  };
+  const tts = createTtsWindows({ spawnFn, dataDir: dir });
+  const r = await tts.sintetizar('hola');
+  ok(r.wav && r.wav.length > 8, 'devuelve audio');
+  eq(r.voz, 'Microsoft Elena Natural');
+  eq(r.natural, true, 'la marca natural llega hasta el renderer');
+});
+
+test('voz/tts-windows: una voz natural que falla no se cambia en silencio por una robótica', async () => {
+  const { createTtsWindows } = require('../main/voice/tts-windows');
+  const spawnFn = () => {
+    const l = {};
+    const proc = { stdout: { on: (k, f) => { l['o' + k] = f; } }, stderr: { on: (k, f) => { l['e' + k] = f; } }, on: (k, f) => { l[k] = f; }, kill() {}, stdin: { end() {} } };
+    setTimeout(() => { l['odata'](Buffer.from('ERROR::SSML no válido\n')); l['exit'](1); }, 5);
+    return proc;
+  }; 
+  const tts = createTtsWindows({ spawnFn, dataDir: tmpDir('sagi-tts-nat3-') });
+  const r = await tts.sintetizar('hola', { voice: 'Microsoft Elena Natural' });
+  ok(!r.wav && r.error, 'no hay audio y hay error');
+  ok(/natural/i.test(r.error), 'el error dice que la voz natural falló: ' + r.error);
+});
+
+/* ---------- rescate del motor sordo (motor moderno que no recibe audio) ---------- */
+
+test('voz/manager: rescatarMotor delega en el motor de escucha (motorAlternativo)', async () => {
+  const { createVoiceManager } = require('../main/voice/manager');
+  const llamadas = [];
+  const stt = { nombre: 'stt', capacidades: { partials: true, confidence: true, level: false },
+    start: async () => {}, push: () => {}, stop: async () => {}, motorAlternativo: async () => { llamadas.push('rescate'); } };
+  const tts = { nombre: 'tts', capacidades: { partials: false, confidence: false, level: false }, sintetizar: async () => ({ wav: Buffer.from('RIFF'), voz: 'x', ms: 1 }), listarVoces: async () => [] };
+  const m = createVoiceManager({ emit: () => {}, stt, tts, onPhrase: () => {} });
+  await m.rescatarMotor();
+  eq(llamadas.length, 1, 'el rescate del manager llega al motor de escucha');
+  /* Un motor que no sabe rescatar (una fase futura, una mentira de prueba) no rompe nada. */
+  const sttMudo = { nombre: 'stt', capacidades: { partials: true, confidence: true, level: false }, start: async () => {}, push: () => {}, stop: async () => {} };
+  const m2 = createVoiceManager({ emit: () => {}, stt: sttMudo, tts, onPhrase: () => {} });
+  await m2.rescatarMotor();   // no debe lanzar
+  ok(true, 'y un motor sin motorAlternativo no rompe el rescate');
+});
+
+test('voz/rescate: el vigía del renderer pide el cambio al clásico cuando hay voz y cero texto', () => {
+  const fs = require('fs');
+  const src = fs.readFileSync(path.join(__dirname, '..', 'renderer', 'voice-mode.js'), 'utf8');
+  /* La señal del vigía: voz real del micro sostenida SIN ningún texto del motor en toda
+     la sesión. Los parciales y los finales (y la basura, que prueba audio) marcan texto. */
+  ok(/PRIMERA_FRASE_MS\s*=\s*\d{4,}/.test(src), 'hay margen de gracia tras abrir (nadie habla al instante)');
+  ok(/MODO_CALMA_MS\s*=\s*\d{3,}/.test(src), 'la voz debe ser sostenida: una palmada no es un motor sordo');
+  ok((src.match(/textoVisto = true;/g) || []).length >= 3, 'los tres caminos de texto (parcial, final y basura) marcan textoVisto');
+  ok(/voiceRescue\(\)/.test(src), 'el vigía llama al puente voiceRescue');
+  ok(/rescateHecho = true;/.test(src) && !/rescateHecho = false;\s*\/\/\s*otra vez/.test(src), 'el rescate se pide UNA vez por sesión');
+  ok(/clearInterval\(vigia\)/.test(src), 'la vigilancia muere al cerrar el modo');
+  /* El cuerpo de la función, acotado de verdad: el primer trozo tras split('vigilancia')
+     es el comentario de una variable («intervalo de vigilancia»), no la función. */
+  const cuerpoVigia = src.slice(src.indexOf('function vigilancia'), src.indexOf('async function abrir'));
+  ok(/estado === 'hablando'/.test(cuerpoVigia), 'mientras el asistente habla el vigía no juzga (eso es barge-in)');
+});
+
+test('voz/whisper: corta frases por silencio y las manda transcribir al CLI', async () => {
+  const { createWhisper } = require('../main/voice/whisper');
+  const fs = require('fs');
+  const path = require('path');
+  const eventos = [];
+  const argsVistos = [];
+  const spawnFn = (cmd, args) => {
+    argsVistos.push({ cmd, args });
+    const l = {};
+    const proc = { stdout: { on: (k, f) => { l['o' + k] = f; } }, stderr: { on: (k, f) => { l['e' + k] = f; } }, on: (k, f) => { l[k] = f; }, kill() {}, stdin: { end() {} } };
+    setTimeout(() => { l['odata'](Buffer.from('Hola, ¿qué hora es?\n')); l['exit'](0); }, 5);
+    return proc;
+  };
+  const dir = tmpDir('sagi-wh-');
+  fs.mkdirSync(path.join(dir, 'bin'), { recursive: true });
+  fs.mkdirSync(path.join(dir, 'models'), { recursive: true });
+  fs.writeFileSync(path.join(dir, 'bin', 'whisper-cli.exe'), '');
+  fs.writeFileSync(path.join(dir, 'models', 'ggml-base.bin'), '');
+  const engine = createWhisper({ emit: (e) => eventos.push(e), lang: 'es-ES', spawnFn, dirRaiz: dir, tmpDir: dir });
+  await engine.start();
+  ok(engine.estado().disponible, 'binario y modelo resueltos: ' + JSON.stringify(engine.estado()));
+  /* Voz de 0,4 s (tono) + silencio de 0,8 s: la frase se abre con el tono y cierra con
+     la cola de silencio (~0,6 s). */
+  const sr = 16000;
+  const voz = Buffer.alloc(sr * 0.4 * 2);
+  for (let i = 0; i < sr * 0.4; i++) voz.writeInt16LE(Math.round(Math.sin(2 * Math.PI * 220 * i / sr) * 12000), i * 2);
+  engine.push(voz);
+  await new Promise((r) => setTimeout(r, 60));
+  eq(eventos.filter((e) => e.type === 'final').length, 0, 'la frase sigue abierta: nada final aún');
+  engine.push(Buffer.alloc(sr * 0.8 * 2));
+  await new Promise((r) => setTimeout(r, 60));
+  const fin = eventos.find((e) => e.type === 'final');
+  ok(fin, 'la frase cerró con el silencio y llegó transcrita: ' + JSON.stringify(eventos));
+  eq(fin && fin.text, 'Hola, ¿qué hora es?', 'texto que devolvió el CLI');
+  const a = argsVistos[0].args;
+  ok(a.includes('-l') && a[a.indexOf('-l') + 1] === 'es', 'idioma derivado de es-ES: ' + JSON.stringify(a));
+  ok(a.includes('-nt'), 'sin marcas de tiempo (-nt)');
+  ok(!a.includes('--prompt'), 'sin --prompt: en frases cortas el modelo acaba repitiendo su propia cola');
+  const iF = a.indexOf('-f');
+  ok(iF >= 0 && a[iF + 1].endsWith('.wav'), 'transcribe un WAV temporal');
+  ok(!fs.existsSync(a[iF + 1]), 'el WAV temporal se limpia tras transcribir');
+  await engine.stop();
+});
+
+test('voz/whisper: tumba alucinaciones sin voces y limpia el texto', async () => {
+  const { createWhisper } = require('../main/voice/whisper');
+  const fs = require('fs');
+  const path = require('path');
+  const eventos = [];
+  let salida = '♪ ♪ ♪';
+  const spawnFn = () => {
+    const l = {};
+    const proc = { stdout: { on: (k, f) => { l['o' + k] = f; } }, stderr: { on: (k, f) => { l['e' + k] = f; } }, on: (k, f) => { l[k] = f; }, kill() {}, stdin: { end() {} } };
+    setTimeout(() => l['odata'](Buffer.from(salida + '\n')), 5);
+    return proc;
+  };
+  const dir = tmpDir('sagi-wh-');
+  fs.mkdirSync(path.join(dir, 'bin'), { recursive: true });
+  fs.mkdirSync(path.join(dir, 'models'), { recursive: true });
+  fs.writeFileSync(path.join(dir, 'bin', 'whisper-cli.exe'), '');
+  fs.writeFileSync(path.join(dir, 'models', 'ggml-base.bin'), '');
+  const engine = createWhisper({ emit: (e) => eventos.push(e), lang: 'es-ES', spawnFn, dirRaiz: dir, tmpDir: dir });
+  await engine.start();
+  const sr = 16000;
+  engine.push(Buffer.alloc(sr * 0.5 * 2).map((v, i) => (i % 2 === 0 ? Math.round(Math.sin(2 * Math.PI * 220 * (i / 2) / sr) * 12000) & 0xff : Math.round(Math.sin(2 * Math.PI * 220 * (i / 2) / sr) * 12000) >> 8)));
+  engine.push(Buffer.alloc(sr * 0.8 * 2));
+  await new Promise((r) => setTimeout(r, 60));
+  eq(eventos.filter((e) => e.type === 'final').length, 0, 'una alucinación sin voces no llega al usuario');
+  salida = '   Hola,   ¿qué   hora   es?   ';
+  engine.push(Buffer.alloc(sr * 0.4 * 2));   // nuevo silencio no abre nada: sin voz no hay frase
+  await new Promise((r) => setTimeout(r, 30));
+  eq(eventos.filter((e) => e.type === 'final').length, 0, 'silencio solo no produce frases');
+  await engine.stop();
+});
+
+test('voz/whisper: el tap PCM renderer→voice:pcm→push está cableado', () => {
+  const fs = require('fs');
+  const app = fs.readFileSync('renderer/app.js', 'utf8');
+  const main = fs.readFileSync('main/main.js', 'utf8');
+  const preload = fs.readFileSync('main/preload.js', 'utf8');
+  const vm = fs.readFileSync('renderer/voice-mode.js', 'utf8');
+  ok(/voicePcm:\s*\(pcm\)/.test(preload), 'el preload puentea voicePcm');
+  ok(/ipcMain\.on\('voice:pcm'/.test(main), 'main recibe el PCM por voice:pcm');
+  ok(/createWhisper/.test(main) && /push\(pcm\)/.test(main), 'main construye el motor whisper y le pasa el PCM');
+  ok(/abrirTapPcm/.test(app) && /cerrarTapPcm/.test(app), 'el renderer abre y cierra el tap con la sesión');
+  ok(/audioWorklet/.test(app), 'el tap va por AudioWorklet (sin ruido del hilo principal)');
+  ok(/__alCerrarModoVoz/.test(vm), 'el cierre del panel (Esc/adiós/botón) suelta el tap');
+  ok(/voiceInstallStatus/.test(preload) && /voice:installStatus/.test(main), 'el estado del dictado local llega a Ajustes');
+});
+
+test('voz/tap: las cuatro causas del «orbe se mueve y no transcribe» están cerradas', () => {
+  const fs = require('fs');
+  const app = fs.readFileSync('renderer/app.js', 'utf8');
+  const html = fs.readFileSync('renderer/index.html', 'utf8');
+  const main = fs.readFileSync('main/main.js', 'utf8');
+  const wj = fs.readFileSync('main/voice/whisper.js', 'utf8');
+  /* 1) La CSP debe permitir blobs como script: el código del AudioWorklet viaja en uno
+        y sin esto Chromium lo BLOQUEA en silencio — el tap nacía muerto. */
+  ok(/script-src[^\"]*\bblob:/.test(html), 'la CSP deja cargar el AudioWorklet (script-src con blob:)');
+  /* 2) El contexto del tap NUNCA fuerza sampleRate: Chromium en Windows entrega
+        silencio con algunos micros si se le pide 16 kHz; se captura a la tasa nativa
+        y se remuestrea. */
+  ok(!/new AudioCtx\(\{\s*sampleRate/.test(app), 'el tap no fuerza sampleRate (silencio garantizado en algunos micros)');
+  ok(/enviarPcmAlMotor/.test(app) && /srDestino = 16000/.test(app), 'el remuestreo a 16 kHz vive en el renderer');
+  /* 3) El fallo del tap ya no se traga: se suelta lo adquirido y se AVISA. Y el nodo
+        cuelga del destino vía un gain mudo (un grafo sin destino puede no procesarse). */
+  ok(/\[tap-pcm\] fallo al abrir/.test(app), 'el fallo del tap se registra y se muestra');
+  ok(/createGain\(\)/.test(app) && /gain\.value = 0/.test(app) && /connect\(ctx\.destination\)/.test(app), 'el nodo del tap cuelga del destino con un gain mudo');
+  /* 4) Con voz y sin nada transcribiendo, el vigía reabre el tap (whisper) o pide el
+        rescate (motores de Windows); el proceso principal también puede ordenarlo. */
+  ok(/__reabrirTap/.test(app) && /reabrir-tap/.test(app) && /reabrirTapVoz/.test(app), 'la reapertura del tap está cableada (vigía y orden del principal)');
+  ok(/__tapEstado/.test(app), 'el vigía puede saber si el tap está vivo');
+  ok(/reabrir-tap/.test(main), 'el proceso principal emite la orden de reabrir el tap');
+  ok(/pcmMs/.test(main), 'hay telemetría de audio recibido por voice:pcm');
+  /* Y el VAD no debe dejar fuera a los micros de poca ganancia: puerta tenue sostenida. */
+  ok(/FACTOR_TI_BIO/.test(wj) && /DISPARO_TI_BIO/.test(wj), 'el VAD abre frases con habla tenue sostenida (micros de poca ganancia)');
+});
+
+test('voz/whisper: la puerta tenue del VAD abre frases que el umbral fuerte no ve', async () => {
+  const { createWhisper } = require('../main/voice/whisper');
+  const fs = require('fs');
+  const path = require('path');
+  const eventos = [];
+  const spawnFn = (cmd, args) => {
+    const l = {};
+    const proc = { stdout: { on: (k, f) => { l['o' + k] = f; } }, stderr: { on: (k, f) => { l['e' + k] = f; } }, on: (k, f) => { l[k] = f; }, kill() {}, stdin: { end() {} } };
+    setTimeout(() => { l['odata'](Buffer.from('voz tenue\n')); l['exit'](0); }, 5);
+    return proc;
+  };
+  const dir = tmpDir('sagi-wh-tb-');
+  fs.mkdirSync(path.join(dir, 'bin'), { recursive: true });
+  fs.mkdirSync(path.join(dir, 'models'), { recursive: true });
+  fs.writeFileSync(path.join(dir, 'bin', 'whisper-cli.exe'), '');
+  fs.writeFileSync(path.join(dir, 'models', 'ggml-base.bin'), '');
+  const engine = createWhisper({ emit: (e) => eventos.push(e), lang: 'es-ES', spawnFn, dirRaiz: dir, tmpDir: dir });
+  await engine.start();
+  /* Habla TENUE: 2× el suelo (por debajo del umbral fuerte de 3×), 0,5 s seguidos.
+     La puerta fuerte no la abre; la tenue (1,6×, 12 marcos ≈ 360 ms) debe hacerlo. */
+  const sr = 16000;
+  const calibra = Buffer.alloc(sr * 1.0 * 2);   // 1 s de suelo bajo para calibrar
+  engine.push(calibra);
+  const tenue = Buffer.alloc(sr * 0.5 * 2);
+  for (let i = 0; i < sr * 0.5; i++) tenue.writeInt16LE(Math.round(Math.sin(2 * Math.PI * 220 * i / sr) * 500), i * 2);
+  engine.push(tenue);
+  engine.push(Buffer.alloc(sr * 0.8 * 2));      // silencio que cierra la frase
+  await new Promise((r) => setTimeout(r, 60));
+  const fin = eventos.find((e) => e.type === 'final');
+  ok(fin && fin.text === 'voz tenue', 'la frase tenue se abrió, cerró y se transcribió: ' + JSON.stringify(eventos));
+  await engine.stop();
+});
+
+test('voz/rescate: MotorAlterno:: del guion no respawnedea el proceso y fija el clásico para el próximo arranque', async () => {
+  const { createSttWindows } = require('../main/voice/stt-windows');
+  const eventos = [];
+  let nacidos = 0;
+  const argsVistos = [];
+  const spawnFn = (c, a) => {
+    nacidos++;
+    argsVistos.push(a);
+    const l = {};
+    const proc = { stdout: { on: (k, f) => { l['o' + k] = f; } }, stderr: { on: (k, f) => { l['e' + k] = f; } }, on: (k, f) => { l[k] = f; }, kill() {}, stdin: { end() {} } };
+    setTimeout(() => { l['odata'](Buffer.from('MODE::winrt\nREADY::es-ES\nMotorAlterno::el microfono predeterminado no entrega audio\n')); }, 5);
+    return proc;
+  };
+  const engine = createSttWindows({ emit: (e) => eventos.push(e), spawnFn, scriptPath: 'voice.ps1' });
+  await engine.start();
+  await new Promise((r) => setTimeout(r, 40));
+  eq(nacidos, 1, 'el guion se rescata solo: no se lo mata desde fuera: ' + nacidos);
+  ok(eventos.some((e) => e.type === 'notice' && /cl[aá]sico/.test(e.text)), 'se avisa del cambio: ' + JSON.stringify(eventos.filter((e) => e.type === 'notice')));
+  // El próximo arranque (caída, reapertura) va ya directo al clásico:
+  await engine.start();
+  eq(nacidos, 2, 'un start() rearma la escucha');
+  ok(argsVistos[1].includes('-NoWinrt'), 'el rearranque tras el auto-rescate va al clásico: ' + JSON.stringify(argsVistos[1]));
+});
+
+test('voz/rescate: la cadena completa renderer→manager→-NoWinrt está cableada', () => {
+  const fs = require('fs');
+  const preload = fs.readFileSync(path.join(__dirname, '..', 'main', 'preload.js'), 'utf8');
+  const mainSrc = fs.readFileSync(path.join(__dirname, '..', 'main', 'main.js'), 'utf8');
+  const stt = fs.readFileSync(path.join(__dirname, '..', 'main', 'voice', 'stt-windows.js'), 'utf8');
+  ok(/voiceRescue:.*'voice:rescue'/.test(preload), 'el puente expone voiceRescue sobre el canal voice:rescue');
+  ok(/'voice:rescue'/.test(mainSrc) && /rescatarMotor/.test(mainSrc), 'el proceso principal atiende voice:rescue y llama al manager');
+  ok(/motorAlternativo/.test(mainSrc), 'el wrapper stt del proceso principal expone el rescate');
+  ok(/motorAlternativo/.test(stt) && /-NoWinrt/.test(stt), 'el motor de escucha rearma el guion con el clásico');
+});
+
+/* ---------- voz: calidad de la voz local, precisión del dictado y fluidez ---------- */
+
+/* El troceado de la lectura en voz alta vive en renderer/frases.js justo para poder
+   probarlo aquí (es la pieza delicada: partir de más o de menos se oye). */
+test('voz/frases: parte la respuesta sin romper decimales y sin leer código', () => {
+  const { corteDeFrase, limpiarParaVoz, diceAlgo } = require('../renderer/frases');
+  const trozos = (texto, fin) => {
+    const out = []; let leido = 0;
+    for (;;) { const c = corteDeFrase(texto.slice(leido), fin); if (c <= 0) break; out.push(texto.slice(leido, leido + c)); leido += c; }
+    return out;
+  };
+  eq(trozos('Hecho.', false).length, 1, 'una frase cerrada se lee entera');
+  /* El decimal NO es un final de frase: si el corte fuera por el punto, la voz diría
+     «versión tres» y «cinco» — es el fallo que ya se cazó en el troceado del proceso
+     principal, y aquí vale la pena tenerlo escrito otra vez. */
+  eq(trozos('Está en la versión 3.5 del manual.', false).length, 1, 'el punto de un decimal no parte la frase');
+  eq(trozos('Quedan 10.000 resultados para revisar.', false).length, 1, 'ni el de un separador de miles');
+  eq(trozos('Estoy mirando el', false).length, 0, 'a medias no se dice nada todavía');
+  eq(trozos('Estoy mirando el', true).length, 1, 'y al terminar la respuesta la cola sin punto sí se lee');
+  const lista = trozos('Uno\nDos sin punto\n', false);
+  eq(lista.length, 2, 'los saltos de línea son frontera de frase: ' + JSON.stringify(lista));
+  const conCodigo = trozos('Mira:\n```js\nconst a = 1;\n```\nListo.', true).map(limpiarParaVoz).join('|');
+  ok(!/const/.test(conCodigo), 'el código no se lee en voz alta: ' + JSON.stringify(conCodigo));
+  ok(/Listo/.test(conCodigo), 'y el texto de alrededor sí se lee: ' + JSON.stringify(conCodigo));
+  eq(limpiarParaVoz('**Hola** `x` # Título'), 'Hola x Título', 'el markdown se limpia antes de hablar');
+  ok(!diceAlgo(limpiarParaVoz('|---|---|')), 'una línea de tabla no gasta una síntesis');
+  ok(diceAlgo('Hola'), 'y una palabra sí se lee');
+});
+
+test('voz/local: la voz de Piper manda salvo que el usuario elija otra a mano', () => {
+  const { usarVozLocal, VOZ_NOMBRE } = require('../main/voice/tts-local');
+  ok(usarVozLocal({ disponible: true, voice: '' }), 'sin voz guardada suena la local');
+  ok(usarVozLocal({ disponible: true, voice: VOZ_NOMBRE }), 'con la local guardada, la local');
+  ok(usarVozLocal({ disponible: true, voice: 'Microsoft Helena' }), 'una voz de Windows puesta por la APP no condena a la local');
+  ok(!usarVozLocal({ disponible: true, voice: 'Microsoft Helena', fijo: true }), 'si la eligió el usuario a mano, manda la suya');
+  ok(usarVozLocal({ disponible: true, voice: VOZ_NOMBRE, fijo: true }), 'y si eligió la local, sigue siendo la local');
+  ok(!usarVozLocal({ disponible: false, voice: '' }), 'sin instalar no hay nada que preferir');
+  const main = fs.readFileSync(path.join(__dirname, '..', 'main', 'main.js'), 'utf8');
+  const app = fs.readFileSync(path.join(__dirname, '..', 'renderer', 'app.js'), 'utf8');
+  ok(/usarVozLocal\(/.test(main), 'el proceso principal decide con esta función');
+  ok(/'ttsVoiceFijo' in clean/.test(main), 'el ajuste «elegida a mano» se valida como booleano');
+  ok(/ttsVoiceFijo: true/.test(app), 'elegir voz en Ajustes la marca como elección del usuario');
+  ok(/\^piper/i.test(app), 'Ajustes reconoce la voz local para preferirla');
+});
+
+test('voz/whisper: el motor elige el modelo de más precisión que haya instalado', () => {
+  const { createWhisper } = require('../main/voice/whisper');
+  const dir = tmpDir('sagi-wh-modelo-');
+  fs.mkdirSync(path.join(dir, 'bin'), { recursive: true });
+  fs.mkdirSync(path.join(dir, 'models'), { recursive: true });
+  fs.writeFileSync(path.join(dir, 'bin', 'whisper-cli.exe'), '');
+  fs.writeFileSync(path.join(dir, 'models', 'ggml-base.bin'), '');
+  eq(createWhisper({ emit: () => {}, dirRaiz: dir }).estado().modeloNombre, 'ggml-base', 'con sólo el base instalado usa el base');
+  fs.writeFileSync(path.join(dir, 'models', 'ggml-small-q5_1.bin'), '');
+  eq(createWhisper({ emit: () => {}, dirRaiz: dir }).estado().modeloNombre, 'ggml-small-q5_1', 'y en cuanto está el q5_1 prefiere el que se midió para conversar');
+  const main = fs.readFileSync(path.join(__dirname, '..', 'main', 'main.js'), 'utf8');
+  ok(/ggml-small-q5_1\.bin/.test(main), 'el instalador baja ese mismo modelo (el que el motor va a usar)');
+  ok(/MIN_MODELO/.test(main) && /llegó incompleto/.test(main), 'y no da por bueno un modelo truncado');
+});
+
+test('voz/whisper: la vista previa enseña el texto mientras se habla y no pisa al final', async () => {
+  const { createWhisper } = require('../main/voice/whisper');
+  const eventos = [];
+  const lanzados = [];
+  const spawnFn = (cmd, args) => {
+    lanzados.push(args);
+    const l = {};
+    const proc = { stdout: { on: (k, f) => { l['o' + k] = f; } }, stderr: { on: (k, f) => { l['e' + k] = f; } }, on: (k, f) => { l[k] = f; }, kill() {}, stdin: { end() {} } };
+    const wav = args[args.indexOf('-f') + 1];
+    const previa = path.basename(wav).startsWith('p-');
+    setTimeout(() => { l['odata'](Buffer.from(previa ? 'recuérdame llamar\n' : 'Recuérdame llamar a Álvaro.\n')); l['exit'](0); }, 5);
+    return proc;
+  };
+  const dir = tmpDir('sagi-wh-prev-');
+  const tmp = path.join(dir, 'tmp');
+  fs.mkdirSync(path.join(dir, 'bin'), { recursive: true });
+  fs.mkdirSync(path.join(dir, 'models'), { recursive: true });
+  fs.mkdirSync(tmp, { recursive: true });
+  fs.writeFileSync(path.join(dir, 'bin', 'whisper-cli.exe'), '');
+  fs.writeFileSync(path.join(dir, 'models', 'ggml-base.bin'), '');
+  const engine = createWhisper({ emit: (e) => eventos.push(e), lang: 'es-ES', spawnFn, dirRaiz: dir, tmpDir: tmp });
+  await engine.start();
+  /* 2 s de voz seguidos: por encima del mínimo de la previa (~1,2 s) y sin silencio, así
+     que la frase sigue abierta mientras la previa ya se ha lanzado. */
+  const sr = 16000;
+  const voz = new Int16Array(sr * 2);
+  for (let i = 0; i < voz.length; i++) voz[i] = Math.round(Math.sin(2 * Math.PI * 220 * i / sr) * 12000);
+  engine.push(Buffer.from(voz.buffer));
+  await new Promise((r) => setTimeout(r, 80));
+  const parcial = eventos.find((e) => e.type === 'partial');
+  ok(parcial && /recuérdame/.test(parcial.text), 'mientras habla, el panel ya enseña texto: ' + JSON.stringify(eventos));
+  eq(eventos.filter((e) => e.type === 'final').length, 0, 'y la frase sigue abierta: nada definitivo todavía');
+  engine.push(Buffer.alloc(sr * 0.8 * 2));
+  await new Promise((r) => setTimeout(r, 80));
+  const fin = eventos.find((e) => e.type === 'final');
+  ok(fin && fin.text === 'Recuérdame llamar a Álvaro.', 'al callar, el texto definitivo sustituye al parcial: ' + JSON.stringify(eventos));
+  const parciales = eventos.filter((e) => e.type === 'partial').length;
+  await new Promise((r) => setTimeout(r, 60));
+  eq(eventos.filter((e) => e.type === 'partial').length, parciales, 'ningún parcial llega DESPUÉS del final (el panel no revive texto viejo)');
+  ok(lanzados.length >= 2, 'se lanzaron la previa y la definitiva (procesos distintos)');
+  eq(fs.readdirSync(tmp).length, 0, 'ni la previa ni el final dejan WAV temporales');
+  await engine.stop();
+});
+
+test('voz/fluidez: la respuesta se lee por frases MIENTRAS se escribe', () => {
+  const app = fs.readFileSync(path.join(__dirname, '..', 'renderer', 'app.js'), 'utf8');
+  const main = fs.readFileSync(path.join(__dirname, '..', 'main', 'main.js'), 'utf8');
+  const html = fs.readFileSync(path.join(__dirname, '..', 'renderer', 'index.html'), 'utf8');
+  ok(/SagiFrases/.test(app) && /frases\.js/.test(html), 'el troceado probado es el que usa la página');
+  ok(/hablarEnFlujo\(b\._stream, false\)/.test(app), 'cada trozo del stream entra en la voz en cuanto tiene frase');
+  ok(/hablarEnFlujo\(leidoHastaAqui, true\)/.test(app), 'al cerrar el turno solo va la cola, no se repite lo ya leído');
+  ok(/encolar: lecturaSuena/.test(app), 'la primera frase corta la lectura anterior y las siguientes se encolan');
+  ok(/if \(!\(opts && opts\.encolar\)\) voz\.stopSpeaking\(\)/.test(main), 'el proceso principal encola sin cortar lo que suena');
+  const vm = fs.readFileSync(path.join(__dirname, '..', 'renderer', 'voice-mode.js'), 'utf8');
+  ok(/setInterrumpido/.test(app), 'la app sabe cuándo el usuario ha interrumpido');
+  ok(/AL_INTERRUMPIR\(\)/.test(vm), 'y el panel se lo dice al interrumpir (barge-in)');
+  ok(/reiniciarLecturaVoz\(\)/.test(app) && /limpiarPasosVoz\(\);\r?\n  reiniciarLecturaVoz\(\)/.test(app), 'cada turno empieza a leer de cero');
+});
+
+test('voz/parar: el panel puede detener el turno en curso (botón y voz)', () => {
+  const html = fs.readFileSync(path.join(__dirname, '..', 'renderer', 'index.html'), 'utf8');
+  const vm = fs.readFileSync(path.join(__dirname, '..', 'renderer', 'voice-mode.js'), 'utf8');
+  const app = fs.readFileSync(path.join(__dirname, '..', 'renderer', 'app.js'), 'utf8');
+  ok(/id="vmParar"/.test(html), 'el panel tiene su botón de parar (el chat queda detrás)');
+  ok(/cablearParar/.test(vm) && /PARAR\(\)/.test(vm), 'el botón llama a parar');
+  ok(/setParar/.test(vm) && /setOcupado/.test(vm), 'el panel sabe si hay trabajo y cómo pararlo');
+  ok(/window\.sagitari\.stopChat\(\)/.test(app) && /setParar\(/.test(app), 'parar de verdad es el MISMO stopChat del chat');
+  ok(/\^\(para\|p\[aá\]rate/.test(vm), 'decir «para» con el agente trabajando también lo detiene');
+  ok(/parar\.hidden = !\(s === 'pensando' \|\| s === 'hablando'\)/.test(vm), 'el botón solo se enseña cuando hay algo que parar');
+});
+
+/* ---------- cierre del runner ---------- */
 
 /* Cierre de la suite: se ejecutan TODOS los tests registrados, en orden, uno
    detrás de otro, y solo entonces se imprime el resumen. */

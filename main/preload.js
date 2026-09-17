@@ -41,14 +41,27 @@ contextBridge.exposeInMainWorld('sagitari', {
      siendo el dictado al compositor (Alt+clic): son cosas distintas y no se tocan. */
   voiceOpen: () => ipcRenderer.invoke('voice:open'),
   voiceClose: () => ipcRenderer.invoke('voice:close'),
+  /* Rescate del motor sordo: el renderer detecta voz real del micro sin ningún texto
+     y pide el cambio al motor clásico (idempotente en el proceso principal). */
+  voiceRescue: () => ipcRenderer.invoke('voice:rescue'),
+  /* Dictado local (whisper): el tap del micrófono del renderer viaja al motor local;
+     y Ajustes puede instalarlo (con progreso por evento). */
+  voicePcm: (pcm) => ipcRenderer.send('voice:pcm', pcm),
+  voicePcmActivo: () => ipcRenderer.invoke('voice:pcmActivo'),
+  voiceInstallStatus: () => ipcRenderer.invoke('voice:installStatus'),
+  voiceInstall: () => ipcRenderer.invoke('voice:install'),
+  onVoiceInstall: on('voice:installProgress', ([p]) => [p]),
   voiceEvent: (ev) => ipcRenderer.send('voice:event', ev),
   onVoiceEvent: on('voice:event', ([ev]) => [ev]),
   /* `opts.forzar` = el modo voz pide hablar aunque el TTS esté apagado en Ajustes. */
   speak: (text, opts) => ipcRenderer.invoke('tts:speak', text, opts),
   ttsList: () => ipcRenderer.invoke('tts:list'),
+  ttsInstall: () => ipcRenderer.invoke('tts:install'),
+  onTtsInstall: on('tts:installProgress', ([p]) => [p]),
   onTtsPhrase: on('tts:phrase', ([p]) => [p]),      // { id, bytes }
   ttsPlayed: (id) => ipcRenderer.send('tts:played', id),
   ttsStop: () => ipcRenderer.send('tts:stop'),
+  ttsReset: () => ipcRenderer.send('tts:reset'),
   onTtsDone: on('tts:done', () => []),
   onThemeChanged: on('theme:changed', ([v]) => [v]),
   quit: () => ipcRenderer.invoke('app:quit'),
