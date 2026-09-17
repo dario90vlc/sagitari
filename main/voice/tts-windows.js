@@ -12,8 +12,12 @@ const os = require('os');
 const path = require('path');
 const { spawn } = require('child_process');
 const { CAPACIDADES_BASE } = require('./contract');
+/* La ruta del guion SIEMPRE pasa por aquí: en la app instalada `__dirname` cae dentro de
+   `app.asar` y PowerShell no puede leer ahí (era el «El argumento … no existe» que dejaba
+   al usuario sin voz en el portable). Ver ruta-script.js. */
+const { rutaScriptReal } = require('./ruta-script');
 
-function createTtsWindows({ spawnFn = spawn, dataDir = os.tmpdir(), scriptPath = path.join(__dirname, '..', 'tts.ps1'), rate = 0 } = {}) {
+function createTtsWindows({ spawnFn = spawn, dataDir = os.tmpdir(), scriptPath = rutaScriptReal(path.join(__dirname, '..', 'tts.ps1')), rate = 0 } = {}) {
   /* Los temporales de una frase viven bajo NUESTRA carpeta, no sueltos en %TEMP%: así
      dispose() puede barrer de verdad lo que deje una síntesis interrumpida (si el proceso
      muere a mitad, el .txt con la frase del usuario y el .wav se quedaban huérfanos y sin

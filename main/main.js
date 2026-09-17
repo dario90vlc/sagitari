@@ -1045,6 +1045,10 @@ ipcMain.on('glow:set', (e, { mode, color }) => glow(mode, color));
    es donde está probado: aquí se traducía con un `slice()` a mano por prefijo y la mitad
    de los números estaban mal (ver la cabecera de ese módulo). */
 const { partirLinea } = require('./voice/protocolo');
+/* `powershell.exe -File` no puede leer dentro de `app.asar`: en la app instalada el
+   dictado clásico apuntaba a `…/app.asar/main/voice.ps1` y PowerShell lo rechazaba.
+   El resolver devuelve la ruta desempaquetada (o una copia real) — ver voice/ruta-script.js. */
+const { rutaScriptReal } = require('./voice/ruta-script');
 
 ipcMain.handle('voice:start', async () => {
   if (whisper) return { ok: true, note: 'Ya estaba escuchando' };
@@ -1076,7 +1080,7 @@ function arrancarDictado() {
   /* El PARSEO del protocolo vive en `voice/protocolo.js` (mismo módulo que el modo voz):
      aquí había una segunda copia a mano con los mismos `slice()` mal contados que ya se
      corrigieron allí. Dos fuentes de verdad para el mismo protocolo es un bug futuro. */
-  const p = spawn('powershell.exe', ['-NoProfile', '-ExecutionPolicy', 'Bypass', '-File', path.join(__dirname, 'voice.ps1'), '-Lang', lang], { windowsHide: true });
+  const p = spawn('powershell.exe', ['-NoProfile', '-ExecutionPolicy', 'Bypass', '-File', rutaScriptReal(path.join(__dirname, 'voice.ps1')), '-Lang', lang], { windowsHide: true });
   whisper = p;
   p.stdout.on('data', (d) => {
     if (whisper !== p) return;   // proceso ya reemplazado: su salida no interesa

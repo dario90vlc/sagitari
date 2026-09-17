@@ -12,10 +12,13 @@
 const path = require('path');
 const { spawn } = require('child_process');
 const { assertEngine, CAPACIDADES_BASE } = require('./contract');
+/* El guion tiene que ser una ruta REAL para PowerShell: dentro del asar existe para
+   Node, no para el sistema. Ver ruta-script.js. */
+const { rutaScriptReal } = require('./ruta-script');
 
 const SEP = '\u001f';   // separador de unidad: no aparece en texto normal
 
-function createSttWindows({ emit, lang = 'es-ES', spawnFn = spawn, scriptPath = path.join(__dirname, '..', 'voice.ps1'), forzarClasico: forzarClasicoInicial = false } = {}) {
+function createSttWindows({ emit, lang = 'es-ES', spawnFn = spawn, scriptPath = rutaScriptReal(path.join(__dirname, '..', 'voice.ps1')), forzarClasico: forzarClasicoInicial = false } = {}) {
   let proc = null;
   let buf = '';
   let info = { motor: '', idioma: '' };

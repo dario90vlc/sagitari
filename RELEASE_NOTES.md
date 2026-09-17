@@ -1,3 +1,28 @@
+# SAGITARI 3.1.1
+
+**La voz vuelve a funcionar en la app instalada y en el portable.** En la 3.1.0, los guiones
+que dan voz y oído a la app (`tts.ps1` y `voice.ps1`) se empaquetaban dentro del archivo `.asar`
+y Windows no sabe leer ahí: PowerShell rechazaba la ruta con «El argumento … no existe», así que
+la app no podía leer nada en voz alta ni arrancar el dictado. Solo pasaba en las versiones
+compiladas —en desarrollo no hay asar—, que es justo donde no se veía. / **Voice works again in
+the installed app and in the portable.** In 3.1.0 the scripts that give the app its voice and
+hearing (`tts.ps1` and `voice.ps1`) were packed inside the `.asar` archive, and Windows cannot
+read there: PowerShell rejected the path with “The argument … does not exist”, so the app could
+not read anything out loud nor start dictation. It only happened in the built versions —in
+development there is no asar—, which is exactly where it went unnoticed.
+
+## Correcciones / Fixes
+
+- **Los guiones de voz salen del asar y el motor resuelve siempre una ruta real.** Los `.ps1`
+  se empaquetan desempaquetados (`asarUnpack`) y, si por lo que sea no hay copia desempaquetada,
+  el contenido se deja en caché en una ruta real antes de entregársela a PowerShell. Cubre los
+  dos guiones —hablar y dictar— y también el dictado clásico de la app, que apuntaba al mismo
+  sitio. / **The voice scripts now live outside the asar and the engine always resolves a real
+  path.** The `.ps1` files ship unpacked (`asarUnpack`) and, should there be no unpacked copy,
+  the content is cached at a real path before handing it to PowerShell. This covers both
+  scripts —speaking and dictation— and also the app's classic dictation, which pointed to the
+  same place.
+
 # SAGITARI 3.1.0
 
 **Habla con SAGITARI y conecta tus propios servidores MCP.** Esta versión trae dos capacidades

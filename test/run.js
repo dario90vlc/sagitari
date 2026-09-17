@@ -3566,6 +3566,59 @@ test('voz/stt-windows: si el motor muere insistentemente, se rinde y avisa al co
   eq(eventos2.filter((e) => e.type === 'error').length, 0, 'un cierre pedido no es un error');
 });
 
+test('voz/ruta-script: fuera del asar la ruta se devuelve tal cual', () => {
+  const { rutaScriptReal } = require('../main/voice/ruta-script');
+  const dev = path.join(__dirname, '..', 'main', 'tts.ps1');
+  eq(rutaScriptReal(dev), dev, 'en desarrollo no hay copias ni cachés de por medio');
+});
+
+/* El fallo que arregla esto se veía SOLO en la app instalada: `powershell.exe -File` no
+   puede leer dentro de `app.asar` («El argumento … no existe») y el usuario se quedaba
+   sin voz y sin dictado. Se reproduce aquí la forma exacta de esa ruta. */
+test('voz/ruta-script: dentro del asar usa el guion desempaquetado', () => {
+  const { rutaScriptReal } = require('../main/voice/ruta-script');
+  const raiz = tmpDir('sagi-asar-');
+  const enAsar = path.join(raiz, 'app.asar', 'main', 'tts.ps1');
+  const gemelo = path.join(raiz, 'app.asar.unpacked', 'main', 'tts.ps1');
+  fs.mkdirSync(path.dirname(enAsar), { recursive: true });
+  fs.mkdirSync(path.dirname(gemelo), { recursive: true });
+  fs.writeFileSync(enAsar, 'Write-Output "asar"', 'utf8');
+  fs.writeFileSync(gemelo, 'Write-Output "desempaquetado"', 'utf8');
+  eq(rutaScriptReal(enAsar), gemelo, 'se entrega a PowerShell la ruta real, no la del asar');
+  // Una ruta que YA está desempaquetada no puede reescribirse dos veces.
+  eq(rutaScriptReal(gemelo), gemelo, 'el gemelo no se reescribe a sí mismo');
+});
+
+test('voz/ruta-script: sin gemelo deja una copia real y la refresca al cambiar', () => {
+  const { rutaScriptReal } = require('../main/voice/ruta-script');
+  const raiz = tmpDir('sagi-asar2-');
+  const dirCache = path.join(raiz, 'cache');
+  const enAsar = path.join(raiz, 'app.asar', 'main', 'voice.ps1');
+  fs.mkdirSync(path.dirname(enAsar), { recursive: true });
+  fs.writeFileSync(enAsar, 'guion uno', 'utf8');
+  const real = rutaScriptReal(enAsar, { dirCache });
+  ok(!real.includes('app.asar' + path.sep), 'la ruta devuelta no está dentro del asar: ' + real);
+  eq(fs.readFileSync(real, 'utf8'), 'guion uno', 'y su contenido es el del guion empacado');
+  // Una actualización de la app no puede dejar el guion viejo en caché.
+  fs.writeFileSync(enAsar, 'guion dos', 'utf8');
+  eq(fs.readFileSync(rutaScriptReal(enAsar, { dirCache }), 'utf8'), 'guion dos', 'la copia se refresca con el guion nuevo');
+});
+
+/* Los DOS motores tienen que pasar por el resolver por defecto: si uno se queda con
+   `path.join(__dirname, …)`, el fallo vuelve en la app instalada sin que ningún test
+   funcional lo note (los tests inyectan scriptPath). Se comprueba sobre el código, como
+   el resto de comprobaciones de contrato de este fichero. */
+test('voz: los dos motores de Windows resuelven la ruta del guion fuera del asar', () => {
+  for (const f of ['stt-windows.js', 'tts-windows.js']) {
+    const src = fs.readFileSync(path.join(__dirname, '..', 'main', 'voice', f), 'utf8');
+    ok(/scriptPath = rutaScriptReal\(/.test(src), f + ' resuelve el guion con rutaScriptReal');
+  }
+  /* Y el empaquetado tiene que sacar los guiones del asar: sin esto, el resolver cae al
+     camino de copia —funciona, pero es trabajo en caliente que no hace falta. */
+  const pkg = JSON.parse(fs.readFileSync(path.join(__dirname, '..', 'package.json'), 'utf8'));
+  ok((pkg.build.asarUnpack || []).some((p) => /main\/\*\*\/\*\.ps1/.test(p)), 'los .ps1 van desempaquetados (asarUnpack)');
+});
+
 test('voz/tts-windows: sintetiza una frase, borra el temporal y dice qué voz usó', async () => {
   const fs = require('fs');
   const path = require('path');
