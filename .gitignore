@@ -29,6 +29,9 @@ Thumbs.db
 _*.js
 _*.png
 _*.html
+# Sondas temporales de PowerShell: mismo criterio que las de arriba (una sonda de un
+# rato no entra en el historial; si sirve de verdad, se sube sin el guion bajo).
+_*.ps1
 
 # Compañero visual de brainstorming (maquetas locales, no se versionan)
 .superpowers/

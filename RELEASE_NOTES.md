@@ -1,3 +1,133 @@
+# SAGITARI 3.1.0
+
+**Habla con SAGITARI y conecta tus propios servidores MCP.** Esta versión trae dos capacidades
+grandes y una tanda de correcciones de fondo. El **modo voz** convierte el micrófono en una
+forma completa de usar la app: hablas, el asistente hace el trabajo en tu PC y te contesta en
+voz alta, con voz neuronal local y dictado local de alta precisión que se instalan a petición
+(nada de tu voz sale del equipo). Y la **integración de MCP** deja que añadas tus propios
+servidores —comandos locales o URLs remotas— para que el agente use sus herramientas como las
+de casa: mismo catálogo, mismas confirmaciones, mismos guardarraíles. / **Talk to SAGITARI and
+plug in your own MCP servers.** This version brings two big capabilities plus a round of
+deep fixes. **Voice mode** turns the microphone into a complete way of using the app: you
+speak, the assistant does the work on your PC and answers out loud, with a local neural voice
+and high-accuracy local dictation installed on demand (none of your voice leaves the machine).
+And **MCP integration** lets you add your own servers —local commands or remote URLs— so the
+agent uses their tools like its own: same catalog, same confirmations, same guardrails.
+
+## Modo voz / Voice mode
+
+- **Manos libres de verdad.** Pulsar el micrófono abre el modo voz: hablas, el silencio cierra
+  la frase, se envía al agente y la respuesta se dice en voz alta. Mientras responde, el orbe
+  late con su voz; si hablas encima, se calla al instante y te escucha, sin perder tu primera
+  sílaba. / **Real hands-free.** Pressing the mic opens voice mode: you talk, silence closes the
+  sentence, it is sent to the agent and the answer is spoken out loud. While it answers, the
+  orb pulses with its voice; if you talk over it, it shuts up instantly and listens, without
+  losing your first syllable.
+- **Empieza a hablar en cuanto tiene la primera frase.** La respuesta se lee por frases según
+  el modelo la va escribiendo, no al terminar el turno: en una tarea con herramientas eso son
+  decenas de segundos de espera que ya no existen. Y puedes **pararlo** diciendo «para» o con
+  el botón **Parar** del panel. / **It starts speaking as soon as it has the first sentence.**
+  The reply is read sentence by sentence as the model writes it, not at the end of the turn:
+  on a task that uses tools that used to be tens of seconds of waiting. And you can **stop it**
+  by saying “para” or with the panel's **Parar** button.
+- **Voz neuronal local (Piper), sin depender de la voz de Windows.** Se instala desde Ajustes
+  (≈80 MB, descarga única) y suena a persona, 100% offline. Cuando está instalada manda ella;
+  si no, la app usa la mejor voz del sistema avisando de cuál está sonando. / **Local neural
+  voice (Piper), no dependency on the Windows voice.** Installed from Settings (≈80 MB, one-off
+  download) and it sounds like a person, 100% offline. Once installed it takes over; otherwise
+  the app uses the best system voice and tells you which one is playing.
+- **Dictado local de alta precisión (Whisper).** Transcripción en español 100% local y sin
+  internet, con **texto en vivo mientras hablas** y el modelo que de verdad entiende (≈190 MB,
+  a petición). El reconocimiento de Windows sigue de respaldo, y si su motor moderno arranca
+  sordo —cambio de micrófono, filtros de audio— la app lo detecta y cambia al clásico sola. /
+  **High-accuracy local dictation (Whisper).** 100% local, offline Spanish transcription with
+  **live text while you speak** and the model that actually understands you (≈190 MB, on
+  demand). Windows speech recognition stays as fallback, and if its modern engine starts up
+  deaf —changed microphone, audio filters— the app notices and switches to the classic one by
+  itself.
+- **La transcripción se ve y se corrige.** Cada frase queda en pantalla con su nivel de
+  confianza; si el motor oyó mal un nombre propio, la tocas, la arreglas y Enter la reenvía por
+  el mismo camino. / **The transcript is visible and editable.** Every sentence stays on screen
+  with its confidence level; if the engine got a proper noun wrong, you tap it, fix it and Enter
+  sends it again through the same path.
+- **Los permisos se contestan hablando.** Cuando el agente pide permiso para una acción
+  sensible, el aviso sale en el panel y se contesta con «sí» o «no» (o con los botones): las dos
+  puertas acaban en la misma decisión. / **Permissions are answered by voice.** When the agent
+  asks for permission for a sensitive action, the request shows up in the panel and is answered
+  with “sí” or “no” (or with the buttons): both doors lead to the same decision.
+- **El modo voz no tiene camino propio al agente.** Lo que dictas entra por el MISMO envío del
+  chat, así que hereda herramientas, permisos, guardarraíles, memoria e historial. El micrófono
+  solo vive con el modo abierto, y el permiso de micrófono se concede solo a la página de la
+  app. Nada de audio ni de texto sale del equipo. / **Voice mode has no path of its own to the
+  agent.** What you dictate goes through the SAME chat send, so it inherits tools, permissions,
+  guardrails, memory and history. The microphone only lives while the mode is open, and the mic
+  permission is granted only to the app's own page. No audio or text leaves your machine.
+
+## Servidores MCP / MCP servers
+
+- **Cliente MCP propio, sin dependencias nuevas.** Transporte `stdio` (procesos locales) y HTTP
+  remoto con streaming y SSE, con validación de URL, sesión y errores legibles. / **Own MCP
+  client, no new dependencies.** `stdio` transport (local processes) and remote HTTP with
+  streaming and SSE, with URL validation, session handling and readable errors.
+- **Las herramientas MCP son herramientas de casa.** Aparecen en el catálogo como las nativas
+  (`mcp__servidor__herramienta`), con su tarjeta de confirmación, su resultado en el registro y
+  su coste de pasos igual que cualquier otra. No hay vía lateral: si el motor de permisos no la
+  ve, no se ejecuta. / **MCP tools are first-class tools.** They show up in the catalog like the
+  native ones (`mcp__server__tool`), with their confirmation card, their result in the log and
+  their step cost like any other. There is no side door: if the permission engine does not see
+  it, it does not run.
+- **Permiso explícito por defecto, con niveles.** Cada llamada pide confirmación salvo que tú
+  subas la confianza de un servidor o de una herramienta concreta, y el interruptor global
+  apaga también las herramientas que se le ofrecen al modelo. / **Explicit permission by
+  default, with levels.** Every call asks for confirmation unless you raise the trust for a
+  server or a specific tool, and the global switch also removes those tools from the model's
+  catalog.
+- **Ajustes › MCP:** lista con el estado de cada servidor, formulario guiado, botón **Probar**
+  (conecta y lista sus herramientas de verdad), registro por servidor, importar/exportar el
+  bloque `mcpServers` de otros clientes y reconexión al reencender. / **Settings › MCP:** list
+  with each server's state, guided form, **Test** button (really connects and lists its tools),
+  per-server log, import/export of the `mcpServers` block from other clients and reconnect on
+  re-enable.
+- **Credenciales cifradas con DPAPI**, como las claves de API, y **Detener** corta una llamada
+  MCP en vuelo. / **Credentials encrypted with DPAPI**, like API keys, and **Stop** cancels an
+  in-flight MCP call.
+
+## Correcciones y dureza / Fixes and hardening
+
+- **Un guardarraíl podía inutilizar la sesión** y una lectura SSE incompleta tiraba respuestas
+  enteras: ambos corregidos, con la confirmación de clics por índice y el estado compartido del
+  navegador arreglados. / **A guardrail could make the session unusable** and an incomplete SSE
+  read dropped whole answers: both fixed, along with click confirmation by index and the shared
+  browser state.
+- **No se pierden conversaciones ni claves** al cerrar el turno o la app, y el sistema de
+  adjuntos es un módulo probado. / **Conversations and keys are no longer lost** when a turn or
+  the app closes, and attachments are now a tested module.
+- **El modelo que eliges manda.** El router ya no rellena por categoría en silencio, y un
+  proveedor que acepta la conexión pero deja de enviar datos corta el turno solo con un error
+  legible y un botón **Reintentar**. / **The model you choose wins.** The router no longer fills
+  in by category behind your back, and a provider that accepts the connection but stops sending
+  data cuts the turn off by itself with a readable error and a **Retry** button.
+- **El navegador espera a que la página cargue de verdad** (se habilita el dominio `Page` y se
+  espera al compromiso de la navegación), en vez de dar por cargada una página a medias. /
+  **The browser waits for the page to actually load** (the `Page` domain is enabled and it waits
+  for the navigation commit) instead of calling a half-loaded page ready.
+- **Verificación más honesta:** la suite de tests es determinista y no toca tus datos reales, la
+  comprobación de interfaz tiene límite de tiempo y el smoke test da un veredicto real. 268
+  comprobaciones unitarias más la comprobación sobre la app viva pasan antes de publicar. /
+  **More honest verification:** the test suite is deterministic and never touches your real data,
+  the UI check has a deadline and the smoke test gives a real verdict. 268 unit checks plus the
+  live-app check pass before publishing.
+
+## Descargas / Downloads
+
+| Archivo / File | Descripción / Description |
+|---|---|
+| `SAGITARI-Setup-3.1.0.exe` | **Instalador / Installer** (NSIS): accesos directos, desinstalador / shortcuts, uninstaller |
+| `SAGITARI-Portable-3.1.0.exe` | **Portable**: un solo ejecutable, sin instalación / single executable, no install |
+| `Source code (zip/tar.gz)` | Código fuente / Source code |
+
+> Binario sin firmar: Windows SmartScreen puede avisar en la primera ejecución (*Más información → Ejecutar de todas formas*). La app te dice si la actualización que descarga está firmada o no. Los motores de voz y de dictado locales **no** van dentro del instalador: se descargan a petición desde Ajustes y se pueden borrar. / Unsigned binary: SmartScreen may warn on first run (*More info → Run anyway*). The app tells you whether the update it downloads is signed. The local voice and dictation engines are **not** bundled in the installer: they are downloaded on demand from Settings and can be removed.
+
 # SAGITARI 3.0.1
 
 **El router respeta tu modelo elegido y los proveedores mudos no cuelgan el chat.** La cadena de
