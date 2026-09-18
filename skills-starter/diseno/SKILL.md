@@ -1,7 +1,16 @@
 ---
 name: diseno
 description: Diseño de interfaces y experiencia de usuario. Usar al crear o mejorar UI, CSS, layouts, componentes visuales o flujos de usuario.
-version: 1.0.0
+version: 1.1.0
+category: Diseño
+agents:
+  - orchestrator
+  - coding
+triggers:
+  - interfaz
+  - css
+  - diseno
+  - pantalla
 ---
 
 # Skill: Diseño

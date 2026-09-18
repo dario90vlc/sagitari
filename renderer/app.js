@@ -333,11 +333,30 @@ if (window.ResizeObserver) {
 function nowClock(ts) {
   return new Date(ts || Date.now()).toLocaleTimeString('es', { hour: '2-digit', minute: '2-digit' });
 }
-function dayStamp() {
+/** «Hoy» / «Ayer» / «12 de marzo», según cuánto hace de esa fecha. */
+function etiquetaDia(ts) {
+  const dias = Math.round((new Date().setHours(0, 0, 0, 0) - new Date(ts || Date.now()).setHours(0, 0, 0, 0)) / 86400000);
+  if (dias <= 0) return 'Hoy';
+  if (dias === 1) return 'Ayer';
+  return new Date(ts).toLocaleDateString('es-ES', { day: 'numeric', month: 'long' });
+}
+/* Separador de día: se estampa cuando CAMBIA el día, no antes de cada turno.
+   Antes cada respuesta del agente metía un «Hoy · 14:32» entre la pregunta y la
+   respuesta —doce veces en una tarde—, y eso se lee como un corte del hilo, no
+   como un separador temporal. Al cambiar de conversación se olvida (`stampDia`),
+   así que el primero de cada hilo vuelve a salir. */
+let stampDia = null;
+function dayStamp(ts) {
+  const dia = new Date(ts || Date.now()).toDateString();
+  if (stampDia === dia) return null;
+  stampDia = dia;
   const d = document.createElement('div');
   d.className = 'day';
-  d.textContent = 'Hoy · ' + nowClock();
+  // solo el día: la hora ya va en cada mensaje, y «Hoy · 14:32» sobre el primero
+  // repetía el mismo dato dos veces
+  d.textContent = etiquetaDia(ts);
   msgs.appendChild(d);
+  return d;
 }
 /** El estado vacío desaparece en cuanto hay una sola burbuja. */
 function hideEmpty() { if (chatEmpty) chatEmpty.hidden = true; }
@@ -447,7 +466,11 @@ function msgActions(holder, text, opts) {
   // conversación»): copiar el markdown crudo daba **negritas** y vallas
   row.appendChild(mk('copy', 'Copiar este mensaje', () => {
     const bub = holder.querySelector('.bubble') || holder;
-    copyText(bub.innerText, 'Mensaje copiado');
+    // el razonamiento es interno: al copiar el mensaje se copia la respuesta, no
+    // lo que el modelo pensó por el camino (el bloque tiene su propio botón)
+    const copia = bub.cloneNode(true);
+    copia.querySelectorAll('.thinkblock').forEach(x => x.remove());
+    copyText(copia.innerText, 'Mensaje copiado');
   }));
   if (o.retry) row.appendChild(mk('refresh', 'Regenerar esta respuesta', regenerate));
   if (o.speak) row.appendChild(mk('volume', 'Leer en voz alta', () => speak(text)));
@@ -507,6 +530,9 @@ function ensureAssistantBubble() {
     pendingTurn = {
       mode: currentRunMode, group: null, body: null, cards: [],
       tools: 0, totalMs: 0, plan: null, planIdx: 0,
+      team: null,   // v2.2: tablero del equipo (delegaciones en vivo)
+      think: null,  // v2.3: bloque de razonamiento (Ajustes ▸ Agente)
+      fails: 0,     // herramientas que fallaron (la cabecera del grupo lo enseña)
     };
   }
   return pendingAssistant;
@@ -525,6 +551,7 @@ function ensureToolGroup() {
     head.setAttribute('tabindex', '0');
     head.setAttribute('aria-expanded', 'true');
     head.innerHTML = `<span class="tg-ic">${ic('tools')}</span><b class="tg-title">Herramientas</b>`
+      + `<span class="tg-fails" hidden></span>`
       + `<span class="tg-meta"></span><span class="tg-chev">${ic('chevron')}</span>`;
     const body = document.createElement('div');
     body.className = 'tgroup-body';
@@ -532,6 +559,7 @@ function ensureToolGroup() {
       const open = g.classList.toggle('open');
       g.classList.toggle('closed', !open);
       head.setAttribute('aria-expanded', open ? 'true' : 'false');
+      g._tocado = true;   // el usuario decide: el cierre automático ya no lo pisa
     };
     head.onclick = toggle;
     head.addEventListener('keydown', (e) => {
@@ -539,7 +567,7 @@ function ensureToolGroup() {
     });
     g.append(head, body);
     b.appendChild(g);
-    pendingTurn.group = { el: g, body, title: head.querySelector('.tg-title'), meta: head.querySelector('.tg-meta') };
+    pendingTurn.group = { el: g, body, head, title: head.querySelector('.tg-title'), meta: head.querySelector('.tg-meta'), fails: head.querySelector('.tg-fails') };
   }
   return pendingTurn.group;
 }
@@ -548,7 +576,102 @@ function refreshToolGroup() {
   if (!pendingTurn || !pendingTurn.group) return;
   const g = pendingTurn.group;
   g.title.textContent = K.toolCount(pendingTurn.tools);
-  g.meta.textContent = pendingTurn.totalMs ? K.fmtDuration(pendingTurn.totalMs) : 'en curso…';
+  /* Meta: mientras quedan tarjetas abiertas se dice cuántas hay EN CURSO (antes solo
+     cabía «en curso…», y con doce herramientas no decía cuánto faltaba); al cerrarse
+     todas, el tiempo total acumulado. */
+  const enCurso = pendingTurn.cards.filter(c => c.classList.contains('run')).length;
+  g.meta.textContent = enCurso ? enCurso + ' en curso' : (pendingTurn.totalMs ? K.fmtDuration(pendingTurn.totalMs) : '');
+  /* Y si algo falló, la cabecera lo dice: con el grupo plegado, un fallo dentro era
+     invisible hasta abrirlo a mano. */
+  const fallos = pendingTurn.fails || 0;
+  if (g.fails) {
+    g.fails.hidden = !fallos;
+    g.fails.textContent = fallos === 1 ? '1 fallo' : fallos + ' fallos';
+  }
+  g.el.classList.toggle('has-fails', !!fallos);
+}
+
+/** Pliega el grupo de herramientas al llegar la respuesta, si el usuario no lo abrió. */
+function cerrarHerramientas() {
+  const g = pendingTurn && pendingTurn.group;
+  if (!g || g.el._tocado) return;
+  g.el.classList.remove('open');
+  g.el.classList.add('closed');
+  g.head.setAttribute('aria-expanded', 'false');
+}
+
+/* ---- v2.3: razonamiento del modelo (opcional, Ajustes ▸ Agente) ----
+   Los modelos que razonan (Claude con razonamiento ampliado, la serie o/ GPT-5,
+   DeepSeek R1…) cuentan su proceso antes de responder. Con el ajuste activado el
+   agente lo reenvía en `thinking_delta` y aquí se pinta en un bloque plegable que
+   va ANTES de todo lo demás: se lee en vivo mientras piensa y se pliega solo
+   cuando empieza a contestar. Nunca se pronuncia —la lectura por frases solo mira
+   los `delta`— ni se copia con el mensaje: es texto interno, no la respuesta. */
+function ensureThinkBlock() {
+  const b = ensureAssistantBubble();
+  if (!pendingTurn.think || !pendingTurn.think.isConnected) {
+    const d = document.createElement('div');
+    d.className = 'thinkblock open';
+    d.innerHTML = '<div class="think-head" role="button" tabindex="0" aria-expanded="true">'
+      + `<span class="th-ic">${ic('brain')}</span><b>Razonamiento</b>`
+      + '<span class="th-meta">pensando…</span>'
+      + `<button class="th-copy" title="Copiar el razonamiento">${ic('copy')}</button>`
+      + `<span class="th-chev">${ic('chevron')}</span></div>`
+      + '<div class="think-body"></div>';
+    const head = d.querySelector('.think-head');
+    const toggle = () => {
+      const open = d.classList.toggle('open');
+      d.classList.toggle('closed', !open);
+      head.setAttribute('aria-expanded', open ? 'true' : 'false');
+      d._tocado = true;   // si el usuario lo abre, ya no se cierra solo
+    };
+    head.onclick = (e) => { if (e.target.closest('.th-copy')) return; toggle(); };
+    head.addEventListener('keydown', (e) => {
+      if (e.key === 'Enter' || e.key === ' ') { e.preventDefault(); toggle(); }
+    });
+    d.querySelector('.th-copy').onclick = (e) => { e.stopPropagation(); copyText(d._texto || '', 'Razonamiento copiado'); };
+    // el razonamiento va el PRIMERO: se piensa antes de usar herramientas y de responder
+    b.insertBefore(d, b.firstChild);
+    pendingTurn.think = d;
+  }
+  return pendingTurn.think;
+}
+
+/** Pinta el razonamiento AHORA (sin esperar a un frame). */
+function pintarRazonamiento(t) {
+  if (!t || !t.isConnected) return;
+  t.querySelector('.think-body').innerHTML = fmt(t._texto || '');
+}
+
+/** Repinta el razonamiento en el siguiente frame (llega a trozos, como el texto).
+    Dos cautelas, ambas aprendidas de fallos reales:
+    · el bloque se recuerda EN LA PROPIA FUNCIÓN y no se busca en `pendingTurn`: el último
+      frame de un turno puede caer después de que el turno se cierre (pendingTurn = null);
+    · esto es solo para el goteo en vivo. El CIERRE del bloque se pinta de forma síncrona
+      (ver `thinking_done`), porque con la ventana minimizada u oculta —o en un arranque
+      de prueba con `--hidden`— Chromium no dispara `requestAnimationFrame` y el bloque se
+      quedaba con su texto guardado pero VACÍO en pantalla. */
+let thinkRaf = 0;
+let thinkTarget = null;
+function scheduleThinkRender(d) {
+  thinkTarget = d || (pendingTurn && pendingTurn.think) || thinkTarget;
+  if (thinkRaf) return;
+  thinkRaf = requestAnimationFrame(() => {
+    thinkRaf = 0;
+    const t = thinkTarget;
+    thinkTarget = null;
+    pintarRazonamiento(t);
+    scroll();
+  });
+}
+
+/** Pliega el razonamiento cuando la respuesta empieza (si el usuario no lo abrió). */
+function cerrarRazonamiento() {
+  const d = pendingTurn && pendingTurn.think;
+  if (!d || d._tocado) return;
+  d.classList.remove('open');
+  d.classList.add('closed');
+  d.querySelector('.think-head').setAttribute('aria-expanded', 'false');
 }
 
 /** Abre la tarjeta de una herramienta que empieza a ejecutarse. */
@@ -608,6 +731,7 @@ function completeToolCard(ev) {
   if (!card) { toolCard({ name: ev.name, args: {} }); card = pendingTurn.cards[pendingTurn.cards.length - 1]; }
   card.classList.remove('run');
   card.classList.add(ok ? 'done' : 'err');
+  if (!ok) pendingTurn.fails = (pendingTurn.fails || 0) + 1;
   const took = ms || (Date.now() - (card._t0 || Date.now()));
   card.querySelector('.tcard-ic').innerHTML = ic(ok ? 'check' : 'alert');
   card.querySelector('.tcard-time').textContent = K.fmtDuration(took);
@@ -625,6 +749,143 @@ function completeToolCard(ev) {
   // en modo PLAN, cada herramienta completada marca un paso del plan
   advancePlan();
   scroll();
+}
+
+/**
+ * Cierre de una delegación: la tarjeta del subagente con su estado y su evidencia.
+ * Antes el `delegate` quedaba como una tarjeta de herramienta («Subagente · Investigador
+ * → tarea») y su cierre no se veía en ninguna parte: el RESULT/STATUS/EVENCE del
+ * subagente se quedaba dentro del prompt del orquestador. Todo lo que se enseña aquí
+ * viene ya calculado del evento (agent.js), no se reinterpreta en la interfaz.
+ */
+function delegationCard(ev) {
+  if (!pendingTurn) return;
+  ensureAssistantBubble();
+  const group = ensureToolGroup();
+  const sub = K.subagent(ev.subagent) || { label: 'Subagente', icon: 'agents', cls: 'a-p2' };
+  const estado = String(ev.status || 'OK').toUpperCase();
+  const fallo = estado === 'FAILED';
+  const parcial = estado === 'PARTIAL';
+  const card = document.createElement('div');
+  card.className = 'tcard dcard ' + (fallo ? 'err' : (parcial ? 'part' : 'done'));
+  if (ev.subagent) card.dataset.delegate = String(ev.subagent);   // nunca `dataset.tool`: no es una herramienta
+  const etiqueta = fallo ? 'FALLÓ' : (parcial ? 'PARCIAL' : 'OK');
+  card.innerHTML = `
+    <div class="tcard-head">
+      <span class="tcard-ic">${ic(fallo ? 'alert' : 'check')}</span>
+      <span class="tcard-name">${esc(sub.label)}</span>
+      <span class="dcard-status ${fallo ? 'fail' : (parcial ? 'part' : 'ok')}" title="Estado del subagente">${esc(etiqueta)}</span>
+      <span class="tcard-args" title="${esc(String(ev.result || ''))}">${esc(K.clip(String(ev.result || ''), 110))}</span>
+      <span class="tcard-time">${ev.durationMs ? esc(K.fmtDuration(Number(ev.durationMs))) : ''}</span>
+      <span class="tcard-chev">${ic('chevron')}</span>
+    </div>
+    <div class="tcard-body"></div>`;
+  const body = card.querySelector('.tcard-body');
+  body.innerHTML = `<div class="tb-label">RESULTADO</div><pre>${esc(String(ev.result || '(sin resumen)'))}</pre>`
+    + (ev.details ? `<div class="tb-label">DETALLES</div><pre>${esc(String(ev.details))}</pre>` : '')
+    + (ev.evidence ? `<div class="tb-label">EVIDENCIA</div><pre>${esc(String(ev.evidence))}</pre>` : '');
+  const head = card.querySelector('.tcard-head');
+  head.setAttribute('role', 'button');
+  head.setAttribute('tabindex', '0');
+  head.setAttribute('aria-expanded', 'false');
+  const toggle = () => {
+    const open = card.classList.toggle('open');
+    head.setAttribute('aria-expanded', open ? 'true' : 'false');
+  };
+  head.onclick = toggle;
+  head.addEventListener('keydown', (e) => {
+    if (e.key === 'Enter' || e.key === ' ') { e.preventDefault(); toggle(); }
+  });
+  group.body.appendChild(card);
+  pendingTurn.cards.push(card);   // el turno la limpia igual que las demás
+  scroll();
+  return card;
+}
+
+/* ---------- v2.2: tablero del equipo (delegaciones EN VIVO) ----------
+   Las tarjetas de herramienta ya enseñan cada paso, pero responder a «quién está
+   trabajando ahora mismo» exigía leerlas todas. Este tablero es una tira de chips, uno
+   por delegación del turno: se pinta al EMPEZAR (delegate_start, con la subtarea) y se
+   resuelve al acabar (delegate_done) con OK, PARCIAL o fallo. Así se ve al instante qué
+   está haciendo cada subagente sin esperar al cierre del turno. */
+function etiquetaEquipo(ev) {
+  const who = (K.subagent(ev.subagent) || {}).label || 'Subagente';
+  const tarea = String(ev.task || '').replace(/\s+/g, ' ').trim().slice(0, 40);
+  return who + (tarea ? ' · ' + tarea : '');
+}
+
+function ensureTeamBoard() {
+  const b = ensureAssistantBubble();
+  if (!pendingTurn.team) {
+    const g = document.createElement('div');
+    g.className = 'tgroup team open';
+    const head = document.createElement('div');
+    head.className = 'tgroup-head';
+    head.setAttribute('role', 'button');
+    head.setAttribute('tabindex', '0');
+    head.setAttribute('aria-expanded', 'true');
+    head.innerHTML = `<span class="tg-ic">${ic('agents')}</span><b class="tg-title">Equipo</b>`
+      + `<span class="tg-meta"></span><span class="tg-chev">${ic('chevron')}</span>`;
+    const body = document.createElement('div');
+    body.className = 'tgroup-body';
+    const toggle = () => {
+      const open = g.classList.toggle('open');
+      g.classList.toggle('closed', !open);
+      head.setAttribute('aria-expanded', open ? 'true' : 'false');
+    };
+    head.onclick = toggle;
+    head.addEventListener('keydown', (e) => {
+      if (e.key === 'Enter' || e.key === ' ') { e.preventDefault(); toggle(); }
+    });
+    g.append(head, body);
+    // el tablero va ARRIBA del grupo de herramientas: es el resumen, no el detalle
+    if (pendingTurn.group) b.insertBefore(g, pendingTurn.group.el);
+    else b.appendChild(g);
+    pendingTurn.team = { el: g, body, meta: head.querySelector('.tg-meta'), chips: [] };
+  }
+  return pendingTurn.team;
+}
+
+function equipoEnMarcha() {
+  const t = pendingTurn && pendingTurn.team;
+  if (!t) return 0;
+  return t.chips.filter(c => !c.cerrado).length;
+}
+
+function equipoChip(ev) {
+  const board = ensureTeamBoard();
+  const chip = document.createElement('div');
+  chip.className = 'toolchip run';
+  chip.dataset.subagent = String(ev.subagent || '');
+  chip.title = etiquetaEquipo(ev) + (ev.expect ? '\n\nCriterio de éxito: ' + String(ev.expect).slice(0, 300) : '');
+  chip.innerHTML = `<span class="tc-mark"><span class="pulse-dot"></span></span><span class="tc-txt">${esc(etiquetaEquipo(ev))}</span>`;
+  board.body.appendChild(chip);
+  board.chips.push({ subagent: String(ev.subagent || ''), el: chip, cerrado: false });
+  board.meta.textContent = `${equipoEnMarcha()} en marcha`;
+  return chip;
+}
+
+function equipoCierra(ev) {
+  if (!pendingTurn || !pendingTurn.team) return;
+  const estado = String(ev.status || 'OK').toUpperCase();
+  // se cierra la fila que abrió ESTA subtarea; si no la encuentra (el turno se recortó),
+  // cae a la primera abierta de ese agente y, en último caso, a la primera abierta
+  const abiertas = pendingTurn.team.chips.filter(c => !c.cerrado);
+  const chip = abiertas.find(c => c.subagent === String(ev.subagent || '') && c.el.title.startsWith(etiquetaEquipo(ev)))
+    || abiertas.find(c => c.subagent === String(ev.subagent || ''))
+    || abiertas[0];
+  if (!chip) return;
+  chip.cerrado = true;
+  chip.el.classList.remove('run');
+  chip.el.classList.add(estado === 'FAILED' ? 'err' : 'done');
+  const mark = chip.el.querySelector('.tc-mark');
+  if (mark) mark.innerHTML = ic(estado === 'FAILED' ? 'alert' : 'check');
+  if (estado === 'PARTIAL') {
+    const txt = chip.el.querySelector('.tc-txt');
+    if (txt) txt.textContent += ' · a medias';
+  }
+  const enMarcha = equipoEnMarcha();
+  pendingTurn.team.meta.textContent = enMarcha ? `${enMarcha} en marcha` : 'todos han terminado';
 }
 
 function toolChip(text, state) {
@@ -687,6 +948,23 @@ function advancePlan() {
 /** Cierra las tarjetas que quedaron «en curso…» cuando el turno muere a medias. */
 function closePendingCards(failed) {
   if (!pendingTurn) return;
+  // un razonamiento que se quedó a medias se marca: «pensando…» para siempre mentiría
+  if (pendingTurn.think) {
+    const meta = pendingTurn.think.querySelector('.th-meta');
+    if (meta && /pensando/.test(meta.textContent)) meta.textContent = 'interrumpido';
+  }
+  // los chips del tablero del equipo que quedaron «en marcha» también se cierran
+  if (pendingTurn.team) {
+    for (const chip of pendingTurn.team.chips) {
+      if (chip.cerrado) continue;
+      chip.cerrado = true;
+      chip.el.classList.remove('run');
+      chip.el.classList.add(failed ? 'err' : 'done');
+      const mark = chip.el.querySelector('.tc-mark');
+      if (mark) mark.innerHTML = ic(failed ? 'alert' : 'close');
+    }
+    pendingTurn.team.meta.textContent = failed ? 'interrumpido' : 'detenido';
+  }
   for (const card of pendingTurn.cards) {
     if (!card.classList.contains('run')) continue;   // ya tenía su resultado
     card.classList.remove('run');
@@ -711,6 +989,17 @@ function finishAssistant(finalText, opts) {
   if (!pendingAssistant) return;
   const o = opts || {};
   const holder = pendingAssistant;
+  /* Con la respuesta ya entregada, el razonamiento y las herramientas se pliegan (si el
+     usuario no los abrió): la transcripción queda pregunta → detalles plegados → respuesta,
+     que es lo que se quiere releer. Un turno interrumpido se deja tal cual: ahí los detalles
+     SON el interés. */
+  if (finalText) {
+    // y su texto se asegura en pantalla: si el último frame no llegó a dispararse (ventana
+    // oculta), el bloque se quedaba vacío hasta el siguiente repintado
+    pintarRazonamiento(pendingTurn && pendingTurn.think);
+    cerrarRazonamiento();
+    cerrarHerramientas();
+  }
   const stream = holder.querySelector('.stream');
   // texto ya streameado: al Detener (o si la ejecución falla) NO se tira, se conserva
   const acc = holder._stream || '';
@@ -800,6 +1089,7 @@ const AGENT_MAP = {
   open_url: { el: 'agentCard-navigator', name: 'Navegador', icon: 'compass', cls: 'a-c', desc: 'Abriendo enlaces' },
   browser_control: { el: 'agentCard-navigator', name: 'Navegador', icon: 'compass', cls: 'a-c', desc: 'Controlando el navegador' },
   screenshot: { el: 'agentCard-analyst', name: 'Analista', icon: 'camera', cls: 'a-b2', desc: 'Analizando la pantalla' },
+  view_image: { el: 'agentCard-analyst', name: 'Analista', icon: 'eye', cls: 'a-b2', desc: 'Analizando una imagen' },
   clipboard: { el: 'agentCard-ops', name: 'Operador', icon: 'clipboard', cls: 'a-p2', desc: 'Gestionando portapapeles' },
   notify: { el: 'agentCard-ops', name: 'Operador', icon: 'bell', cls: 'a-p2', desc: 'Enviando notificación' },
   media_control: { el: 'agentCard-ops', name: 'Operador', icon: 'music', cls: 'a-p2', desc: 'Control multimedia' },
@@ -1035,8 +1325,8 @@ const PASOS_VOZ_MAX = 5;   // la franja es un estado, no un historial: sin tope,
                            // de cien herramientas la haría crecer sin fin (y sin verse)
 let pasosVoz = [];
 
-function pasoVoz(ev, ok) {
-  const label = K.tool(ev.name).label + (ev.subagent && K.subagent(ev.subagent) ? ' · ' + K.subagent(ev.subagent).label : '');
+function pasoVoz(ev, ok, labelCustom) {
+  const label = labelCustom || (K.tool(ev.name).label + (ev.subagent && K.subagent(ev.subagent) ? ' · ' + K.subagent(ev.subagent).label : ''));
   /* El `tool` abre el paso (queda «en curso») y el `tool_result` lo CIERRA marcándolo, en
      vez de añadir una fila nueva: el mismo trabajo saldría dos veces y, con cinco huecos,
      se comería él solo la franja. Si no hay paso abierto que cerrar —porque se recortó o
@@ -1068,6 +1358,15 @@ window.sagitari.onAgentEvent((ev) => {
       case 'status': feed(ev.text, 'pur'); break;
       case 'tool': feed(ev.name || 'herramienta', 'pur'); break;
       case 'tool_result': feed((ev.name || '') + ' — ' + String(ev.result || 'ok').slice(0, 90), (String(ev.result || '').startsWith('Error') ? 'err' : 'ok')); break;
+      case 'delegate_start':
+        feed(etiquetaEquipo(ev), 'pur');
+        break;
+      case 'delegate_done': {
+        const who = (K.subagent(ev.subagent) || {}).label || 'Subagente';
+        const st = String(ev.status || 'OK').toUpperCase();
+        feed(who + ' — ' + (st === 'FAILED' ? 'falló' : (st === 'PARTIAL' ? 'a medias' : 'terminó')) + (ev.result ? ': ' + String(ev.result).slice(0, 80) : ''), st === 'FAILED' ? 'err' : 'ok');
+        break;
+      }
       case 'task_done':
         feed('Tarea en segundo plano completada', 'ok');
         if ($('#view-tasks').classList.contains('on')) renderTasks();
@@ -1097,8 +1396,15 @@ window.sagitari.onAgentEvent((ev) => {
   }
   switch (ev.type) {
     case 'delta': {
+      /* El texto de un SUBAGENTE es trabajo interno (acaba en su RESULT/DETAILS/EVIDENCE),
+         no la respuesta al usuario: si entra aquí se mezcla en la burbuja del asistente y,
+         peor, la lectura por frases lo pronuncia en voz alta. Su cierre se cuenta en la
+         tarjeta de la delegación (delegate_done). */
+      if (ev.subagent) break;
       const b = ensureAssistantBubble();
       b._stream = (b._stream || '') + ev.text;
+      // ya está contestando: el razonamiento se pliega (el bloque sigue ahí, para releerlo)
+      cerrarRazonamiento();
       // modo PLAN: en cuanto el plan queda cerrado en el texto se pinta como
       // checklist y desaparece del stream (así se ve avanzar mientras trabaja)
       if (pendingTurn && pendingTurn.mode === 'plan' && !pendingTurn.plan) {
@@ -1116,6 +1422,44 @@ window.sagitari.onAgentEvent((ev) => {
       hablarEnFlujo(b._stream, false);
       break;
     }
+    /* Razonamiento del modelo (solo llega si el usuario lo activó en Ajustes). Se pinta
+       en su bloque y NUNCA en la burbuja ni en la voz: no es la respuesta. */
+    case 'thinking_delta': {
+      if (ev.subagent) break;   // el de un subagente es trabajo interno (va en su tarjeta)
+      const d = ensureThinkBlock();
+      d._texto = (d._texto || '') + ev.text;
+      d._desde = d._desde || Date.now();
+      d._hasta = Date.now();
+      d.querySelector('.th-meta').textContent = 'pensando…';
+      scheduleThinkRender(d);
+      setChatStatus('Razonando…');
+      break;
+    }
+    case 'thinking_done': {
+      if (ev.subagent) break;
+      const d = pendingTurn && pendingTurn.think;
+      if (!d) break;
+      if (typeof ev.text === 'string' && ev.text) d._texto = ev.text;
+      if (!String(d._texto || '').trim()) {   // el modelo no razonó nada: no hay bloque
+        d.remove();
+        pendingTurn.think = null;
+        break;
+      }
+      const ms = (d._desde && d._hasta) ? (d._hasta - d._desde) : Number(ev.durationMs) || 0;
+      // por debajo del segundo no hay nada que medir: «pensó 0 ms» no dice nada
+      d.querySelector('.th-meta').textContent = ms >= 1000 ? 'pensó ' + K.fmtDuration(ms) : 'pensó';
+      // SÍNCRONO a propósito: es el cierre del bloque (ver scheduleThinkRender)
+      thinkTarget = null;
+      pintarRazonamiento(d);
+      scroll();
+      break;
+    }
+    // un reintento en otro modelo: lo que pensó el que falló no se mezcla con lo nuevo
+    case 'thinking_reset': {
+      const d = pendingTurn && pendingTurn.think;
+      if (d) { d.remove(); pendingTurn.think = null; }
+      break;
+    }
     // cada llamada a herramienta abre su propia tarjeta con argumentos y estado
     case 'tool':
       toolCard(ev);
@@ -1128,6 +1472,21 @@ window.sagitari.onAgentEvent((ev) => {
       setChatStatus(ev.text);
       feed(ev.text, 'pur');
       agentStartForStatus(ev.text);
+      break;
+    // arranque de una delegación: se pinta en el tablero del equipo al instante
+    case 'delegate_start':
+      equipoChip(ev);
+      pasoVoz({ name: 'delegate', subagent: ev.subagent }, undefined, etiquetaEquipo(ev));
+      setChatStatus(etiquetaEquipo(ev) + ' — trabajando…');
+      feed(etiquetaEquipo(ev), 'pur');
+      break;
+    // cierre de una delegación: la tarjeta del subagente con su estado y su evidencia
+    case 'delegate_done':
+      delegationCard(ev);
+      equipoCierra(ev);
+      pasoVoz({ name: 'delegate', subagent: ev.subagent }, String(ev.status || 'OK').toUpperCase() !== 'FAILED', etiquetaEquipo(ev));
+      agentStop();
+      feed(((K.subagent(ev.subagent) || {}).label || 'Subagente') + ' — ' + (String(ev.status || 'OK').toUpperCase() === 'FAILED' ? 'falló' : 'terminó'), String(ev.status || '').toUpperCase() === 'FAILED' ? 'err' : 'ok');
       break;
     case 'tool_result':
       completeToolCard(ev);
@@ -1511,6 +1870,7 @@ async function enviarTexto(text, atts = []) {
   // el turno del usuario queda sellado con el modo con el que se envió: en el
   // historial se ve de un vistazo qué respondió cada modo
   currentRunMode = K.mode(mode).key;
+  dayStamp();   // si el hilo cruza la medianoche, el separador sale con la pregunta
   const b = bubble('user', { mode: currentRunMode });
   b.textContent = text;
   // los adjuntos se ven en la burbuja (miniaturas y nombres), no solo en el texto
@@ -2506,9 +2866,24 @@ async function initSecurity() {
     $('#grLoop').value = g.loopThreshold ?? 3;
     if ($('#grCost')) $('#grCost').value = g.maxCostUsd ?? 0;
     if ($('#grStall')) $('#grStall').value = g.stallThreshold ?? 6;
+    if ($('#grDelegations')) $('#grDelegations').value = g.maxDelegations ?? 8;
+    // v2.5: paralelismo del turno (por defecto 3; el navegador y el disco van con cola)
+    if ($('#parTools')) $('#parTools').value = CFG.settings.parallelTools ?? 3;
     if ($('#grLlmTimeout')) $('#grLlmTimeout').value = Math.round((CFG.settings.llmTimeoutMs ?? 120000) / 1000);
     if ($('#setMaxTasks')) $('#setMaxTasks').value = CFG.settings.maxConcurrentTasks ?? 1;
     if ($('#swAutoResume')) $('#swAutoResume').classList.toggle('on', CFG.settings.autoResumeTasks !== false);
+    // La verificación de cierre viene ACTIVADA por defecto (el agente no da una tarea
+    // por terminada sin comprobarla); la marca sólo se lee como desactivada si es false.
+    if ($('#swVerificar')) $('#swVerificar').classList.toggle('on', CFG.settings.verifyGate !== false);
+    // Modelo por agente: viene DESACTIVADO (el modelo elegido manda en todo hasta que el
+    // usuario pida el ahorro: una vez se cambió un modelo en silencio y se leyó como un fallo)
+    if ($('#swAgenteModelo')) $('#swAgenteModelo').classList.toggle('on', CFG.settings.agentRouting === true);
+    // Razonamiento visible: apagado por defecto (en algunos proveedores cuesta tokens
+    // aparte, y no todo el mundo quiere leer el proceso interno del modelo)
+    if ($('#swThinking')) $('#swThinking').classList.toggle('on', CFG.settings.showThinking === true);
+    // Revisión del cambio: ACTIVA por defecto (es la pieza que evita que el código
+    // salga sin que nadie lo haya leído); solo se lee como apagada si es false
+    if ($('#swRevisar')) $('#swRevisar').classList.toggle('on', CFG.settings.reviewGate !== false);
     if (CFG.settings.devMode) { devMode = true; $('#devModeSw').classList.add('on'); paintMeta(); }
   } catch {}
   renderSecurity();
@@ -2533,6 +2908,13 @@ $('#grTokens').onchange = (e) => window.sagitari.secSetGuardrail({ maxTokens: cl
 $('#grLoop').onchange = (e) => window.sagitari.secSetGuardrail({ loopThreshold: clampGuardrail(e.target, 3) });
 if ($('#grCost')) $('#grCost').onchange = (e) => window.sagitari.secSetGuardrail({ maxCostUsd: clampGuardrail(e.target, 0) });
 if ($('#grStall')) $('#grStall').onchange = (e) => window.sagitari.secSetGuardrail({ stallThreshold: clampGuardrail(e.target, 0) });
+if ($('#grDelegations')) $('#grDelegations').onchange = (e) => window.sagitari.secSetGuardrail({ maxDelegations: clampGuardrail(e.target, 8) });
+if ($('#parTools')) $('#parTools').onchange = async (e) => {
+  const v = clampGuardrail(e.target, 3);   // 1 = en orden, como antes
+  CFG.settings.parallelTools = v;
+  await window.sagitari.setSettings({ parallelTools: v });
+  showToast(v === 1 ? 'Las herramientas irán una detrás de otra' : 'Hasta ' + v + ' herramientas a la vez (con cola por recurso)');
+};
 if ($('#grLlmTimeout')) $('#grLlmTimeout').onchange = async (e) => {
   const v = clampGuardrail(e.target, 120);
   await window.sagitari.setSettings({ llmTimeoutMs: v * 1000 });
@@ -2548,6 +2930,32 @@ if ($('#swAutoResume')) $('#swAutoResume').onclick = async (e) => {
   const on = !e.currentTarget.classList.contains('on');
   e.currentTarget.classList.toggle('on', on);
   await window.sagitari.setSettings({ autoResumeTasks: on });
+};
+if ($('#swAgenteModelo')) $('#swAgenteModelo').onclick = async (e) => {
+  const on = !e.currentTarget.classList.contains('on');
+  e.currentTarget.classList.toggle('on', on);
+  CFG.settings.agentRouting = on;
+  await window.sagitari.setSettings({ agentRouting: on });
+};
+if ($('#swVerificar')) $('#swVerificar').onclick = async (e) => {
+  const on = !e.currentTarget.classList.contains('on');
+  e.currentTarget.classList.toggle('on', on);
+  CFG.settings.verifyGate = on;
+  await window.sagitari.setSettings({ verifyGate: on });
+};
+if ($('#swRevisar')) $('#swRevisar').onclick = async (e) => {
+  const on = !e.currentTarget.classList.contains('on');
+  e.currentTarget.classList.toggle('on', on);
+  CFG.settings.reviewGate = on;
+  await window.sagitari.setSettings({ reviewGate: on });
+  showToast(on ? 'Cada cambio se revisará antes de cerrar' : 'Revisión del cambio desactivada');
+};
+if ($('#swThinking')) $('#swThinking').onclick = async (e) => {
+  const on = !e.currentTarget.classList.contains('on');
+  e.currentTarget.classList.toggle('on', on);
+  CFG.settings.showThinking = on;
+  await window.sagitari.setSettings({ showThinking: on });
+  showToast(on ? 'Se mostrará el razonamiento del modelo' : 'Razonamiento del modelo oculto');
 };
 $('#devModeSw').onclick = async (e) => {
   devMode = !e.currentTarget.classList.contains('on');
@@ -3248,12 +3656,16 @@ function resetChatView(messages) {
   msgs.innerHTML = '';
   pendingAssistant = null; pendingTurn = null;
   lastAssistantEl = null; lastTurnSummary = '';
+  stampDia = null;   // una conversación nueva vuelve a estampar su día
   setChatStatus('');
   const list = messages || [];
   if (!list.length) { showEmpty(); pinned = true; scroll(true); return; }
   hideEmpty();
-  dayStamp();
   for (const m of list) {
+    // separador de día REAL al restaurar: sale al empezar y cada vez que el hilo salta de
+    // día, con la fecha de los mensajes (antes se estampaba «Hoy · <hora actual>» arriba
+    // aunque la conversación fuera de la semana pasada)
+    dayStamp(m.ts);
     const b = bubble(m.role, { mode: m.mode, ts: m.ts });
     // el contenido guardado lleva el texto de los adjuntos incrustado: lo
     // escondemos de la burbuja y enseñamos solo las miniaturas/nombres
@@ -3294,7 +3706,11 @@ $('#btnCopyConv').onclick = () => {
     const who = m.classList.contains('me') ? (CFG.settings.userName || 'Tú') : 'Sagitari';
     const badge = m.querySelector('.msg-mode');
     const t = m.querySelector('.bubble');
-    if (t) parts.push(`## ${who}${badge ? ' · ' + badge.textContent.trim() : ''}\n${t.innerText.trim()}`);
+    if (!t) return;
+    // el razonamiento no forma parte de la conversación: se copia la respuesta
+    const copia = t.cloneNode(true);
+    copia.querySelectorAll('.thinkblock').forEach(x => x.remove());
+    parts.push(`## ${who}${badge ? ' · ' + badge.textContent.trim() : ''}\n${copia.innerText.trim()}`);
   });
   copyText(parts.join('\n\n'), 'Conversación copiada');
 };

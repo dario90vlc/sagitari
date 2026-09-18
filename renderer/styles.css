@@ -593,7 +593,17 @@ body.nofocus .glow, body.nofocus .glow::before, body.nofocus .glowRing { animati
 }
 .toolchip.done { background: rgba(52,211,153,0.10); border-color: rgba(52,211,153,0.3); color: var(--ok); }
 .toolchip.err { background: rgba(251,113,133,0.10); border-color: rgba(251,113,133,0.35); color: var(--danger); }
-.day { text-align: center; font-size: 11px; color: var(--dim); letter-spacing: .08em; margin: 8px 0 2px; }
+/* Separador de día: ahora sale al empezar el hilo y al saltar de día (antes aparecía
+   antes de CADA respuesta, doce veces en una tarde), así que se marca como separador:
+   la etiqueta entre dos líneas, en vez de una línea de texto suelta. */
+.day {
+  display: flex; align-items: center; gap: 10px; margin: 12px 4px 6px;
+  font: 600 10px var(--font-ui); letter-spacing: .14em; text-transform: uppercase; color: var(--dim);
+}
+.day::before, .day::after {
+  content: ''; height: 1px; flex: 1 1 auto;
+  background: linear-gradient(90deg, transparent, var(--line2), transparent);
+}
 
 .chatfoot { padding: 10px 10px 16px; flex-shrink: 0; position: relative; }
 
@@ -643,6 +653,7 @@ body.nofocus .glow, body.nofocus .glow::before, body.nofocus .glowRing { animati
 .a-b { background: rgba(var(--acc3-rgb), 0.16); } .a-p { background: rgba(var(--acc2-rgb), 0.18); }
 .a-b2 { background: rgba(34,211,238,0.14); } .a-c { background: rgba(217,70,239,0.14); }
 .a-y { background: rgba(251,191,36,0.14); } .a-p2 { background: rgba(96,165,250,0.14); }
+.a-y2 { background: rgba(251,146,60,0.16); }   /* revisor del cambio: naranja, distinto del Archivador */
 .acard b { display: block; } .acard small { color: var(--dim); font-size: 12px; }
 .adot { position: absolute; top: 12px; right: 14px; width: 9px; height: 9px; border-radius: 50%; background: rgba(148,163,184,0.25); }
 .acard.on .adot { background: var(--ok); box-shadow: 0 0 10px var(--ok); animation: blink 1.2s infinite; }
@@ -1005,6 +1016,12 @@ depender del color de acento elegido. */
    caía al anillo del sistema, que pertenece a otra paleta. */
 :focus-visible { outline: 2px solid rgba(var(--acc-rgb), 0.95); outline-offset: 2px; }
 
+/* Selección de texto: el azul del sistema rompe la paleta y, sobre estas superficies
+   oscuras, deja el texto elegido casi ilegible en las respuestas largas. En el chat
+   toma el color del modo activo, como el resto de la vista. */
+::selection { background: rgba(var(--acc2-rgb), 0.42); color: #fff; }
+#messages ::selection { background: rgba(var(--mode-rgb), 0.40); }
+
 /* textarea rec state */
 #chatInput.rec { color: var(--warn); }
 /* ===== v1.1: confirmation bar, dev metrics, security panel ===== */
@@ -1196,7 +1213,51 @@ depender del color de acento elegido. */
    La burbuja usa `white-space: pre-wrap` (respetar los saltos del modelo), así
    que los saltos de línea del propio HTML se dibujarían como líneas en blanco
    dentro de las tarjetas. Los componentes vuelven al flujo normal. */
-.tgroup, .tcard, .plancard, .chip-run, .msg-actions, .msg-head, .codeblock { white-space: normal; }
+.tgroup, .tcard, .plancard, .chip-run, .msg-actions, .msg-head, .codeblock, .thinkblock { white-space: normal; }
+
+/* ---- razonamiento del modelo (opcional, Ajustes ▸ Agente ▸ Conversación) ----
+   Va el primero de la burbuja y es deliberadamente más discreto que la respuesta:
+   texto pequeño y atenuado, con la marca del color del modo, para que se distinga de
+   lo que el agente AFIRMA. Se pliega solo cuando empieza a contestar. */
+.thinkblock {
+  border: 1px dashed rgba(var(--mode-rgb), 0.34); border-radius: 11px;
+  margin: 2px 0 7px; background: rgba(var(--mode-rgb), 0.05); overflow: hidden;
+}
+.thinkblock .think-head {
+  display: flex; align-items: center; gap: 7px; padding: 5px 10px;
+  cursor: pointer; user-select: none; color: var(--dim);
+}
+.thinkblock .think-head:hover { background: rgba(var(--mode-rgb), 0.08); }
+.thinkblock .think-head:focus-visible { outline: 2px solid rgba(var(--mode-rgb), 0.7); outline-offset: -2px; }
+.thinkblock .th-ic { display: grid; place-items: center; color: var(--mode-c); }
+.thinkblock .th-ic .ic { width: 13px; height: 13px; }
+.thinkblock .think-head b { font: 600 11px var(--font-ui); letter-spacing: .06em; }
+.thinkblock .th-meta { font-size: 11px; color: var(--dim); margin-left: 2px; }
+.thinkblock .th-copy {
+  appearance: none; margin-left: auto; cursor: pointer; color: var(--dim);
+  background: none; border: none; padding: 0 2px; display: grid; place-items: center;
+  opacity: 0; transition: opacity .14s;
+}
+.thinkblock:hover .th-copy, .thinkblock .th-copy:focus-visible { opacity: 1; }
+.thinkblock .th-copy:hover { color: var(--cyan); }
+.thinkblock .th-copy .ic { width: 12px; height: 12px; }
+.thinkblock .th-chev { display: grid; place-items: center; color: var(--dim); transition: transform .18s; }
+.thinkblock .th-chev .ic { width: 13px; height: 13px; }
+.thinkblock.open .th-chev { transform: rotate(90deg); }
+.thinkblock.closed .think-body { display: none; }
+.thinkblock .think-body {
+  border-top: 1px dashed rgba(var(--mode-rgb), 0.24); padding: 7px 11px 9px;
+  max-height: 280px; overflow: auto;
+  font-size: 12px; line-height: 1.55; color: var(--dim);
+}
+.thinkblock .think-body .md { opacity: .92; }
+/* punto que late mientras piensa: el bloque sigue ABIERTO, así que «pensando…» se ve */
+.thinkblock.open .th-meta::after {
+  content: ''; display: inline-block; width: 5px; height: 5px; margin-left: 5px;
+  border-radius: 50%; background: var(--mode-c); animation: blink 1.4s infinite;
+}
+.thinkblock .think-body::-webkit-scrollbar { width: 5px; }
+.thinkblock .think-body::-webkit-scrollbar-thumb { background: rgba(var(--mode-rgb), 0.28); border-radius: 3px; }
 
 /* ---- tarjeta de herramienta: cabecera + detalle expandible ---- */
 .tcard {
@@ -1206,6 +1267,17 @@ depender del color de acento elegido. */
 .tcard.run { border-color: rgba(var(--mode-rgb), 0.36); }
 .tcard.done { border-color: rgba(52,211,153,0.28); }
 .tcard.err { border-color: rgba(251,113,133,0.36); }
+.tcard.part { border-color: rgba(251,191,36,0.34); }
+/* Tablero del equipo: quién está trabajando ahora mismo (delegaciones en vivo). Un chip por
+   subagente con su subtarea; pasa de «en marcha» a OK/parcial/fallo al cerrar. */
+.tgroup.team { border-color: rgba(var(--mode-rgb), 0.28); }
+.tgroup.team .tgroup-body { display: flex; flex-direction: column; align-items: flex-start; gap: 4px; }
+.tgroup.team .tgroup-body .toolchip { max-width: 100%; }
+/* Cierre de una delegación: el estado del subagente en una píldora (OK · PARCIAL · FALLÓ) */
+.dcard-status { font: 700 10px var(--font-display); letter-spacing: 1px; padding: 2px 8px; border-radius: 999px; flex-shrink: 0; }
+.dcard-status.ok { color: var(--ok); background: rgba(52,211,153,0.14); }
+.dcard-status.part { color: #fbbf24; background: rgba(251,191,36,0.14); }
+.dcard-status.fail { color: var(--danger); background: rgba(251,113,133,0.14); }
 .tcard-head {
   display: flex; align-items: center; gap: 8px; padding: 7px 10px;
   cursor: pointer; user-select: none;
@@ -1263,6 +1335,13 @@ depender del color de acento elegido. */
 .tgroup-head .tg-ic .ic { width: 14px; height: 14px; }
 .tgroup-head b { font: 600 12px var(--font-ui); color: var(--txt); }
 .tgroup-head .tg-meta { font-size: 11px; color: var(--dim); margin-left: auto; }
+/* fallo dentro del grupo: la cabecera lo enseña aunque el grupo esté plegado */
+.tgroup-head .tg-fails {
+  font: 700 11px var(--font-ui); letter-spacing: .04em; color: var(--danger);
+  padding: 1px 7px; border-radius: 999px; background: rgba(251,113,133,0.14);
+}
+.tgroup.has-fails { border-color: rgba(251,113,133,0.34); }
+.tgroup.has-fails .tgroup-head { background: linear-gradient(90deg, rgba(251,113,133,0.10), transparent); }
 .tgroup-head .tg-chev { color: var(--dim); display: grid; place-items: center; transition: transform .18s; }
 .tgroup-head .tg-chev .ic { width: 14px; height: 14px; }
 .tgroup.closed .tg-chev { transform: rotate(0deg); }

@@ -1,7 +1,16 @@
 ---
 name: investigacion
 description: Investigación profunda en internet con fuentes verificadas. Usar al investigar temas, comparar productos/precios o recopilar información actual.
-version: 1.0.0
+version: 1.1.0
+category: Investigación
+agents:
+  - orchestrator
+  - research
+triggers:
+  - investiga
+  - compara
+  - fuentes
+  - informacion actual
 ---
 
 # Skill: Investigación

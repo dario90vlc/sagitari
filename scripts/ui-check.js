@@ -39,6 +39,10 @@ const CHECK_DEADLINE_MS = 8000;
    ni tocan claves reales — y de paso enseñan qué herramientas le ofrece la app
    al modelo, que no viaja por ningún canal de la interfaz. */
 const TEST_DATA_DIR = path.join(process.env.APPDATA || path.join(os.homedir(), 'AppData', 'Roaming'), 'SagitariAI-test');
+/* El espacio de trabajo de la instancia de prueba: una carpeta TEMPORAL, no la del
+   usuario. La comprobación de la revisión del cambio escribe un archivo de verdad y
+   no puede dejar nada en el escritorio de quien ejecuta esto. */
+const WS_TEST = fs.mkdtempSync(path.join(os.tmpdir(), 'sagi-ui-ws-'));
 function seedTestConfig(apiPort) {
   const file = path.join(TEST_DATA_DIR, 'config.json');
   /* Proveedor con lista larga y el modelo en uso al final: es el caso que hace
@@ -68,7 +72,13 @@ function seedTestConfig(apiPort) {
      primera fila de la lista quedaba fuera de la parte visible). */
   try {
     fs.mkdirSync(TEST_DATA_DIR, { recursive: true });
-    fs.writeFileSync(file, JSON.stringify({ providers: [{ ...dummy, id: 'ui-check', models: modelos }], active: dummy, mcp: { enabled: true, servers: [mcpServer, mcpServerConGuion] } }, null, 2), 'utf8');
+    fs.writeFileSync(file, JSON.stringify({
+      providers: [{ ...dummy, id: 'ui-check', models: modelos }], active: dummy,
+      mcp: { enabled: true, servers: [mcpServer, mcpServerConGuion] },
+      // el razonamiento se muestra en las comprobaciones de la interfaz: es un ajuste
+      // del usuario y hay que verificar que su bloque aparece (y que se apaga solo)
+      settings: { showThinking: true, workspace: WS_TEST },
+    }, null, 2), 'utf8');
   } catch {}
 }
 
@@ -120,6 +130,11 @@ function fakeLlm() {
      recibe de verdad (system prompt, definiciones y el índice de skills), así que es
      donde se puede comprobar el registro con el que se le habla, sin fiarse del código. */
   const cuerpos = [];
+  /* GUION: respuestas SSE ya hechas que se sirven en orden antes de caer al «listo» de
+     siempre. Permite escenificar un turno con herramientas (p. ej. una delegación) sin
+     inventar un servidor aparte: cada petición —incluidas las del SUBAGENTE, que usa el
+     mismo proveedor— consume la siguiente. */
+  const guion = [];
   const srv = http.createServer((req, res) => {
     let body = '';
     req.on('data', (c) => { body += c; });
@@ -129,12 +144,25 @@ function fakeLlm() {
       vistos.push(nombres);      // null = la petición no traía `tools`
       cuerpos.push(body);
       res.writeHead(200, { 'content-type': 'text/event-stream' });
-      res.write('data: ' + JSON.stringify({ choices: [{ delta: { content: 'listo' } }] }) + '\n\n');
-      res.write('data: [DONE]\n\n');
+      res.write(guion.length ? guion.shift() : 'data: ' + JSON.stringify({ choices: [{ delta: { content: 'listo' } }] }) + '\n\ndata: [DONE]\n\n');
       res.end();
     });
   });
-  return new Promise((res) => srv.listen(0, '127.0.0.1', () => res({ srv, port: srv.address().port, vistos, cuerpos })));
+  return new Promise((res) => srv.listen(0, '127.0.0.1', () => res({ srv, port: srv.address().port, vistos, cuerpos, guion })));
+}
+
+/** Una respuesta SSE de una sola frase (o de un tool_call, ver `guionToolCall`). */
+function guionTexto(texto) {
+  return 'data: ' + JSON.stringify({ choices: [{ delta: { content: texto } }] }) + '\n\ndata: [DONE]\n\n';
+}
+function guionToolCall(id, name, args) {
+  return 'data: ' + JSON.stringify({ choices: [{ delta: { tool_calls: [{ index: 0, id, function: { name, arguments: JSON.stringify(args) } }] } }] }) + '\n\ndata: [DONE]\n\n';
+}
+/** Razonamiento del modelo (`reasoning_content`, como DeepSeek y compañía) + su respuesta. */
+function guionRazonamiento(razonamiento, respuesta) {
+  return 'data: ' + JSON.stringify({ choices: [{ delta: { reasoning_content: razonamiento } }] }) + '\n\n'
+    + (respuesta ? 'data: ' + JSON.stringify({ choices: [{ delta: { content: respuesta } }] }) + '\n\n' : '')
+    + 'data: [DONE]\n\n';
 }
 
 /** Comprobaciones sobre la ventana viva. `true` = bien. */
@@ -192,6 +220,7 @@ const AFTER = {
     let salido = false;
     const salir = () => { if (!salido) { salido = true; process.exit(code); } };
     try { llm.srv.close(); } catch {}
+    try { fs.rmSync(WS_TEST, { recursive: true, force: true }); } catch {}
     child.once('exit', salir);
     try { child.kill(); } catch {}
     setTimeout(() => { try { child.kill('SIGKILL'); } catch {} salir(); }, 4000);
@@ -536,6 +565,185 @@ const AFTER = {
       ? 'lleva emojis: ' + JSON.stringify(emojisEnviados.slice(0, 6))
       : 'no declara la regla de estilo'));
   }
+
+  /* El prompt en la petición CRUDA: lo estable delante y lo volátil al final, para que el
+     proveedor pueda cachear el prefijo. La memoria cambia en cada turno; si viaja en medio
+     del prompt, el caché se rompe desde ahí. */
+  const iGuia = cuerpoModelo.indexOf('DELEGACIÓN');
+  const iWs = cuerpoModelo.indexOf('ESPACIO DE TRABAJO');
+  const iMem = cuerpoModelo.indexOf('MEMORIA del usuario');
+  if (iGuia > 0 && iWs > 0 && iMem > 0 && iMem > iGuia && iMem > iWs) {
+    console.log('  ok   el prompt va con lo estable delante y lo volátil al final (caché de prefijo)');
+  } else {
+    failed++;
+    console.log('  FALLO el orden del prompt no deja cachear el prefijo  ->  ' + JSON.stringify({ iGuia, iWs, iMem }));
+  }
+
+  /* ---- DELEGACIÓN en la interfaz (de punta a punta, con el modelo de mentira) ----
+     Tres turnos: el orquestador delega en el investigador, el subagente cierra con su
+     RESULT/EVIDENCE y el orquestador responde. El texto interno del subagente lleva una
+     marca irrepetible: si esa marca aparece en la RESPUESTA (quitando el grupo de
+     herramientas), es que se ha colado en la burbuja —y con el modo voz se leería en voz
+     alta—, que es justo el defecto que esta comprobación vigila. Solo aparece en su
+     tarjeta de delegación, que es donde el usuario quiere leerla. */
+  const MARCA_SUB = 'prueba-interna-999';
+  // El agente elegido es el VERIFICADOR a propósito: su clave real (`verification`)
+  // no estaba en el catálogo de etiquetas de la interfaz (`verify`), así que su ficha
+  // no resolvía y leer `.label` de la nada tumbaba el manejador de eventos.
+  llm.guion.push(
+    guionToolCall('d1', 'delegate', { agent: 'verification', task: 'comprueba el informe de vuelos', expect: 'una URL con el precio' }),
+    guionTexto('RESULT: 3 vuelos hallados\nDETAILS: 180 EUR ida y vuelta\nEVIDENCE: ' + MARCA_SUB + '\nSTATUS: OK'),
+    guionTexto('Tienes tres vuelos a Roma desde 180 EUR.')
+  );
+  const esperar = async (expr, ms) => {
+    const limite = Date.now() + ms;
+    for (;;) {
+      if (await evaluate(expr) === true) return true;
+      if (Date.now() > limite) return false;
+      await new Promise(r => setTimeout(r, 250));
+    }
+  };
+  await evaluate('document.querySelector(\'[data-view="chat"]\').click()');
+  await evaluate('document.querySelector("#chatInput").value = "investiga vuelos a Roma"; document.querySelector("#chatSend").click()');
+  const llegoLaTarjeta = await esperar('!!document.querySelector(".tcard.dcard")', 25000);
+  if (llegoLaTarjeta) {
+    console.log('  ok   la delegación pinta su tarjeta en el chat');
+  } else {
+    failed++;
+    console.log('  FALLO la delegación no dejó tarjeta en el chat (guion: ' + llm.guion.length + ' respuestas sin usar)');
+  }
+  await judge('la tarjeta de la delegación trae estado y evidencia',
+    '(function(){ var c = document.querySelector(".tcard.dcard"); if (!c) return false; var t = c.textContent || ""; return /Verificador/.test(t) && /OK/.test(t) && t.indexOf(' + JSON.stringify(MARCA_SUB) + ') >= 0; })()');
+  /* El tablero del equipo: la delegación se ve EN VIVO (una fila por subtarea, con su
+     criterio) y se resuelve al acabar. Se comprueba aquí y no en el test unitario porque
+     es lo único que cierra la pregunta «¿quién está trabajando ahora mismo?». */
+  await judge('el tablero del equipo enseña la delegación en vivo y la cierra',
+    '(function(){ var g = document.querySelector(".tgroup.team"); if (!g) return false; if (!/Equipo/.test(g.textContent || "")) return false; var chips = g.querySelectorAll(".toolchip"); if (chips.length !== 1) return false; var c = chips[0]; if (c.classList.contains("run")) return false; if (!(c.classList.contains("done") || c.classList.contains("err"))) return false; var t = c.textContent || ""; return /Verificador/.test(t) && /comprueba el informe de vuelos/.test(t); })()');
+  await judge('Ajustes deja fijar el tope de subagentes por turno',
+    '(async function(){ var el = document.querySelector("#grDelegations"); return !!el && Number(el.value) === 8; })()');
+
+  await judge('el texto interno del subagente NO entra en la respuesta',
+    '(function(){ var ms = document.querySelectorAll(".msg.ai"); var last = ms[ms.length - 1]; if (!last) return false; var copia = last.cloneNode(true); copia.querySelectorAll(".tgroup").forEach(function(g){ g.remove(); }); var t = copia.textContent || ""; return t.indexOf(' + JSON.stringify(MARCA_SUB) + ') < 0 && /Roma/.test(t); })()');
+
+  /* ---- v2.3: razonamiento visible (Ajustes ▸ Agente ▸ Conversación) ----
+     El modelo de mentira manda `reasoning_content`, como DeepSeek y compañía. Se
+     comprueba lo que VE el usuario: un bloque propio encima de la respuesta, plegado
+     en cuanto el agente empieza a contestar, que no se cuela en la respuesta —y por
+     tanto no se leería en voz alta— y que desaparece si apaga el ajuste. En el mismo
+     turno se fuerza UNA herramienta que falla (leer un archivo que no existe): antes,
+     con el grupo plegado, un fallo dentro era invisible hasta abrirlo a mano. */
+  const MARCA_RAZON = 'prueba-razonamiento-777';
+  await evaluate('document.querySelector("#btnClear").click()');   // conversación limpia: el separador de día se cuenta desde cero
+  await new Promise(r => setTimeout(r, 600));
+  llm.guion.push(
+    guionToolCall('r1', 'read_file', { path: 'no-existe-jamas-sagitari.txt' }),
+    guionRazonamiento(MARCA_RAZON + ': ese archivo no está; lo digo tal cual.', 'Listo: no había tal archivo.')
+  );
+  const aiAntes = await evaluate('document.querySelectorAll(".msg.ai").length');
+  await evaluate('document.querySelector("#chatInput").value = "mira ese archivo"; document.querySelector("#chatSend").click()');
+  const llegoRazon = await esperar('document.querySelectorAll(".msg.ai").length > ' + aiAntes + ' && !!document.querySelector(".msg.ai:last-child .thinkblock")', 25000);
+  if (llegoRazon) console.log('  ok   el razonamiento del modelo se pinta en su propio bloque');
+  else { failed++; console.log('  FALLO no apareció el bloque de razonamiento (guion: ' + llm.guion.length + ' respuestas sin usar)'); }
+  await judge('el bloque trae el razonamiento, su duración, su botón de copiar y queda plegado',
+    '(function(){ const b = document.querySelector(".msg.ai:last-child .thinkblock"); if (!b) return { bloque: false }; const cuerpo = b.querySelector(".think-body"); const r = { marca: !!cuerpo && cuerpo.textContent.indexOf(' + JSON.stringify(MARCA_RAZON) + ') >= 0, meta: b.querySelector(".th-meta").textContent, copiar: !!b.querySelector(".th-copy"), plegado: !b.classList.contains("open") }; return (r.marca && r.copiar && r.plegado && /^pensó/.test(r.meta)) ? true : r; })()');
+  await judge('el razonamiento NO entra en la respuesta (ni se leería en voz alta)',
+    '(function(){ const m = document.querySelector(".msg.ai:last-child"); if (!m) return false; const c = m.querySelector(".bubble").cloneNode(true); c.querySelectorAll(".thinkblock,.tgroup").forEach(x => x.remove()); const t = c.textContent || ""; return t.indexOf(' + JSON.stringify(MARCA_RAZON) + ') < 0 && /no había tal archivo/.test(t); })()');
+  await judge('la cabecera del grupo avisa del fallo con el grupo plegado',
+    '(function(){ const g = document.querySelector(".msg.ai:last-child .tgroup:not(.team)"); if (!g) return false; const f = g.querySelector(".tg-fails"); return !!f && !f.hidden && /1 fallo/.test(f.textContent) && g.classList.contains("has-fails"); })()');
+  /* El separador de día: antes lo estampaba CADA respuesta del agente (doce veces en una
+     tarde, entre la pregunta y la respuesta). Se mide contando: uno al empezar el hilo y
+     el MISMO número después de otro turno, que es exactamente lo que fallaba. */
+  const dias1 = await evaluate('document.querySelectorAll("#messages .day").length');
+  if (dias1 >= 1) console.log('  ok   el hilo estampa su separador de día al empezar');
+  else { failed++; console.log('  FALLO el hilo no tiene separador de día'); }
+
+  /* El interruptor de Ajustes manda de verdad: apagado, el siguiente turno no trae
+     bloque (el agente ni lo pide), y al volver a encenderlo vuelve a aparecer. Se deja
+     ENCENDIDO al terminar: el ajuste persiste en la configuración de la prueba. */
+  const enviarYEsperar = async (marca) => {
+    // el turno anterior tiene que haber cerrado del todo: con el agente ocupado, el envío
+    // se descarta (a propósito) y la espera se quedaría mirando un turno que no existe
+    await esperar('(async function(){ return !(await window.sagitari.getAgentsLive()).running; })()', 15000);
+    const n = await evaluate('document.querySelectorAll(".msg.ai").length');
+    await evaluate('document.querySelector("#chatInput").value = ' + JSON.stringify(marca) + '; document.querySelector("#chatSend").click()');
+    const ok = await esperar('document.querySelectorAll(".msg.ai").length > ' + n + ' && /no había tal archivo/.test(document.querySelector(".msg.ai:last-child").textContent)', 25000);
+    return ok;
+  };
+  await evaluate('document.querySelector(\'[data-view="settings"]\').click()');
+  await evaluate('document.querySelector(\'.settab[data-set="agent"]\').click()');
+  const apagadoOk = await evaluate('(async function(){ const sw = document.querySelector("#swThinking"); if (!sw || !sw.classList.contains("on")) return false; sw.click(); await new Promise(r => setTimeout(r, 400)); return !sw.classList.contains("on"); })()');
+  if (apagadoOk) console.log('  ok   el interruptor del razonamiento se apaga en Ajustes');
+  else { failed++; console.log('  FALLO no se pudo apagar el razonamiento en Ajustes'); }
+  llm.guion.push(guionRazonamiento(MARCA_RAZON + ': esto NO debería verse.', 'Listo: no había tal archivo.'));
+  await enviarYEsperar('otra vez, sin razonamiento visible');
+  await judge('con el ajuste apagado el turno no trae bloque de razonamiento',
+    '!document.querySelector(".msg.ai:last-child .thinkblock")');
+  await judge('y el turno nuevo tampoco añade otro separador de día',
+    'document.querySelectorAll("#messages .day").length === ' + dias1);
+  const encendidoOk = await evaluate('(async function(){ const sw = document.querySelector("#swThinking"); sw.click(); await new Promise(r => setTimeout(r, 400)); return sw.classList.contains("on"); })()');
+  llm.guion.push(guionRazonamiento(MARCA_RAZON + ': vuelvo a pensar a la vista.', 'Listo: no había tal archivo.'));
+  const envio3 = await enviarYEsperar('y ahora otra vez, con razonamiento visible');
+  await judge('al volver a encenderlo el bloque reaparece',
+    '(function(){ const b = document.querySelector(".msg.ai:last-child .thinkblock"); if (!b) return { encendido: document.querySelector("#swThinking").classList.contains("on"), envio: ' + JSON.stringify(envio3) + ', turnos: document.querySelectorAll(".msg.ai").length, bloques: document.querySelectorAll(".msg.ai .thinkblock").length }; return (b.querySelector(".think-body").textContent || "").indexOf(' + JSON.stringify(MARCA_RAZON) + ') >= 0; })()');
+  if (!encendidoOk) { failed++; console.log('  FALLO el interruptor no vuelve a encender el razonamiento'); }
+  await evaluate('document.querySelector(\'[data-view="chat"]\').click()');
+
+  /* ---- v2.4: la revisión del CAMBIO antes de cerrar (de punta a punta) ----
+     El modelo de mentira escribe un archivo y el orquestador contesta. Antes de aceptar
+     ese cierre, la app delega la revisión en su Revisor. Se comprueba en la ventana viva
+     lo que el usuario ve (la tarjeta con el informe y el cierre final) y, en Node, lo que
+     de verdad recibió el modelo y qué hay en el disco — sin creerse a la app. */
+  const MARCA_REV = 'prueba-revision-555';
+  const archivoRev = 'revision-' + Date.now() + '.js';
+  await evaluate('document.querySelector("#btnClear").click()');
+  await new Promise(r => setTimeout(r, 600));
+  llm.guion.push(
+    guionToolCall('w1', 'write_file', { path: archivoRev, content: 'function revisado() { return 42; }\n' }),
+    guionTexto('He creado ' + archivoRev + '.'),
+    guionTexto('RESULT: ' + MARCA_REV + ' sin hallazgos bloqueantes\nDETAILS: un archivo, un añadido\nSTATUS: OK'),
+    guionTexto('Listo: el archivo está y pasa la revisión.')
+  );
+  await evaluate('document.querySelector("#chatInput").value = "crea un módulo de prueba"; document.querySelector("#chatSend").click()');
+  /* Escribir en el disco pide permiso (y está bien que lo pida): aquí se concede, que es
+     lo que haría el usuario. Si no apareciera la barra, la escritura no llegaría y la
+     comprobación del archivo en el disco lo diría. */
+  let permitido = false;
+  for (let i = 0; i < 40 && !permitido; i++) {
+    const visible = await evaluate('(function(){ const b = document.querySelector("#confirmBar"); return !!b && !b.hidden; })()');
+    if (visible) { await evaluate('document.querySelector("#confirmOk").click()'); permitido = true; }
+    else await new Promise(r => setTimeout(r, 250));
+  }
+  const llegoRevision = await esperar('!!document.querySelector(".tcard.dcard") && /Revisor/.test(document.querySelector("#messages").textContent)', 25000);
+  if (llegoRevision) console.log('  ok   la revisión del cambio deja su tarjeta en el chat');
+  else { failed++; console.log('  FALLO el Revisor no llegó a pintar su tarjeta (guion: ' + llm.guion.length + ' respuestas sin usar)'); }
+  // la tarjeta de la revisión se pinta al ACABAR la delegación: el cierre del modelo viene después
+  const llegoCierreRev = await esperar('/pasa la revisi[oó]n/.test(document.querySelector("#messages").textContent)', 25000);
+  if (!llegoCierreRev) { failed++; console.log('  FALLO el turno no cerró con la respuesta del modelo tras la revisión'); }
+  /* El cierre se busca en las ÚLTIMAS burbujas sin el grupo de herramientas ni el
+     razonamiento: el texto del turno y las tarjetas comparten burbuja, así que leer el
+     `.textContent` crudo de la última mezcla las dos cosas. */
+  await judge('el revisor deja su informe y el cierre final es el del modelo',
+    '(function(){ const cards = [...document.querySelectorAll(".tcard.dcard")]; const rev = cards.find(c => /Revisor/.test(c.textContent || "")); if (!rev) return { tarjeta: false }; const conTexto = [...document.querySelectorAll(".msg.ai")].slice(-2).map(m => { const c = m.cloneNode(true); c.querySelectorAll(".tgroup,.thinkblock").forEach(x => x.remove()); return c.textContent || ""; }).join(" | "); return (new RegExp(' + JSON.stringify(MARCA_REV) + ').test(rev.textContent || "") && /sin hallazgos bloqueantes/.test(rev.textContent || "") && /pasa la revisi[oó]n/.test(conTexto)) ? true : { informe: (rev.textContent || "").slice(0, 110), cierre: conTexto.slice(0, 160) }; })()');
+  await judge('Ajustes trae la revisión del cambio activada (y es apagable)',
+    '(function(){ const sw = document.querySelector("#swRevisar"); return !!sw && sw.classList.contains("on"); })()');
+  /* En Node: el diff del turno tiene que haber llegado AL MODELO y el archivo tiene que
+     estar en el disco. La primera es la prueba de que la revisión no es decorado; la
+     segunda, de que el permiso y la escritura atómica funcionaron de verdad. */
+  const cuerpoRev = llm.cuerpos.map(String).find(b => b.indexOf('DIFF DEL TURNO') >= 0);
+  if (cuerpoRev && /\+ function revisado/.test(cuerpoRev)) {
+    console.log('  ok   el diff del turno llega al agente de revisión');
+  } else {
+    failed++;
+    console.log('  FALLO el revisor no recibió el diff del turno');
+  }
+  if (fs.existsSync(path.join(WS_TEST, archivoRev))) {
+    console.log('  ok   el archivo escrito existe en el espacio de trabajo');
+  } else {
+    failed++;
+    console.log('  FALLO la escritura no llegó al disco (permiso concedido: ' + permitido + ')');
+  }
+  if (llm.guion.length) { failed++; console.log('  FALLO el turno de revisión consumió un guion distinto (quedan ' + llm.guion.length + ')'); }
+  await evaluate('document.querySelector(\'[data-view="chat"]\').click()');
 
   /* El modo voz necesita micrófono y dos canales nuevos. Se prueba con el dispositivo
      de mentira de Chromium (--use-fake-device-for-media-stream), así que pasa también

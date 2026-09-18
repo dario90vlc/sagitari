@@ -1,12 +1,16 @@
 'use strict';
 
-const { exec } = require('child_process');
+const { exec, spawn } = require('child_process');
 const os = require('os');
 const fs = require('fs');
 const fsp = require('fs/promises');
 const path = require('path');
 const skills = require('./skills');
 const memory = require('./memory');
+const proyecto = require('./proyecto');
+const repomap = require('./repomap');
+const cambios = require('./cambios');
+const mcpTransport = require('./mcp-transport');
 const { killTree } = require('./proc');
 
 // cmd.exe y otras herramientas nativas emiten en la página de códigos OEM (CP850 en
@@ -18,6 +22,20 @@ const CP850 = '\u00c7\u00fc\u00e9\u00e2\u00e4\u00e0\u00e5\u00e7\u00ea\u00eb\u00e
   '\u2514\u2534\u252c\u251c\u2500\u253c\u00e3\u00c3\u255a\u2554\u2569\u2566\u2560\u2550\u256c\u00a4\u00f0\u00d0\u00ca\u00cb\u00c8\u0131\u00cd\u00ce\u00cf\u2518\u250c\u2588\u2584\u00a6\u00cc\u2580' +
   '\u00d3\u00df\u00d4\u00d2\u00f5\u00d5\u00b5\u00fe\u00de\u00da\u00db\u00d9\u00fd\u00dd\u00af\u00b4\u00ad\u00b1\u2017\u00be\u00b6\u00a7\u00f7\u00b8\u00b0\u00a8\u00b7\u00b9\u00b3\u00b2\u25a0\u00a0';
 const UTF8_STRICT = new TextDecoder('utf-8', { fatal: true });
+/**
+ * Tipo MIME real de una imagen por sus primeros bytes (no por la extensión: renombrar
+ * un .txt a .png no lo convierte en imagen, y los modelos solo aceptan formatos de
+ * verdad). Devuelve null si no es de un formato que se pueda enviar.
+ */
+function tipoDeImagen(buf) {
+  if (!buf || buf.length < 4) return null;
+  if (buf[0] === 0x89 && buf[1] === 0x50 && buf[2] === 0x4e && buf[3] === 0x47) return 'image/png';
+  if (buf[0] === 0xff && buf[1] === 0xd8 && buf[2] === 0xff) return 'image/jpeg';
+  if (buf.slice(0, 4).toString('latin1') === 'GIF8') return 'image/gif';
+  if (buf.slice(0, 4).toString('latin1') === 'RIFF' && buf.slice(8, 12).toString('latin1') === 'WEBP') return 'image/webp';
+  return null;
+}
+
 function decodeOut(buf) {
   buf = Buffer.isBuffer(buf) ? buf : Buffer.from(String(buf ?? ''), 'utf8');
   try { return UTF8_STRICT.decode(buf); } catch {}
@@ -64,6 +82,92 @@ function run(cmd, opts = {}) {
     // el agente puede matar el comando al pulsar Detener
     if (opts.registerKillable) opts.registerKillable({ stop: () => killTree(child) });
   });
+}
+
+/* --------------------------------------------------------------------------- *
+ *  Comprobar la sintaxis de lo que se acaba de escribir
+ *
+ *  Es la diferencia entre enterarse del error AHORA —cuando el modelo tiene el
+ *  contexto para arreglarlo— o tres pasos después, cuando ya ha construido
+ *  encima. Se ejecuta sin shell y con el Node que la app trae dentro, así que no
+ *  depende de que el equipo tenga Node instalado.
+ * --------------------------------------------------------------------------- */
+
+/** Ejecuta un programa con argumentos SIN shell (las rutas con espacios y acentos
+    llegan intactas). code === null significa «no hay con qué comprobarlo». */
+function runProg(file, argv, opts = {}) {
+  return new Promise((resolve) => {
+    const timeout = opts.timeout || 10000;
+    let done = false, out = [], err = [];
+    const finish = (code) => {
+      if (done) return;
+      done = true;
+      clearTimeout(timer);
+      resolve({ code, stdout: decodeOut(Buffer.concat(out)), stderr: decodeOut(Buffer.concat(err)) });
+    };
+    let child;
+    try {
+      child = spawn(file, argv, {
+        cwd: opts.cwd || undefined,
+        env: { ...process.env, ...(opts.env || {}) },
+        windowsHide: true,
+        windowsVerbatimArguments: opts.verbatim === true,
+        stdio: ['ignore', 'pipe', 'pipe'],
+      });
+    } catch (e) { resolve({ code: null, stdout: '', stderr: String(e.message) }); return; }
+    const timer = setTimeout(() => { try { killTree(child); } catch {} finish(1); }, timeout);
+    child.on('error', (e) => finish(e && e.code === 'ENOENT' ? null : 1));
+    child.stdout.on('data', (d) => out.push(d));
+    child.stderr.on('data', (d) => err.push(d));
+    child.on('close', (code) => finish(code == null ? 1 : code));
+  });
+}
+
+/** Primera línea que explica algo (los checkers sacan ruido de contexto alrededor). */
+function lineaDelError(txt) {
+  const lineas = String(txt || '').split(/\r?\n/).map(l => l.trim()).filter(Boolean);
+  const u = lineas.find(l => /error|syntax|unexpected|invalid|unexpected token|not defined/i.test(l));
+  return clip(u || lineas[0] || 'no compila', 300);
+}
+
+/**
+ * Comprueba la sintaxis de un archivo y devuelve el motivo del fallo, o null si
+ * está bien (o si no hay con qué comprobarlo: eso NO es un error del código).
+ */
+async function revisarSintaxis(absPath) {
+  const c = proyecto.comprobacionSintaxis(absPath);
+  if (!c) return null;
+  let st;
+  try { st = await fsp.stat(absPath); } catch { return null; }
+  if (!st.isFile() || st.size > 1536 * 1024) return null;
+  if (c.json) {
+    try { JSON.parse(await fsp.readFile(absPath, 'utf8')); return null; }
+    catch (e) { return `JSON inválido: ${clip(e.message, 200)}`; }
+  }
+  let res;
+  try {
+    const r = mcpTransport.resolveCommand(c.prog, [...c.extraArgs, absPath]);
+    res = await runProg(r.file, r.argv, { env: r.env, verbatim: r.verbatim, timeout: 15000 });
+  } catch { return null; }   // no hay ni Node ni el checker: no se puede comprobar
+  if (res.code === null || res.code === 0) return null;
+  return `${c.etiqueta}: ${lineaDelError(res.stderr || res.stdout)}`;
+}
+
+/**
+ * Texto del resultado de una escritura, con la comprobación de sintaxis pegada.
+ * Si no compila se devuelve como FALLO (con el motivo y diciendo que el archivo
+ * SÍ quedó escrito): el modelo lo ve como un paso fallido y lo arregla ya, y la
+ * tarjeta del chat se marca en rojo en vez de dar el cambio por bueno.
+ */
+async function resultadoEscritura(absPath, okText, { checked = [] } = {}) {
+  const fallos = [];
+  for (const f of [absPath, ...checked]) {
+    if (fallos.length >= 3) break;
+    const mal = await revisarSintaxis(f);
+    if (mal) fallos.push(`${path.basename(f)}: ${mal}`);
+  }
+  if (!fallos.length) return `OK: ${okText}`;
+  return `Error: ${okText}, pero NO compila:\n- ${fallos.join('\n- ')}\nEl archivo queda tal cual (no se deshace). Arréglalo antes de seguir con otra cosa.`;
 }
 
 const clip = (s, n = 8000) => {
@@ -173,6 +277,14 @@ async function executeTool(name, args, ctx) {
     case 'use_skill': {
       const s = await skills.getSkill(args.name || '');
       if (!s) return `Error: skill "${args.name}" no encontrada. Skills disponibles: ${(await skills.listSkills()).filter(x => x.enabled).map(x => x.name).join(', ') || '(ninguna)'}`;
+      /* v2.2: el cuerpo completo se manda UNA vez por turno. Si el modelo la vuelve a
+         pedir (pasa en tareas largas: se le olvida que la cargó), ya está en el contexto y
+         repetirla son miles de tokens por nada. Se recuerda por turno en el propio agente
+         (`loadedSkills`), que es el único que sabe cuándo empieza uno nuevo. */
+      if (ctx.loadedSkills && ctx.loadedSkills.has(s.id)) {
+        return `La skill «${s.name}» ya está cargada en este turno: sigue sus instrucciones (no hace falta que te la repita).`;
+      }
+      if (ctx.loadedSkills) ctx.loadedSkills.add(s.id);
       // límite declarado de herramientas (informativo para el agente; los permisos reales los decide el usuario en Ajustes)
       const scope = s.allowTools ? `\n\nHERRAMIENTAS AUTORIZADAS POR ESTA SKILL: ${s.allowTools}. Evita usar otras salvo necesidad justificada.` : '';
       return `# Skill: ${s.name}\n\n${s.body}${scope}`;
@@ -203,6 +315,30 @@ async function executeTool(name, args, ctx) {
       const rest = end < total ? `\n...[quedan ${total - end} líneas; continúa con offset: ${end + 1}]` : '';
       return clip(`[líneas ${start}-${end} de ${total}]\n${lines.slice(start - 1, end).join('\n')}${rest}`, 60000);
     }
+    /* v2.2: mirar una imagen DEL DISCO. Antes solo existía la captura de pantalla y la
+       página del navegador: "mira este PNG de mi carpeta" no se podía hacer (y `read_file`
+       rechaza binarios a propósito). La imagen vuelve como parte multimodal del resultado,
+       que es el mismo camino que ya usa `screenshot`. */
+    case 'view_image': {
+      const p = inWs(args.path);
+      let st;
+      try { st = await fsp.stat(p); }
+      catch (e) { return `Error: no pude abrir ${p} (${e.code || e.message}).`; }
+      if (!st.isFile()) return `Error: ${p} no es un archivo.`;
+      // 8 MB: por encima de eso la petición al modelo se dispara (el base64 pesa ~4/3 del
+      // archivo) y la mayoría de proveedores la rechaza o la recorta sin avisar
+      if (st.size > 8 * 1024 * 1024) {
+        return `Error: imagen demasiado grande (${(st.size / 1048576).toFixed(1)} MB; el límite es 8 MB). Pídele al usuario una versión reducida o recortada.`;
+      }
+      const buf = await fsp.readFile(p);
+      const tipo = tipoDeImagen(buf);
+      if (!tipo) return `Error: ${p} no parece una imagen de un formato que los modelos acepten (PNG, JPEG, GIF o WEBP).`;
+      const kb = Math.max(1, Math.round(st.size / 1024));
+      return {
+        text: `Imagen abierta: ${p} (${kb} KB, ${tipo}). La tienes delante: descríbela según lo que VES. Si por lo que sea no puedes ver imágenes, dilo tal cual en vez de inventar su contenido.`,
+        images: [`data:${tipo};base64,${buf.toString('base64')}`],
+      };
+    }
     case 'write_file': {
       const p = inWs(args.path);
       const content = String(args.content ?? '');
@@ -211,6 +347,8 @@ async function executeTool(name, args, ctx) {
       // un disco lleno a mitad dejaba el fichero del usuario cortado y sin copia.
       // Es el mismo patrón que ya usan checkpoints, memoria y hábitos.
       const tmp = p + '.sagi-tmp';
+      // v2.4: pre-imagen para poder REVISAR el cambio después (ver cambios.js)
+      cambios.recordar(workspace, p);
       try {
         await fsp.writeFile(tmp, content, 'utf8');
         await fsp.rename(tmp, p);
@@ -218,7 +356,8 @@ async function executeTool(name, args, ctx) {
         await fsp.rm(tmp, { force: true }).catch(() => {});
         throw e;
       }
-      return `OK: ${content.length} bytes escritos en ${p}`;
+      repomap.invalidar(workspace);
+      return await resultadoEscritura(p, `${content.length} bytes escritos en ${p}`);
     }
     case 'edit_file': {
       const p = inWs(args.path);
@@ -242,8 +381,57 @@ async function executeTool(name, args, ctx) {
       // la función evita que un `$&`/`$1` dentro del texto nuevo se interprete
       // como patrón de reemplazo (el modelo edita código, no plantillas)
       const replaced = args.replace_all ? text.split(oldStr).join(newStr) : text.replace(oldStr, () => newStr);
+      cambios.recordar(workspace, p, text);
       await fsp.writeFile(p, replaced, 'utf8');
-      return `OK: ${args.replace_all ? count : 1} reemplazo(s) en ${p}`;
+      repomap.invalidar(workspace);
+      return await resultadoEscritura(p, `${args.replace_all ? count : 1} reemplazo(s) en ${p}`);
+    }
+    /* v2.4: mapa del repositorio e índice de símbolos. En un proyecto grande, leer
+       archivo a archivo se come el contexto y aun así se pierden cosas; esto responde
+       «¿qué hay aquí?» y «¿dónde se define X?» sin abrir nada. */
+    case 'repo_map': {
+      const dir = args.path ? inWs(args.path) : workspace;
+      return clip(repomap.mapa(dir, { maxChars: Number(args.max_chars) || 7000 }), 20000);
+    }
+    case 'find_symbol': {
+      const q = String(args.name || args.query || '').trim();
+      if (!q) return 'Error: dime qué buscas (name).';
+      return clip(repomap.textoBusqueda(workspace, q, { limit: Math.min(Number(args.limit) || 30, 60) }), 12000);
+    }
+    /* v2.4: varios cambios en varios archivos, en una sola llamada y ATÓMICOS:
+       primero se comprueba que TODOS los anclajes existen y son únicos y, solo
+       entonces, se escribe. Antes, un refactor de cinco archivos eran cinco
+       llamadas y un archivo a medias si la tercera fallaba. */
+    case 'apply_patch': {
+      // OJO: la local NO puede llamarse `cambios` — sombrearía el módulo `cambios`
+      // (el registrador de pre-imágenes) y `cambios.recordar` sería un TypeError.
+      const lista = Array.isArray(args.changes) ? args.changes : [];
+      if (!lista.length) return 'Error: changes es obligatorio (lista de {path, old_string, new_string}).';
+      if (lista.length > 40) return 'Error: demasiados cambios de golpe (máximo 40). Divídelo en partes.';
+      const planes = [];
+      const errores = [];
+      for (const c of lista) {
+        const p = inWs(c && c.path);
+        const oldStr = String((c && c.old_string) ?? '');
+        const newStr = String((c && c.new_string) ?? '');
+        if (!oldStr) { errores.push(`${c && c.path}: old_string vacío`); continue; }
+        let texto;
+        try { texto = await fsp.readFile(p, 'utf8'); }
+        catch (e) { errores.push(`${c.path}: no pude leerlo (${e.code || e.message})`); continue; }
+        const veces = texto.split(oldStr).length - 1;
+        if (veces === 0) { errores.push(`${c.path}: old_string no encontrado (copia el texto exacto con read_file)`); continue; }
+        if (veces > 1 && !c.replace_all) { errores.push(`${c.path}: old_string aparece ${veces} veces; añade contexto o usa replace_all`); continue; }
+        const siguiente = c.replace_all ? texto.split(oldStr).join(newStr) : texto.replace(oldStr, () => newStr);
+        if (planes.some(x => x.p === p)) { errores.push(`${c.path}: dos cambios sobre el mismo archivo en una llamada (junta el texto en uno)`); continue; }
+        planes.push({ p, antes: texto, despues: siguiente, n: c.replace_all ? veces : 1 });
+      }
+      if (errores.length) {
+        return `Error: no se ha escrito NADA (el parche se aplica entero o no se aplica):\n- ${errores.join('\n- ')}`;
+      }
+      for (const plan of planes) { cambios.recordar(workspace, plan.p, plan.antes); await fsp.writeFile(plan.p, plan.despues, 'utf8'); }
+      repomap.invalidar(workspace);
+      const resumen = planes.map(pl => `${path.basename(pl.p)} (${pl.n})`).join(', ');
+      return await resultadoEscritura(planes[0].p, `${planes.length} archivo(s) actualizados: ${resumen}`, { checked: planes.map(x => x.p) });
     }
     case 'list_dir': {
       const root = inWs(args.path);
@@ -284,6 +472,12 @@ async function executeTool(name, args, ctx) {
       return `OK: ${args.url} abierta en el navegador por defecto`;
     }
     case 'browser_control':
+      /* v2.5: las descargas del navegador caen en una carpeta conocida (y fuera del
+         sistema del usuario) y el resultado dice dónde: antes se perdían en la carpeta
+         por defecto de Chrome y nadie sabía dónde habían ido. */
+      if (ctx.workspace && typeof browser.setDownloadDir === 'function') {
+        browser.setDownloadDir(path.join(ctx.workspace, 'descargas-sagitari'));
+      }
       return browser.handle(args, ctx.ownerId);
     case 'screenshot': {
       const shot = await screenshotFn();

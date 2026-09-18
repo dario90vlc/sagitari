@@ -1,7 +1,7 @@
 {
   "name": "sagitari",
   "productName": "SAGITARI",
-  "version": "3.1.1",
+  "version": "3.2.0",
   "description": "SAGITARI — agente de IA con control total del PC: chat, voz, navegador y automatización del sistema",
   "main": "main/main.js",
   "scripts": {
@@ -9,6 +9,7 @@
     "dev": "electron . --dev",
     "smoke": "electron . --smoke",
     "uicheck": "node scripts/ui-check.js",
+    "navcheck": "node scripts/navegador-check.js",
     "test": "node test/run.js",
     "dist": "electron-builder --win nsis portable",
     "dist:installer": "electron-builder --win nsis",

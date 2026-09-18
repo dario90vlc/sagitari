@@ -566,6 +566,28 @@
             </div>
 
             <div class="setcard">
+              <div class="sc-head"><b>Delegación y verificación</b><span class="sc-hint">Cómo reparte el trabajo y cómo comprueba que quedó bien</span></div>
+              <div class="swrow srow" data-keys="modelo por agente subagentes ahorro coste barato enrutado"><span class="st"><b>Modelo por agente</b><small>Deja que los subagentes que sólo leen, mueven archivos o miran capturas usen el modelo más ligero de tu proveedor; el que verifica y el chat siguen con el que elegiste.</small></span>
+                <div class="sw" id="swAgenteModelo" aria-label="Modelo por agente"></div></div>
+              <div class="swrow srow" data-keys="verificar comprobar resultado cierre calidad subagentes evidencia"><span class="st"><b>Verificación antes de cerrar</b><small>Cuando una tarea cambia archivos, SAGITARI comprueba el resultado (o lo delega en su agente de verificación) antes de dártela por hecha. Apágalo si prefieres respuestas más rápidas.</small></span>
+                <div class="sw" id="swVerificar" aria-label="Verificación antes de cerrar"></div></div>
+              <div class="swrow srow" data-keys="revisar revision codigo diff cambio revisor calidad"><span class="st"><b>Revisar el cambio antes de cerrar</b><small>Cuando una tarea modifica archivos, un agente de revisión lee el diff antes de dártelo por hecho y busca lo que está mal: contratos rotos, casos límite, restos del nombre viejo. Si encuentra algo bloqueante, SAGITARI lo arregla en el mismo turno. Apágalo si prefieres respuestas más rápidas.</small></span>
+                <div class="sw" id="swRevisar" aria-label="Revisar el cambio antes de cerrar"></div></div>
+              <div class="grid2">
+                <div class="field srow" data-keys="subagentes delegaciones limite equipo tope"><label for="grDelegations">SUBAGENTES POR TURNO (0 = sin tope)</label><input type="number" id="grDelegations" min="0" /></div>
+                <div class="field srow" data-keys="paralelo simultaneo concurrencia herramientas rapidez"><label for="parTools">HERRAMIENTAS EN PARALELO (1-4)</label><input type="number" id="parTools" min="1" max="4" /></div>
+              </div>
+              <div class="subnote">Varias órdenes del mismo mensaje se ejecutan a la vez cuando no chocan: el navegador es uno solo, la escritura en disco va en cola y la terminal admite dos comandos. Con 1, todo va en orden.</div>
+              <div class="subnote">Cada subagente tiene su propio presupuesto de pasos, así que sin este tope un turno largo acaba en una cadena de delegaciones. Al alcanzarlo, SAGITARI no se detiene: termina la tarea con lo que ya tiene.</div>
+            </div>
+
+            <div class="setcard">
+              <div class="sc-head"><b>Conversación</b><span class="sc-hint">Qué se ve de lo que Sagitari piensa por dentro</span></div>
+              <div class="swrow srow" data-keys="razonamiento thinking pensar proceso interno razonar"><span class="st"><b>Mostrar el razonamiento del modelo</b><small>Los modelos que razonan (Claude, la serie o y GPT-5, DeepSeek R1…) enseñan su proceso antes de responder. Aparece plegado encima de la respuesta y se pliega solo al empezar a contestar. Nunca se lee en voz alta. Puede costar tokens extra en algunos proveedores.</small></span>
+                <div class="sw" id="swThinking" aria-label="Mostrar el razonamiento del modelo"></div></div>
+            </div>
+
+            <div class="setcard">
               <div class="sc-head"><b>Diagnóstico</b><span class="sc-hint">Para depurar el comportamiento del agente</span></div>
               <div class="swrow srow" data-keys="modo desarrollador metricas debug tokens latencia coste"><span class="st"><b>Modo desarrollador</b><small>Muestra métricas en vivo (tokens, latencia, coste) bajo el chat.</small></span>
                 <div class="sw" id="devModeSw" aria-label="Modo desarrollador"></div></div>

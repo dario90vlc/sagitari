@@ -5,12 +5,20 @@
      ---
      name: mi-skill
      description: Qué hace y CUÁNDO usarla (esta línea viaja siempre en el prompt)
+     agents:            # opcional: a qué agentes se le ofrece la skill
+       - coding         # (orchestrator, research, browser, coding, file, vision, verification)
+       - '*'
      ---
      ...instrucciones completas (solo se cargan bajo demanda con use_skill)...
 
    Ahorro de tokens: al prompt solo va el ÍNDICE (nombre + description de cada skill).
    El cuerpo completo (que puede ser largo) se inyecta UNA VEZ solo cuando el agente
-   decide que la skill es relevante, vía la herramienta use_skill. */
+   decide que la skill es relevante, vía la herramienta use_skill.
+
+   v2.1: las skills se reparten POR AGENTE (`agents:`). El orquestador solo ve las
+   suyas y cada subagente solo las de su especialidad: menos ruido en el prompt,
+   menos tokens y menos confusión (una skill de navegación no le sirve al de
+   verificación). Sin `agents:` la skill aplica a todos, como siempre. */
 
 const fs = require('fs');
 const fsp = require('fs/promises');
@@ -59,7 +67,107 @@ function parseFrontMatter(raw) {
   return { meta, body: m[2].trim() };
 }
 
-function skillsDir() { fs.mkdirSync(SKILLS_DIR, { recursive: true }); return SKILLS_DIR; }
+/** Carpeta del almacén, creándola la primera vez. El mkdir se hace UNA vez: antes se
+    repetía en cada llamada (y `skillsDir()` está en todos los caminos del módulo). */
+let DIR_LISTO = false;
+function skillsDir() {
+  if (!DIR_LISTO) {
+    try { fs.mkdirSync(SKILLS_DIR, { recursive: true }); } catch {}
+    DIR_LISTO = true;
+  }
+  return SKILLS_DIR;
+}
+
+/* ---------- índice en memoria (v2.2) ----------
+   Antes CADA prompt releía y reparseaba el almacén entero: el system prompt (por turno),
+   las skills sugeridas (por turno), y otra vez los dos por cada delegación, más `use_skill`
+   y la pantalla de Skills. Con 20-50 skills instaladas eso son cientos de lecturas y
+   `JSON.parse` por turno en el hilo principal de Electron —el mismo que mueve el navegador
+   y la voz—.
+
+   Ahora hay UN índice en memoria que comparten el prompt, las sugerencias, `use_skill` y la
+   interfaz. Se invalida de dos formas:
+     · explícita: cualquier mutación de este módulo (instalar, crear, borrar, activar,
+       actualizar) llama a `invalidarIndice()`;
+     · por huella: antes de reutilizarlo se calcula una firma BARATA del almacén (nombres +
+       mtime/tamaño de los ficheros que pueden cambiar) que detecta lo editado FUERA de la
+       app —la carpeta está abierta al usuario desde Ajustes— sin leer ni parsear nada.
+   Coste por consulta: un `readdir` y dos `stat` por skill, frente a las tres lecturas más
+   el parseo de antes. */
+let INDEX_CACHE = null;   // { dir, firma, skills }
+let INDEX_LECTURAS = 0;   // lecturas reales del almacén (se comprueba en los tests)
+
+function invalidarIndice() { INDEX_CACHE = null; }
+
+/** Firma barata del almacén. `''` si todavía no existe. */
+function firmaDelAlmacen(dir) {
+  let entries = [];
+  try { entries = fs.readdirSync(dir, { withFileTypes: true }); } catch { return ''; }
+  const partes = [];
+  for (const e of entries) {
+    if (!e.isDirectory()) continue;
+    partes.push(e.name);
+    for (const f of ['SKILL.md', 'enabled.json']) {
+      try {
+        const st = fs.statSync(path.join(dir, e.name, f));
+        partes.push(f + ':' + st.mtimeMs + ':' + st.size);
+      } catch { partes.push(f + ':-'); }
+    }
+  }
+  return partes.join('|');
+}
+
+/** Índice completo del almacén (síncrono: lo usa el system prompt, que no puede esperar). */
+function indexSkills() {
+  const dir = skillsDir();
+  if (INDEX_CACHE && INDEX_CACHE.dir === dir && firmaDelAlmacen(dir) === INDEX_CACHE.firma) {
+    return INDEX_CACHE.skills;
+  }
+  const skills = leerSkillsSync(dir);
+  INDEX_LECTURAS++;
+  // la firma se toma DESPUÉS de leer: si algo cambió mientras leíamos, la próxima
+  // consulta lo detecta en vez de quedarse con la foto vieja
+  INDEX_CACHE = { dir, firma: firmaDelAlmacen(dir), skills };
+  return skills;
+}
+
+/** Lee y parsea el almacén entero (solo lo hace `indexSkills`, una vez por cambio). */
+function leerSkillsSync(dir) {
+  const out = [];
+  let entries = [];
+  try { entries = fs.readdirSync(dir, { withFileTypes: true }); } catch { return out; }
+  for (const e of entries) {
+    if (!e.isDirectory()) continue;
+    const file = path.join(dir, e.name, 'SKILL.md');
+    let raw;
+    try { raw = fs.readFileSync(file, 'utf8'); } catch { continue; }
+    const fm = parseFrontMatter(raw);
+    if (!fm || !fm.meta.name) continue;
+    let enabled = true;
+    try { enabled = JSON.parse(fs.readFileSync(path.join(dir, e.name, 'enabled.json'), 'utf8')).enabled !== false; } catch {}
+    let source = null;
+    try { source = JSON.parse(fs.readFileSync(path.join(dir, e.name, 'source.json'), 'utf8')); } catch {}
+    out.push({
+      id: e.name,
+      name: fm.meta.name,
+      description: fm.meta.description || '',
+      version: fm.meta.version || '',
+      author: fm.meta.author || '',
+      category: fm.meta.category || '',
+      compatibility: fm.meta.compatibility || fm.meta.compatible || '',
+      dependencies: Array.isArray(fm.meta.dependencies) ? fm.meta.dependencies : (fm.meta.dependencies ? [String(fm.meta.dependencies)] : []),
+      examples: Array.isArray(fm.meta.examples) ? fm.meta.examples : (fm.meta.examples ? [String(fm.meta.examples)] : []),
+      triggers: Array.isArray(fm.meta.triggers) ? fm.meta.triggers : (fm.meta.triggers ? [String(fm.meta.triggers)] : []),
+      agents: Array.isArray(fm.meta.agents) ? fm.meta.agents : (fm.meta.agents ? [String(fm.meta.agents)] : []),
+      allowTools: Array.isArray(fm.meta.tools) ? fm.meta.tools.join(', ') : (fm.meta.tools || ''),
+      source,
+      enabled,
+      bodyChars: fm.body.length,
+      body: fm.body
+    });
+  }
+  return out;
+}
 
 /**
  * Resuelve la carpeta de una skill validando SIEMPRE el id (única vía para
@@ -87,70 +195,46 @@ function slugifyId(name) {
   return /\w/.test(s) ? s : '';
 }
 
-/** Lista todas las skills instaladas. */
-async function listSkills() {
-  const dir = skillsDir();
-  const out = [];
-  let entries = [];
-  try { entries = await fsp.readdir(dir, { withFileTypes: true }); } catch { return out; }
-  for (const e of entries) {
-    if (!e.isDirectory()) continue;
-    const file = path.join(dir, e.name, 'SKILL.md');
-    let raw;
-    try { raw = await fsp.readFile(file, 'utf8'); } catch { continue; }
-    const fm = parseFrontMatter(raw);
-    if (!fm || !fm.meta.name) continue;
-    let enabled = true;
-    try { enabled = JSON.parse(await fsp.readFile(path.join(dir, e.name, 'enabled.json'), 'utf8')).enabled !== false; } catch {}
-    let source = null;
-    try { source = JSON.parse(await fsp.readFile(path.join(dir, e.name, 'source.json'), 'utf8')); } catch {}
-    out.push({
-      id: e.name,
-      name: fm.meta.name,
-      description: fm.meta.description || '',
-      version: fm.meta.version || '',
-      author: fm.meta.author || '',
-      category: fm.meta.category || '',
-      compatibility: fm.meta.compatibility || fm.meta.compatible || '',
-      dependencies: Array.isArray(fm.meta.dependencies) ? fm.meta.dependencies : (fm.meta.dependencies ? [String(fm.meta.dependencies)] : []),
-      examples: Array.isArray(fm.meta.examples) ? fm.meta.examples : (fm.meta.examples ? [String(fm.meta.examples)] : []),
-      triggers: Array.isArray(fm.meta.triggers) ? fm.meta.triggers : (fm.meta.triggers ? [String(fm.meta.triggers)] : []),
-      allowTools: Array.isArray(fm.meta.tools) ? fm.meta.tools.join(', ') : (fm.meta.tools || ''),
-      source,
-      enabled,
-      bodyChars: fm.body.length,
-      body: fm.body
-    });
-  }
-  return out;
+/** Lista todas las skills instaladas (desde el índice en memoria). */
+async function listSkills() { return indexSkills(); }
+
+/**
+ * ¿Esta skill se le ofrece a este agente?
+ * Sin `agents:` en el front-matter, aplica a TODOS (compatibilidad con las skills
+ * que ya existían). Con `agents:`, solo a los listados (o a todos si incluye '*').
+ * Un agente desconocido no filtra nada (nunca deja al agente sin skills por un typo).
+ */
+function skillAppliesTo(skill, agentKey) {
+  const list = (skill && Array.isArray(skill.agents)) ? skill.agents : [];
+  if (!list.length) return true;
+  const key = String(agentKey || '').trim().toLowerCase();
+  if (!key) return true;
+  return list.some(a => {
+    const s = String(a || '').trim().toLowerCase();
+    return s === '*' || s === key;
+  });
 }
 
-/** Índice compacto para el system prompt — versión SÍNCRONA (systemPrompt es sync). */
-function promptIndexSync() {
-  const dir = skillsDir();
+/**
+ * Índice compacto para el system prompt — versión SÍNCRONA (systemPrompt es sync).
+ * `agentKey` reparte las skills por agente (orchestrator, coding, research…).
+ */
+function promptIndexSync(agentKey) {
   const lines = [];
-  let entries = [];
-  try { entries = fs.readdirSync(dir, { withFileTypes: true }); } catch { return ''; }
-  for (const e of entries) {
-    if (!e.isDirectory()) continue;
-    let raw;
-    try { raw = fs.readFileSync(path.join(dir, e.name, 'SKILL.md'), 'utf8'); } catch { continue; }
-    const fm = parseFrontMatter(raw);
-    if (!fm || !fm.meta.name) continue;
-    let enabled = true;
-    try { enabled = JSON.parse(fs.readFileSync(path.join(dir, e.name, 'enabled.json'), 'utf8')).enabled !== false; } catch {}
-    if (enabled) lines.push(`- ${fm.meta.name}: ${String(fm.meta.description || '').slice(0, 180)}${String(fm.meta.description || '').length > 180 ? '…' : ''}`);
+  for (const s of indexSkills()) {
+    if (!s.enabled || !skillAppliesTo(s, agentKey)) continue;
+    const d = String(s.description || '');
+    lines.push(`- ${s.name}: ${d.slice(0, 180)}${d.length > 180 ? '…' : ''}`);
   }
   return lines.join('\n');
 }
 
-/** Índice compacto (async, para UI). */
-async function promptIndex() { return promptIndexSync(); }
+/** Índice compacto (async, para UI). `agentKey` opcional para verlo como un agente. */
+async function promptIndex(agentKey) { return promptIndexSync(agentKey); }
 
 /** Devuelve el cuerpo completo de una skill por id o nombre. */
 async function getSkill(idOrName) {
-  const all = await listSkills();
-  const s = all.find(x => x.id === idOrName || x.name === idOrName);
+  const s = indexSkills().find(x => x.id === idOrName || x.name === idOrName);
   return s || null;
 }
 
@@ -171,11 +255,13 @@ async function searchSkills(query) {
 /**
  * Auto-activación según la tarea (v1.7): devuelve las skills cuya descripción
  * o triggers encajan con el texto de la petición. Solo skills habilitadas.
+ * `opts`: { agent, limit } — filtra por agente (v2.1) y acota cuántas se ofrecen.
  */
-async function suggestSkillsFor(text) {
+async function suggestSkillsFor(text, opts = {}) {
+  const { agent, limit } = typeof opts === 'number' ? { limit: opts } : (opts || {});
   const t = String(text || '').toLowerCase();
   if (!t.trim()) return [];
-  const all = (await listSkills()).filter(s => s.enabled);
+  const all = (await listSkills()).filter(s => s.enabled && skillAppliesTo(s, agent));
   const hits = [];
   for (const s of all) {
     const triggers = (s.triggers || []).filter(Boolean);
@@ -186,7 +272,8 @@ async function suggestSkillsFor(text) {
     const words = hay.split(/[^a-z0-9áéíóúñü]+/).filter(w => w.length >= 4);
     if (words.some(w => t.includes(w) && w.length >= 5)) hits.push(s);
   }
-  return hits.slice(0, 3);
+  const max = Number(limit) > 0 ? Number(limit) : 3;
+  return hits.slice(0, max);
 }
 
 /* ---------- v1.7: actualización de skills importadas ---------- */
@@ -210,6 +297,7 @@ async function writeSource(id, source) {
   // usuario no vería el motivo. El error sube al importador, que lo anota.
   await fsp.mkdir(dir, { recursive: true });
   await writeFileAtomic(path.join(dir, 'source.json'), JSON.stringify(source, null, 2));
+  invalidarIndice();
 }
 
 /** Re-importa una skill desde su repo de origen. Devuelve {ok, changed}. */
@@ -224,7 +312,7 @@ async function updateSkill(id) {
   const raw = await fetchSkillMarkdown(f.url);
   const fm = parseFrontMatter(raw);
   const changed = !fm || fm.meta.version !== s.version || fm.body !== s.body;
-  if (changed) await writeFileAtomic(path.join(dir, 'SKILL.md'), raw);
+  if (changed) { await writeFileAtomic(path.join(dir, 'SKILL.md'), raw); invalidarIndice(); }
   return { ok: true, changed, version: fm ? fm.meta.version : '' };
 }
 
@@ -244,6 +332,7 @@ async function setEnabled(id, enabled) {
   const dir = safeSkillDir(id); // lanza 'id de skill inválido' ante traversal
   await fsp.mkdir(dir, { recursive: true });
   await writeFileAtomic(path.join(dir, 'enabled.json'), JSON.stringify({ enabled: !!enabled }));
+  invalidarIndice();
 }
 
 /* ---------- importación desde GitHub (sin git ni unzip) ---------- */
@@ -358,6 +447,7 @@ async function importFromGitHub(repo) {
     }
     installed.push({ id, name: fm.meta.name, from: repoName });
   }
+  invalidarIndice();   // aunque alguna fallara: lo instalado tiene que aparecer ya
   if (!installed.length && !skipped.length) throw new Error('Los SKILL.md encontrados no tienen front-matter válido (name/description).');
   return installed.concat(skipped);
 }
@@ -369,12 +459,25 @@ async function createSkill({ name, description, body }) {
   await fsp.mkdir(dest, { recursive: true });
   const md = `---\nname: ${slug}\ndescription: ${description || 'Skill personalizada'}\n---\n\n${body || ''}\n`;
   await writeFileAtomic(path.join(dest, 'SKILL.md'), md);
+  invalidarIndice();
   return { id: slug, name: slug };
 }
 
 async function deleteSkill(id) {
   const dir = safeSkillDir(id); // '..' o '.' ya no pueden resolver a la carpeta padre
   await fsp.rm(dir, { recursive: true, force: true });
+  invalidarIndice();
 }
 
-module.exports = { listSkills, promptIndex, promptIndexSync, getSkill, setEnabled, importFromGitHub, createSkill, deleteSkill, searchSkills, suggestSkillsFor, updateSkill, updateAll, writeSource, skillsDir, __test: { parseFrontMatter, _resetForTests: (dir) => { SKILLS_DIR = dir; } } };
+module.exports = {
+  listSkills, promptIndex, promptIndexSync, skillAppliesTo, getSkill, setEnabled,
+  importFromGitHub, createSkill, deleteSkill, searchSkills, suggestSkillsFor,
+  updateSkill, updateAll, writeSource, skillsDir, invalidarIndice,
+  __test: {
+    parseFrontMatter,
+    indexSkills,
+    lecturas: () => INDEX_LECTURAS,
+    firmaDelAlmacen,
+    _resetForTests: (dir) => { SKILLS_DIR = dir; DIR_LISTO = false; invalidarIndice(); INDEX_LECTURAS = 0; },
+  },
+};

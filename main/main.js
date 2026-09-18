@@ -78,7 +78,7 @@ const CONFIG_FILE = path.join(CONFIG_DIR, 'config.json');
 let config = {
   providers: [],                 // [{id, name, baseUrl, apiKey, models:[], activeModel}]
   active: null,                  // {providerId, name, baseUrl, apiKey, model, temperature, vision}
-  settings: { theme: 'violet', uiColor: 'violet', glowColor: 'match', glowStrength: 1, ttsEnabled: true, voiceLang: 'es-ES', glowEnabled: true, userName: 'Darío', mode: 'act', maxConcurrentTasks: 1, autoResumeTasks: true, llmTimeoutMs: 120000 },
+  settings: { theme: 'violet', uiColor: 'violet', glowColor: 'match', glowStrength: 1, ttsEnabled: true, voiceLang: 'es-ES', glowEnabled: true, userName: 'Darío', mode: 'act', maxConcurrentTasks: 1, autoResumeTasks: true, llmTimeoutMs: 120000, showThinking: false, reviewGate: true, parallelTools: 3 },
   mcp: { enabled: true, servers: [] },   // servidores MCP del usuario (ver main/mcp-config.js)
 };
 
@@ -91,6 +91,7 @@ const securityDefaults = {
     maxDurationMs: 15 * 60 * 1000, // 0 = sin límite
     maxTokens: 0,                // 0 = sin límite
     maxCostUsd: 0,               // 0 = sin límite (coste estimado en USD)
+    maxDelegations: 8,           // subagentes por turno (0 = sin tope)
     loopThreshold: 3,            // llamadas idénticas seguidas antes de parar
     stallThreshold: 6,           // pasos sin progreso antes de parar (0 = sin límite)
   },
@@ -594,6 +595,15 @@ ipcMain.handle('settings:set', (e, patch) => {
   /* ¿La voz de la lectura la eligió el usuario a mano? Booleano estricto, por lo mismo
      que `sttClasico`: un «true» en texto no debe poder fijar el ajuste. */
   if ('ttsVoiceFijo' in clean && typeof clean.ttsVoiceFijo !== 'boolean') delete clean.ttsVoiceFijo;
+  /* Razonamiento visible (v2.3): booleano estricto. Un «true»/«false» en texto significaría
+     verdadero siempre, y el ajuste no se podría apagar. */
+  if ('showThinking' in clean && typeof clean.showThinking !== 'boolean') delete clean.showThinking;
+  if ('reviewGate' in clean && typeof clean.reviewGate !== 'boolean') delete clean.reviewGate;
+  // v2.5: herramientas del mismo mensaje que corren a la vez (1 = una detrás de otra)
+  if ('parallelTools' in clean) {
+    const n = Math.round(Number(clean.parallelTools));
+    if (!Number.isFinite(n) || n < 1 || n > 4) delete clean.parallelTools; else clean.parallelTools = n;
+  }
   config.settings = { ...config.settings, ...clean };
   const saved = persistConfig();
   if ('glowEnabled' in clean && !clean.glowEnabled) glow('off');

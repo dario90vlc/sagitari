@@ -126,6 +126,14 @@ function forcedConfirmReason(name, args = {}) {
   // de perfil de cookies/sesiones: ninguna de las dos es una acción «normal»
   if (a.action === 'eval') return 'Ejecutar JavaScript arbitrario dentro de la página';
   if (a.action === 'profile') return 'Cambiar el perfil del navegador (cookies y sesiones)';
+  // v2.5: subir archivos MANDA datos del usuario a una web, y aceptar el diálogo de
+  // la página puede confirmar algo destructivo («¿borrar la cuenta?»): ninguna de las
+  // dos cosas se hace sin preguntar.
+  if (a.action === 'upload') {
+    const f = Array.isArray(a.files) ? a.files : (a.file ? [a.file] : []);
+    return 'Subir archivo(s) del equipo a una página web' + (f.length ? ': ' + f.map((x) => String(x).split(/[\\/]/).pop()).join(', ') : '');
+  }
+  if (a.action === 'dialog' && a.accept !== false) return 'Aceptar el diálogo de la página (puede confirmar algo destructivo)';
   // Un clic por índice no dice a qué se está clicando: la etiqueta la resuelve el
   // navegador con su inventario (agent.js la añade como `_label`). Sin ella —o si
   // apunta a comprar/pagar/eliminar— se pregunta siempre; con ella mandan las
@@ -173,8 +181,9 @@ class Guardrails {
         maxDurationMs: policy.guardrails?.maxDurationMs ?? 15 * 60 * 1000,
         maxTokens: policy.guardrails?.maxTokens ?? 0,          // 0 = unlimited
         maxCostUsd: policy.guardrails?.maxCostUsd ?? 0,        // 0 = unlimited (estimación)
-      loopThreshold: policy.guardrails?.loopThreshold ?? 3,  // identical consecutive calls before loop
-      stallThreshold: policy.guardrails?.stallThreshold ?? 6, // pasos sin señal de progreso
+        maxDelegations: policy.guardrails?.maxDelegations ?? 8, // 0 = sin tope (subagentes por turno)
+        loopThreshold: policy.guardrails?.loopThreshold ?? 3,  // identical consecutive calls before loop
+        stallThreshold: policy.guardrails?.stallThreshold ?? 6, // pasos sin señal de progreso
       },
     };
     this.startedAt = 0;
@@ -188,6 +197,7 @@ class Guardrails {
     this.model = null;
     this.recentCalls = [];       // signatures of last N tool calls
     this.approvals = new Map();  // remembered confirmations: signature -> expiry
+    this.delegations = 0;        // subagentes lanzados en este turno
     this._stall = 0;             // pasos consecutivos sin progreso
   }
 
@@ -209,8 +219,28 @@ class Guardrails {
     this.tokensOut = 0;
     this.costUsd = 0;
     this.recentCalls = [];
+    this.delegations = 0;
     this._stall = 0;
     this._lastToolName = null;   // si no, la señal de progreso quedaba contaminada entre ejecuciones
+  }
+
+  /**
+   * Tope de delegaciones por turno. Los límites generales (pasos y llamadas) frenan el
+   * total, pero no que un turno se vaya en delegar una y otra vez: cada subagente tiene
+   * su propio presupuesto de pasos y su coste, así que 80 llamadas pueden ser diez
+   * investigaciones. Devuelve {ok:false, reason} con el texto que ve el modelo.
+   */
+  checkDelegation() {
+    const max = Number(this.policy.guardrails.maxDelegations);
+    if (!max || max <= 0) return { ok: true };
+    if (this.delegations >= max) {
+      return {
+        ok: false,
+        reason: `Tope de delegaciones de este turno (${max}). No lances más subagentes: termina la tarea con tus herramientas e integra lo que ya tienes. Si de verdad faltaba trabajo, dilo al usuario en vez de delegar otra vez.`,
+      };
+    }
+    this.delegations++;
+    return { ok: true };
   }
 
   /** Call once per model turn. Returns {ok, reason?}. */

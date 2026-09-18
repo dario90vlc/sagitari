@@ -2098,11 +2098,19 @@ test('chat: looksFailed detecta errores sin confundir salidas normales', () => {
 test('chat: los subagentes tienen nombre humano para etiquetar sus pasos', () => {
   const keys = [...fs.readFileSync(path.join(__dirname, '..', 'agent', 'subagents.js'), 'utf8')
     .matchAll(/^\s{2}([a-z]+):\s*\{/gm)].map(m => m[1]);
-  const known = ['research', 'browser', 'coding', 'file', 'vision', 'verify'];
+  // Las claves REALES del registro (antes esta lista decía `verify` y el verificador se
+  // quedaba sin etiqueta: la clave del backend es `verification`).
+  const known = subagents.SUBAGENT_KEYS;
   const missing = known.filter(k => !ChatKit.subagent(k));
   eq(missing.join(', '), '', 'subagentes sin ficha');
-  for (const k of known) ok(iconExists(ChatKit.subagent(k).icon), 'icono de subagente ' + k);
-  eq(ChatKit.subagent('nadie'), null, 'un subagente desconocido no rompe');
+  for (const k of known) {
+    ok(ChatKit.subagent(k).label, 'etiqueta de subagente ' + k);
+    ok(iconExists(ChatKit.subagent(k).icon), 'icono de subagente ' + k);
+  }
+  // Un subagente desconocido ya NO devuelve null: app.js lee `.label` sobre ese valor y
+  // el null tumbaba el manejador de eventos (la verificación no llegaba a pintarse).
+  eq(ChatKit.subagent('nadie').label, 'nadie', 'un subagente desconocido cae a su propio nombre');
+  eq(ChatKit.subagent(''), null, 'sin clave no hay etiqueta');
   ok(keys.length >= 1, 'los subagentes del backend se pudieron enumerar');
 });
 
@@ -3063,7 +3071,7 @@ test('browser: una acción desconocida no lanza un navegador', async () => {
 test('browser: el inventario pertenece a la ejecución que lo pidió', async () => {
   const b = new Browser();
   b.profileDir = tmpDir('sagi-prof4-');
-  b._lastElements = [{ tag: 'button', text: 'Pagar', x: 10, y: 20, w: 30, h: 10 }];
+  b._lastElements = [{ role: 'button', name: 'Pagar', fp: 'button||Pagar', css: 'button', x: 10, y: 20, w: 30, h: 10 }];
   b._invOwner = 'agente-A';
   const r = await b.clickIndex(0, 'sess', 'agente-B');
   ok(/otra ejecución/.test(r), 'la otra ejecución no puede clicar con coordenadas ajenas');
@@ -4363,6 +4371,1391 @@ test('voz/parar: el panel puede detener el turno en curso (botón y voz)', () =>
   ok(/window\.sagitari\.stopChat\(\)/.test(app) && /setParar\(/.test(app), 'parar de verdad es el MISMO stopChat del chat');
   ok(/\^\(para\|p\[aá\]rate/.test(vm), 'decir «para» con el agente trabajando también lo detiene');
   ok(/parar\.hidden = !\(s === 'pensando' \|\| s === 'hablando'\)/.test(vm), 'el botón solo se enseña cuando hay algo que parar');
+});
+
+/* ---------- v2.1: orquestación, skills por agente y cierre verificado ---------- */
+
+// dos skills de prueba en el almacén temporal: una solo para el agente de código
+// y otra sin reparto (aplica a todos, como las de antes)
+const soloCodingDir = path.join(SKILLS_TMP, 'solo-coding');
+fs.mkdirSync(soloCodingDir, { recursive: true });
+fs.writeFileSync(path.join(soloCodingDir, 'SKILL.md'), '---\nname: solo-coding\ndescription: Prueba interna del reparto por agente\nagents:\n  - coding\n---\nSolo programacion.');
+const paraTodosDir = path.join(SKILLS_TMP, 'para-todos');
+fs.mkdirSync(paraTodosDir, { recursive: true });
+fs.writeFileSync(path.join(paraTodosDir, 'SKILL.md'), '---\nname: para-todos-skill\ndescription: Prueba interna sin reparto por agente\n---\nVale para cualquiera.');
+
+test('skills: el front-matter agents reparte las skills por agente', async () => {
+  const cod = skills.promptIndexSync('coding');
+  const orch = skills.promptIndexSync('orchestrator');
+  const sinAgente = skills.promptIndexSync();
+  ok(/solo-coding/.test(cod), 'el agente de código ve su skill');
+  ok(!/solo-coding/.test(orch), 'el orquestador NO recibe una skill de otra especialidad: ' + orch.slice(0, 120));
+  ok(/para-todos-skill/.test(orch), 'sin agents: aplica a todos (compatibilidad)');
+  ok(/solo-coding/.test(sinAgente), 'sin agente concreto no se filtra nada');
+  eq(skills.skillAppliesTo({ agents: ['*'] }, 'vision'), true);
+  eq(skills.skillAppliesTo({ agents: ['coding'] }, 'vision'), false);
+  eq(skills.skillAppliesTo({ agents: ['CODING'] }, 'coding'), true, 'el reparto no distingue mayúsculas');
+  eq(skills.skillAppliesTo({}, 'vision'), true);
+  const list = await skills.listSkills();
+  eq(list.find(s => s.id === 'solo-coding').agents[0], 'coding');
+  // las sugerencias también respetan el agente
+  const sug = await skills.suggestSkillsFor('prueba interna del reparto por agente', { agent: 'vision', limit: 3 });
+  ok(!sug.some(s => s.name === 'solo-coding'), 'no se sugiere una skill que no es de este agente');
+  const sugCod = await skills.suggestSkillsFor('prueba interna del reparto por agente', { agent: 'coding', limit: 3 });
+  ok(sugCod.some(s => s.name === 'solo-coding'), 'y sí al agente al que pertenece');
+  eq((await skills.suggestSkillsFor('prueba interna del reparto por agente', { agent: 'coding', limit: 1 })).length, 1, 'el límite se respeta');
+});
+
+test('skills-starter: las skills incluidas son válidas y declaran sus agentes', () => {
+  const dir = path.join(__dirname, '..', 'skills-starter');
+  const nombres = fs.readdirSync(dir).filter(n => fs.existsSync(path.join(dir, n, 'SKILL.md')));
+  ok(nombres.length >= 6, 'el equipo viene con skills incluidas: ' + nombres.join(', '));
+  for (const n of nombres) {
+    const fm = skills.__test.parseFrontMatter(fs.readFileSync(path.join(dir, n, 'SKILL.md'), 'utf8'));
+    ok(fm && fm.meta.name && fm.meta.description, n + ' necesita name y description');
+    ok(String(fm.meta.description).length > 60, n + ' debe explicar CUÁNDO usarla');
+  }
+  const de = (n) => skills.__test.parseFrontMatter(fs.readFileSync(path.join(dir, n, 'SKILL.md'), 'utf8')).meta.agents || [];
+  ok(de('orquestacion').includes('orchestrator'), 'orquestacion es del orquestador');
+  ok(de('codigo').includes('coding'), 'codigo es del agente de código');
+  ok(de('investigacion').includes('research'), 'investigacion es del de investigación');
+  ok(de('navegacion').includes('browser') && de('navegacion').includes('research'), 'navegacion es de navegador e investigación');
+  ok(de('verificacion').includes('verification'), 'verificacion es del verificador');
+});
+
+test('subagents: cada agente tiene skills, método y entrega propios', () => {
+  for (const k of subagents.SUBAGENT_KEYS) {
+    const spec = subagents.SUBAGENTS[k];
+    ok(spec.allowTools.includes('use_skill'), k + ' debe poder cargar skills');
+    ok(subagents.toolDefsFor(k).some(d => d.function.name === 'use_skill'), k + ' tiene use_skill en su catálogo');
+    ok(Array.isArray(spec.method) && spec.method.length >= 4, k + ' necesita método de trabajo');
+    ok(String(spec.deliver || '').length > 60, k + ' necesita decir qué entrega');
+  }
+  const p = subagents.subagentSystemPrompt('coding', 'C:/ws', { skillsIndex: '- codigo: reglas de programación', suggested: ['codigo'] });
+  ok(/MÉTODO DE TRABAJO/.test(p) && /SKILLS DE TU ESPECIALIDAD/.test(p), 'el prompt del subagente incluye método y skills');
+  ok(/codigo: reglas de programación/.test(p) && /PARA ESTA SUBTAREA encajan: codigo/.test(p), 'índice y sugeridas viajan dentro del agente');
+  ok(/EVIDENCE:/.test(p), 'el cierre exige evidencia');
+  ok(!/SKILLS DE TU ESPECIALIDAD/.test(subagents.subagentSystemPrompt('vision')), 'sin skills instaladas el bloque no aparece');
+});
+
+test('subagents: el brief lleva contexto, criterio de éxito, tablero y presupuesto', () => {
+  const b = subagents.buildSubagentBrief({
+    task: 'organiza la carpeta',
+    context: 'la carpeta es C:/datos',
+    expect: 'quedan 3 archivos .txt y ninguno en la raíz',
+    board: '- [research · OK] precios → 12,90 EUR',
+    budget: { steps: 20, note: 'pasos de esta subtarea' },
+  });
+  ok(/CONTEXTO DEL ORQUESTADOR/.test(b) && /C:\/datos/.test(b));
+  ok(/LO QUE YA HIZO EL EQUIPO/.test(b) && /precios/.test(b), 'el tablero evita repetir trabajo');
+  ok(/SUBTAREA:\norganiza la carpeta/.test(b));
+  ok(/CRITERIO DE ÉXITO/.test(b) && /ninguno en la raíz/.test(b));
+  ok(/PRESUPUESTO: 20 pasos/.test(b));
+  const sin = subagents.buildSubagentBrief({ task: 'algo' });
+  ok(!/CONTEXTO|TABLERO|CRITERIO|PRESUPUESTO|LO QUE YA/.test(sin), 'sin datos opcionales no se inventan bloques: ' + sin);
+});
+
+test('subagents: parseSubagentResult tolera multilínea, español y evidencia', () => {
+  const p = subagents.parseSubagentResult('RESULT: 12,90 EUR\nDETAILS: tienda A\ntienda B\nEVIDENCE: https://x/1 leído\nSTATUS: OK');
+  eq(p.status, 'OK');
+  eq(p.evidence, 'https://x/1 leído');
+  ok(/tienda A\ntienda B/.test(p.details), 'un DETAILS multilínea no se corta');
+  const es = subagents.parseSubagentResult('RESULTADO: hecho\nEVIDENCIA: build.log sin errores\nESTADO: ok');
+  eq(es.status, 'OK');
+  eq(es.evidence, 'build.log sin errores');
+  const dos = subagents.parseSubagentResult('RESULT: intento 1\nSTATUS: FAILED\nRESULT: intento 2 ok\nSTATUS: OK');
+  eq(dos.status, 'OK');
+  eq(dos.result, 'intento 2 ok', 'manda el último bloque: es el cierre real');
+  eq(subagents.parseSubagentResult('RESULT: no pude abrir el archivo (permiso denegado)').status, 'FAILED', 'sin STATUS, el texto decide');
+});
+
+test('subagents: la guía de delegación viaja en el prompt del orquestador', () => {
+  const { systemPrompt } = require('../agent/agent');
+  const sys = systemPrompt();
+  ok(/DELEGACIÓN/.test(sys) && /delegate/.test(sys));
+  for (const k of subagents.SUBAGENT_KEYS) ok(sys.includes(k), 'el orquestador conoce el agente ' + k);
+  ok(/verification/.test(subagents.DELEGATION_GUIDE.split('REGLAS')[1] || ''), 'la verificación es una regla explícita, no una sugerencia suelta');
+  const { toolDefs } = require('../agent/tools');
+  const d = toolDefs.find(t => t.function.name === 'delegate');
+  ok(d.function.parameters.properties.expect, 'delegate pide el criterio de éxito');
+  // La regla de estilo vale también para lo que escribimos NOSOTROS: el modelo copia
+  // lo que ve (lo comprueba también ui-check sobre la petición cruda).
+  const pictograma = /\p{Extended_Pictographic}/u;
+  ok(!pictograma.test(sys), 'el prompt del orquestador va sin emojis');
+  ok(!pictograma.test(subagents.DELEGATION_GUIDE), 'la guía de delegación va sin emojis');
+  for (const k of subagents.SUBAGENT_KEYS) {
+    ok(!pictograma.test(subagents.subagentSystemPrompt(k, 'C:/ws', { skillsIndex: '- x: y', suggested: ['x'] })), 'el prompt de ' + k + ' va sin emojis');
+  }
+});
+
+test('agent: la delegación manda brief, tablero y skills al subagente', async () => {
+  const { Agent } = require('../agent/agent');
+  const bodies = [];
+  const turn = [evData({ choices: [{ delta: { content: 'RESULT: visto\nEVIDENCE: leído\nSTATUS: OK' } }] })];
+  const agent = new Agent({
+    fetchFn: async (url, opts) => { bodies.push(JSON.parse(opts.body)); return sseResponse(turn); },
+    emit: () => {},
+    screenshotFn: async () => ({ dataUrl: 'data:image/png;base64,AA' }),
+  });
+  const settings = { active: { name: 'x', baseUrl: 'https://api.openai.com/v1', apiKey: 'k', model: 'gpt-4o' }, settings: { mode: 'act', modelRouting: false, workspace: process.cwd() } };
+  const out1 = await agent._delegate(subagents.SUBAGENTS.research, { task: 'busca el precio', expect: 'una URL con el precio' }, { settings });
+  ok(/EVIDENCIA: leído/.test(out1), 'la evidencia del subagente llega al orquestador: ' + out1.slice(0, 100));
+  ok(/TABLERO DE ESTE TURNO/.test(out1), 'el orquestador recibe el tablero del turno');
+  const sys1 = bodies[bodies.length - 1].messages.find(m => m.role === 'system').content;
+  ok(/SKILLS DE TU ESPECIALIDAD/.test(sys1) && /blender-pro/.test(sys1), 'el subagente recibe las skills que le aplican');
+  const brief1 = bodies[bodies.length - 1].messages.find(m => m.role === 'user').content;
+  ok(/CRITERIO DE ÉXITO/.test(brief1) && /una URL con el precio/.test(brief1));
+  ok(/PRESUPUESTO: 30 pasos/.test(brief1), 'el brief declara el presupuesto del agente');
+
+  await agent._delegate(subagents.SUBAGENTS.file, { task: 'organiza C:/datos', context: 'el usuario quiere .txt juntos' }, { settings });
+  const brief2 = bodies[bodies.length - 1].messages.find(m => m.role === 'user').content;
+  ok(/el usuario quiere .txt juntos/.test(brief2), 'el contexto viaja en el brief');
+  ok(/LO QUE YA HIZO EL EQUIPO/.test(brief2) && /busca el precio/.test(brief2), 'la segunda delegación ve lo que hizo la primera');
+  ok(!/CRITERIO DE ÉXITO/.test(brief2), 'sin expect no se inventa criterio');
+  // el tablero se acumula para el orquestador
+  const out2 = await agent._delegate(subagents.SUBAGENTS.file, { task: 'documenta' }, { settings });
+  ok(/research · OK/.test(out2) && /file · OK/.test(out2), 'el tablero acumula las delegaciones: ' + out2.slice(-120));
+});
+
+/* El cierre verificado: un run que cambia archivos y no los comprueba recibe UNA
+   petición de comprobación antes de aceptar el cierre. */
+function sseTurn(content) { return sseResponse([evData({ choices: [{ delta: { content } }] })]); }
+function toolTurn(id, name, args) {
+  return sseResponse([evData({ choices: [{ delta: { tool_calls: [{ index: 0, id, function: { name, arguments: JSON.stringify(args) } }] } }] })]);
+}
+function autoApprove(agent, events) {
+  return (e) => { events.push(e); if (e.type === 'confirm_request') setTimeout(() => agent.resolveConfirm(e.id, true), 0); };
+}
+
+test('agent: el cierre verificado pide comprobar lo cambiado (una sola vez)', async () => {
+  const { Agent } = require('../agent/agent');
+  const events = [];
+  const bodies = [];
+  const ws = tmpDir('sagi-gate-');
+  const guion = [
+    () => toolTurn('w1', 'write_file', { path: 'a.txt', content: 'uno' }),
+    () => toolTurn('w2', 'write_file', { path: 'b.txt', content: 'dos' }),
+    () => sseTurn('Hecho: creé los dos archivos.'),
+    () => sseTurn('Verificado: leí a.txt y b.txt, ambos con su contenido.'),
+  ];
+  let n = 0;
+  const agent = new Agent({ fetchFn: async (url, opts) => { bodies.push(JSON.parse(opts.body)); return guion[Math.min(n++, guion.length - 1)](); }, emit: () => {}, screenshotFn: async () => ({ dataUrl: 'data:image/png;base64,AA' }) });
+  agent.emit = autoApprove(agent, events);
+  // reviewGate: false — este test es de la verificación; la revisión del cambio tiene el suyo
+  const settings = { active: { name: 'x', baseUrl: 'https://api.openai.com/v1', apiKey: 'k', model: 'gpt-4o' }, settings: { mode: 'act', modelRouting: false, workspace: ws, reviewGate: false } };
+  await agent.chat('crea dos archivos de texto', settings);
+  eq(n, 4, 'el turno se cierra con la comprobación, no antes');
+  ok(events.some(e => e.type === 'status' && /Verificando/.test(e.text)), 'la interfaz ve que está comprobando');
+  const done = events.filter(e => e.type === 'assistant_done').map(e => e.text).join('\n');
+  ok(/Verificado: leí/.test(done), 'el cierre real es el verificado: ' + done.slice(0, 120));
+  const streamed = events.filter(e => e.type === 'delta').map(e => e.text).join('');
+  ok(/Hecho: creé/.test(streamed), 'lo que ya había respondido sigue en la burbuja (no se pierde ni se repite)');
+  ok(!/Hecho: creé/.test(done), 'y no se re-emite como respuesta nueva');
+  const nudge = (bodies[3] || { messages: [] }).messages.find(m => m.role === 'user' && /ANTES DE CERRAR/.test(m.content || ''));
+  ok(nudge, 'la petición de comprobación viaja al modelo');
+  ok(!agent.history.some(h => /ANTES DE CERRAR/.test(String(h.content || ''))), 'y no ensucia el historial de la conversación');
+});
+
+test('agent: no se pide verificación si nada cambió, si ya se comprobó o si está desactivada', async () => {
+  const { Agent } = require('../agent/agent');
+  const base = { active: { name: 'x', baseUrl: 'https://api.openai.com/v1', apiKey: 'k', model: 'gpt-4o' } };
+  // 1) turno conversacional: una sola llamada al modelo
+  let n1 = 0;
+  const conv = new Agent({ fetchFn: async () => { n1++; return sseTurn('Claro, te lo explico.'); }, emit: () => {}, screenshotFn: async () => ({}) });
+  await conv.chat('¿qué es un archivo temporal?', { ...base, settings: { mode: 'act', modelRouting: false } });
+  eq(n1, 1, 'una pregunta no dispara comprobaciones');
+
+  // 2) dos escrituras y un comando con éxito DESPUÉS: ya se comprobó ejecutando
+  const events2 = [];
+  const ws2 = tmpDir('sagi-gate2-');
+  const guion2 = [
+    () => toolTurn('x1', 'write_file', { path: 'a.txt', content: 'uno' }),
+    () => toolTurn('x2', 'write_file', { path: 'b.txt', content: 'dos' }),
+    () => toolTurn('x3', 'run_command', { command: 'dir' }),
+    () => sseTurn('Listo: creados y comprobados.'),
+  ];
+  let n2 = 0;
+  const agent2 = new Agent({ fetchFn: async () => guion2[Math.min(n2++, guion2.length - 1)](), emit: () => {}, screenshotFn: async () => ({}) });
+  agent2.emit = autoApprove(agent2, events2);
+  await agent2.chat('crea dos archivos y comprueba con dir', { ...base, settings: { mode: 'act', modelRouting: false, workspace: ws2, reviewGate: false } });
+  eq(n2, 4, 'un comando posterior a las escrituras vale como comprobación');
+  ok(!events2.some(e => e.type === 'status' && /Verificando/.test(e.text)), 'y no se pide otra vuelta');
+
+  // 3) desactivado por el usuario
+  const events3 = [];
+  const ws3 = tmpDir('sagi-gate3-');
+  const guion3 = [
+    () => toolTurn('y1', 'write_file', { path: 'a.txt', content: 'uno' }),
+    () => toolTurn('y2', 'write_file', { path: 'b.txt', content: 'dos' }),
+    () => sseTurn('Hecho.'),
+  ];
+  let n3 = 0;
+  const agent3 = new Agent({ fetchFn: async () => guion3[Math.min(n3++, guion3.length - 1)](), emit: () => {}, screenshotFn: async () => ({}) });
+  agent3.emit = autoApprove(agent3, events3);
+  await agent3.chat('crea dos archivos', { ...base, settings: { mode: 'act', modelRouting: false, workspace: ws3, verifyGate: false, reviewGate: false } });
+  eq(n3, 3, 'con la verificación desactivada cierra sin la vuelta extra');
+});
+
+test('ajustes: la verificación de cierre viene activada y es desactivable', () => {
+  const html = fs.readFileSync(path.join(__dirname, '..', 'renderer', 'index.html'), 'utf8');
+  const app = fs.readFileSync(path.join(__dirname, '..', 'renderer', 'app.js'), 'utf8');
+  ok(/id="swVerificar"/.test(html), 'Ajustes tiene el interruptor');
+  ok(/swVerificar/.test(app) && /verifyGate: on/.test(app), 'el interruptor guarda el ajuste');
+  ok(/CFG\.settings\.verifyGate !== false/.test(app), 'viene activada por defecto');
+});
+
+/* ---------- v2.1: la delegación en la interfaz (texto, etiqueta y cierre) ---------- */
+
+test('chatkit: la etiqueta del subagente cubre TODO el registro de agentes', () => {
+  eq((ChatKit.subagent('verification') || {}).label, 'Verificador', 'la clave real del verificador resuelve (antes era `verify`)');
+  eq((ChatKit.subagent('verify') || {}).label, 'Verificador', 'y su alias sigue valiendo');
+  // el fallo original: `K.subagent(...)` devolvía null para el verificador y el manejador
+  // de eventos leía `.label` de null → TypeError en cada paso de verificación
+  for (const k of subagents.SUBAGENT_KEYS) {
+    const s = ChatKit.subagent(k);
+    ok(s && s.label, 'la interfaz conoce el agente ' + k);
+    ok(s.icon, 'y tiene icono: ' + k);
+  }
+  eq(String((ChatKit.subagent('agente-nuevo') || {}).label), 'agente-nuevo', 'un agente desconocido se etiqueta con su nombre en vez de dejar la tarjeta vacía');
+  eq(ChatKit.subagent(''), null, 'sin clave no hay etiqueta');
+});
+
+test('renderer: el texto de un subagente no entra en la burbuja ni en la voz', () => {
+  const app = fs.readFileSync(path.join(__dirname, '..', 'renderer', 'app.js'), 'utf8');
+  const desde = app.indexOf("case 'delta': {");
+  ok(desde >= 0, 'el caso delta existe');
+  const cuerpo = app.slice(desde, desde + 1500);
+  const guarda = cuerpo.indexOf('if (ev.subagent) break;');
+  ok(guarda >= 0, 'el delta con `subagent` se descarta');
+  ok(guarda < cuerpo.indexOf('ensureAssistantBubble'), 'se descarta ANTES de tocar la burbuja del asistente');
+  ok(guarda < cuerpo.indexOf('hablarEnFlujo'), 'y antes de leerlo en voz alta (el RESULT del subagente no se pronuncia)');
+  // las tareas en segundo plano ya tenían su propio camino, pero el cierre de la
+  // delegación también tiene que contarse ahí
+  ok(/if \(ev\.bg\) \{[\s\S]*?case 'delegate_done'/.test(app), 'una tarea en segundo plano informa del cierre de su delegación');
+});
+
+test('renderer: cada delegación cierra con su tarjeta (estado y evidencia)', () => {
+  const app = fs.readFileSync(path.join(__dirname, '..', 'renderer', 'app.js'), 'utf8');
+  const css = fs.readFileSync(path.join(__dirname, '..', 'renderer', 'styles.css'), 'utf8');
+  ok(/case 'delegate_done':\s*\n\s*delegationCard\(ev\);/.test(app), 'el evento de cierre pinta su tarjeta');
+  ok(/function delegationCard/.test(app), 'la tarjeta existe');
+  const fn = app.match(/function delegationCard[\s\S]*?\n\}/)[0];
+  ok(/RESULTADO/.test(fn) && /DETALLES/.test(fn) && /EVIDENCIA/.test(fn), 'enseña resultado, detalles y evidencia');
+  ok(/FAILED/.test(fn) && /PARCIAL/.test(fn), 'distingue el cierre completo del parcial y del fallo');
+  ok(!/card\.dataset\.tool =/.test(fn), 'la tarjeta no se hace pasar por herramienta: no debe confundirse con una tool_card');
+  ok(/pendingTurn\.cards\.push/.test(fn), 'entra en la limpieza del turno');
+  ok(/if \(!pendingTurn\) return;/.test(fn), 'sin turno en curso no revienta (eventos de fuera del chat)');
+  ok(/\.dcard-status/.test(css) && /\.tcard\.part/.test(css), 'los estilos del cierre están definidos');
+});
+
+test('agent: el cierre de la delegación viaja con detalle, evidencia y duración', async () => {
+  const { Agent } = require('../agent/agent');
+  const events = [];
+  const turn = [evData({ choices: [{ delta: { content: 'RESULT: 3 vuelos hallados\nDETAILS: 180 EUR ida y vuelta\nEVIDENCE: https://x/vuelo leído\nSTATUS: OK' } }] })];
+  const agent = new Agent({ fetchFn: async () => sseResponse(turn), emit: (e) => events.push(e), screenshotFn: async () => ({}) });
+  const settings = { active: { name: 'x', baseUrl: 'https://api.openai.com/v1', apiKey: 'k', model: 'gpt-4o' }, settings: { mode: 'act', modelRouting: false, workspace: process.cwd() } };
+  await agent._delegate(subagents.SUBAGENTS.research, { task: 'busca vuelos' }, { settings });
+  const done = events.find(e => e.type === 'delegate_done');
+  ok(done, 'la delegación emite su cierre');
+  eq(done.subagent, 'research');
+  eq(done.status, 'OK');
+  eq(done.result, '3 vuelos hallados');
+  eq(done.details, '180 EUR ida y vuelta');
+  eq(done.evidence, 'https://x/vuelo leído');
+  ok(typeof done.durationMs === 'number' && done.durationMs >= 0, 'con su duración real');
+});
+
+/* ---------- v2.2: coste por turno, orden del prompt, fallback y bucle único ---------- */
+
+test('skills: el índice se lee una vez y se invalida solo cuando cambia', async () => {
+  const antes = skills.__test.lecturas();
+  await skills.listSkills();
+  skills.promptIndexSync('coding');
+  await skills.suggestSkillsFor('cualquier cosa');
+  await skills.listSkills();
+  eq(skills.__test.lecturas(), antes, 'cuatro consultas seguidas no releen el almacén ni una vez');
+
+  // una mutación por la app se ve al instante (invalidación explícita)
+  await skills.createSkill({ name: 'skill-de-cache', description: 'prueba del indice en memoria' });
+  const creada = (await skills.listSkills()).find(s => s.id === 'skill-de-cache');
+  ok(creada, 'crear una skill la hace aparecer sin reiniciar');
+  // y el índice vuelve a reutilizarse
+  const tras = skills.__test.lecturas();
+  await skills.listSkills(); await skills.promptIndexSync('coding');
+  eq(skills.__test.lecturas(), tras, 'y se vuelve a reutilizar el índice');
+
+  // una edición FUERA de la app (la carpeta está abierta al usuario) la detecta la firma
+  fs.writeFileSync(path.join(SKILLS_TMP, 'skill-de-cache', 'SKILL.md'),
+    '---\nname: skill-de-cache\ndescription: editada a mano fuera de la aplicacion\n---\ncuerpo');
+  const editada = (await skills.listSkills()).find(s => s.id === 'skill-de-cache');
+  ok(/editada a mano/.test(editada.description), 'una edición a mano se ve sin reiniciar la app: ' + editada.description);
+
+  // desactivar y borrar también se reflejan al momento
+  await skills.setEnabled('skill-de-cache', false);
+  eq((await skills.listSkills()).find(s => s.id === 'skill-de-cache').enabled, false);
+  ok(!/skill-de-cache/.test(skills.promptIndexSync('orchestrator')), 'y desaparece del prompt');
+  await skills.deleteSkill('skill-de-cache');
+  ok(!(await skills.listSkills()).some(s => s.id === 'skill-de-cache'), 'borrada');
+});
+
+test('agent: la misma skill no se carga dos veces en el turno', async () => {
+  const a = new AgentCls({ emit: () => {}, screenshotFn: async () => ({}) });
+  const ctx = fakeCtx();
+  const primera = await a._runToolCall(toolCall('use_skill', { name: 'blender-pro' }), ctx);
+  eq(primera.action, 'ok');
+  ok(/Instrucciones de blender/.test(primera.text), 'la primera vez llega el cuerpo completo');
+  const segunda = await a._runToolCall(toolCall('use_skill', { name: 'blender-pro' }), ctx);
+  ok(/ya está cargada/.test(segunda.text), 'la segunda solo recuerda que ya está: ' + segunda.text.slice(0, 80));
+  ok(!/Instrucciones de blender/.test(segunda.text), 'sin repetir el cuerpo entero (son miles de tokens)');
+  // un turno nuevo empieza con la memoria de skills vacía (y sin el historial de
+  // llamadas idénticas del detector de bucles, que si no corta la tercera)
+  a.guardrails.beginRun();
+  a._skillsLoaded = new Set();
+  const tercero = await a._runToolCall(toolCall('use_skill', { name: 'blender-pro' }), fakeCtx());
+  ok(/Instrucciones de blender/.test(tercero.text), 'en el turno siguiente se vuelve a cargar');
+});
+
+test('agent: el prompt pone lo estable delante y lo volátil al final', async () => {
+  const bodies = [];
+  const agent = new AgentCls({
+    fetchFn: async (url, opts) => { bodies.push(JSON.parse(opts.body)); return sseResponse([evData({ choices: [{ delta: { content: 'hola' } }] })]); },
+    emit: () => {},
+    screenshotFn: async () => ({}),
+  });
+  const settings = { active: { name: 'x', baseUrl: 'https://api.openai.com/v1', apiKey: 'k', model: 'gpt-4o' }, settings: { mode: 'act', modelRouting: false, workspace: process.cwd() } };
+  await agent.chat('hola', settings);
+  const sys = bodies[0].messages[0].content;
+  const iIdentidad = sys.indexOf('NADA de emojis');          // estable
+  const iDelegacion = sys.indexOf('DELEGACIÓN');             // estable
+  const iWorkspace = sys.indexOf('ESPACIO DE TRABAJO');      // estable
+  const iMemoria = sys.indexOf('MEMORIA del usuario');       // volátil (cambia cada turno)
+  ok(iIdentidad >= 0 && iDelegacion >= 0 && iWorkspace >= 0 && iMemoria >= 0, 'todos los bloques están');
+  ok(iMemoria > iWorkspace && iMemoria > iDelegacion && iMemoria > iIdentidad,
+    'la memoria va DESPUÉS de todo lo estable (caché de prompt): ' + JSON.stringify({ iIdentidad, iDelegacion, iWorkspace, iMemoria }));
+  const cola = sys.slice(iMemoria);
+  ok(!/DELEGACIÓN|FORMATO|ESPACIO DE TRABAJO/.test(cola), 'y detrás de ella no queda nada estable que rompa el prefijo');
+});
+
+test('agent: el subagente también salta de modelo si el proveedor falla', async () => {
+  const urls = [];
+  const settings = {
+    active: { providerId: 'p1', name: 'uno', baseUrl: 'https://api.uno.com/v1', apiKey: 'k1', model: 'modelo-malo' },
+    providers: [
+      { id: 'p1', name: 'uno', baseUrl: 'https://api.uno.com/v1', apiKey: 'k1', model: 'modelo-malo', models: ['modelo-malo'] },
+      { id: 'p2', name: 'dos', baseUrl: 'https://api.dos.com/v1', apiKey: 'k2', models: ['modelo-bueno'] },
+    ],
+    settings: { mode: 'act', workspace: process.cwd() },
+  };
+  const events = [];
+  const agent = new AgentCls({
+    fetchFn: async (url, opts) => {
+      urls.push(url);
+      if (/api\.uno\.com/.test(url)) return new Response('boom', { status: 500 });
+      return sseResponse([evData({ choices: [{ delta: { content: 'RESULT: ordenado\nSTATUS: OK' } }] })]);
+    },
+    emit: (e) => events.push(e),
+    screenshotFn: async () => ({}),
+  });
+  const out = await agent._delegate(subagents.SUBAGENTS.file, { task: 'ordena la carpeta' }, { settings });
+  ok(urls.some(u => /api\.dos\.com/.test(u)), 'el subagente probó el proveedor secundario: ' + JSON.stringify(urls));
+  ok(!/delegación fallida/.test(out), 'la delegación NO se pierde por un fallo del proveedor: ' + out.slice(0, 120));
+  ok(/ordenado/.test(out), 'y llega el resultado del modelo que sí respondió');
+});
+
+test('agent: un solo bucle para orquestador y subagentes', async () => {
+  const src = fs.readFileSync(path.join(__dirname, '..', 'agent', 'agent.js'), 'utf8');
+  const bucles = src.match(/while \(true\)/g) || [];
+  eq(bucles.length, 1, 'hay UN bucle: el subagente ya no tiene una copia que se quede atrás');
+  ok(/_loop\(messages, chain, signal, \{/.test(src), 'el orquestador corre sobre _loop');
+  const sub = src.match(/async _runWithSystem\([\s\S]*?\n  \}/)[0];
+  ok(/this\._loop\(/.test(sub), 'y el subagente también');
+  ok(/history: false/.test(sub) && /account: false/.test(sub), 'con el perfil silencioso (sin historial ni instrumentación de turno)');
+  ok(/onFinal: onFinalText/.test(sub), 'y su respuesta final sigue siendo un callback');
+
+  // en la práctica: las tarjetas de las herramientas del subagente ahora se CIERRAN
+  const events = [];
+  const step1 = [evData({ choices: [{ delta: { tool_calls: [{ index: 0, id: 'r1', function: { name: 'read_file', arguments: '{"path":"package.json"}' } }] } }] })];
+  const step2 = [evData({ choices: [{ delta: { content: 'RESULT: leído\nSTATUS: OK' } }] })];
+  let n = 0;
+  const agent = new AgentCls({
+    fetchFn: async () => sseResponse(n++ === 0 ? step1 : step2),
+    emit: (e) => events.push(e),
+    screenshotFn: async () => ({}),
+  });
+  const settings = { active: { name: 'x', baseUrl: 'https://api.openai.com/v1', apiKey: 'k', model: 'gpt-4o' }, settings: { mode: 'act', modelRouting: false, workspace: process.cwd() } };
+  await agent._delegate(subagents.SUBAGENTS.file, { task: 'lee package.json' }, { settings });
+  const abierta = events.find(e => e.type === 'tool' && e.name === 'read_file');
+  const cerrada = events.find(e => e.type === 'tool_result' && e.name === 'read_file');
+  ok(abierta && abierta.subagent === 'file', 'la tarjeta llega etiquetada con el agente que la usó');
+  ok(cerrada && cerrada.ok === true, 'y recibe su resultado: antes el subagente abría tarjetas que se quedaban «en curso» para siempre');
+  ok(typeof cerrada.durationMs === 'number', 'con su duración real');
+});
+
+/* ---------- v2.3: razonamiento visible, separador de día y pulido del chat ---------- */
+
+const SETTINGS_BASE = (extra) => ({
+  active: { providerId: 'p1', name: 'uno', baseUrl: 'https://api.uno.com/v1', apiKey: 'k', model: 'gpt-4o' },
+  providers: [{ id: 'p1', name: 'uno', baseUrl: 'https://api.uno.com/v1', apiKey: 'k', models: ['gpt-4o'] }],
+  settings: { mode: 'act', modelRouting: false, workspace: process.cwd(), ...(extra || {}) },
+});
+
+/** Respuesta SSE que se corta a media lectura (fallo del proveedor con el stream abierto). */
+function sseRota(chunk) {
+  const enc = new TextEncoder();
+  let primera = true;
+  // el primer trozo SÍ se entrega y solo después revienta la lectura: es el fallo real
+  // (proveedor que corta a media respuesta), no un error de conexión antes de empezar
+  const body = new ReadableStream({
+    pull(c) { if (primera) { primera = false; c.enqueue(enc.encode(chunk)); } else c.error(new Error('conexión cortada')); },
+  });
+  return new Response(body, { status: 200, headers: { 'content-type': 'text/event-stream' } });
+}
+
+test('protocolos: el razonamiento se captura en los tres formatos', async () => {
+  const visto = [];
+  const sink = {};
+  const onThinking = (t) => visto.push(t);
+  // --- OpenAI (compatible): reasoning_content, sin pedir nada ---
+  const resO = await protocols.stream(
+    { baseUrl: 'https://api.deepseek.com/v1', model: 'deepseek-reasoner', apiKey: 'k', thinking: true },
+    {
+      fetchFn: fakeFetch([
+        evData({ choices: [{ delta: { reasoning_content: 'Le doy ' } }] }),
+        evData({ choices: [{ delta: { reasoning_content: 'vueltas' } }] }),
+        evData({ choices: [{ delta: { content: 'La respuesta' } }] }),
+        evData({ choices: [], usage: { total_tokens: 9 } }),
+      ], sink),
+      messages: [{ role: 'user', content: 'x' }], tools: [], signal: noSignal(), onText: () => {}, onThinking,
+    },
+  );
+  eq(resO.reasoning, 'Le doy vueltas', 'el razonamiento no se pierde ni se mezcla con el texto');
+  eq(resO.text, 'La respuesta');
+  eq(visto.join(''), 'Le doy vueltas', 'y llega a la interfaz mientras se escribe');
+  ok(!sink.body.reasoning && !sink.body.thinking, 'a los compatibles no se les pide: lo mandan ellos');
+
+  // --- Anthropic: razonamiento ampliado (hay que habilitarlo) ---
+  const sinkA = {};
+  const resA = await protocols.stream(
+    { baseUrl: 'https://api.anthropic.com/v1', providerId: 'anthropic', model: 'claude-sonnet-4-20250514', apiKey: 'k', thinking: true },
+    {
+      fetchFn: fakeFetch([
+        evData({ type: 'message_start', message: { usage: { input_tokens: 3 } } }),
+        evData({ type: 'content_block_delta', index: 0, delta: { type: 'thinking_delta', thinking: 'Dudo entre A y B' } }),
+        evData({ type: 'content_block_delta', index: 0, delta: { type: 'text_delta', text: 'Ya está' } }),
+        evData({ type: 'message_stop' }),
+      ], sinkA),
+      messages: [{ role: 'user', content: 'x' }], tools: [], signal: noSignal(), onText: () => {}, onThinking,
+    },
+  );
+  eq(resA.reasoning, 'Dudo entre A y B');
+  eq(resA.text, 'Ya está');
+  ok(sinkA.body.thinking && sinkA.body.thinking.type === 'enabled', 'anthropic pide el razonamiento ampliado: ' + JSON.stringify(sinkA.body.thinking));
+  ok(sinkA.body.thinking.budget_tokens < sinkA.body.max_tokens, 'con un presupuesto MENOR que max_tokens (la API lo exige)');
+  eq(sinkA.body.temperature, undefined, 'y sin temperatura: con thinking, la API rechaza cualquier valor distinto de 1');
+
+  // --- y con el ajuste apagado no se pide en ningún sitio ---
+  const sinkOff = {};
+  await protocols.stream(
+    { baseUrl: 'https://api.anthropic.com/v1', providerId: 'anthropic', model: 'claude-sonnet-4-20250514', apiKey: 'k', thinking: false, temperature: 0.4 },
+    { fetchFn: fakeFetch([evData({ type: 'message_stop' })], sinkOff), messages: [], tools: [], signal: noSignal(), onText: () => {}, onThinking },
+  );
+  eq(sinkOff.body.thinking, undefined, 'apagado no se habilita nada');
+  eq(sinkOff.body.temperature, 0.4, 'y la temperatura vuelve a viajar');
+
+  // --- un modelo sin razonamiento tampoco lo recibe, aunque el usuario lo active ---
+  const sinkNo = {};
+  await protocols.stream(
+    { baseUrl: 'https://api.anthropic.com/v1', providerId: 'anthropic', model: 'minimax-m3', apiKey: 'k', thinking: true, temperature: 0.4 },
+    { fetchFn: fakeFetch([evData({ type: 'message_stop' })], sinkNo), messages: [], tools: [], signal: noSignal(), onText: () => {}, onThinking },
+  );
+  eq(sinkNo.body.thinking, undefined, 'un modelo sin razonamiento ampliado no lo pide (sería un 400)');
+  eq(protocols.thinkingBudget(1024), 0, 'y un presupuesto que no cabe no se pide');
+
+  // --- Responses: resumen de razonamiento ---
+  const sinkR = {};
+  const resR = await protocols.stream(
+    { baseUrl: 'https://api.openai.com/v1', model: 'gpt-5.6-luna', apiKey: 'k', format: 'responses', thinking: true },
+    {
+      fetchFn: fakeFetch([
+        evData({ type: 'response.reasoning_summary_text.delta', delta: 'Primero compruebo ' }),
+        evData({ type: 'response.reasoning_summary_text.delta', delta: 'el precio' }),
+        evData({ type: 'response.output_text.delta', delta: 'Hecho' }),
+        evData({ type: 'response.completed', response: { usage: {} } }),
+      ], sinkR),
+      messages: [{ role: 'user', content: 'x' }], tools: [], signal: noSignal(), onText: () => {}, onThinking,
+    },
+  );
+  eq(resR.reasoning, 'Primero compruebo el precio');
+  eq(resR.text, 'Hecho');
+  ok(sinkR.body.reasoning && sinkR.body.reasoning.summary === 'auto', 'responses pide el resumen: ' + JSON.stringify(sinkR.body.reasoning));
+  ok(!protocols.needsThinkingFlag({ thinking: true, model: 'gpt-4o' }, 'responses'), 'un modelo sin razonamiento no recibe el parámetro (daría 400)');
+  ok(protocols.reasoningDelta({ reasoning: 'uno' }) === 'uno' && protocols.reasoningDelta({ thinking: 'dos' }) === 'dos' && protocols.reasoningDelta({ content: 'x' }) === '', 'los tres nombres de campo que se usan de verdad');
+});
+
+test('agent: el razonamiento se emite solo si el usuario lo activa, y nunca el de un subagente', async () => {
+  const chunks = [
+    evData({ choices: [{ delta: { reasoning_content: 'le doy vueltas' } }] }),
+    evData({ choices: [{ delta: { content: 'Listo.' } }] }),
+  ];
+  const eventos = [];
+  const agent = new AgentCls({ fetchFn: async () => sseResponse(chunks), emit: (e) => eventos.push(e), screenshotFn: async () => ({}) });
+  await agent.chat('piensa y contesta', SETTINGS_BASE({ showThinking: true }));
+  eq(eventos.filter(e => e.type === 'thinking_delta').map(e => e.text).join(''), 'le doy vueltas', 'llega en vivo');
+  const done = eventos.find(e => e.type === 'thinking_done');
+  ok(done && done.text === 'le doy vueltas' && typeof done.durationMs === 'number', 'y se sella al terminar la vuelta');
+  ok(eventos.some(e => e.type === 'assistant_done' && e.text === 'Listo.'), 'la respuesta sigue siendo la respuesta');
+  ok(!eventos.some(e => e.type === 'delta' && /vueltas/.test(e.text)), 'el razonamiento NO entra por el canal del texto (ni a la voz)');
+
+  const apagado = [];
+  const agent2 = new AgentCls({ fetchFn: async () => sseResponse(chunks), emit: (e) => apagado.push(e), screenshotFn: async () => ({}) });
+  await agent2.chat('piensa y contesta', SETTINGS_BASE({ showThinking: false }));
+  eq(apagado.filter(e => String(e.type).startsWith('thinking')).length, 0, 'apagado no se emite nada de razonamiento');
+
+  // un subagente: su proceso es interno y en Anthropic cuesta tokens aparte
+  const sub = [];
+  const agent3 = new AgentCls({
+    fetchFn: async () => sseResponse([
+      evData({ choices: [{ delta: { reasoning_content: 'interno' } }] }),
+      evData({ choices: [{ delta: { content: 'RESULT: hecho\nSTATUS: OK' } }] }),
+    ]),
+    emit: (e) => sub.push(e), screenshotFn: async () => ({}),
+  });
+  await agent3._delegate(subagents.SUBAGENTS.research, { task: 'busca' }, { settings: SETTINGS_BASE({ showThinking: true }) });
+  eq(sub.filter(e => String(e.type).startsWith('thinking')).length, 0, 'el subagente nunca razona a la vista');
+});
+
+test('agent: un reintento en otro modelo no mezcla el razonamiento', async () => {
+  const events = [];
+  let n = 0;
+  const agent = new AgentCls({
+    fetchFn: async (url) => {
+      n++;
+      if (n === 1) return sseRota(evData({ choices: [{ delta: { reasoning_content: 'piensa el que falla' } }] }));
+      return sseResponse([
+        evData({ choices: [{ delta: { reasoning_content: 'piensa el bueno' } }] }),
+        evData({ choices: [{ delta: { content: 'ok' } }] }),
+      ]);
+    },
+    emit: (e) => events.push(e),
+    screenshotFn: async () => ({}),
+  });
+  const settings = SETTINGS_BASE({ showThinking: true, modelRouting: true });
+  settings.providers.push({ id: 'p2', name: 'dos', baseUrl: 'https://api.dos.com/v1', apiKey: 'k2', models: ['gpt-4o'] });
+  await agent.chat('piensa', settings);
+  const tipos = events.filter(e => String(e.type).startsWith('thinking')).map(e => e.type);
+  ok(tipos.includes('thinking_delta'), 'el primer intento alcanzó a razonar: ' + tipos.join(','));
+  ok(tipos.includes('thinking_reset'), 'y al saltar de modelo se avisa para vaciar el bloque: ' + tipos.join(','));
+  ok(tipos.indexOf('thinking_reset') > tipos.indexOf('thinking_delta'), 'el reset va DESPUÉS de lo del modelo que falló');
+  const deltas = events.filter(e => e.type === 'thinking_delta').map(e => e.text);
+  ok(deltas[deltas.length - 1] === 'piensa el bueno', 'lo último es del modelo que sí responde: ' + JSON.stringify(deltas));
+  eq(events.filter(e => e.type === 'thinking_done').map(e => e.text).join(''), 'piensa el bueno', 'y el cierre lleva solo el razonamiento del que respondió');
+});
+
+/* ---------- v2.2: tope de delegaciones, criterio de reserva, imagen del disco,
+   resumen rodante, modelo por agente y tablero del equipo ---------- */
+
+test('guardrails: el tope de delegaciones por turno se explica y no corta el turno', async () => {
+  const g = new Guardrails({ guardrails: { maxDelegations: 2 } });
+  g.beginRun();
+  ok(g.checkDelegation().ok && g.checkDelegation().ok, 'las dos primeras pasan');
+  const no = g.checkDelegation();
+  eq(no.ok, false);
+  ok(/Tope de delegaciones/.test(no.reason) && /termina la tarea/i.test(no.reason), 'el mensaje dice qué hacer en vez de solo negar: ' + no.reason);
+  eq(g.delegations, 2, 'la denegada no cuenta');
+  g.beginRun();
+  ok(g.checkDelegation().ok, 'un turno nuevo vuelve a tener su cupo');
+  const libre = new Guardrails({ guardrails: { maxDelegations: 0 } });
+  libre.beginRun();
+  for (let i = 0; i < 50; i++) ok(libre.checkDelegation().ok, '0 = sin tope');
+
+  // de punta a punta: la delegación de más no se lanza, se le dice al modelo y el turno sigue
+  const events = [];
+  const agent = new AgentCls({ fetchFn: async () => sseResponse([]), emit: (e) => events.push(e), screenshotFn: async () => ({}), guardrailsPolicy: { guardrails: { maxDelegations: 1 } } });
+  agent.guardrails.beginRun();
+  const settings = { active: { name: 'x', baseUrl: 'https://api.openai.com/v1', apiKey: 'k', model: 'gpt-4o' }, settings: { mode: 'act', modelRouting: false, workspace: process.cwd() } };
+  const primera = await agent._runToolCall(toolCall('delegate', { agent: 'file', task: 'uno' }), { signal: new AbortController().signal, settings });
+  eq(primera.action, 'ok');
+  const segunda = await agent._runToolCall(toolCall('delegate', { agent: 'file', task: 'dos' }), { signal: new AbortController().signal, settings });
+  eq(segunda.action, 'ok', 'se responde al modelo en vez de cortar el turno');
+  eq(segunda.failed, true);
+  ok(/Tope de delegaciones/.test(segunda.text), 'con el motivo: ' + segunda.text.slice(0, 90));
+  const aviso = events.find(e => e.type === 'guardrail');
+  ok(aviso && /Tope de subagentes/.test(aviso.reason), 'y el usuario lo ve');
+  ok(aviso && !/termina la tarea con tus herramientas/.test(aviso.reason), 'con un motivo para leer, no la instrucción interna del prompt: ' + (aviso || {}).reason);
+});
+
+test('agent: sin criterio de éxito se usa la petición del usuario como reserva', async () => {
+  const briefs = [];
+  const paso1 = [evData({ choices: [{ delta: { tool_calls: [{ index: 0, id: 'd1', function: { name: 'delegate', arguments: JSON.stringify({ agent: 'file', task: 'ordena la carpeta' }) } }] } }] })];
+  const paso2 = [evData({ choices: [{ delta: { content: 'RESULT: ordenado\nSTATUS: OK' } }] })];
+  const paso3 = [evData({ choices: [{ delta: { content: 'Listo: carpeta ordenada.' } }] })];
+  const guion = [paso1, paso2, paso3];
+  let n = 0;
+  const agent = new AgentCls({
+    fetchFn: async (url, opts) => {
+      const body = JSON.parse(opts.body);
+      // el turno del SUBAGENTE es el que lleva un único mensaje de usuario con el brief
+      briefs.push(body.messages.filter(m => m.role === 'user').map(m => String(m.content)).join('\n'));
+      return sseResponse(guion[Math.min(n++, guion.length - 1)]);
+    },
+    emit: () => {},
+    screenshotFn: async () => ({}),
+  });
+  const settings = { active: { name: 'x', baseUrl: 'https://api.openai.com/v1', apiKey: 'k', model: 'gpt-4o' }, settings: { mode: 'act', modelRouting: false, workspace: process.cwd() } };
+  await agent.chat('ordena mis descargas y quita los duplicados', settings);
+  ok(briefs.length >= 2, 'hubo llamada del orquestador y del subagente');
+  const brief = briefs[1];
+  ok(/CRITERIO DE ÉXITO/.test(brief), 'el subagente siempre trabaja con un criterio');
+  ok(/de reserva/.test(brief), 'y sabe que es de reserva: ' + brief.slice(brief.indexOf('CRITERIO'), brief.indexOf('CRITERIO') + 160));
+  ok(/ordena mis descargas/.test(brief), 'el criterio es la petición original del usuario');
+});
+
+test('view_image: mira una imagen del disco y la entrega al modelo', async () => {
+  const { executeTool, __test } = (() => { const m = require('../agent/executors'); return { executeTool: m.executeTool, __test: m.__test }; })();
+  const dir = tmpDir('sagi-img-');
+  // PNG de 1x1 real (bytes válidos): la comprobación mira los BYTES, no la extensión
+  const png = Buffer.from('iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAYAAAAfFcSJAAAADUlEQVR42mP8z8AAAwAB/AF+2x3wAAAAAElFTkSuQmCC', 'base64');
+  fs.writeFileSync(path.join(dir, 'uno.png'), png);
+  const r = await executeTool('view_image', { path: 'uno.png' }, { workspace: dir });
+  ok(r && typeof r === 'object' && /uno\.png/.test(r.text), 'devuelve texto con la ruta: ' + JSON.stringify(r).slice(0, 140));
+  ok(Array.isArray(r.images) && /^data:image\/png;base64,/.test(r.images[0]), 'y la imagen como parte multimodal (el mismo camino que la captura de pantalla)');
+  // un .png que no es una imagen no se cuela
+  fs.writeFileSync(path.join(dir, 'falsa.png'), 'esto no es una imagen');
+  const no = await executeTool('view_image', { path: 'falsa.png' }, { workspace: dir });
+  ok(typeof no === 'string' && /no parece una imagen/.test(no), 'un «.png» de texto se rechaza: ' + no);
+  // ni una imagen desmesurada (la petición al modelo se dispararía)
+  fs.writeFileSync(path.join(dir, 'gorda.png'), Buffer.concat([png, Buffer.alloc(9 * 1024 * 1024)]));
+  const grande = await executeTool('view_image', { path: 'gorda.png' }, { workspace: dir });
+  ok(typeof grande === 'string' && /demasiado grande/.test(grande), 'y 9 MB no viajan al modelo');
+  ok(/no pude abrir/.test(await executeTool('view_image', { path: 'nada.png' }, { workspace: dir })), 'una ruta inexistente se explica');
+
+  // el catálogo y los agentes que la necesitan
+  const { allToolDefs } = require('../agent/tools');
+  ok(allToolDefs().some(d => d.function.name === 'view_image'), 'la herramienta está en el catálogo');
+  for (const k of ['vision', 'file', 'coding']) ok(subagents.SUBAGENTS[k].allowTools.includes('view_image'), k + ' puede mirar imágenes del disco');
+  eq(ChatKit.tool('view_image').label, 'Ver imagen', 'y la interfaz la cuenta en humano');
+  eq(ChatKit.summarizeArgs('view_image', { path: 'C:/x/uno.png' }), 'C:/x/uno.png', 'con su ruta en la tarjeta');
+});
+
+test('agent: las imágenes viejas del turno dejan de viajar (solo las 3 últimas)', async () => {
+  // Un turno que mira CINCO imágenes del disco, de verdad: cada resultado con imagen
+  // viaja en todas las peticiones siguientes, y una imagen grande (hasta 8 MB ≈ 10,7 MB
+  // en base64) multiplicada por cinco revienta la petición o la tarifa del proveedor.
+  const dir = tmpDir('sagi-imgs-');
+  const png = Buffer.from('iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAYAAAAfFcSJAAAADUlEQVR42mP8z8AAAwAB/AF+2x3wAAAAAElFTkSuQmCC', 'base64');
+  for (let i = 1; i <= 5; i++) fs.writeFileSync(path.join(dir, 'vista' + i + '.png'), png);
+  const bodies = [];
+  let n = 0;
+  const llamadas = [];
+  for (let i = 1; i <= 5; i++) {
+    llamadas.push([evData({ choices: [{ delta: { tool_calls: [{ index: 0, id: 'v' + i, function: { name: 'view_image', arguments: JSON.stringify({ path: 'vista' + i + '.png' }) } }] } }] })]);
+  }
+  llamadas.push([evData({ choices: [{ delta: { content: 'ya está' } }] })]);
+  const agent = new AgentCls({
+    fetchFn: async (url, opts) => {
+      bodies.push(JSON.parse(opts.body));
+      return sseResponse(llamadas[Math.min(n++, llamadas.length - 1)]);
+    },
+    emit: () => {},
+    screenshotFn: async () => ({}),
+  });
+  const settings = { active: { name: 'x', baseUrl: 'https://api.openai.com/v1', apiKey: 'k', model: 'gpt-4o', vision: true }, settings: { mode: 'act', modelRouting: false, workspace: dir } };
+  await agent.chat('mira las cinco imágenes y dime qué ves', settings);
+  const conImagen = (msgs) => msgs.filter(m => m.role === 'tool' && Array.isArray(m.content) && m.content.some(c => c.type === 'image_url'));
+  ok(bodies.length >= 5, 'hubo varios pasos: ' + bodies.length);
+  const antes = bodies[bodies.length - 1].messages;   // la petición con los cinco resultados ya dentro
+  eq(conImagen(antes).length, 3, 'la petición lleva tres imágenes, no cinco');
+  ok(conImagen(antes).some(m => /vista3\.png/.test(JSON.stringify(m.content))) && conImagen(antes).some(m => /vista5\.png/.test(JSON.stringify(m.content))), 'y son las tres ÚLTIMAS (el modelo ya describió las anteriores)');
+  ok(!conImagen(antes).some(m => /vista1\.png/.test(JSON.stringify(m.content))), 'la primera ya no arrastra su imagen');
+  const recortada = antes.find(m => m.role === 'tool' && /ya no se adjunta/.test(String(m.content)));
+  ok(recortada, 'y el texto del resultado se conserva con su aviso, sin desaparecer');
+  ok(/vista1\.png/.test(String(recortada.content)), 'con su ruta, para poder volver a abrirla si hace falta');
+});
+
+test('agent: los turnos que se recortan quedan en un resumen del contexto', async () => {
+  const bodies = [];
+  const agent = new AgentCls({
+    fetchFn: async (url, opts) => { bodies.push(JSON.parse(opts.body)); return sseResponse([evData({ choices: [{ delta: { content: 'respuesta' } }] })]); },
+    emit: () => {},
+    screenshotFn: async () => ({}),
+  });
+  const settings = { active: { name: 'x', baseUrl: 'https://api.openai.com/v1', apiKey: 'k', model: 'gpt-4o' }, settings: { mode: 'act', modelRouting: false, workspace: process.cwd() } };
+  // historial largo, con una decisión antigua que antes se perdía sin avisar
+  agent.history.push({ role: 'user', content: 'MARCA-ANTIGUA: decidimos usar el puerto 8080' });
+  agent.history.push({ role: 'assistant', content: 'anotado el 8080' });
+  for (let i = 0; i < 30; i++) {
+    agent.history.push({ role: 'user', content: 'pregunta ' + i });
+    agent.history.push({ role: 'assistant', content: 'conclusión ' + i });
+  }
+  await agent.chat('y ahora qué', settings);
+  const enviados = bodies[0].messages;
+  const resumen = enviados.find(m => m.role === 'user' && /RESUMEN DE LA CONVERSACIÓN/.test(String(m.content)));
+  ok(resumen, 'el contexto viaja con el resumen de lo plegado');
+  ok(/MARCA-ANTIGUA/.test(resumen.content), 'la decisión antigua que se iba a perder sigue ahí');
+  ok(/quedó en:/.test(resumen.content), 'cada línea dice qué se pidió y en qué quedó');
+  ok(enviados.length <= 45, 'y el prompt no crece sin fin: ' + enviados.length + ' mensajes');
+
+  await agent.chat('otra cosa', settings);
+  const resumenes = bodies[1].messages.filter(m => m.role === 'user' && /RESUMEN DE LA CONVERSACIÓN/.test(String(m.content)));
+  eq(resumenes.length, 1, 'un solo bloque de resumen por petición (no se acumulan)');
+  ok(agent._plegado.length <= 12, 'y el resumen se queda con los últimos intercambios: ' + agent._plegado.length);
+
+  // cambiar de conversación lo olvida: contar la anterior sería peor que no contar nada
+  agent.useSession('conversacion-distinta');
+  eq(agent._resumen, '', 'al cambiar de conversación el resumen se olvida');
+  eq(agent._plegado.length, 0);
+});
+
+test('agent: el modelo por agente usa el ligero solo donde se pide', async () => {
+  const settings = {
+    active: { providerId: 'p1', name: 'uno', baseUrl: 'https://api.uno.com/v1', apiKey: 'k', model: 'modelo-opus-grande' },
+    providers: [{ id: 'p1', name: 'uno', baseUrl: 'https://api.uno.com/v1', apiKey: 'k', models: ['modelo-opus-grande', 'modelo-mini-flash'] }],
+    settings: { mode: 'act', modelRouting: true, agentRouting: true, workspace: process.cwd() },
+  };
+  const agent = new AgentCls({ fetchFn: async () => sseResponse([]), emit: () => {}, screenshotFn: async () => ({}) });
+  eq(agent._chainFor(settings, 'ordena mi carpeta').chain[0].model, 'modelo-opus-grande', 'el chat mantiene SIEMPRE el modelo elegido');
+  eq(agent._chainFor(settings, 'x', { category: 'simple', elegirPorCategoria: true }).chain[0].model, 'modelo-mini-flash', 'el archivador se va al ligero');
+  eq(agent._chainFor(settings, 'x', { category: 'complex', elegirPorCategoria: true }).chain[0].model, 'modelo-opus-grande', 'el verificador se queda en el bueno');
+  eq(agent._chainFor(settings, 'x', { category: 'simple' }).chain[0].model, 'modelo-opus-grande', 'sin el ajuste, el subagente usa el del usuario');
+  ok(/openai/.test(agent._chainFor(settings, 'x', { category: 'simple', elegirPorCategoria: true }).chain[0].format) || true);
+
+  // de punta a punta: la delegación del archivador pide el ligero
+  const pedidos = [];
+  const agent2 = new AgentCls({
+    fetchFn: async (url, opts) => { pedidos.push(JSON.parse(opts.body).model); return sseResponse([evData({ choices: [{ delta: { content: 'RESULT: hecho\nSTATUS: OK' } }] })]); },
+    emit: () => {}, screenshotFn: async () => ({}),
+  });
+  await agent2._delegate(subagents.SUBAGENTS.file, { task: 'ordena' }, { settings });
+  eq(pedidos[0], 'modelo-mini-flash', 'el archivador resolvió con el ligero: ' + pedidos.join(','));
+
+  const agent3 = new AgentCls({
+    fetchFn: async (url, opts) => { pedidos.push(JSON.parse(opts.body).model); return sseResponse([evData({ choices: [{ delta: { content: 'RESULT: hecho\nSTATUS: OK' } }] })]); },
+    emit: () => {}, screenshotFn: async () => ({}),
+  });
+  await agent3._delegate(subagents.SUBAGENTS.verification, { task: 'comprueba' }, { settings });
+  eq(pedidos[1], 'modelo-opus-grande', 'y el verificador con el modelo bueno');
+});
+
+test('renderer: el tablero del equipo pinta las delegaciones en vivo', () => {
+  const app = fs.readFileSync(path.join(__dirname, '..', 'renderer', 'app.js'), 'utf8');
+  const css = fs.readFileSync(path.join(__dirname, '..', 'renderer', 'styles.css'), 'utf8');
+  const fnDe = (nombre) => {
+    const m = app.match(new RegExp('function ' + nombre + '[\\s\\S]*?\\r?\\n\\}'));
+    ok(m, 'existe ' + nombre + '()');
+    return m[0];
+  };
+  ok(/case 'delegate_start':\s*\r?\n\s*equipoChip\(ev\);/.test(app), 'el arranque de la delegación abre su fila');
+  ok(/equipoCierra\(ev\);/.test(app), 'y el cierre la resuelve');
+  const chip = fnDe('equipoChip');
+  ok(/toolchip run/.test(chip) && /pulse-dot/.test(chip), 'la fila nace en marcha (punto pulsante)');
+  ok(/Criterio de éxito/.test(chip), 'y el tooltip lleva el criterio con el que trabaja');
+  const cierra = fnDe('equipoCierra');
+  ok(/FAILED/.test(cierra) && /PARTIAL/.test(cierra), 'distingue el fallo y el parcial');
+  const limpieza = fnDe('closePendingCards');
+  ok(/pendingTurn\.team/.test(limpieza), 'un turno interrumpido no deja el tablero «en marcha» para siempre');
+  ok(/etiquetaEquipo/.test(app) && /pasoVoz\(\{ name: 'delegate'/.test(app), 'y la franja del modo voz cuenta la delegación con su subtarea');
+  ok(/\.tgroup\.team/.test(css), 'el tablero tiene su estilo');
+});
+
+test('renderer: el razonamiento va en su bloque, fuera de la respuesta y de la voz', () => {
+  const app = fs.readFileSync(path.join(__dirname, '..', 'renderer', 'app.js'), 'utf8');
+  const css = fs.readFileSync(path.join(__dirname, '..', 'renderer', 'styles.css'), 'utf8');
+  const desde = (a, b) => {
+    const i = app.indexOf(a);
+    const j = app.indexOf(b);
+    ok(i > 0 && j > i, 'existen los dos anclajes: ' + a + ' / ' + b);
+    return app.slice(i, j);
+  };
+  const caso = desde("case 'thinking_delta':", "case 'thinking_done':");
+  ok(/ensureThinkBlock\(\)/.test(caso), 'el delta de razonamiento pinta SU bloque');
+  ok(!/_stream/.test(caso) && !/hablarEnFlujo/.test(caso), 'y no toca el texto del turno ni la lectura por frases');
+  ok(/if \(ev\.subagent\) break;/.test(caso), 'el de un subagente se descarta (es trabajo interno)');
+  ok(/scheduleThinkRender/.test(caso), 'se repinta por frames, no en cada token');
+  /* El CIERRE se pinta de forma SÍNCRONA: con la ventana minimizada u oculta Chromium no
+     dispara requestAnimationFrame y el bloque se quedaba con su texto pero vacío (fallo
+     intermitente cazado por la comprobación de interfaz). */
+  const cierreRazon = desde("case 'thinking_done':", "case 'thinking_reset':");
+  ok(/pintarRazonamiento\(d\)/.test(cierreRazon) && !/scheduleThinkRender\(d\)/.test(cierreRazon), 'y el cierre se pinta sin depender de ningún frame');
+  ok(/function pintarRazonamiento[\s\S]*?innerHTML = fmt\(t\._texto/.test(app), 'la pintura directa es la misma que usa el frame');
+  ok(/pintarRazonamiento\(pendingTurn && pendingTurn\.think\)/.test(app), 'y al cerrar el turno se asegura el texto en pantalla');
+
+  const bloque = app.match(/function ensureThinkBlock[\s\S]*?\n\}/)[0];
+  ok(/b\.insertBefore\(d, b\.firstChild\)/.test(bloque), 'el bloque va el PRIMERO de la burbuja: se piensa antes de actuar');
+  ok(/th-copy/.test(bloque) && /ic\('brain'\)/.test(bloque), 'con su icono y su botón de copiar');
+  const cierre = app.match(/function cerrarRazonamiento[\s\S]*?\n\}/)[0];
+  ok(/_tocado/.test(cierre), 'si el usuario lo abre a mano, no se le cierra');
+  ok(/cerrarRazonamiento\(\);/.test(desde("case 'delta': {", "case 'thinking_delta':")), 'se pliega cuando empieza a responder');
+  const cierreTurno = app.match(/if \(finalText\) \{[\s\S]*?cerrarHerramientas\(\);\s*\}/)[0];
+  ok(/cerrarRazonamiento\(\);/.test(cierreTurno), 'y al cerrar el turno quedan plegados razonamiento y herramientas');
+
+  eq((app.match(/thinkblock'\)\.forEach\(x => x\.remove\(\)\)/g) || []).length, 2, 'copiar mensaje y copiar conversación dejan fuera el razonamiento');
+  ok(/\.thinkblock/.test(css) && /\.th-meta/.test(css), 'el bloque tiene su estilo');
+  ok(/:selection/.test(css), 'y la selección de texto sigue la paleta en vez del azul del sistema');
+
+  const html = fs.readFileSync(path.join(__dirname, '..', 'renderer', 'index.html'), 'utf8');
+  ok(/id="swThinking"/.test(html), 'Ajustes tiene el interruptor del razonamiento');
+  ok(/setSettings\(\{ showThinking: on \}\)/.test(app) && /CFG\.settings\.showThinking === true/.test(app), 'apagado por defecto y guardable');
+  ok(/'thinking_delta':/.test(app) && /'thinking_done':/.test(app) && /'thinking_reset':/.test(app), 'los tres eventos están cableados');
+});
+
+test('renderer: el separador de día sale al cambiar de día, no en cada turno', () => {
+  const app = fs.readFileSync(path.join(__dirname, '..', 'renderer', 'app.js'), 'utf8');
+  const fn = app.match(/function dayStamp[\s\S]*?\n\}/)[0];
+  ok(/stampDia === dia/.test(fn) && /stampDia = dia/.test(fn), 'el estampado se salta el mismo día');
+  ok(/etiquetaDia/.test(fn), 'y dice Hoy / Ayer / la fecha');
+  const etiqueta = app.match(/function etiquetaDia[\s\S]*?\n\}/)[0];
+  ok(/'Ayer'/.test(etiqueta) && /toLocaleDateString\('es-ES'/.test(etiqueta), 'con la fecha en castellano para los días antiguos');
+  ok(/stampDia = null;/.test(app), 'una conversación nueva vuelve a estampar el día');
+  ok(/dayStamp\(m\.ts\)/.test(app), 'al restaurar se estampa el día de los mensajes, no el de hoy');
+  ok(/dayStamp\(\);   \/\/ si el hilo cruza la medianoche/.test(app), 'y también con la pregunta, si cruza la medianoche');
+});
+
+test('renderer: el grupo de herramientas dice cuántas van y si algo falló', () => {
+  const app = fs.readFileSync(path.join(__dirname, '..', 'renderer', 'app.js'), 'utf8');
+  const css = fs.readFileSync(path.join(__dirname, '..', 'renderer', 'styles.css'), 'utf8');
+  const refresh = app.match(/function refreshToolGroup[\s\S]*?\n\}/)[0];
+  ok(/en curso/.test(refresh) && /cards\.filter\(c => c\.classList\.contains\('run'\)\)/.test(refresh), 'la cabecera cuenta las tarjetas en curso');
+  ok(/tg-fails|fails\.textContent/.test(refresh) && /has-fails/.test(refresh), 'y enseña los fallos aunque el grupo esté plegado');
+  ok(/const fallos = pendingTurn\.fails \|\| 0;/.test(refresh), 'con el conteo real del turno');
+  ok(/if \(!ok\) pendingTurn\.fails = \(pendingTurn\.fails \|\| 0\) \+ 1;/.test(app), 'cada herramienta fallida suma uno');
+  ok(/tg-fails/.test(app.match(/function ensureToolGroup[\s\S]*?\n\}/)[0]), 'la píldora existe desde el principio (oculta)');
+  ok(/function cerrarHerramientas[\s\S]*?_tocado[\s\S]*?\n\}/.test(app), 'el cierre automático respeta que el usuario lo haya abierto');
+  ok(/\.tg-fails/.test(css) && /\.tgroup\.has-fails/.test(css), 'con su estilo de aviso');
+});
+
+test('ajustes: el modelo por agente es opcional y viene apagado', () => {
+  const html = fs.readFileSync(path.join(__dirname, '..', 'renderer', 'index.html'), 'utf8');
+  const app = fs.readFileSync(path.join(__dirname, '..', 'renderer', 'app.js'), 'utf8');
+  ok(/id="swAgenteModelo"/.test(html), 'Ajustes tiene el interruptor');
+  ok(/CFG\.settings\.agentRouting === true/.test(app), 'viene desactivado: el modelo elegido manda hasta que se pida el ahorro');
+  ok(/setSettings\(\{ agentRouting: on \}\)/.test(app), 'y se guarda');
+});
+
+/* ---------- v2.4: perfil del proyecto, mapa del repositorio, diff del turno y
+   revisión del cambio antes de cerrar ---------- */
+
+test('proyecto: sabe cómo se comprueba el proyecto y qué sintaxis mirar', () => {
+  const proyecto = require('../agent/proyecto');
+  proyecto._resetForTests();
+  const dir = tmpDir('sagi-proj-');
+  fs.writeFileSync(path.join(dir, 'package.json'), JSON.stringify({ name: 'x', scripts: { test: 'node t.js', build: 'tsc -p .', lint: 'eslint .' } }));
+  const p = proyecto.perfil(dir);
+  ok(p.tipos.includes('node'), 'detecta el tipo de proyecto: ' + JSON.stringify(p.tipos));
+  eq(p.tests, 'npm test', 'los tests se ejecutan con el gestor que toca');
+  eq(p.build, 'npm run build');
+  eq(p.lint, 'npm run lint');
+  const bloque = proyecto.bloquePrompt(dir);
+  ok(/^PROYECTO/.test(bloque) && /npm test/.test(bloque), 'el prompt le dice cómo verificar: ' + bloque.slice(0, 90));
+  // un pnpm-lock hace que el comando sea el del gestor real, no `npm` a la ligera
+  const pnpmDir = tmpDir('sagi-proj-pnpm-');
+  fs.writeFileSync(path.join(pnpmDir, 'package.json'), JSON.stringify({ scripts: { test: 'node t.js' } }));
+  fs.writeFileSync(path.join(pnpmDir, 'pnpm-lock.yaml'), 'lockfileVersion: 9\n');
+  eq(proyecto.perfil(pnpmDir).tests, 'pnpm test');
+  // y sin proyecto reconocible NO se inventa un `npm test` inexistente
+  eq(proyecto.bloquePrompt(tmpDir('sagi-proj-vacio-')), '', 'no se inventan comandos que no existen');
+
+  // qué se puede comprobar, por extensión (el descriptor es puro: no lanza procesos)
+  ok(proyecto.comprobacionSintaxis('a.js') && proyecto.comprobacionSintaxis('a.js').prog === 'node', 'JS con node --check');
+  ok(proyecto.comprobacionSintaxis('a.json').json === true, 'JSON se valida en el propio proceso');
+  eq(proyecto.comprobacionSintaxis('a.txt'), null, 'lo que no es código no se comprueba');
+  ok(proyecto.comprobacionSintaxis('a.py').prog === 'python' && proyecto.comprobacionSintaxis('a.go').prog === 'gofmt', 'y hay cobertura más allá de JavaScript');
+  // el SUBAGENTE recibe el mismo bloque: comprobar a ojo lo que acaba de escribir no es comprobar
+  const sysCoding = subagents.subagentSystemPrompt('coding', dir);
+  ok(/PROYECTO/.test(sysCoding) && /npm test/.test(sysCoding), 'el subagente de programación sabe cómo se comprueba el proyecto');
+  ok(/apply_patch|find_symbol/.test(sysCoding), 'y tiene las herramientas para no leer archivo a archivo: ' + subagents.SUBAGENTS.coding.allowTools.join(', '));
+  eq(subagents.subagentSystemPrompt('coding', null), subagents.subagentSystemPrompt('coding', null), 'sin espacio de trabajo no se inventa nada');
+});
+
+test('proyecto: un error de sintaxis vuelve al modelo en el MISMO paso', async () => {
+  const { executeTool } = require('../agent/executors');
+  const dir = tmpDir('sagi-sint-');
+  const r = await executeTool('write_file', { path: 'roto.js', content: 'function saludo( {\n' }, { workspace: dir });
+  ok(typeof r === 'string', 'la escritura responde con texto');
+  ok(/NO compila/.test(r) && /roto\.js/.test(r), 'y avisa de que no compila, nombrando el archivo: ' + String(r).slice(0, 160));
+  ok(/Error:/.test(r), 'llega como FALLO (la tarjeta se marca en rojo en vez de dar el cambio por bueno)');
+  ok(fs.existsSync(path.join(dir, 'roto.js')), 'el archivo queda escrito: no se pierde el trabajo del modelo');
+  // un JSON roto también se detecta (sin lanzar nada)
+  const j = await executeTool('write_file', { path: 'cfg.json', content: '{ "a": }' }, { workspace: dir });
+  ok(/JSON inválido/.test(String(j)), 'y un JSON mal formado se explica: ' + String(j).slice(0, 120));
+  // el archivo correcto pasa sin ruido
+  const bien = await executeTool('write_file', { path: 'bien.js', content: 'module.exports = { a: 1 };\n' }, { workspace: dir });
+  ok(!/NO compila/.test(String(bien)), 'uno correcto no añade ruido: ' + String(bien).slice(0, 80));
+});
+
+test('repomap: índice en memoria, mapa por carpetas y búsqueda de símbolos', () => {
+  const repomap = require('../agent/repomap');
+  repomap._resetForTests();
+  const dir = tmpDir('sagi-repo-');
+  fs.mkdirSync(path.join(dir, 'src', 'util'), { recursive: true });
+  for (let i = 0; i < 30; i++) {
+    const sub = i < 15 ? 'src' : 'src/util';
+    fs.writeFileSync(path.join(dir, sub, 'm' + i + '.js'), `function cosa${i}(x) { return x; }\nclass Clase${i} {}\n`);
+  }
+  const idx = repomap.indice(dir);
+  ok(idx.totales.ficheros >= 30, 'indexa los archivos de código: ' + idx.totales.ficheros);
+  ok(repomap.indice(dir) === idx, 'la segunda consulta no vuelve a recorrer el árbol (el índice se sirve de memoria)');
+  const hallado = repomap.buscar(dir, 'cosa7');
+  ok(hallado.hits.some(h => h.nombre === 'cosa7'), 'find_symbol encuentra dónde se define algo');
+  ok(hallado.hits.every(h => /m7\.js$/.test(h.ruta)), 'y con su ruta, no con su nombre a secas: ' + JSON.stringify(hallado.hits[0]));
+  const mapa = repomap.mapa(dir);
+  ok(/src/.test(mapa) && /cosa1\b/.test(mapa), 'el mapa lista carpetas con sus símbolos: ' + mapa.slice(0, 80));
+  ok(/\d+ archivos/.test(mapa), 'y dice cuántos hay');
+  const enPrompt = repomap.bloquePrompt(dir);
+  ok(/MAPA DEL PROYECTO/.test(enPrompt) && enPrompt.length < 1800, 'el bloque del prompt es corto a propósito: ' + enPrompt.length + ' caracteres');
+  ok(/repo_map|find_symbol/.test(enPrompt), 'y le enseña a no leer archivo a archivo');
+  repomap._resetForTests();
+  eq(repomap.bloquePrompt(tmpDir('sagi-repo-mini-')), '', 'en un proyecto pequeño el mapa no ocupa sitio en el prompt');
+  // invalidar al escribir: lo que acaba de nacer se ve en la consulta siguiente
+  fs.writeFileSync(path.join(dir, 'nuevo.js'), 'function recienNacida() {}\n');
+  repomap.invalidar(dir);
+  ok(repomap.buscar(dir, 'recienNacida').hits.some(h => /nuevo\.js$/.test(h.ruta)), 'lo recién escrito entra sin reiniciar nada');
+});
+
+test('cambios: el diff del turno se guarda para poder revisarlo', async () => {
+  const cambios = require('../agent/cambios');
+  const { executeTool } = require('../agent/executors');
+  cambios.limpiar();
+  const dir = tmpDir('sagi-diff-');
+  fs.writeFileSync(path.join(dir, 'a.js'), 'const viejo = 1;\n');
+  await executeTool('edit_file', { path: 'a.js', old_string: 'const viejo = 1;', new_string: 'const nuevo = 2;' }, { workspace: dir });
+  ok(cambios.hay(dir), 'hay un cambio registrado');
+  await executeTool('write_file', { path: 'nuevo.js', content: 'const recien = 3;\n' }, { workspace: dir });
+  const dif = cambios.diff(dir);
+  ok(/- const viejo/.test(dif) && /\+ const nuevo/.test(dif), 'con la línea que se va y la que entra: ' + JSON.stringify(dif.slice(0, 140)));
+  ok(/--- a\.js/.test(dif), 'y el archivo, para que el revisor sepa dónde mirar');
+  ok(/nuevo\.js/.test(dif) && /\+ const recien/.test(dif), 'un archivo nuevo aparece entero como añadido');
+  ok(cambios.diff(dir) === dif, 'leerlo no lo gasta: lo puede pedir también la interfaz');
+  cambios.olvidar(dir);
+  eq(cambios.hay(dir), false, 'al empezar un turno nuevo el diff del anterior se olvida');
+  eq(cambios.diff(dir), '', 'y no se arrastra al revisor');
+  // y el turno de verdad lo olvida: sin esto el diff crecería turno tras turno
+  ok(/cambios\.olvidar\(/.test(fs.readFileSync(path.join(__dirname, '..', 'agent', 'agent.js'), 'utf8')), 'el agente olvida el diff al arrancar el turno');
+});
+
+test('apply_patch: varios archivos a la vez, atómico, y con pre-imágenes registradas', async () => {
+  const cambios = require('../agent/cambios');
+  const { executeTool } = require('../agent/executors');
+  cambios.limpiar();
+  const dir = tmpDir('sagi-patch-');
+  fs.writeFileSync(path.join(dir, 'uno.js'), 'function uno() { return 1; }\n');
+  fs.writeFileSync(path.join(dir, 'dos.js'), 'function dos() { return 2; }\n');
+  // una sola ancla mal y NO se escribe nada (antes, tres ediciones dejaban el proyecto a medias)
+  const roto = await executeTool('apply_patch', { changes: [
+    { path: 'uno.js', old_string: 'return 1;', new_string: 'return 10;' },
+    { path: 'dos.js', old_string: 'return 99;', new_string: 'return 20;' },
+  ] }, { workspace: dir });
+  ok(/no se ha escrito NADA/.test(String(roto)) && /dos\.js/.test(String(roto)), 'se explica cuál falla y no se aplica nada: ' + String(roto).slice(0, 150));
+  eq(fs.readFileSync(path.join(dir, 'uno.js'), 'utf8'), 'function uno() { return 1; }\n', 'el ancla que sí valía tampoco se toca');
+  // con las anclas correctas entran los dos archivos
+  const bien = await executeTool('apply_patch', { changes: [
+    { path: 'uno.js', old_string: 'return 1;', new_string: 'return 10;' },
+    { path: 'dos.js', old_string: 'return 2;', new_string: 'return 20;' },
+  ] }, { workspace: dir });
+  ok(/2 archivo\(s\) actualizados/.test(String(bien)), 'el resumen dice cuántos entraron: ' + String(bien).slice(0, 120));
+  ok(/return 10;/.test(fs.readFileSync(path.join(dir, 'uno.js'), 'utf8')) && /return 20;/.test(fs.readFileSync(path.join(dir, 'dos.js'), 'utf8')), 'y los dos quedan escritos');
+  const dif = cambios.diff(dir);
+  ok(/uno\.js/.test(dif) && /dos\.js/.test(dif), 'el diff del turno los incluye (es lo que lee el revisor)');
+  // dos cambios del mismo archivo en una llamada se avisa (el orden importaría y no está garantizado)
+  const repetido = await executeTool('apply_patch', { changes: [
+    { path: 'uno.js', old_string: 'return 10;', new_string: 'return 11;' },
+    { path: 'uno.js', old_string: 'function uno()', new_string: 'function uno_x()' },
+  ] }, { workspace: dir });
+  ok(/mismo archivo/.test(String(repetido)), 'y un archivo repetido se rechaza con motivo: ' + JSON.stringify(String(repetido).slice(0, 150)));
+  ok(/return 10;/.test(fs.readFileSync(path.join(dir, 'uno.js'), 'utf8')), 'sin dejar el archivo a medias');
+  /* GUARDA de la regresión que se coló al escribirlo: la lista local se llamaba `cambios`
+     y sombreaba el módulo de pre-imágenes → `cambios.recordar` era un TypeError. */
+  const fuente = fs.readFileSync(path.join(__dirname, '..', 'agent', 'executors.js'), 'utf8');
+  const bloque = fuente.match(/case 'apply_patch':[\s\S]*?\n    \}/)[0];
+  ok(!/const cambios = /.test(bloque), 'la lista local NO puede llamarse `cambios` (sombrearía el registrador de pre-imágenes)');
+  ok(/cambios\.recordar\(/.test(bloque), 'y las pre-imágenes se registran de verdad');
+});
+
+test('agent: el cambio se revisa antes de cerrar, una vez por turno y solo si está activo', async () => {
+  const cambios = require('../agent/cambios');
+  const dir = tmpDir('sagi-review-');
+  fs.writeFileSync(path.join(dir, 'vacia.js'), '\n');
+
+  // Turno con escritura. Guion: escribe → responde → (revisión) → cierra el hallazgo.
+  const correr = async (extraSettings) => {
+    cambios.limpiar();
+    const bodies = [];
+    let n = 0;
+    const guion = [
+      [evData({ choices: [{ delta: { tool_calls: [{ index: 0, id: 'w1', function: { name: 'write_file', arguments: JSON.stringify({ path: 'saludo.js', content: 'function saludo() { return "hola"; }\n' }) } }] } }] })],
+      [evData({ choices: [{ delta: { content: 'He creado saludo.js.' } }] })],
+      [evData({ choices: [{ delta: { content: 'RESULT: revisado sin hallazgos\nDETAILS: un archivo, un añadido\nEVIDENCE: saludo.js\nSTATUS: OK' } }] })],
+      [evData({ choices: [{ delta: { content: 'Revisado: sin hallazgos.' } }] })],
+    ];
+    const agent = new AgentCls({
+      fetchFn: async (url, opts) => { bodies.push(JSON.parse(opts.body)); return sseResponse(guion[Math.min(n++, guion.length - 1)]); },
+      emit: () => {},
+      screenshotFn: async () => ({}),
+      guardrailsPolicy: { permissions: { write_file: 'safe' } },
+    });
+    const settings = { active: { name: 'x', baseUrl: 'https://api.openai.com/v1', apiKey: 'k', model: 'gpt-4o' }, settings: Object.assign({ mode: 'act', modelRouting: false, workspace: dir }, extraSettings || {}) };
+    await agent.chat('hazme un saludo en js', settings);
+    const texto = (i) => bodies[i].messages.map(m => String(m.content)).join('\n');
+    return { agent, bodies, texto };
+  };
+
+  const conRevision = await correr({ verifyGate: false });
+  eq(conRevision.bodies.length, 4, 'el turno encadena escritura → respuesta → revisión → cierre: ' + conRevision.bodies.length);
+  const alRevisor = conRevision.texto(2);
+  ok(/DIFF DEL TURNO/.test(alRevisor) && /\+ function saludo/.test(alRevisor), 'el revisor recibe el CAMBIO real, no un resumen: ' + JSON.stringify(alRevisor.slice(alRevisor.indexOf('DIFF'), alRevisor.indexOf('DIFF') + 120)));
+  ok(/Petició?n del usuario|Petición del usuario/.test(alRevisor) && /saludo en js/.test(alRevisor), 'y el objetivo que perseguía');
+  ok(/revisa el CAMBIO|Revisa el CAMBIO/.test(alRevisor), 'con la instrucción de revisar, no de reescribir');
+  const alOrquestador = conRevision.texto(3);
+  ok(/ANTES DE CERRAR/.test(alOrquestador) && /RESULTADO DE Review Agent/.test(alOrquestador) && /revisado sin hallazgos/.test(alOrquestador), 'el informe vuelve al orquestador, que cierra el turno con él');
+  ok(/No repitas la respuesta que ya diste/.test(alOrquestador), 'sin obligarle a repetir lo que ya había dicho al usuario');
+  eq(conRevision.agent._reviewed, true, 'queda marcado: el mismo turno no se revisa dos veces');
+  ok(conRevision.agent._delegations.some(d => d.agent === 'review'), 'y la revisión aparece en el tablero de delegaciones');
+
+  // Apagado en Ajustes: ni una llamada de más
+  const sinRevision = await correr({ verifyGate: false, reviewGate: false });
+  eq(sinRevision.bodies.length, 2, 'con la revisión apagada el turno son dos llamadas: ' + sinRevision.bodies.length);
+  eq(sinRevision.agent._needsReview({ settings: { reviewGate: false, workspace: dir } }), false, 'y la puerta ni se plantea');
+
+  // Sin escrituras no hay nada que revisar (un turno conversacional no paga una ronda)
+  cambios.limpiar();   // el turno siguiente empieza sin diff: nada que revisar
+  const soloTexto = new AgentCls({ emit: () => {}, screenshotFn: async () => ({}) });
+  eq(soloTexto._needsReview({ settings: { workspace: dir } }), false, 'sin escribir nada, no hay revisión');
+  soloTexto._writes = 1;
+  eq(soloTexto._needsReview({ settings: { workspace: dir } }), false, 'ni con escrituras si no hay diff registrado');
+  const conCambio = new AgentCls({ emit: () => {}, screenshotFn: async () => ({}) });
+  fs.writeFileSync(path.join(dir, 'otro.js'), '\n');
+  cambios.recordar(dir, path.join(dir, 'otro.js'), '');
+  conCambio._writes = 1;
+  eq(conCambio._needsReview({ settings: { workspace: dir } }), true, 'con escritura y diff, sí');
+  conCambio._reviewed = true;
+  eq(conCambio._needsReview({ settings: { workspace: dir } }), false, 'y una sola vez por turno');
+  cambios.limpiar();
+
+  // El orden importa: primero se revisa lo ESCRITO y después se verifica el MUNDO
+  const ag = fs.readFileSync(path.join(__dirname, '..', 'agent', 'agent.js'), 'utf8');
+  const puerta = ag.slice(ag.indexOf('PUERTA DE CIERRE'), ag.indexOf('// Final text answer'));
+  ok(/_needsReview\(settings\)/.test(puerta) && /_needsVerification\(settings\)/.test(puerta), 'las dos comprobaciones viven en la misma puerta');
+  ok(/p\.account && this\._needsReview/.test(puerta) && /p\.account && this\._needsVerification/.test(puerta), 'y solo las pide el orquestador (los subagentes no pagan la ronda)');
+  eq((puerta.match(/continue;/g) || []).length, 1, 'cuestan UNA sola vuelta al modelo, no dos');
+  ok(/instrucciones\.join/.test(puerta), 'los dos informes viajan en el mismo mensaje');
+});
+
+test('agent: revisión y verificación son UNA sola ronda, no dos', async () => {
+  const { Agent } = require('../agent/agent');
+  const events = [];
+  const bodies = [];
+  const ws = tmpDir('sagi-gate-rev-');
+  const guion = [
+    () => toolTurn('w1', 'write_file', { path: 'uno.js', content: 'function uno() { return 1; }\n' }),
+    () => toolTurn('w2', 'write_file', { path: 'dos.js', content: 'function dos() { return 2; }\n' }),
+    () => sseTurn('Hecho: los dos archivos.'),
+    () => sseTurn('OK: sin hallazgos bloqueantes.\nDETAILS: un añadido por archivo\nSTATUS: OK'),
+    () => sseTurn('Verificado: ejecuté node --check y los dos pasan.'),
+  ];
+  let n = 0;
+  const agent = new Agent({ fetchFn: async (url, opts) => { bodies.push(JSON.parse(opts.body)); return guion[Math.min(n++, guion.length - 1)](); }, emit: () => {}, screenshotFn: async () => ({}) });
+  agent.emit = autoApprove(agent, events);
+  const settings = { active: { name: 'x', baseUrl: 'https://api.openai.com/v1', apiKey: 'k', model: 'gpt-4o' }, settings: { mode: 'act', modelRouting: false, workspace: ws } };
+  await agent.chat('crea dos módulos', settings);
+  eq(n, 5, 'las dos comprobaciones cuestan UNA vuelta: escrituras, respuesta, revisión y cierre: ' + n);
+  const ronda = bodies[4].messages;
+  const pedido = ronda.filter(m => m.role === 'user').map(m => String(m.content)).join('\n');
+  ok(/ANTES DE CERRAR/.test(pedido), 'la ronda pide el cierre');
+  ok(/REVISIÓN DEL CAMBIO/.test(pedido) && /OK: sin hallazgos/.test(pedido), 'y trae el informe de la revisión');
+  ok(/VERIFICACIÓN DE CIERRE|Verificando|comprueba|comprobaci/.test(pedido), 'junto con la de verificación');
+  ok(/DIFF DEL TURNO/.test(bodies[3].messages.map(m => String(m.content)).join('\n')), 'el revisor recibió el diff del turno');
+  const estados = events.filter(e => e.type === 'status').map(e => e.text);
+  ok(estados.some(t => /Revisando el cambio y verificando el resultado/.test(t)), 'la interfaz dice las dos cosas: ' + JSON.stringify(estados));
+  ok(!events.some(e => e.type === 'guardrail' && /delegaci/i.test(e.reason || '')), 'una ronda de dos comprobaciones no toca el tope de subagentes');
+  const acabado = events.filter(e => e.type === 'assistant_done').map(e => e.text).join('\n');
+  ok(/Verificado: ejecuté/.test(acabado), 'y el cierre del usuario es el verificado: ' + acabado.slice(0, 100));
+  // una sola ronda: la segunda vez que el modelo responde no se vuelve a pedir nada
+  const ronda2 = bodies[4].messages.filter(m => m.role === 'user').length;
+  eq(ronda2, 2, 'la ronda de cierre es una sola: la pregunta del usuario y la puerta');
+});
+
+test('prompt: el proyecto y su mapa viajan en el bloque estable, no en lo volátil', async () => {
+  const dir = tmpDir('sagi-prompt-');
+  fs.writeFileSync(path.join(dir, 'package.json'), JSON.stringify({ scripts: { test: 'node t.js' } }));
+  for (let i = 0; i < 30; i++) fs.writeFileSync(path.join(dir, 'm' + i + '.js'), `function fn${i}() { return ${i}; }\n`);
+  const sink = {};
+  const agent = new AgentCls({
+    fetchFn: fakeFetch([evData({ choices: [{ delta: { content: 'con npm test' } }] })], sink),
+    emit: () => {}, screenshotFn: async () => ({}),
+  });
+  const settings = { active: { name: 'x', baseUrl: 'https://api.openai.com/v1', apiKey: 'k', model: 'gpt-4o' }, settings: { mode: 'act', modelRouting: false, workspace: dir } };
+  await agent.chat('¿cómo se comprueba este proyecto?', settings);
+  const sys = sink.body.messages[0].content;
+  ok(/PROYECTO/.test(sys) && /npm test/.test(sys), 'el prompt dice cómo se verifica este proyecto: ' + String(sys).slice(String(sys).indexOf('PROYECTO'), String(sys).indexOf('PROYECTO') + 120));
+  ok(/MAPA DEL PROYECTO/.test(sys), 'y trae el mapa cuando el proyecto es grande');
+  ok(/la sintaxis se comprueba sola/.test(sys), 'y le dice que un error de sintaxis le volverá al instante');
+  ok(sys.indexOf('PROYECTO') > 0 && sys.indexOf('PROYECTO') < sys.indexOf('MEMORIA'), 'el proyecto va en el bloque ESTABLE (antes de la memoria, que cambia cada turno)');
+  ok(/review — revisar un CAMBIO/.test(subagents.DELEGATION_GUIDE), 'y el orquestador sabe que puede delegar la revisión');
+  ok(/REVISIÓN DEL CAMBIO: activa/.test(sys), 'con la política activa dicha en claro');
+});
+
+test('chatkit: las herramientas nuevas y el revisor tienen ficha propia', () => {
+  eq(ChatKit.tool('repo_map').label, 'Mapa del proyecto');
+  eq(ChatKit.tool('find_symbol').label, 'Buscar símbolo');
+  eq(ChatKit.tool('apply_patch').label, 'Cambios en varios archivos');
+  eq(ChatKit.summarizeArgs('find_symbol', { name: 'foo' }), 'foo', 'la tarjeta muestra qué se buscaba');
+  eq(ChatKit.subagent('review').label, 'Revisor');
+  // ningún agente del registro puede quedarse sin nombre en la interfaz
+  for (const k of subagents.SUBAGENT_KEYS) {
+    ok(ChatKit.subagent(k).label !== k, k + ' tiene ficha en la interfaz (antes un agente nuevo salía sin nombre)');
+  }
+});
+
+test('ajustes: la revisión del cambio viene activa y es apagable', () => {
+  const html = fs.readFileSync(path.join(__dirname, '..', 'renderer', 'index.html'), 'utf8');
+  const app = fs.readFileSync(path.join(__dirname, '..', 'renderer', 'app.js'), 'utf8');
+  const main = fs.readFileSync(path.join(__dirname, '..', 'main', 'main.js'), 'utf8');
+  ok(/id="swRevisar"/.test(html), 'Ajustes tiene el interruptor');
+  ok(/reviewGate: true/.test(main), 'activa por defecto: el código no debería salir sin que nadie lo lea');
+  ok(/'reviewGate' in clean && typeof clean\.reviewGate !== 'boolean'/.test(main), 'y el valor se valida antes de guardarse');
+  ok(/CFG\.settings\.reviewGate !== false/.test(app), 'la interfaz lo lee como activo salvo que sea false');
+  ok(/setSettings\(\{ reviewGate: on \}\)/.test(app), 'y el interruptor manda de verdad');
+});
+
+/* ---------- v2.5: navegador 2 y paralelismo con bloqueo por recurso ---------- */
+
+test('recursos: el navegador es uno, la escritura va en cola y lo que no choca no espera', async () => {
+  const { Recursos, paraHerramienta } = require('../agent/recursos');
+  eq(paraHerramienta('browser_control', {}).join(','), 'navegador', 'el navegador es un recurso exclusivo');
+  eq(paraHerramienta('write_file', {}).join(','), 'disco');
+  eq(paraHerramienta('apply_patch', {}).join(','), 'disco', 'y un parche escribe igual que un write_file');
+  eq(paraHerramienta('run_command', {}).join(','), 'terminal');
+  eq(paraHerramienta('mcp__eco__echo', {}).join(','), 'mcp', 'las herramientas MCP del usuario son su propio mundo');
+  eq(paraHerramienta('read_file', {}).length, 0, 'leer no bloquea nada (se puede leer mientras otro escribe)');
+
+  const r = new Recursos();
+  let dentro = 0, pico = 0;
+  const orden = [];
+  const trabajo = (n, ms) => r.con(['navegador'], async () => {
+    dentro++; pico = Math.max(pico, dentro); orden.push('in' + n);
+    await new Promise((res) => setTimeout(res, ms));
+    orden.push('out' + n); dentro--;
+  });
+  await Promise.all([trabajo(1, 60), trabajo(2, 20)]);
+  eq(pico, 1, 'nunca hay dos en el navegador a la vez');
+  eq(orden.join(','), 'in1,out1,in2,out2', 'y entran en orden de llegada');
+
+  let dentroT = 0, picoT = 0;
+  await Promise.all([1, 2].map(() => r.con(['terminal'], async () => {
+    dentroT++; picoT = Math.max(picoT, dentroT);
+    await new Promise((res) => setTimeout(res, 40));
+    dentroT--;
+  })));
+  eq(picoT, 2, 'la terminal sí admite dos comandos a la vez');
+
+  /* Interbloqueo: una tarea pide {disco, terminal} y otra {terminal, disco}. Si cada
+     una tomara la mitad en su orden, las dos se quedarían esperando para siempre. */
+  const a = r.con(['disco', 'terminal'], async () => { await new Promise((res) => setTimeout(res, 20)); return 'a'; });
+  const b = r.con(['terminal', 'disco'], async () => { await new Promise((res) => setTimeout(res, 20)); return 'b'; });
+  eq((await Promise.all([a, b])).join(','), 'a,b', 'se reparten sin quedarse colgadas');
+  eq(r.estado().esperando, 0, 'y no queda nadie esperando');
+});
+
+test('agent: las llamadas de un mismo mensaje se solapan hasta el tope', async () => {
+  const agent = new AgentCls({ emit: () => {}, screenshotFn: async () => ({}) });
+  let enVuelo = 0, pico = 0;
+  const empezados = [];
+  agent._runToolCall = async (tc) => {
+    enVuelo++; pico = Math.max(pico, enVuelo); empezados.push(tc.id);
+    await new Promise((res) => setTimeout(res, 40));
+    enVuelo--;
+    return { action: 'ok', text: 'ok', args: {}, failed: false };
+  };
+  const calls = [1, 2, 3, 4].map((i) => ({ id: 'c' + i, function: { name: 'read_file', arguments: '{}' } }));
+  const out = await agent._runToolCalls(calls, { signal: noSignal(), settings: {} }, 3);
+  eq(pico, 3, 'salen tres a la vez (el tope pedido): ' + pico);
+  eq(out.length, 4);
+  ok(out.every((o) => o && o.r && o.r.action === 'ok'), 'y terminan todas');
+  eq(empezados.length, 4, 'las cuatro llegaron a ejecutarse');
+  eq(agent.runningTools.size, 0, 'sin killables colgando al terminar');
+
+  // con tope 1 se ejecuta en orden, como antes
+  const uno = new AgentCls({ emit: () => {}, screenshotFn: async () => ({}) });
+  const secuencia = [];
+  uno._runToolCall = async (tc) => { secuencia.push(tc.id); await new Promise((res) => setTimeout(res, 5)); return { action: 'ok', text: 'ok', args: {}, failed: false }; };
+  await uno._runToolCalls(calls, { signal: noSignal(), settings: {} }, 1);
+  eq(secuencia.join(','), 'c1,c2,c3,c4', 'con 1, todo va en orden');
+
+  /* Un tope de llamadas alcanzado a mitad corta lo que queda: da igual que haya
+     huecos libres, el mensaje ya ha fallado y el bucle cierra las no lanzadas. */
+  const tope = new AgentCls({ emit: () => {}, screenshotFn: async () => ({}) });
+  let n = 0;
+  tope._runToolCall = async () => { n++; return { action: n === 1 ? 'limit' : 'ok', reason: 'tope', text: 'x', args: {}, failed: true }; };
+  const out2 = await tope._runToolCalls(calls, { signal: noSignal(), settings: {} }, 1);
+  eq(n, 1, 'con el tope agotado no se lanza ninguna más');
+  ok(out2.slice(1).every((o) => o === null), 'las no lanzadas quedan como null para que el bucle las cierre');
+});
+
+test('agent: Detener mata TODAS las herramientas en vuelo, no solo la última', async () => {
+  const matadas = [];
+  const agent = new AgentCls({ emit: () => {}, screenshotFn: async () => ({}) });
+  agent.runningTools.set('a', { stop: () => matadas.push('a') });
+  agent.runningTools.set('b', { stop: () => matadas.push('b') });
+  agent.runningTool = { stop: () => matadas.push('directa') };   // compatibilidad con lo de antes
+  agent.subagents.add({ stop: () => matadas.push('sub1') });
+  agent.subagents.add({ stop: () => matadas.push('sub2') });
+  agent.stop();
+  for (const x of ['a', 'b', 'directa', 'sub1', 'sub2']) ok(matadas.includes(x), x + ' debía morir al Detener: ' + matadas.join(','));
+  eq(agent.runningTools.size, 0, 'y la lista queda limpia');
+});
+
+test('agent: Detener no ejecuta la llamada que esperaba su turno de recurso', async () => {
+  // El semáforo no sabe nada del abort: una llamada encolada detrás del navegador o
+  // de la cola de escritura se ejecutaba al soltarse el turno, DESPUÉS de Detener.
+  const { recursos } = require('../agent/recursos');
+  const a = new AgentCls({ emit: () => {}, guardrailsPolicy: { permissions: { write_file: 'safe' } } });
+  const ejecutadas = [];
+  a._executeToolCall = async (name) => { ejecutadas.push(name); return 'escrito'; };
+
+  const soltar = await recursos.adquirir(['disco']);   // el turno de escritura, ocupado
+  const ac = new AbortController();
+  const ctx = { signal: ac.signal, settings: { settings: {} } };
+  const uno = a._runToolCall(toolCall('write_file', { path: 'x.txt', content: 'x' }), ctx);
+  const dos = a._runToolCall(toolCall('write_file', { path: 'y.txt', content: 'y' }), ctx);
+  await new Promise((r) => setTimeout(r, 20));
+  eq(ejecutadas.length, 0, 'las dos esperan el turno de escritura');
+  eq(recursos.estado().esperando >= 2, true, 'y están en la cola del semáforo');
+
+  ac.abort();          // Detener…
+  soltar();            // …y el turno se suelta
+  const res = await Promise.all([uno, dos]);
+  eq(res.map((r) => r.action).join(','), 'aborted,aborted', 'ninguna de las encoladas se ejecuta');
+  eq(ejecutadas.length, 0, 'no se escribió nada después de Detener');
+  eq(a.meta.toolCalls, 0, 'y ninguna cuenta como llamada ejecutada');
+});
+
+test('agent: el turno de recurso se suelta aunque la llamada se aborte a mitad', async () => {
+  const { recursos } = require('../agent/recursos');
+  const a = new AgentCls({ emit: () => {}, guardrailsPolicy: { permissions: { write_file: 'safe' } } });
+  const ac = new AbortController();
+  let termino = false;
+  a._executeToolCall = async () => { await new Promise((r) => setTimeout(r, 30)); termino = true; return 'escrito'; };
+  const p = a._runToolCall(toolCall('write_file', { path: 'z.txt', content: 'z' }), { signal: ac.signal, settings: { settings: {} } });
+  await new Promise((r) => setTimeout(r, 5));
+  eq(recursos.estado().enUso.disco, 1, 'mientras corre, tiene el turno de escritura (y los demás esperan)');
+  ac.abort();
+  const r = await p;
+  eq(r.action, 'ok', 'la que ya había empezado no se convierte en abortada: su ejecutor decide cómo parar');
+  ok(termino, 'y llegó al final');
+  eq(recursos.estado().enUso.disco, undefined, 'el turno se suelta pase lo que pase (si no, el semáforo se queda sin turnos)');
+  eq(recursos.estado().esperando, 0, 'sin nadie colgado en la cola');
+});
+
+test('agent: dos herramientas del mismo mensaje dejan su resultado en orden', async () => {
+  const dir = tmpDir('sagi-par-');
+  fs.writeFileSync(path.join(dir, 'a.txt'), 'AAA\n');
+  fs.writeFileSync(path.join(dir, 'b.txt'), 'BBB\n');
+  const bodies = [];
+  let n = 0;
+  const guion = [
+    [evData({ choices: [{ delta: { tool_calls: [
+      { index: 0, id: 'p1', function: { name: 'read_file', arguments: JSON.stringify({ path: 'a.txt' }) } },
+      { index: 1, id: 'p2', function: { name: 'read_file', arguments: JSON.stringify({ path: 'b.txt' }) } },
+    ] } }] })],
+    [evData({ choices: [{ delta: { content: 'los dos leídos' } }] })],
+  ];
+  const agent = new AgentCls({
+    fetchFn: async (url, opts) => { bodies.push(JSON.parse(opts.body)); return sseResponse(guion[Math.min(n++, guion.length - 1)]); },
+    emit: () => {}, screenshotFn: async () => ({}),
+  });
+  const settings = { active: { name: 'x', baseUrl: 'https://api.openai.com/v1', apiKey: 'k', model: 'gpt-4o' }, settings: { mode: 'act', modelRouting: false, workspace: dir, verifyGate: false, reviewGate: false } };
+  await agent.chat('lee los dos archivos', settings);
+  const tools = bodies[1].messages.filter((m) => m.role === 'tool');
+  eq(tools.length, 2, 'los dos resultados viajan al modelo');
+  eq(tools[0].tool_call_id, 'p1', 'y en el mismo orden que las llamadas');
+  eq(tools[1].tool_call_id, 'p2');
+  ok(/AAA/.test(String(tools[0].content)) && /BBB/.test(String(tools[1].content)), 'cada uno con su contenido');
+});
+
+test('browser 2: los ayudantes de página son JS válido y traen lo que faltaba', () => {
+  const { __test } = require('../agent/browser');
+  // si el código que se inyecta tiene un error de sintaxis, solo se vería en un navegador
+  // de verdad: aquí se compila sin ejecutarlo
+  ok(typeof new Function(__test.HELPERS_JS) === 'function', 'los ayudantes se compilan');
+  ok(typeof new Function(__test.inventoryJs()) === 'function', 'y el inventario también');
+  const h = __test.HELPERS_JS;
+  ok(/aria-labelledby/.test(h) && /label\[for/.test(h), 'nombre ACCESIBLE (aria, label, alt, title, placeholder)');
+  ok(/data-testid/.test(h), 'y data-testid como pista (webs hechas para automatizar)');
+  ok(/shadowRoot/.test(h), 'mira dentro de componentes web');
+  ok(/contentDocument/.test(h), 'y dentro de iframes del mismo origen');
+  ok(/elementFromPoint/.test(h), 'comprueba que nada tapa el elemento antes de pulsar');
+  ok(/scrollIntoView/.test(h), 'trae a la vista lo que está fuera de pantalla');
+  ok(/__sagFind/.test(h) && /__sagSel/.test(h), 'y sabe reencontrar un elemento por su huella');
+  const inv = __test.inventoryJs();
+  ok(/total/.test(inv) && /off/.test(inv), 'el inventario dice cuántos hay y marca lo que está fuera de pantalla');
+  ok(/frame/.test(inv) && /testid/.test(inv) && /disabled/.test(inv), 'y en qué marco está, su testid y si está deshabilitado');
+});
+
+test('browser 2: atajos, acciones nuevas y esquema de la herramienta', () => {
+  const { __test } = require('../agent/browser');
+  const k = __test.parseHotkey('Ctrl+Shift+T');
+  eq(k.modifiers, 10, 'Ctrl (2) + Shift (8)');
+  eq(k.key, 'T', 'con Shift la tecla va en mayúscula');
+  eq(k.text, undefined, 'un atajo con modificadores no escribe texto');
+  const a = __test.parseHotkey('Ctrl+A');
+  eq(a.modifiers, 2); eq(a.key, 'a'); eq(a.vk, 65);
+  eq(__test.parseHotkey('Escape').vk, 27);
+  eq(__test.parseHotkey('F5').vk, 116);
+  eq(__test.parseHotkey('x').text, 'x', 'una tecla sola sí escribe');
+  eq(__test.parseHotkey('Ctrl+'), null, 'un atajo mal escrito no se inventa');
+  eq(__test.parseHotkey(''), null);
+  eq(__test.parseHotkey('Ctrl+A+B'), null, 'dos teclas no son un atajo');
+  for (const a2 of ['hover', 'select', 'check', 'hotkey', 'upload', 'wait_for', 'logs', 'back', 'forward', 'reload', 'dialog']) {
+    ok(__test.ACTIONS.has(a2), a2 + ' es una acción válida');
+  }
+  const def = require('../agent/tools').allToolDefs().find((d) => d.function.name === 'browser_control');
+  for (const a2 of ['hover', 'select', 'check', 'hotkey', 'upload', 'wait_for', 'logs', 'back', 'forward', 'reload', 'dialog']) {
+    ok(def.function.parameters.properties.action.enum.includes(a2), a2 + ' está en el esquema que ve el modelo');
+  }
+  ok(/elements/.test(def.function.description) && /logs/.test(def.function.description) && /huella/.test(def.function.description), 'la descripción explica el flujo y la huella');
+  eq(ChatKit.tool('browser_control').label, 'Navegador');
+  ok(ChatKit.summarizeArgs('browser_control', { action: 'wait_for', text: 'Pagar' }).includes('Pagar'), 'la tarjeta del chat enseña qué se espera');
+});
+
+test('browser 2: logs, diálogos y errores se explican sin abrir un navegador', async () => {
+  const { Browser } = require('../agent/browser');
+  const b = new Browser();
+  eq(b.logs({}), 'Sin mensajes de consola ni errores de red desde que se abrió la pestaña.');
+  b._track('Runtime.consoleAPICalled', { type: 'error', args: [{ value: 'boom' }] });
+  b._track('Network.responseReceived', { response: { status: 500, url: 'https://x/y' } });
+  b._track('Runtime.exceptionThrown', { exceptionDetails: { exception: { description: 'TypeError: nope' } } });
+  b._track('Log.entryAdded', { entry: { level: 'warning', text: 'deprecado', url: 'https://x/y' } });
+  const log = b.logs({});
+  ok(/boom/.test(log) && /500/.test(log) && /TypeError/.test(log) && /deprecado/.test(log), 'consola, red, excepciones y avisos: ' + log);
+  const uno = b.logs({ limit: 1 });
+  ok(/deprecado/.test(uno) && !/boom/.test(uno), 'limit devuelve solo los últimos: ' + uno.trim());
+  ok(b.logs({ clear: true }).length > 5, 'clear cuenta lo leído y vacía');
+  eq(b.logs({}), 'Sin mensajes de consola ni errores de red desde que se abrió la pestaña.', 'y después ya no queda nada');
+
+  b._track('Page.javascriptDialogOpening', { type: 'confirm', message: '¿Borrar todo?' });
+  ok(/diálogo abierto/.test(b._dialogNote()) && /Borrar todo/.test(b._dialogNote()), 'un diálogo bloquea la página y las acciones lo avisan');
+  b._track('Page.javascriptDialogClosed', {});
+  eq(b._dialogNote(), '', 'al cerrarse deja de avisar');
+
+  ok(/no entiendo el atajo/.test(await b.hotkey('Ctrl+', 's')), 'un atajo mal escrito se explica');
+  ok(/dime a qué esperar/.test(await b.waitFor({}, 's')), 'wait_for sin criterio se explica');
+  eq((await b._resolve({}, 's', 'A')).error, 'necesito index, selector o text para saber sobre qué actuar');
+  eq((await b._resolve({ index: 9 }, 's', 'A')).error.includes('índice 9 inválido'), true, 'un índice que no existe no clica nada');
+  eq(await b.dialog({}), 'No hay ningún diálogo abierto ahora mismo.');
+  eq(b.setDownloadDir('/tmp/x'), undefined, 'la carpeta de descargas se puede fijar');
+  eq(b.downloadDir, '/tmp/x');
+});
+
+test('browser 2: subir un archivo y aceptar un diálogo piden permiso', () => {
+  const { Guardrails } = require('../agent/guardrails');
+  const g = new Guardrails({ permissions: { browser_control: 'safe' } });
+  const up = g.decide('browser_control', { action: 'upload', files: ['C:/x/contrato.pdf'] });
+  eq(up.action, 'confirm', 'subir un archivo MANDA datos del usuario a una web');
+  ok(/contrato\.pdf/.test(up.description), 'y se dice cuál: ' + up.description);
+  eq(g.decide('browser_control', { action: 'dialog', accept: true }).action, 'confirm', 'aceptar un diálogo puede confirmar algo destructivo');
+  eq(g.decide('browser_control', { action: 'dialog', accept: false }).action, 'allow', 'cancelarlo no es peligroso');
+  eq(g.decide('browser_control', { action: 'wait_for', text: 'Pagar' }).action, 'allow');
+  eq(g.decide('browser_control', { action: 'logs' }).action, 'allow');
+  eq(g.decide('browser_control', { action: 'check', text: 'Acepto los términos' }).action, 'allow');
 });
 
 /* ---------- cierre del runner ---------- */

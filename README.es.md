@@ -33,9 +33,9 @@ La opción recomendada es el instalador de Windows:
 
 | Paquete | Descripción |
 |---|---|
-| [**SAGITARI-Setup-3.1.1.exe**](https://github.com/dario90vlc/sagitari/releases/download/v3.1.1/SAGITARI-Setup-3.1.1.exe) | Instalador con accesos directos y desinstalador |
-| [**SAGITARI-Portable-3.1.1.exe**](https://github.com/dario90vlc/sagitari/releases/download/v3.1.1/SAGITARI-Portable-3.1.1.exe) | Ejecutable único, sin instalación |
-| [**Notas de la versión**](https://github.com/dario90vlc/sagitari/releases/tag/v3.1.1) | Cambios, correcciones de seguridad y hashes SHA-256 |
+| [**SAGITARI-Setup-3.2.0.exe**](https://github.com/dario90vlc/sagitari/releases/download/v3.2.0/SAGITARI-Setup-3.2.0.exe) | Instalador con accesos directos y desinstalador |
+| [**SAGITARI-Portable-3.2.0.exe**](https://github.com/dario90vlc/sagitari/releases/download/v3.2.0/SAGITARI-Portable-3.2.0.exe) | Ejecutable único, sin instalación |
+| [**Notas de la versión**](https://github.com/dario90vlc/sagitari/releases/tag/v3.2.0) | Cambios, correcciones de seguridad y hashes SHA-256 |
 
 > **Windows SmartScreen:** los binarios no tienen firma digital actualmente, por lo que Windows puede mostrar un aviso la primera vez. Pulsa *Más información → Ejecutar de todas formas* si confías en la descarga. Comprueba el hash SHA-256 publicado en las notas de la release.
 
@@ -46,9 +46,12 @@ La opción recomendada es el instalador de Windows:
 ### Un agente que ejecuta
 
 - **Terminal y archivos** — inspecciona, crea, edita y organiza tu espacio de trabajo.
-- **Automatización del navegador** — controla Chrome o Edge mediante DevTools Protocol: navegar, hacer clic, escribir, leer, gestionar pestañas y capturar pantallas.
 - **Acciones de escritorio** — abre aplicaciones y URLs, gestiona ventanas, portapapeles, notificaciones y multimedia.
+- **Navegador 2** — maneja Chrome o Edge como una persona: inventario con el **nombre accesible** de cada control (aunque sea un botón de icono), dentro de **componentes web e iframes**, clics que se vuelven a localizar por su huella y avisan si algo los tapa, esperas de verdad (`wait_for`), consola y errores de red (`logs`), diálogos, subida de archivos, atajos de teclado, listas y casillas, historial y descargas en una carpeta conocida.
+- **Trabajo en paralelo** — las órdenes de un mismo mensaje se ejecutan a la vez con **bloqueo por recurso**: el navegador es uno solo, la escritura en disco va en cola y Detener mata todo lo que esté en vuelo.
 - **Visión y adjuntos** — adjunta imágenes, código, documentos y ficheros de texto; las imágenes pueden enviarse a modelos con visión.
+- **Código con red** — sabe cómo se comprueban **tu** proyecto (tests, compilación, lint) y comprueba la **sintaxis** de cada archivo al escribirlo: el error vuelve al instante, no tres pasos después. `apply_patch` hace varias ediciones en varios archivos de una vez (o entran todas o no entra ninguna) y, antes de darte algo por hecho, un **agente de revisión** lee el cambio del turno y busca lo que está mal (contratos rotos, casos límite, restos del nombre viejo). Se apaga en Ajustes ▸ Delegación y verificación.
+- **Mapa del proyecto** — en proyectos grandes indexa archivos y símbolos (`repo_map`, `find_symbol`) en vez de leerlos uno a uno, así no se pierde en 100.000 líneas ni se queda en cuatro ediciones locales.
 
 ### Inteligencia flexible
 
@@ -66,6 +69,7 @@ La opción recomendada es el instalador de Windows:
 - Seis paletas de acento y controles de color e intensidad del glow en tiempo real.
 - Conversaciones separadas, telemetría de agentes, logs locales estructurados y métricas opcionales para desarrolladores.
 - Entrada por voz mediante el reconocimiento de Windows y salida por texto a voz.
+- **Razonamiento visible (opcional)**: los modelos que razonan (Claude, la serie o y GPT-5, DeepSeek R1…) enseñan su proceso en un bloque plegable sobre la respuesta; se lee en vivo mientras piensa, se pliega solo al empezar a contestar y nunca se lee en voz alta. Se activa en Ajustes ▸ Agente.
 - **Modo voz**: pulsa el micrófono y habla; el asistente te oye, hace el trabajo y te contesta en voz alta. Manos libres: al callar, se envía; te enseña el texto mientras hablas y empieza a responder en voz alta en cuanto tiene la primera frase, sin esperar a terminar. Si hablas mientras responde, se calla y te escucha; y puedes detenerlo diciendo «para» o con el botón **Parar** del panel. Todo en tu equipo, con voz neuronal local (Piper) y dictado local de alta precisión (Whisper) instalables desde Ajustes. `Alt`+clic en el micrófono mantiene el dictado clásico al cuadro de texto.
 
 ## Seguridad primero
@@ -136,7 +140,7 @@ npm run uicheck           # probar el renderer en vivo
 npm run dist              # crear instalador NSIS + portable
 ```
 
-El workflow de release ejecuta la comprobación de sintaxis, tests, smoke, UI, compilación de los dos artefactos de Windows, verificación de archivos y generación de hashes SHA-256. El tag debe coincidir con la versión de `package.json`; para esta release es `v3.1.1`.
+El workflow de release ejecuta la comprobación de sintaxis, tests, smoke, UI, compilación de los dos artefactos de Windows, verificación de archivos y generación de hashes SHA-256. El tag debe coincidir con la versión de `package.json`; para esta release es `v3.2.0`.
 
 ## Estructura del proyecto
 

@@ -74,6 +74,7 @@ const ChatKit = (function () {
     open_url:        { label: 'Abrir web',        icon: 'globe',    verb: 'Abriendo' },
     browser_control: { label: 'Navegador',        icon: 'compass',  verb: 'Controlando el navegador' },
     screenshot:      { label: 'Captura de pantalla', icon: 'camera', verb: 'Capturando' },
+    view_image:      { label: 'Ver imagen',       icon: 'eye',      verb: 'Mirando la imagen' },
     clipboard:       { label: 'Portapapeles',     icon: 'clipboard', verb: 'Usando el portapapeles' },
     notify:          { label: 'Notificación',     icon: 'bell',     verb: 'Notificando' },
     media_control:   { label: 'Multimedia',       icon: 'music',    verb: 'Controlando multimedia' },
@@ -81,6 +82,9 @@ const ChatKit = (function () {
     system_info:     { label: 'Sistema',          icon: 'monitor',  verb: 'Consultando el sistema' },
     remember:        { label: 'Recordar',         icon: 'memory',   verb: 'Guardando en memoria' },
     use_skill:       { label: 'Skill',            icon: 'spark',    verb: 'Aplicando skill' },
+    repo_map:        { label: 'Mapa del proyecto', icon: 'map',     verb: 'Mapeando el proyecto' },
+    find_symbol:     { label: 'Buscar símbolo',   icon: 'search',   verb: 'Buscando dónde se define' },
+    apply_patch:     { label: 'Cambios en varios archivos', icon: 'save', verb: 'Aplicando cambios' },
     delegate:        { label: 'Subagente',        icon: 'agents',   verb: 'Delegando' },
   };
 
@@ -97,16 +101,19 @@ const ChatKit = (function () {
   /* Claves que, por orden, mejor resumen lo que hace una llamada. */
   const ARG_HINTS = {
     run_command: ['command'],
-    read_file: ['path'], write_file: ['path'], edit_file: ['path'], list_dir: ['path'],
+    read_file: ['path'], view_image: ['path'], write_file: ['path'], edit_file: ['path'], list_dir: ['path'],
     search_files: ['pattern', 'path'],
     open_app: ['name', 'args'],
     open_url: ['url'],
-    browser_control: ['action', 'url', 'selector', 'text', 'index'],
+    browser_control: ['action', 'url', 'text', 'selector', 'index', 'key', 'value', 'files'],
     clipboard: ['action', 'text'],
     media_control: ['action'],
     window_manage: ['action', 'title', 'name'],
     remember: ['text', 'key'],
     use_skill: ['name'],
+    repo_map: ['path'],
+    find_symbol: ['query', 'name'],
+    apply_patch: ['changes', 'summary'],
     delegate: ['agent', 'task'],
     notify: ['title', 'message'],
     system_info: ['query', 'what'],
@@ -272,18 +279,30 @@ const ChatKit = (function () {
     return clip(first, max || 120) + extra;
   }
 
-  /** Nombre corto de un subagente para etiquetar sus pasos. */
+  /** Nombre corto de un subagente para etiquetar sus pasos.
+      Las claves son EXACTAMENTE las del registro del agente (agent/subagents.js): una
+      clave que no case deja la tarjeta sin etiqueta —y antes rompía el render (ver
+      `subagent`)—, así que `verify` se mantiene como alias del verdadero. */
   const SUBAGENTS = {
-    research: { label: 'Investigador', icon: 'search', cls: 'a-b' },
-    browser:  { label: 'Navegador', icon: 'compass', cls: 'a-c' },
-    coding:   { label: 'Programador', icon: 'code', cls: 'a-p2' },
-    file:     { label: 'Archivador', icon: 'folder', cls: 'a-y' },
-    vision:   { label: 'Analista visual', icon: 'eye', cls: 'a-b2' },
-    verify:   { label: 'Verificador', icon: 'check', cls: 'a-p' },
+    research:     { label: 'Investigador', icon: 'search', cls: 'a-b' },
+    browser:      { label: 'Navegador', icon: 'compass', cls: 'a-c' },
+    coding:       { label: 'Programador', icon: 'code', cls: 'a-p2' },
+    file:         { label: 'Archivador', icon: 'folder', cls: 'a-y' },
+    vision:       { label: 'Analista visual', icon: 'eye', cls: 'a-b2' },
+    verification: { label: 'Verificador', icon: 'check', cls: 'a-p' },
+    review:       { label: 'Revisor', icon: 'list', cls: 'a-y2' },
   };
+  SUBAGENTS.verify = SUBAGENTS.verification;
 
+  /**
+   * Etiqueta de un subagente. NUNCA devuelve null para una clave no vacía: un agente
+   * nuevo (o un nombre inesperado del proveedor) no puede dejar la tarjeta sin nombre
+   * ni tumbar el manejador de eventos al leer `.label`.
+   */
   function subagent(key) {
-    return SUBAGENTS[String(key || '')] || null;
+    const k = String(key || '');
+    if (!k) return null;
+    return SUBAGENTS[k] || { label: k, icon: 'agents', cls: 'a-p2' };
   }
 
   /**

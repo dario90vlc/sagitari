@@ -4,6 +4,9 @@ const os = require('os');
 const fs = require('fs');
 const path = require('path');
 const { allToolDefs } = require('./tools');
+const cambios = require('./cambios');
+const proyecto = require('./proyecto');
+const repomap = require('./repomap');
 const { executeTool } = require('./executors');
 const skills = require('./skills');
 const memory = require('./memory');
@@ -14,6 +17,7 @@ const subagents = require('./subagents');
 const models = require('./models');
 const habits = require('./habits');
 const opencode = require('./opencode');   // identificación de sesión (OpenCode Go/Zen)
+const { recursos, paraHerramienta } = require('./recursos');   // v2.5: bloqueo por recurso (navegador, disco, terminal)
 const protocols = require('./protocols'); // multi-formato: OpenAI / Anthropic / Responses
 
 function systemPrompt() {
@@ -49,19 +53,11 @@ REGLAS DE HERRAMIENTAS
 - Con run_command usa sintaxis de cmd.exe de Windows. No uses comandos interactivos.
 - FICHEROS: lee antes de escribir. Para modificar un archivo existente usa edit_file (reemplazo exacto de un fragmento); reserva write_file para crear archivos nuevos o reescribir el archivo entero. En archivos largos, léelos por tramos con offset/limit en vez de volcarlos completos.
 
-DELEGACIÓN (v1.4)
-- Para subtareas autónomas y especializadas, usa delegate (research, browser, coding, file, vision, verification).
-- El subagente trabaja con sus propias herramientas y permisos y te devuelve un resultado estructurado; TÚ integras la respuesta final para el usuario.
-- Delega en verification antes de dar por terminadas tareas críticas si tienes dudas razonables.
+${subagents.DELEGATION_GUIDE}
 
-SKILLS DISPONIBLES (instrucciones especializadas cargables)
-Antes de tareas donde una skill aplique, llama a use_skill con su nombre: te devolverá instrucciones expertas que debes seguir. No la cites al usuario; aplícala.
-${skills.promptIndexSync()}
-
-MEMORIA del usuario — recuerdos relevantes para esta conversación (úsalos si aplican, no los cites):
-{{MEMORY}}
-- Para guardar algo importante que el usuario te pida recordar (preferencias, datos, decisiones), usa la herramienta remember.
-- Si la petición es conversacional (saludo, pregunta), responde directamente sin herramientas.
+SKILLS DISPONIBLES (instrucciones especializadas del usuario, cargables)
+Antes de una tarea donde una skill aplique, llama a use_skill con su nombre: te devolverá instrucciones expertas que debes seguir. No la cites al usuario; aplícala. Si la tarea se repite y ya conoces su contenido, no la recargues.
+${skills.promptIndexSync('orchestrator')}
 
 FORMATO
 - Tus respuestas se muestran en un chat con soporte markdown ligero (negrita, listas, código). Sé claro y ordenado.
@@ -133,6 +129,11 @@ function newConfirmId(prefix) {
 }
 
 class Agent {
+  /* v2.5: cuántas herramientas del mismo mensaje corren a la vez (las que pueden:
+     el bloqueo por recurso decide). Es un tope del bucle, no del modelo. */
+  static MAX_PARALELO = 4;
+  static _callSeq = 0;
+
   constructor(opts) {
     this.fetchFn = opts.fetchFn || fetch;
     this.emit = opts.emit;               // (event) => void  (to renderer)
@@ -144,9 +145,27 @@ class Agent {
     this.abort = null;
     this.stopRequested = false;          // el usuario pulsó Detener en esta conversación
     this.pauseRequested = false;         // pausa solicitada (checkpoint + stop limpio)
-    this.runningTool = null;             // { stop() } de la herramienta en ejecución
-    this.subagent = null;                // subagente en curso (para matar su comando al Detener)
+    this.runningTool = null;             // { stop() } de la herramienta en ejecución (la última: compatibilidad)
+    /* v2.5: varias herramientas del MISMO mensaje pueden correr a la vez (el modelo
+       pide tres lecturas o dos delegaciones de golpe). Aquí van todas las killables
+       para que Detener mate las que estén en vuelo, no solo una. */
+    this.runningTools = new Map();       // callId -> { stop() }
+    this.subagents = new Set();          // subagentes en curso (varios, si van en paralelo)
+    this._currentRequest = '';           // petición del usuario del turno (criterio de reserva)
+    this._plegado = [];                  // intercambios antiguos plegados (resumen rodante)
+    this._resumen = '';
     this.toolsFired = new Map();         // name -> {count, lastAt}
+    // v2.1: memoria del run para orquestar (se reinicia en cada _run)
+    this._delegations = [];              // [{agent, task, status, result}] subtareas ya hechas por el equipo
+    this._verified = false;              // alguna verificación delegada dio OK
+    this._writes = 0;                    // archivos escritos/editados en este run
+    this._cmds = 0;                      // comandos ejecutados con éxito
+    this._toolSeq = 0;                   // orden de las herramientas del run
+    this._lastWriteSeq = -1;
+    this._lastCmdSeq = -1;
+    this._gateUsed = false;              // la verificación de cierre solo puede pedirse una vez
+    this._reviewed = false;              // la revisión del cambio también, una por turno
+    this._skillsLoaded = new Set();      // ids de skills ya cargadas en este turno (su cuerpo no se repite)
     this.guardrails = new Guardrails(opts.guardrailsPolicy || {});   // límites + permisos
     this._llmTimeoutMs = null;           // ms sin datos del proveedor antes de cortar (null = default)
     this.pendingConfirm = null;          // {resolve, call} mientras el usuario decide
@@ -160,7 +179,63 @@ class Agent {
   setPolicy(policy) { this.guardrails.setPolicy(policy); }
 
   /** Ata la identidad de sesión a una conversación (misma conv → misma sesión). */
-  useSession(convId) { this.sessionId = opencode.sessionFor(convId); }
+  useSession(convId) {
+    const nuevo = opencode.sessionFor(convId);
+    // al cambiar de conversación el resumen plegado de la anterior no vale para nada
+    // (y contarlo sería peor que no tenerlo)
+    if (nuevo !== this.sessionId) { this._resumen = ''; this._plegado = []; }
+    this.sessionId = nuevo;
+  }
+
+  /* ============ v2.2: resumen rodante del contexto ============
+     El historial que viaja al modelo está acotado (MAX_HISTORY) para no crecer sin fin,
+     pero al recortar se perdía el principio de la conversación EN SECO: una decisión
+     tomada hace veinte turnos desaparecía sin avisar. Ahora lo recortado se pliega en un
+     resumen compacto (una línea por intercambio: qué pidió y en qué quedó) que viaja como
+     primer mensaje de contexto, así que el hilo largo mantiene su memoria sin cargar el
+     prompt con los turnos antiguos enteros.
+
+     Es EXTRACTIVO a propósito: no cuesta una llamada al modelo, no añade latencia al
+     turno y no falla. Un resumen redactado por el modelo es una mejora posible, pero no
+     puede ser el único camino: si falla, la conversación se queda sin memoria. */
+  static MAX_PLEGADO = 12;                // intercambios que caben en el resumen
+  static MAX_PLEGADO_CHARS = 2600;        // tope duro del bloque
+  static MAX_IMAGENES = 3;                // imágenes que siguen viajando en el turno
+
+  /** Pliega los mensajes que se van a descartar en el resumen del turno. */
+  _plegarResumen(msgs) {
+    const texto = (c) => typeof c === 'string' ? c : (Array.isArray(c) ? ((c.find(x => x.type === 'text') || {}).text || '') : '');
+    const limpio = (s, n) => String(s || '').replace(/\s+/g, ' ').trim().slice(0, n);
+    const lineas = [];
+    let actual = null;
+    for (const m of msgs) {
+      if (m.role === 'user') {
+        if (actual) lineas.push(actual);
+        actual = { pide: limpio(texto(m.content), 220), hizo: '' };
+      } else if (m.role === 'assistant' && actual && !m.tool_calls) {
+        actual.hizo = limpio(texto(m.content), 260);   // la conclusión del turno
+      }
+    }
+    if (actual && actual.pide) lineas.push(actual);
+    this._plegado = (this._plegado || []).concat(lineas).slice(-Agent.MAX_PLEGADO);
+    this._resumen = this._renderResumen();
+  }
+
+  _renderResumen() {
+    const l = (this._plegado || []).filter(e => e && e.pide);
+    if (!l.length) return '';
+    const cab = 'RESUMEN DE LA CONVERSACIÓN (turnos antiguos que ya no viajan completos; es CONTEXTO: no lo repitas ni lo cuentes como si acabara de pasar):';
+    const cuerpo = l.map(e => `- pidió: ${e.pide}${e.hizo ? ` → quedó en: ${e.hizo}` : ''}`).join('\n');
+    const total = cab + '\n' + cuerpo;
+    return total.length > Agent.MAX_PLEGADO_CHARS ? total.slice(0, Agent.MAX_PLEGADO_CHARS) + '…' : total;
+  }
+
+  /** Criterio de éxito de reserva: la petición original del usuario. */
+  _expectDeReserva() {
+    const req = String(this._currentRequest || '').trim();
+    if (!req) return '';
+    return `(de reserva: el orquestador no lo precisó) comprueba que lo que entregues responde de verdad a la petición original del usuario: «${req.slice(0, 300)}»`;
+  }
 
   /** Respuesta del usuario a una tarjeta de confirmación (toolbar del chat). */
   resolveConfirm(id, approved) {
@@ -305,12 +380,14 @@ class Agent {
       subagente. Su comando se registra en el SUBagente (registerKillable es suyo),
       así que sin esto el proceso sobrevivía a Detener hasta agotar su timeout. */
   _killRunning() {
-    if (this.runningTool && typeof this.runningTool.stop === 'function') {
-      try { this.runningTool.stop(); } catch {}
+    const killables = [this.runningTool, ...this.runningTools.values()];
+    for (const k of killables) {
+      if (k && typeof k.stop === 'function') { try { k.stop(); } catch {} }
     }
-    if (this.subagent) {
-      try { this.subagent.stop(); } catch {}
-    }
+    this.runningTools.clear();
+    for (const sub of this.subagents) { try { sub.stop(); } catch {} }
+    this.subagents.clear();
+    if (this.subagent) { try { this.subagent.stop(); } catch {} }
   }
 
   // Detener de verdad: aborta el fetch del modelo Y mata el comando/herramienta
@@ -354,6 +431,18 @@ class Agent {
     this.guardrails.beginRun();
     const runStart = Date.now();
     const runId = 'r' + runStart.toString(36);
+    // ---- estado de orquestación del turno: tablero de delegaciones y control
+    // de la verificación antes de cerrar (ver _needsVerification) ----
+    this._delegations = [];
+    this._verified = false;
+    this._writes = 0;
+    this._cmds = 0;
+    this._toolSeq = 0;
+    this._lastWriteSeq = -1;
+    this._lastCmdSeq = -1;
+    this._gateUsed = false;
+    this._reviewed = false;
+    this._skillsLoaded = new Set();
 
     // ---- checkpoint: persistir la tarea si es suficientemente larga ----
     let task = opts.task || null;
@@ -385,8 +474,15 @@ class Agent {
       ? [{ type: 'text', text: userText || (imgUrls.length > 1 ? 'Analiza estas imágenes' : 'Analiza esta imagen') },
          ...imgUrls.map(u => ({ type: 'image_url', image_url: { url: u } }))]
       : userText;
+    // conversación nueva (o historial vaciado al borrarla): el resumen anterior no vale
+    if (!this.history.length) { this._resumen = ''; this._plegado = []; }
+    cambios.olvidar((settings.settings && settings.settings.workspace) || path.join(os.homedir(), 'Desktop', 'Sagitari'));
+    this._currentRequest = userText || '';
     this.history.push({ role: 'user', content });
+    // lo que el recorte va a descartar se pliega antes de perderlo
+    const sobra = this.history.length > MAX_HISTORY ? this.history.slice(0, this.history.length - MAX_HISTORY) : [];
     this.history = trimHistory(this.history);
+    if (sobra.length) this._plegarResumen(sobra);
 
     const ws = (settings.settings && settings.settings.workspace) || path.join(os.homedir(), 'Desktop', 'Sagitari');
     // ---- memoria relevante: solo la que aplica a esta conversación ----
@@ -402,107 +498,191 @@ class Agent {
     } catch {}
     // v2.0: perfil de hábitos observados del usuario
     const habitsBlock = habits.profile();
-    const sys = systemPrompt().replace('{{MEMORY}}', memBlock)
+    /* A PARTIR DE AQUÍ, LO QUE CAMBIA EN CADA TURNO. El prompt se compone en dos bloques
+       a propósito: primero TODO lo estable (identidad, reglas, guía de delegación, índice
+       de skills, espacio de trabajo y modo) y al final lo volátil (memoria, hábitos, skills
+       sugeridas). Los proveedores con caché de prompt reutilizan el prefijo idéntico: antes
+       la memoria —que cambia en cada turno— iba casi al principio y rompía el caché desde
+       la décima línea. */
+    const dinamico = `\n\nMEMORIA del usuario — recuerdos relevantes para esta conversación (úsalos si aplican, no los cites):\n${memBlock}`
+      + '\n- Para guardar algo importante que el usuario te pida recordar (preferencias, datos, decisiones), usa la herramienta remember.'
+      + '\n- Si la petición es conversacional (saludo, pregunta), responde directamente sin herramientas.'
       + (skillsHint || '')
-      + (habitsBlock ? `\n\nPERFIL DEL USUARIO (hábitos observados — adáptate a ellos):\n${habitsBlock}` : '')
+      + (habitsBlock ? `\n\nPERFIL DEL USUARIO (hábitos observados — adáptate a ellos):\n${habitsBlock}` : '');
+    const sys = systemPrompt()
       + `\n\nESPACIO DE TRABAJO: ${ws}`
       + '\n- Es la carpeta por defecto para crear/modificar archivos; las rutas relativas resuelven aquí.'
       + '\n- Solo toques otras ubicaciones si el usuario lo pide explícitamente (ruta absoluta).'
+      // v2.4: lo que se sabe del proyecto (comandos que EXISTEN) y su mapa si es grande.
+      // Van en el bloque estable: cambian poco y así el prefijo sigue siendo cacheable.
+      + (() => { try { const b = proyecto.bloquePrompt(ws); return b ? '\n\n' + b : ''; } catch { return ''; } })()
+      // El mapa se recalcula cada 2 minutos o al escribir (executors.invalidar): recorrer
+      // el árbol en cada turno sería un tirón en el hilo principal sin ganar nada.
+      + (() => { try { const b = repomap.bloquePrompt(ws, { ttlMs: 120000 }); return b ? '\n\n' + b : ''; } catch { return ''; } })()
       + `\n\nMODO ACTUAL (${settings.settings?.mode || 'act'}): ${mode.note}`
-      + (mode.planFirst ? '\nFormato del plan: una línea por paso, empieza tu respuesta con "PLAN:" y numera los pasos.' : '');
-    const messages = [{ role: 'system', content: sys }, ...payloadMessages(this.history)];
+      + (mode.planFirst ? '\nFormato del plan: una línea por paso, empieza tu respuesta con "PLAN:" y numera los pasos.' : '')
+      + (settings.settings?.verifyGate === false
+          ? '\n\nVERIFICACIÓN DE CIERRE: desactivada por el usuario (no hace falta que delegues en verification para cerrar).'
+          : '\n\nVERIFICACIÓN DE CIERRE: activa. Si has modificado archivos o ejecutado cambios, antes de dar la tarea por terminada comprueba el RESULTADO (leer lo escrito, volver a ejecutarlo, o delegar en verification) y dilo en tu cierre.')
+      + (settings.settings?.reviewGate === false
+          ? '\n\nREVISIÓN DEL CAMBIO: desactivada por el usuario.'
+          : '\n\nREVISIÓN DEL CAMBIO: activa. Tu código pasa por una revisión automática antes de cerrar; si te devuelve un hallazgo BLOQUEANTE, arréglalo en el mismo turno.')
+      + dinamico;
+    // el resumen de lo plegado abre el contexto (mensaje de usuario: los proveedores no
+    // aceptan un segundo system a mitad de conversación)
+    const messages = [
+      { role: 'system', content: sys },
+      ...(this._resumen ? [{ role: 'user', content: this._resumen }] : []),
+      ...payloadMessages(this.history),
+    ];
 
     // ---- v1.6: router + cadena de fallback ----
-    const category = models.classify(userText, { hasImage: !!imageDataUrl });
-    let chain = settings.settings?.modelRouting === false
-      ? [{ providerId: cfg.providerId, name: cfg.name, baseUrl: cfg.baseUrl, apiKey: cfg.apiKey, model: cfg.model, role: 'primary' }]
-      : models.fallbackChain(settings, category);
-    if (!chain.length) chain = [{ providerId: cfg.providerId, name: cfg.name, baseUrl: cfg.baseUrl, apiKey: cfg.apiKey, model: cfg.model, role: 'primary' }];
+    const { category, chain } = this._chainFor(settings, userText, { hasImage: !!imageDataUrl });
     runlog.log({ agent: 'sagitari', task: taskId, event: 'model_route', category, chain: chain.map(c => c.model) });
 
     // el modo viaja con el arranque: la UI lo necesita para estampar el turno y
     // pintar el estado en vivo sin volver a preguntar por la configuración
     this.emit({ type: 'busy', busy: true, mode: (settings.settings && settings.settings.mode) || 'act', model: cfg.model });
+    return await this._loop(messages, chain, signal, {
+      settings,
+      tools: null,                        // catálogo completo (los subagentes filtran)
+      history: true,
+      account: true,                      // hábitos, runlog, checkpoints y verificación de cierre
+      task, taskId, runStart,
+      onStatus: (text) => this.emit({ type: 'status', text }),
+      visionAllowsImages: cfg.vision !== false,
+      background: !!opts.background,
+      // razonamiento visible: solo en el chat y solo si el usuario lo activó
+      showThinking: settings.settings?.showThinking === true,
+      // v2.5: cuántas herramientas del mismo mensaje van a la vez (Ajustes)
+      parallelTools: Number(settings.settings?.parallelTools) || Agent.MAX_PARALELO,
+    });
+  }
+
+  /**
+   * Bucle ÚNICO del agente (v2.2). Antes había dos copias —la del orquestador y la de los
+   * subagentes— y ya habían vuelto a divergir: la del subagente no tenía detección de
+   * estancamiento ni cierre verificado, y sus tarjetas de herramienta se quedaban «en
+   * curso» para siempre porque nadie emitía su resultado. Un solo bucle con PERFIL evita
+   * eso: cada arreglo vale para los dos y las diferencias son datos.
+   *
+   * p: { settings, tools, history, account, task, taskId, runStart, onStatus, onFinal,
+   *      visionAllowsImages, background }
+   *   history/account: true solo en el orquestador (historial e instrumentación).
+   *   onStatus: dónde van los estados (null en subagentes: los resume el orquestador).
+   *   onFinal:  entregar la respuesta final por callback (subagentes); si es null, el
+   *             cierre es el del orquestador (assistant_done + tarea completada).
+   */
+  async _loop(messages, chain, signal, p = {}) {
+    const settings = p.settings;
+    const task = p.task || null;
+    const taskId = p.taskId || ('r' + Date.now().toString(36));
+    const runStart = p.runStart || Date.now();
+    const onStatus = p.onStatus || null;
     let assistantSaidSomething = false;
 
     while (true) {
       // ---- guardrail: límites de pasos / tiempo (configurables; 0 = sin límite) ----
       const stepCheck = this.guardrails.checkStep();
       if (!stepCheck.ok) {
-        this.emit({ type: 'status', text: 'Límite de seguridad alcanzado — detenido' });
+        if (onStatus) onStatus('Límite de seguridad alcanzado — detenido');
         this.emit({ type: 'guardrail', reason: stepCheck.reason });
-        runlog.log({ agent: 'sagitari', task: taskId, event: 'guardrail_stop', reason: stepCheck.reason });
-        if (task && !task.closed) { checkpoints.interrupt(task); task.closed = true; }
-        this._pushAssistant(assistantSaidSomething ? { role: 'assistant', content: '(detenido por límite de seguridad)' } : null);
-        return;
+        if (p.account) {
+          runlog.log({ agent: 'sagitari', task: taskId, event: 'guardrail_stop', reason: stepCheck.reason });
+          if (task && !task.closed) { checkpoints.interrupt(task); task.closed = true; }
+          this._pushAssistant(assistantSaidSomething ? { role: 'assistant', content: '(detenido por límite de seguridad)' } : null);
+          return;
+        }
+        break;   // subagente: corta y entrega lo que tenga
       }
       if (signal.aborted) {
-        if (task && !task.closed) {
-          if (this.pauseRequested) {
-            checkpoints.pause(task);
-            this.meta.paused = true;
-            this.emit({ type: 'paused', runId: task.runId, goal: task.goal });
-          } else {
-            checkpoints.interrupt(task);
-            this.emit({ type: 'task_interrupted', runId: task.runId, goal: task.goal });
+        if (p.account) {
+          if (task && !task.closed) {
+            if (this.pauseRequested) {
+              checkpoints.pause(task);
+              this.meta.paused = true;
+              this.emit({ type: 'paused', runId: task.runId, goal: task.goal });
+            } else {
+              checkpoints.interrupt(task);
+              this.emit({ type: 'task_interrupted', runId: task.runId, goal: task.goal });
+            }
+            // la ejecución abandona el run: ninguna vuelta posterior debe reutilizarlo
+            task.closed = true;
           }
-          // la ejecución abandona el run: ninguna vuelta posterior debe reutilizarlo
-          task.closed = true;
+          this._pushAssistant(assistantSaidSomething ? { role: 'assistant', content: '(detenido por el usuario)' } : null);
+          this.emit({ type: 'stopped' });
+          return;
         }
-        this._pushAssistant(assistantSaidSomething ? { role: 'assistant', content: '(detenido por el usuario)' } : null);
-        this.emit({ type: 'stopped' });
-        return;
+        break;   // subagente detenido: entrega lo que tenga
       }
       const t0 = Date.now();
       // si el stream falla (o lo aborta el usuario) la excepción sube tal cual:
       // el salto entre modelos ya lo resuelve _streamWithFallback
-      const res = await this._streamWithFallback(chain, messages, signal);
+      const res = await this._streamWithFallback(chain, messages, signal, null, { thinking: p.showThinking });
       this.meta.llmCalls++;
       this.meta.lastLatencyMs = Date.now() - t0;
+      // cierre del bloque de razonamiento: con su texto completo y su duración (los
+      // deltas ya se pintaron en vivo, esto solo lo sella)
+      if (p.showThinking && res.reasoning) {
+        this.emit({ type: 'thinking_done', text: res.reasoning, durationMs: Date.now() - t0 });
+      }
       if (res.usage) {
         this.meta.tokensIn += res.usage.prompt_tokens || 0;
         this.meta.tokensOut += res.usage.completion_tokens || 0;
-        runlog.log({ agent: 'sagitari', task: taskId, event: 'llm', model: cfg.model, durationMs: this.meta.lastLatencyMs, tokens: res.usage });
+        // el modelo que REALMENTE responde: la cadena puede haber saltado (y el coste
+        // se tarifa con ese, no con el que se pedía)
+        runlog.log({ agent: 'sagitari', task: taskId, event: 'llm', model: this.guardrails.model, durationMs: this.meta.lastLatencyMs, tokens: res.usage });
         const tok = this.guardrails.addTokens((res.usage.total_tokens || 0), res.usage);
         this.meta.costUsd = this.guardrails.getCost();
         if (!tok.ok) {
           this.emit({ type: 'guardrail', reason: tok.reason });
-          if (task && !task.closed) { checkpoints.interrupt(task); task.closed = true; }
-          this._pushAssistant(assistantSaidSomething ? { role: 'assistant', content: '(detenido por límite de tokens)' } : null);
-          return;
+          if (p.account) {
+            if (task && !task.closed) { checkpoints.interrupt(task); task.closed = true; }
+            this._pushAssistant(assistantSaidSomething ? { role: 'assistant', content: '(detenido por límite de tokens)' } : null);
+            return;
+          }
+          break;
         }
       }
       if (res.aborted) {
         // el abort puede llegar a mitad del stream, y entonces esta rama es la
         // única que se ejecuta: sin guardar aquí el checkpoint, la pausa perdía
         // la reanudación y la tarea quedaba marcada como interrumpida
-        if (task && !task.closed && this.pauseRequested) {
-          checkpoints.pause(task);
-          task.closed = true;
-          this.meta.paused = true;
-          this.emit({ type: 'paused', runId: task.runId, goal: task.goal });
+        if (p.account) {
+          if (task && !task.closed && this.pauseRequested) {
+            checkpoints.pause(task);
+            task.closed = true;
+            this.meta.paused = true;
+            this.emit({ type: 'paused', runId: task.runId, goal: task.goal });
+          }
+          this._pushAssistant(assistantSaidSomething ? { role: 'assistant', content: res.text || '(interrumpido)' } : null);
+          this.emit({ type: 'stopped' });
+          return;
         }
-        this._pushAssistant(assistantSaidSomething ? { role: 'assistant', content: res.text || '(interrumpido)' } : null);
-        this.emit({ type: 'stopped' });
-        return;
+        break;
       }
 
       // ---- guardrail v1.2: detección de ausencia de progreso ----
+      // (v2.2: también dentro de un subagente: un bucle de lectura que no avanza quemaba
+      // su presupuesto entero hasta el límite de pasos, sin que nadie lo notara)
       const stall = this.guardrails.checkStall({ toolName: res.toolCalls?.[0]?.function?.name || null, assistantText: res.text });
       if (!stall.ok) {
-        this.emit({ type: 'status', text: 'Sin progreso — detenido' });
+        if (onStatus) onStatus('Sin progreso — detenido');
         this.emit({ type: 'guardrail', reason: stall.reason });
-        runlog.log({ agent: 'sagitari', task: taskId, event: 'stall_detected' });
-        if (task && !task.closed) { checkpoints.interrupt(task); task.closed = true; }
-        this._pushAssistant(assistantSaidSomething ? { role: 'assistant', content: '(detenido: sin progreso)' } : null);
-        return;
+        if (p.account) {
+          runlog.log({ agent: 'sagitari', task: taskId, event: 'stall_detected' });
+          if (task && !task.closed) { checkpoints.interrupt(task); task.closed = true; }
+          this._pushAssistant(assistantSaidSomething ? { role: 'assistant', content: '(detenido: sin progreso)' } : null);
+          return;
+        }
+        break;
       }
 
       if (res.toolCalls && res.toolCalls.length) {
         const msg = { role: 'assistant', content: res.text || '', tool_calls: res.toolCalls };
         if (!res.text) delete msg.content;
         messages.push(msg);
-        this.history.push(JSON.parse(JSON.stringify(msg)));
+        if (p.history) this.history.push(JSON.parse(JSON.stringify(msg)));
 
         // Al salir antes de tiempo (abort / guardrail / bucle) TODA tool_call debe
         // tener su mensaje 'tool' de respuesta: si no, el historial queda inválido
@@ -513,26 +693,65 @@ class Agent {
             if (answered.has(tc.id)) continue;
             answered.add(tc.id);
             messages.push({ role: 'tool', tool_call_id: tc.id, name: tc.function.name, content: reason });
-            this.history.push({ role: 'tool', tool_call_id: tc.id, name: tc.function.name, content: reason });
+            if (p.history) this.history.push({ role: 'tool', tool_call_id: tc.id, name: tc.function.name, content: reason });
           }
         };
 
-        for (const tc of res.toolCalls) {
-          if (signal.aborted) { closePendingCalls('(no ejecutada: ejecución detenida por el usuario)'); break; }
-          const tf = this.toolsFired.get(tc.function.name) || { count: 0, lastAt: 0 };
-          this.toolsFired.set(tc.function.name, { count: tf.count + 1, lastAt: Date.now() });
-          const toolT0 = Date.now();
+        /* ---- v2.5: PARALELISMO con bloqueo por recurso.
 
-          // un solo camino de ejecución (permisos, límites, confirmación y errores
-          // incluidos) compartido con los subagentes
-          const r = await this._runToolCall(tc, {
-            signal, settings, task,
-            onStatus: (text) => this.emit({ type: 'status', text }),
-          });
+           El modelo suele pedir varias cosas en el MISMO mensaje (tres lecturas, dos
+           investigaciones, una captura y un comando). Antes se hacían una detrás de otra
+           y el turno duraba la suma; ahora salen a la vez hasta `parallelTools`, pero
+           cada una toma los recursos que necesita (agent/recursos.js): el NAVEGADOR es
+           uno solo (dos clics a la vez se pisarían la pestaña y el inventario), la
+           ESCRITURA en disco va en cola y la TERMINAL admite dos comandos.
+
+           Los guardarraíles (tope de llamadas, bucle, permisos y confirmaciones) se
+           consultan en orden ANTES de lanzar nada, así que un tope o un bucle detectado
+           cortan también lo que todavía no ha salido; y Detener mata TODO lo que esté en
+           vuelo, no solo la última. */
+        const envueltos = await this._runToolCalls(res.toolCalls, {
+          signal, settings,
+          tools: p.tools,                       // null = catálogo completo
+          noDelegate: !p.account,               // un subagente no vuelve a delegar
+          task: p.account ? task : null,        // el checkpoint es del orquestador
+          onStatus,
+        }, Number(p.parallelTools) || Agent.MAX_PARALELO);
+
+        /* Se procesan EN ORDEN (aunque hayan terminado en otro): el historial y el
+           feed del chat cuentan la misma historia que el modelo pidió, y el orden de
+           los resultados es determinista. */
+        for (let ci = 0; ci < res.toolCalls.length; ci++) {
+          const tc = res.toolCalls[ci];
+          const envuelto = envueltos[ci];
+          // una llamada que no llegó a lanzarse (tope, bucle o Detener) se cierra abajo
+          if (!envuelto) continue;
+          if (p.account) {
+            const tf = this.toolsFired.get(tc.function.name) || { count: 0, lastAt: 0 };
+            this.toolsFired.set(tc.function.name, { count: tf.count + 1, lastAt: Date.now() });
+          }
+          const toolT0 = envuelto.t0;
+          const r = envuelto.r;
+          if (!r) continue;   // abortada a mitad: se cierra como no ejecutada
           const guardar = (text, modelContent) => {
             answered.add(tc.id);
             messages.push({ role: 'tool', tool_call_id: tc.id, name: tc.function.name, content: modelContent === undefined ? text : modelContent });
-            this.history.push({ role: 'tool', tool_call_id: tc.id, name: tc.function.name, content: text });
+            if (p.history) this.history.push({ role: 'tool', tool_call_id: tc.id, name: tc.function.name, content: text });
+            recortarImagenesViejas();
+          };
+          /* Las imágenes adjuntas siguen viajando en CADA petición siguiente del turno. En
+             una tarea con varias capturas o con view_image (una imagen puede pesar 8 MB ≈
+             10,7 MB en base64) la petición crecía sin freno hasta que el proveedor la
+             rechazaba o cobraba de más. Se conservan las últimas tres y las anteriores
+             quedan como texto: el modelo ya las describió y no las necesita otra vez. */
+          const recortarImagenesViejas = () => {
+            if (!p.visionAllowsImages) return;
+            const conImagen = messages.filter(m => m.role === 'tool' && Array.isArray(m.content) && m.content.some(c => c.type === 'image_url'));
+            while (conImagen.length > Agent.MAX_IMAGENES) {
+              const m = conImagen.shift();
+              const txt = (m.content.find(c => c.type === 'text') || {}).text || '';
+              m.content = `${txt}\n(la imagen de este resultado ya no se adjunta: solo viajan las ${Agent.MAX_IMAGENES} últimas del turno)`;
+            }
           };
 
           if (r.action === 'limit') {
@@ -542,19 +761,22 @@ class Agent {
           }
           if (r.action === 'loop') {
             const reason = `Bucle detectado (${r.pattern}): la misma acción se repite sin avanzar. Ejecución detenida para proteger el sistema.`;
-            this.emit({ type: 'status', text: 'Bucle detectado — detenido' });
+            if (onStatus) onStatus('Bucle detectado — detenido');
             this.emit({ type: 'guardrail', reason });
-            runlog.log({ agent: 'sagitari', task: taskId, event: 'loop_detected', tool: tc.function.name, pattern: r.pattern });
             closePendingCalls('(no ejecutada: bucle detectado)');
-            if (task && !task.closed) { checkpoints.interrupt(task); task.closed = true; }
-            this._pushAssistant(assistantSaidSomething ? { role: 'assistant', content: '(detenido: bucle detectado)' } : null);
-            return;
+            if (p.account) {
+              runlog.log({ agent: 'sagitari', task: taskId, event: 'loop_detected', tool: tc.function.name, pattern: r.pattern });
+              if (task && !task.closed) { checkpoints.interrupt(task); task.closed = true; }
+              this._pushAssistant(assistantSaidSomething ? { role: 'assistant', content: '(detenido: bucle detectado)' } : null);
+              return;
+            }
+            break;
           }
           if (r.action === 'aborted') { closePendingCalls('(no ejecutada: ejecución detenida)'); break; }
           if (r.action !== 'ok') {
             // rechazada sin ejecutar (argumentos ilegibles, herramienta fuera de
             // alcance o desconocida, o denegada): se responde y el turno continúa
-            if (r.action === 'denied' && r.reason === 'user') {
+            if (r.action === 'denied' && r.reason === 'user' && p.account) {
               try { habits.observe('confirm', { approved: false, tool: tc.function.name }); } catch {}
             }
             guardar(r.text);
@@ -565,18 +787,27 @@ class Agent {
             continue;
           }
 
-          if (r.confirmed) { try { habits.observe('confirm', { approved: true, tool: tc.function.name }); } catch {} }
+          if (r.confirmed && p.account) { try { habits.observe('confirm', { approved: true, tool: tc.function.name }); } catch {} }
           const { text, images, failed } = r;
-          // v2.0: observar hábitos del usuario (hechos de uso, no conversación)
-          try { habits.observe('tool', { name: tc.function.name, args: r.args }); } catch {}
-          runlog.log({
-            agent: 'sagitari', task: taskId, event: 'tool', tool: tc.function.name,
-            args: r.args, durationMs: Date.now() - toolT0,
-            success: !failed,
-            error: failed ? String(text).slice(0, 200) : undefined,
-          });
+          if (p.account) {
+            // ---- v2.1: traza de mutaciones del run (base del cierre verificado)
+            this._toolSeq++;
+            if (!failed) {
+              const tname = tc.function.name;
+              if (tname === 'write_file' || tname === 'edit_file' || tname === 'apply_patch') { this._writes++; this._lastWriteSeq = this._toolSeq; }
+              else if (tname === 'run_command') { this._cmds++; this._lastCmdSeq = this._toolSeq; }
+            }
+            // v2.0: observar hábitos del usuario (hechos de uso, no conversación)
+            try { habits.observe('tool', { name: tc.function.name, args: r.args }); } catch {}
+            runlog.log({
+              agent: 'sagitari', task: taskId, event: 'tool', tool: tc.function.name,
+              args: r.args, durationMs: Date.now() - toolT0,
+              success: !failed,
+              error: failed ? String(text).slice(0, 200) : undefined,
+            });
+          }
           // ---- checkpoint: registrar el paso (éxito o fallo con su motivo) ----
-          if (task && !task.closed) {
+          if (p.account && task && !task.closed) {
             checkpoints.record(task, { step: 'EXECUTE', tool: tc.function.name, ok: !failed, summary: String(text).slice(0, 160) });
             // OJO: aquí NO va checkpoints.fail(). fail() archiva el run como
             // 'failed' —lo saca de las tareas activas— y el bucle SIGUE ejecutando:
@@ -589,7 +820,7 @@ class Agent {
             }
           }
           // Feed vision inputs (screenshots) back to the model when supported
-          const toolContent = images && cfg.vision !== false
+          const toolContent = images && p.visionAllowsImages
             ? [{ type: 'text', text }, ...images.map(u => ({ type: 'image_url', image_url: { url: u } }))]
             : text;
           guardar(text, toolContent);
@@ -598,8 +829,58 @@ class Agent {
           this.emit({ type: 'tool_result', name: tc.function.name, result: String(text).slice(0, 1200), ok: !failed, durationMs: Date.now() - toolT0 });
           assistantSaidSomething = true;
         }
+        // toda tool_call necesita su respuesta por id, aunque no se haya llegado a lanzar
+        closePendingCalls('(no ejecutada: ejecución detenida o tope alcanzado)');
         continue; // next loop: model reacts to tool results
       }
+
+      /* ---- v2.4: PUERTA DE CIERRE (revisión del CAMBIO + cierre verificado).
+
+         Son dos preguntas distintas sobre el mismo turno:
+           · ¿está bien lo que se ha ESCRITO? (revisión: contratos, casos límite, restos)
+           · ¿funciona de verdad?            (verificación: leer, ejecutar, abrir)
+         Van en UNA sola ronda a propósito: cada vuelta extra es una llamada más al
+         modelo y una espera más para el usuario, y las dos comprobaciones se piden
+         igual antes de cerrar. Cada una solo puede pedirse una vez por turno. */
+      const puertaRev = p.account && this._needsReview(settings);
+      const puertaVer = p.account && this._needsVerification(settings);
+      if (puertaRev || puertaVer) {
+        const instrucciones = [];
+        const informes = [];
+        if (puertaRev) {
+          this._reviewed = true;
+          const wsRev = (settings.settings && settings.settings.workspace) || path.join(os.homedir(), 'Desktop', 'Sagitari');
+          const dif = cambios.diff(wsRev, {});
+          if (dif) {
+            runlog.log({ agent: 'sagitari', task: taskId, event: 'review_gate', writes: this._writes, chars: dif.length });
+            instrucciones.push(REVIEW_GATE_PROMPT);
+            const informe = await this._delegate(subagents.SUBAGENTS.review, {
+              task: 'Revisa el CAMBIO de este turno: dime solo lo que está mal, lo que falta o lo que va a doler. Nada de estilo si el proyecto no lo pide.',
+              context: `Petición del usuario: ${String(this._currentRequest || '').slice(0, 600)}\n\nDIFF DEL TURNO:\n${dif}`,
+              expect: 'Hallazgos numerados con severidad y ruta, o un OK explícito si no hay nada bloqueante.',
+            }, { settings, signal, screenshotFn: this.screenshotFn, browser: this.browser });
+            informes.push(`REVISIÓN DEL CAMBIO (sobre lo que se ha escrito):\n${informe}`);
+          }
+        }
+        if (puertaVer) {
+          this._gateUsed = true;
+          runlog.log({ agent: 'sagitari', task: taskId, event: 'verify_gate', writes: this._writes, cmds: this._cmds });
+          instrucciones.push(VERIFY_GATE_PROMPT);
+        }
+        if (instrucciones.length) {
+          const texto = puertaRev && puertaVer ? 'Revisando el cambio y verificando el resultado antes de cerrar…'
+            : (puertaRev ? 'Revisando el cambio antes de cerrar…' : 'Verificando el resultado antes de cerrar…');
+          this.emit({ type: 'status', text: texto });
+          // lo que el modelo ya respondió se conserva: la ronda extra no repite la respuesta
+          this.history.push({ role: 'assistant', content: res.text });
+          messages.push({ role: 'assistant', content: res.text });
+          messages.push({ role: 'user', content: instrucciones.join('\n\n') + (informes.length ? '\n\n' + informes.join('\n\n') : '') });
+          continue;
+        }
+      }
+
+      // Final text answer — un subagente la entrega a su orquestador
+      if (p.onFinal) { p.onFinal(res.text); return; }
 
       // Final text answer — cierre del protocolo VERIFY → DONE
       this.history.push({ role: 'assistant', content: res.text });
@@ -610,8 +891,16 @@ class Agent {
         this.emit({ type: 'task_done', runId: task.runId, goal: task.goal });
       }
       this.currentRun = null;
-      this.emit({ type: 'assistant_done', text: res.text, runId: opts.background ? (task && task.runId) : undefined });
+      this.emit({ type: 'assistant_done', text: res.text, runId: p.background ? (task && task.runId) : undefined });
       return;
+    }
+
+    // Salida por límite o por abort sin respuesta final: el subagente entrega lo último
+    // que dijo (antes lo hacía el bucle propio con este mismo criterio), y así el
+    // orquestador recibe un PARTIAL honesto en vez de un vacío.
+    if (p.onFinal) {
+      const lastAssistant = [...messages].reverse().find(m => m.role === 'assistant' && m.content);
+      p.onFinal(lastAssistant ? String(lastAssistant.content) : '');
     }
   }
 
@@ -626,6 +915,35 @@ class Agent {
     Agent.CONFIRM_ROUTES.delete(cid);
     try { a.resolveConfirm(cid, approved); } catch {}
     return true;
+  }
+
+  /**
+   * Lanza las llamadas de un mensaje respetando `limite` de concurrencia, con la
+   * seguridad de que Detener o un tope no lanzan ninguna más. Devuelve un array
+   * alineado con `calls` (null donde no se llegó a ejecutar) con { r, t0 }.
+   */
+  async _runToolCalls(calls, ctx, limite) {
+    const out = new Array(calls.length).fill(null);
+    const max = Math.max(1, Math.min(Number(limite) || 1, calls.length, Agent.MAX_PARALELO));
+    let siguiente = 0;
+    let parar = false;
+    const worker = async () => {
+      for (;;) {
+        if (parar || ctx.signal.aborted) { parar = true; return; }
+        const i = siguiente++;
+        if (i >= calls.length) return;
+        const t0 = Date.now();
+        const r = await this._runToolCall(calls[i], { ...ctx, callId: calls[i].id });
+        out[i] = { r, t0 };
+        // un tope de llamadas o un bucle detectado cortan lo que queda por lanzar:
+        // da igual cuántos huecos libres haya, el mensaje ya ha fallado
+        if (r && (r.action === 'limit' || r.action === 'loop')) parar = true;
+      }
+    };
+    const workers = [];
+    for (let k = 0; k < Math.min(max, calls.length); k++) workers.push(worker());
+    await Promise.all(workers);
+    return out;
   }
 
   /**
@@ -726,13 +1044,56 @@ class Agent {
       this.guardrails.approve(decision.signature);
     }
 
+    const callKey = ctx.callId || ('call-' + (++Agent._callSeq));
+    let result;
+    let abortada = false;
+    try {
+      /* v2.5: bloqueo por recurso. Solo se espera si de verdad hay conflicto (el
+         navegador es uno; dos escrituras sobre el disco van en cola), y mientras tanto
+         el resto de llamadas del mensaje siguen en paralelo. */
+      result = await recursos.con(paraHerramienta(name, args), () => {
+        /* Detener mientras esta llamada esperaba su turno: la que ya estaba en vuelo
+           se mata, pero la que estaba en la COLA no puede ejecutarse después de la
+           parada (el navegador es uno: hasta dos clics encolados salían tras Detener
+           porque el semáforo no sabe nada del abort). */
+        if (signal && signal.aborted) { abortada = true; return ''; }
+        return this._executeToolCall(name, args, { settings, signal, task, onStatus, callKey });
+      });
+    } catch (e) { result = 'Error: ' + e.message; }
+    this.runningTools.delete(callKey);
+    if (abortada) return { action: 'aborted', args };
+    this.runningTools.delete(callKey);
+    this.meta.toolCalls++;
+    const images = result && typeof result === 'object' ? result.images : undefined;
+    const text = result && typeof result === 'object' ? result.text : String(result);
+    return { action: 'ok', text, images, failed: typeof text === 'string' && text.startsWith('Error'), args, confirmed };
+  }
+
+  /**
+   * Ejecuta de verdad una llamada ya autorizada: delegación o herramienta del
+   * ejecutor. Es el ÚLTIMO tramo del camino único de ejecución, extraído para que
+   * el bloqueo por recurso envuelva justo lo que toca recursos.
+   */
+  async _executeToolCall(name, args, { settings, signal, task, onStatus, callKey }) {
     let result;
     try {
       if (name === 'delegate') {
         const spec = subagents.SUBAGENTS[String(args.agent || '')];
-        result = spec
-          ? await this._delegate(spec, args, { settings, signal, screenshotFn: this.screenshotFn, browser: this.browser })
-          : `Error: subagente desconocido "${args.agent}". Disponibles: ${subagents.SUBAGENT_KEYS.join(', ')}.`;
+        // v2.2: tope de delegaciones por turno. Se comprueba AQUÍ (antes de arrancar el
+        // subagente) y no corta el turno: se le dice al modelo que termine él la tarea.
+        const cupo = spec ? this.guardrails.checkDelegation() : { ok: true };
+        if (spec && !cupo.ok) {
+          if (onStatus) onStatus('Tope de delegaciones alcanzado');
+          // el evento lleva el motivo EN HUMANO (va a un aviso de la interfaz); la
+          // instrucción —«no lances más subagentes, termina tú»— es para el modelo y
+          // viaja en el resultado de la herramienta, que es quien tiene que obedecerla
+          this.emit({ type: 'guardrail', reason: `Tope de subagentes de este turno alcanzado: SAGITARI continúa la tarea con lo que ya tiene.` });
+          result = `Error: ${cupo.reason}`;
+        } else {
+          result = spec
+            ? await this._delegate(spec, args, { settings, signal, screenshotFn: this.screenshotFn, browser: this.browser })
+            : `Error: subagente desconocido "${args.agent}". Disponibles: ${subagents.SUBAGENT_KEYS.join(', ')}.`;
+        }
       } else {
         result = await executeTool(name, args, {
           emit: (e) => this.emit(e),
@@ -741,29 +1102,77 @@ class Agent {
           settings,
           home: os.homedir(),
           workspace: (settings.settings && settings.settings.workspace) || path.join(os.homedir(), 'Desktop', 'Sagitari'),
-          registerKillable: (k) => { this.runningTool = k; },   // para poder matar el comando al Detener
+          // por llamada (no una sola): con varias en vuelo, Detener mata TODAS
+          registerKillable: (k) => { this.runningTools.set(callKey, k); this.runningTool = k; },
           ownerId: this.sessionId,   // quién pide la acción (el navegador lo usa para no cruzar inventarios)
           mcp: this.mcp,             // servidores MCP del usuario (herramientas mcp__*)
+          loadedSkills: this._skillsLoaded,   // v2.2: skills ya cargadas en este turno
         });
       }
     } catch (e) { result = 'Error: ' + e.message; }
-    this.runningTool = null;
-    this.meta.toolCalls++;
-    const images = result && typeof result === 'object' ? result.images : undefined;
-    const text = result && typeof result === 'object' ? result.text : String(result);
-    return { action: 'ok', text, images, failed: typeof text === 'string' && text.startsWith('Error'), args, confirmed };
+    return result;
+  }
+
+  /**
+   * ¿Hace falta comprobar el resultado antes de aceptar el cierre?
+   * Sí cuando el run cambió varias cosas (2+ archivos, o archivo + comando) y
+   * nada lo comprobó después: ni una verificación delegada, ni un comando
+   * posterior a la última escritura. Una sola vez por run y desactivable en
+   * Ajustes (`verifyGate: false`).
+   */
+  /**
+   * v2.4: ¿toca revisar el cambio antes de cerrar? Se pide UNA vez por turno, solo si
+   * se ha escrito algo y solo si el usuario no lo ha desactivado (`reviewGate`).
+   * Si el propio modelo ya delegó en review, no se repite.
+   */
+  _needsReview(settings) {
+    if (this._reviewed) return false;
+    if (this._writes < 1) return false;
+    const policy = (settings && settings.settings) || {};
+    if (policy.reviewGate === false) return false;
+    const ws = policy.workspace || path.join(os.homedir(), 'Desktop', 'Sagitari');
+    return cambios.hay(ws);   // si no hay diff guardado, no hay nada que revisar
+  }
+
+  _needsVerification(settings) {
+    if (this._gateUsed) return false;
+    const policy = (settings && settings.settings) || {};
+    if (policy.verifyGate === false) return false;
+    const touched = this._writes >= 2 || (this._writes >= 1 && this._cmds >= 1);
+    if (!touched) return false;
+    if (this._verified) return false;
+    if (this._lastCmdSeq > this._lastWriteSeq) return false;   // ya se comprobó ejecutando
+    return true;
   }
 
   /**
    * v1.4: delega una subtarea en un subagente especializado. El subagente es
    * otro Agent con system prompt, herramientas y presupuesto propios; corre su
    * propio bucle y devuelve un RESULTADO ESTRUCTURADO al orquestador.
+   *
+   * v2.1: la subtarea viaja como brief (contexto + criterio de éxito + tablero de
+   * lo ya hecho + presupuesto) y el subagente recibe las SKILLS de su
+   * especialidad. El resultado queda en el tablero para las siguientes
+   * delegaciones del mismo run.
    */
   async _delegate(spec, args, ctx) {
     const t0 = Date.now();
     const taskText = String(args.task || '').slice(0, 2000);
     const context = String(args.context || '').slice(0, 2000);
+    /* v2.2: el criterio de éxito es obligatorio EN LA PRÁCTICA. Si el orquestador no lo
+       precisa, se cae a la petición original del usuario (el subagente trabaja siempre
+       contra un criterio, en vez de "hazlo bien"), y se le dice que es de reserva para
+       que pida precisión si le hace falta. */
+    const expectPedido = String(args.expect || '').trim();
+    const expect = (expectPedido || this._expectDeReserva()).slice(0, 1000);
+    const reserva = !expectPedido && !!expect;
     const ws = (ctx.settings.settings && ctx.settings.settings.workspace) || path.join(os.homedir(), 'Desktop', 'Sagitari');
+    // v2.2: el tablero del chat necesita saber que EMPIEZA una delegación (no solo que
+    // acaba): quién, qué y con qué criterio, en vivo.
+    this.emit({
+      type: 'delegate_start', subagent: spec.key, task: taskText, expect, reserve: reserva,
+      runId: (this.currentRun && !this.currentRun.closed) ? this.currentRun.runId : undefined,
+    });
     const sub = new Agent({
       fetchFn: this.fetchFn,
       emit: (e) => { try { this.emit({ ...e, subagent: spec.key }); } catch {} },
@@ -776,21 +1185,42 @@ class Agent {
       },
     });
     const signal = (this.abort && this.abort.signal) || new AbortController().signal;
-    this.subagent = sub;   // para que Detener/Pausar maten también su comando en curso
+    this.subagent = sub;              // para que Detener/Pausar maten también su comando en curso
+    this.subagents.add(sub);          // …y si van varios en paralelo, todos
     this.emit({ type: 'status', text: `${spec.emoji} ${spec.name}: ${taskText.slice(0, 80)}` });
+    // ---- skills del agente: índice de SU especialidad + las que encajan con esta
+    // subtarea (antes las skills solo existían en el hilo principal)
+    let skillsIndex = '';
+    let suggested = [];
+    try {
+      skillsIndex = skills.promptIndexSync(spec.key);
+      suggested = (await skills.suggestSkillsFor(`${taskText} ${context}`, { agent: spec.key, limit: 2 })).map(s => s.name);
+    } catch {}
+    const brief = subagents.buildSubagentBrief({
+      task: taskText,
+      context,
+      expect,
+      // lo que ya hicieron las otras delegaciones de este run (no se repite trabajo)
+      board: subagents.formatDelegationBoard(this._delegations),
+      budget: { steps: spec.maxSteps, note: 'pasos de herramienta de esta subtarea' },
+    });
     let finalText = '';
     try {
       await sub._runWithSystem(
-        subagents.subagentSystemPrompt(spec.key, ws),
+        subagents.subagentSystemPrompt(spec.key, ws, { skillsIndex, suggested }),
         ctx.settings,
-        (context ? `CONTEXTO DEL ORQUESTADOR: ${context}\n\n` : '') + `SUBTAREA: ${taskText}`,
+        brief,
         subagents.toolDefsFor(spec.key),
         signal,
-        (text) => { finalText = text; }
+        (text) => { finalText = text; },
+        // v2.2: enrutado por especialidad (si el usuario lo activó) — el verificador y el
+        // archivador no necesitan el modelo más caro para leer y comprobar
+        { category: spec.category, elegirPorCategoria: ctx.settings.settings?.agentRouting === true }
       );
     } catch (e) {
       return `RESULT: delegación fallida (${e.message})\nSTATUS: FAILED`;
     } finally {
+      this.subagents.delete(sub);
       this.subagent = null;
       // el gasto del subagente cuenta para el presupuesto global del usuario:
       // sin esto una delegación podía multiplicar el coste sin tope
@@ -801,14 +1231,34 @@ class Agent {
       }
     }
     const parsed = subagents.parseSubagentResult(finalText);
+    // v2.1: una verificación que no falla cuenta como prueba para el cierre
+    if (spec.key === 'verification' && parsed.status !== 'FAILED') this._verified = true;
+    // v2.4: si el propio modelo pidió la revisión, la puerta del cierre no la repite
+    if (spec.key === 'review') this._reviewed = true;
+    this._delegations.push({ agent: spec.key, task: taskText, status: parsed.status, result: parsed.result });
     runlog.log({ agent: 'sagitari', event: 'delegate', subagent: spec.key, status: parsed.status, durationMs: Date.now() - t0, task: taskText.slice(0, 120) });
-    this.emit({ type: 'delegate_done', subagent: spec.key, status: parsed.status, result: parsed.result });
-    return `RESULTADO DE ${spec.name} (${parsed.status}):\n${parsed.result}${parsed.details ? '\nDETALLES: ' + parsed.details : ''}`;
+    // el cierre viaja con lo que el subagente aportó (resultado, detalles y la
+    // evidencia): la tarjeta del chat puede entonces enseñarlo tal cual
+    this.emit({
+      type: 'delegate_done', subagent: spec.key, status: parsed.status,
+      // `task` viaja también para que la interfaz cierre la MISMA fila que abrió al
+      // empezar (evento delegate_start) en vez de buscar por agente
+      task: taskText,
+      result: parsed.result, details: parsed.details, evidence: parsed.evidence,
+      durationMs: Date.now() - t0,
+    });
+    const evidence = parsed.evidence ? `\nEVIDENCIA: ${parsed.evidence}` : '';
+    const board = subagents.formatDelegationBoard(this._delegations);
+    return `RESULTADO DE ${spec.name} (${parsed.status}):\n${parsed.result}${parsed.details ? '\nDETALLES: ' + parsed.details : ''}${evidence}${board ? `\n\nTABLERO DE ESTE TURNO (subagentes ya usados):\n${board}` : ''}`;
   }
 
-  /** Bucle independiente para subagentes: system prompt propio, herramientas
-      restringidas, sin checkpoint ni memoria; entrega la respuesta final por callback. */
-  async _runWithSystem(sys, settings, userText, tools, signal, onFinalText) {
+  /**
+   * Turno de un subagente: system prompt propio, herramientas restringidas, sin
+   * checkpoint ni memoria. Corre sobre el MISMO bucle que el orquestador (v2.2) con el
+   * perfil silencioso, así que hereda sus arreglos: detección de estancamiento, cierre de
+   * las tarjetas de herramienta y —nuevo— la cadena de modelos, que antes no existía aquí.
+   */
+  async _runWithSystem(sys, settings, userText, tools, signal, onFinalText, opts = {}) {
     const cfg = this.activeConfig(settings);
     if (!cfg || !cfg.baseUrl || !cfg.model) throw new Error('sin proveedor/modelo activo');
     this._mode = MODE_PROFILES.act;
@@ -819,64 +1269,45 @@ class Agent {
     if (!Number.isFinite(this._llmTimeoutMs) || this._llmTimeoutMs < 0) this._llmTimeoutMs = null;   // 0 = sin límite
     this.guardrails.model = cfg.model;
     this.guardrails.beginRun();
+    this._skillsLoaded = new Set();
     const messages = [{ role: 'system', content: sys }, { role: 'user', content: userText }];
-    while (true) {
-      if (!this.guardrails.checkStep().ok) break;
-      if (signal.aborted) break;
-      const res = await this._streamOnce(cfg, messages, signal, tools);
-      // los límites del usuario (tokens/coste) también cuentan dentro del subagente
-      if (res.usage) {
-        const tok = this.guardrails.addTokens(res.usage.total_tokens || 0, res.usage);
-        if (!tok.ok) { this.emit({ type: 'guardrail', reason: tok.reason }); break; }
-      }
-      if (res.aborted) break;
-      if (!res.toolCalls || !res.toolCalls.length) { onFinalText(res.text); return; }
-      const msg = { role: 'assistant', content: res.text || '', tool_calls: res.toolCalls };
-      if (!res.text) delete msg.content;
-      messages.push(msg);
-      // toda tool_call debe recibir su respuesta: cortar el bucle a mitad dejaría
-      // un assistant con tool_calls sin responder y la API devolvería 400
-      const answered = new Set();
-      const closePending = (reason) => {
-        for (const tc of res.toolCalls) {
-          if (answered.has(tc.id)) continue;
-          answered.add(tc.id);
-          messages.push({ role: 'tool', tool_call_id: tc.id, name: tc.function.name, content: reason });
-        }
-      };
-      for (const tc of res.toolCalls) {
-        if (signal.aborted) { closePending('(no ejecutada: ejecución detenida)'); break; }
-        // Mismo camino de ejecución que el bucle principal: antes esto era una
-        // copia que iba por detrás (sin alcance real de herramientas, sin marcar
-        // sensibilidad en la confirmación y sin los arreglos del otro bucle).
-        const r = await this._runToolCall(tc, {
-          signal, settings, tools, noDelegate: true,
-          onStatus: null,   // los pasos del subagente los resume el orquestador
-        });
-        if (r.action === 'limit') { closePending('(no ejecutada: límite de llamadas alcanzado)'); break; }
-        if (r.action === 'loop') { closePending('(no ejecutada: bucle detectado)'); break; }
-        if (r.action === 'aborted') { closePending('(no ejecutada: ejecución detenida)'); break; }
-        answered.add(tc.id);
-        const content = r.action === 'ok' && r.images && cfg.vision !== false
-          ? [{ type: 'text', text: r.text }, ...r.images.map(u => ({ type: 'image_url', image_url: { url: u } }))]
-          : r.text;
-        messages.push({ role: 'tool', tool_call_id: tc.id, name: tc.function.name, content });
-      }
-    }
-    // si el bucle terminó por límite/abort, entrega lo último que dijo el subagente
-    const lastAssistant = [...messages].reverse().find(m => m.role === 'assistant' && m.content);
-    onFinalText(lastAssistant ? String(lastAssistant.content) : '');
+    // v2.2: cadena de modelos TAMBIÉN aquí. Antes el subagente iba directo al modelo
+    // activo: un 500 o un timeout del proveedor tiraba la delegación entera (30 pasos de
+    // trabajo a la basura) mientras el hilo principal habría seguido con el secundario.
+    const { chain } = this._chainFor(settings, userText, opts);
+    await this._loop(messages, chain, signal, {
+      settings,
+      tools,                  // catálogo filtrado del subagente
+      history: false,
+      account: false,         // sin hábitos, checkpoints ni cierre verificado: es trabajo interno
+      task: null, taskId: null, runStart: null,
+      onStatus: null,         // los pasos del subagente los resume el orquestador
+      onFinal: onFinalText,
+      visionAllowsImages: cfg.vision !== false,
+      background: false,
+      // el razonamiento de un subagente es trabajo interno (y en Anthropic cuesta
+      // tokens aparte): no se pide ni se muestra, su cierre va en la tarjeta
+      showThinking: false,
+      // v2.5: el subagente también puede pedir varias cosas a la vez; el bloqueo por
+      // recurso es del EQUIPO, así que ni entre subagentes se pisan el navegador
+      parallelTools: Number(settings.settings?.parallelTools) || Agent.MAX_PARALELO,
+    });
   }
 
   /** v1.6: recorre la cadena de modelos; si uno falla (HTTP/red), prueba el
       siguiente y registra la salud de cada intento. */
-  async _streamWithFallback(chain, messages, signal) {
+  async _streamWithFallback(chain, messages, signal, toolsOverride = null, opts = {}) {
     let lastErr = null;
+    let intento = 0;
     for (const entry of chain) {
       const t0 = Date.now();
       const cfg = { ...entry, format: entry.format || protocols.detectFormat(entry) };
+      /* Un intento anterior pudo dejar razonamiento a medias en la interfaz: al saltar
+         de modelo se avisa para que el bloque se vacíe, en vez de mezclar lo que pensó
+         el modelo que falló con lo que piensa el que responde. */
+      if (intento++ && opts.thinking) this.emit({ type: 'thinking_reset' });
       try {
-        const res = await this._streamOnce(cfg, messages, signal);
+        const res = await this._streamOnce(cfg, messages, signal, toolsOverride, opts);
         models.record(entry.model, {
           ok: !res.aborted,
           durationMs: Date.now() - t0,
@@ -902,24 +1333,73 @@ class Agent {
   }
 
   /**
+   * Cadena de modelos de un turno: el primario activo y, si procede, los secundarios que
+   * ordena el router según la tarea. La usan el orquestador Y los subagentes (v2.2: antes
+   * un subagente iba directo al modelo activo, así que un hipo del proveedor tiraba la
+   * delegación entera mientras el hilo principal habría cambiado de modelo).
+   */
+  _chainFor(settings, text, opts = {}) {
+    const cfg = this.activeConfig(settings);
+    const primary = { providerId: cfg.providerId, name: cfg.name, baseUrl: cfg.baseUrl, apiKey: cfg.apiKey, model: cfg.model, role: 'primary' };
+    const category = opts.category || models.classify(text, { hasImage: !!opts.hasImage });
+    let chain = settings.settings?.modelRouting === false ? [primary] : models.fallbackChain(settings, category);
+    if (!chain.length) chain = [primary];
+    /* v2.2: modelo por agente (opcional, `agentRouting`). El modelo ELEGIDO por el usuario
+       manda siempre en el chat —hubo una queja legítima cuando el router lo cambiaba en
+       silencio—; esto solo afecta a los subagentes, y solo si el usuario lo activa: al que
+       verifica o al que archiva le vale el modelo barato del proveedor. Se busca en la
+       lista REAL del proveedor del modelo activo; si no hay lista, no se toca nada. */
+    if (opts.elegirPorCategoria && chain.length) {
+      const prov = (settings.providers || []).find(p => p.id === (settings.active || {}).providerId);
+      const lista = (prov && Array.isArray(prov.models)) ? prov.models : [];
+      const elegido = lista.length ? models.pickModelFor(lista, category) : null;
+      if (elegido && elegido !== chain[0].model) {
+        chain = [{ ...chain[0], model: elegido, format: protocols.detectFormat({ baseUrl: chain[0].baseUrl, providerId: chain[0].providerId, model: elegido }) }, ...chain.slice(1)];
+      }
+    }
+    return { cfg, category, chain };
+  }
+
+  /**
    * Una vuelta del modelo con el protocolo adecuado al proveedor/modelo.
    * El multi-formato (OpenAI / Anthropic / Responses) vive en agent/protocols.js:
    * aquí solo se fija la temperatura del modo y se reenvían los deltas a la UI.
    */
-  async _streamOnce(cfg, messages, signal, toolsOverride = null) {
+  async _streamOnce(cfg, messages, signal, toolsOverride = null, opts = {}) {
     const temperature = cfg.temperature ?? (this._mode ? this._mode.temperature : 0.4);
+    /* Razonamiento visible: se emite a la interfaz SOLO si el usuario lo activó
+       (`showThinking`), y el protocolo solo lo PIDE donde hay que pedirlo (Anthropic
+       y la API Responses). En los compatibles con OpenAI llega igualmente, y cuando
+       el ajuste está apagado sencillamente no se reenvía. */
+    const verRazon = opts.thinking === true;
     return protocols.stream(
-      { ...cfg, temperature, sessionId: this.sessionId, silenceTimeoutMs: this._llmTimeoutMs ?? undefined },
+      { ...cfg, temperature, sessionId: this.sessionId, silenceTimeoutMs: this._llmTimeoutMs ?? undefined, thinking: verRazon },
       {
         fetchFn: this.fetchFn,
         messages,
         tools: toolsOverride || allToolDefs(),
         signal,
         onText: (text) => this.emit({ type: 'delta', text }),
+        onThinking: verRazon ? (text) => this.emit({ type: 'thinking_delta', text }) : undefined,
       }
     );
   }
 }
+
+/* Instrucción del cierre verificado: el modelo ya respondió, así que no debe
+   repetir la respuesta — solo comprobar y añadir la prueba. */
+/* Instrucción de la revisión del cambio: el modelo ya respondió, así que no repite la
+   respuesta — solo atiende lo que el revisor encontró. */
+const REVIEW_GATE_PROMPT = `ANTES DE CERRAR: has modificado archivos en este turno y el equipo de revisión ha mirado el cambio. Sus hallazgos van abajo.
+1. BLOQUEANTE: arréglalo con herramientas ahora y vuelve a comprobar. No lo dejes escrito y sin arreglar.
+2. RIESGO: decide — arréglalo, o explica en una línea por qué se queda así.
+3. SUGERENCIA: no obliga; ignóralas si no aportan.
+4. No repitas la respuesta que ya diste (el usuario ya la tiene). Añade solo lo que cambia: una línea por hallazgo atendido, o «Revisado: sin hallazgos» si venía OK.`;
+
+const VERIFY_GATE_PROMPT = `ANTES DE CERRAR: has modificado archivos o ejecutado cambios en este turno y no hay ninguna comprobación posterior al último cambio. No cierres a ciegas.
+1. Comprueba de verdad el resultado con herramientas: vuelve a leer lo escrito, ejecuta lo que creaste o modifica y mira la salida, o delega en verification con un criterio de éxito verificable (delegate con agent=verification y expect).
+2. Si algo no cuadra, arréglalo antes de cerrar.
+3. NO repitas la respuesta que ya diste (el usuario ya la tiene). Termina con una sola línea: «Verificado: <qué comprobaste y qué salió>». Si no pudiste comprobar algo, dilo en esa misma línea.`;
 
 function statusFor(name, args) {
   if (String(name).startsWith('mcp__')) return 'MCP · ' + (args._mcp ? args._mcp.toolName : name.slice(5));

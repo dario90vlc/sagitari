@@ -1,7 +1,18 @@
 ---
 name: automatizacion
 description: Automatización de tareas en Windows. Usar cuando el usuario quiera automatizar procesos repetitivos, programar tareas o encadenar acciones del sistema.
-version: 1.0.0
+version: 1.1.0
+category: Sistema
+agents:
+  - orchestrator
+  - coding
+  - browser
+  - file
+triggers:
+  - automatiza
+  - cada dia
+  - programar tarea
+  - repetitivo
 ---
 
 # Skill: Automatización

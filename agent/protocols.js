@@ -19,8 +19,11 @@
      detectFormat({ baseUrl, providerId, model, format }) → 'openai'|'anthropic'|'responses'
      authHeaders(cfg, format)                             → cabeceras (Bearer o x-api-key)
      buildBody(format, cfg, messages, tools)              → cuerpo completo de la petición
-     stream(cfg, { fetchFn, messages, tools, signal, onText })
-        → { text, toolCalls, usage, aborted }   (toolCalls en formato OpenAI unificado)
+     stream(cfg, { fetchFn, messages, tools, signal, onText, onThinking })
+        → { text, toolCalls, usage, reasoning, aborted }   (toolCalls en formato OpenAI unificado)
+
+   `onThinking` y `reasoning` son el razonamiento del modelo, cuando el usuario
+   pide verlo (ver needsThinkingFlag): nunca sustituyen a `text`.
 
    Unificado: el resto del agente sigue viendo `messages` estilo OpenAI
    (role assistant+tool_calls / role tool+tool_call_id) y `toolCalls` con
@@ -56,6 +59,55 @@ const OPENCODE_MODEL_FORMAT = {
 };
 
 const norm = (s) => String(s || '').toLowerCase().trim();
+
+/* ------------------------------------------------------------------------ *
+ *  Razonamiento visible (opcional)
+ *
+ *  Cada proveedor cuenta lo que «piensa» a su manera y solo lo hace si se le
+ *  pide: Anthropic necesita habilitar el razonamiento ampliado (con su propio
+ *  presupuesto de tokens), OpenAI solo lo resume en la API Responses, y los
+ *  compatibles con OpenAI (DeepSeek, Qwen, OpenRouter, llama.cpp…) lo mandan
+ *  ellos solos en `reasoning_content`. Aquí solo se CAPTURA lo que llegue;
+ *  pedirlo o no lo decide el agente con el ajuste del usuario, porque
+ *  habilitarlo cuesta tokens y en algunas cuentas no está disponible.
+ * ------------------------------------------------------------------------ */
+/** Modelos de Anthropic con razonamiento ampliado (Claude 3.7 y familia 4). */
+const ANTHROPIC_THINKING = /claude-(?:3[.-]7|4|opus|sonnet|haiku)/;
+/** Modelos de OpenAI que resumen su razonamiento en /responses (serie o y GPT-5+). */
+const OPENAI_REASONING = /^(?:o\d|gpt-5|gpt-6|gpt-7)/;
+
+/**
+ * Presupuesto de razonamiento de Anthropic: la API exige que sea ≥1024 y MENOR
+ * que max_tokens (el total, razonamiento incluido), así que se deja la mitad
+ * para la respuesta. Devuelve 0 si no cabe, y entonces no se pide.
+ */
+function thinkingBudget(maxTokens) {
+  const max = Number(maxTokens) || 4096;
+  if (max <= 1024) return 0;
+  return Math.max(1024, Math.min(4096, Math.floor(max / 2)));
+}
+
+/** ¿Este proveedor tiene que habilitar el razonamiento para mandarlo? */
+function needsThinkingFlag(cfg, format) {
+  if (!cfg.thinking) return false;
+  if (format === 'anthropic') return ANTHROPIC_THINKING.test(norm(cfg.model));
+  if (format === 'responses') return OPENAI_REASONING.test(norm(cfg.model));
+  return false;   // openai: quien lo tenga lo manda sin pedir permiso
+}
+
+/**
+ * Primer trozo de razonamiento de un delta de /chat/completions. Los
+ * proveedores no se ponen de acuerdo ni en el nombre del campo, así que se
+ * miran los tres que se usan de verdad.
+ */
+function reasoningDelta(delta) {
+  if (!delta || typeof delta !== 'object') return '';
+  for (const k of ['reasoning_content', 'reasoning', 'thinking']) {
+    const v = delta[k];
+    if (typeof v === 'string' && v) return v;
+  }
+  return '';
+}
 
 /**
  * Decide el protocolo de una petición.
@@ -252,7 +304,7 @@ function buildBodyOpenAI(cfg, messages, tools) {
   return body;
 }
 
-async function streamOpenAI(cfg, { fetchFn, messages, tools, signal, onText }) {
+async function streamOpenAI(cfg, { fetchFn, messages, tools, signal, onText, onThinking }) {
   const url = joinUrl(cfg.baseUrl, '/chat/completions');
   const resp = await fetchFn(url, {
     method: 'POST',
@@ -263,6 +315,7 @@ async function streamOpenAI(cfg, { fetchFn, messages, tools, signal, onText }) {
   if (!resp.ok) throw httpError(resp, cfg, await resp.text().catch(() => ''));
 
   let text = '';
+  let reasoning = '';
   let usage = null;
   let first = true;
   const toolCalls = [];
@@ -273,6 +326,15 @@ async function streamOpenAI(cfg, { fetchFn, messages, tools, signal, onText }) {
     if (json.usage) usage = json.usage;
     const delta = json.choices?.[0]?.delta;
     if (!delta) return;
+    /* Razonamiento: DeepSeek y compañía lo mandan en `reasoning_content`; otros
+       (OpenRouter, algunos servidores locales) en `reasoning` o `thinking`. Se
+       captura aunque venga sin habérselo pedido, pero el agente solo lo emite a
+       la interfaz si el usuario activó verlo. */
+    const razon = reasoningDelta(delta);
+    if (razon) {
+      reasoning += razon;
+      if (onThinking) onThinking(razon);
+    }
     if (delta.content) {
       if (first && /^\s*$/.test(delta.content)) return;
       first = false;
@@ -290,6 +352,7 @@ async function streamOpenAI(cfg, { fetchFn, messages, tools, signal, onText }) {
   return {
     text: text.trim(),
     toolCalls: toolCalls.filter(Boolean).filter(t => t.function.name),
+    reasoning: reasoning.trim(),
     aborted,
     usage,
   };
@@ -384,7 +447,12 @@ function buildBodyAnthropic(cfg, messages, tools) {
     stream: true,
     messages: msgs,
   };
-  if (typeof cfg.temperature === 'number' && cfg.temperature > 0) body.temperature = cfg.temperature;
+  /* Razonamiento ampliado (si el usuario lo activó y el modelo lo soporta). Con
+     `thinking` habilitado la API RECHAZA cualquier temperatura distinta de 1, así
+     que se omite en vez de fallar la petición entera. */
+  const budget = needsThinkingFlag(cfg, 'anthropic') ? thinkingBudget(cfg.maxTokens) : 0;
+  if (budget) body.thinking = { type: 'enabled', budget_tokens: budget };
+  else if (typeof cfg.temperature === 'number' && cfg.temperature > 0) body.temperature = cfg.temperature;
   if (system) body.system = system;
   if (tools && tools.length) {
     body.tools = tools.map(t => ({
@@ -396,7 +464,7 @@ function buildBodyAnthropic(cfg, messages, tools) {
   return body;
 }
 
-async function streamAnthropic(cfg, { fetchFn, messages, tools, signal, onText }) {
+async function streamAnthropic(cfg, { fetchFn, messages, tools, signal, onText, onThinking }) {
   const url = joinUrl(cfg.baseUrl, '/messages');
   const resp = await fetchFn(url, {
     method: 'POST',
@@ -407,6 +475,7 @@ async function streamAnthropic(cfg, { fetchFn, messages, tools, signal, onText }
   if (!resp.ok) throw httpError(resp, cfg, await resp.text().catch(() => ''));
 
   let text = '';
+  let reasoning = '';
   let usage = null;
   let failure = null;
   const blocks = new Map();   // index -> { id, name, args }
@@ -431,11 +500,16 @@ async function streamAnthropic(cfg, { fetchFn, messages, tools, signal, onText }
       case 'content_block_delta': {
         const d = json.delta || {};
         if (d.type === 'text_delta' && d.text) { text += d.text; onText(d.text); }
+        // razonamiento ampliado: solo llega si se habilitó en el cuerpo
+        else if (d.type === 'thinking_delta' && d.thinking) {
+          reasoning += d.thinking;
+          if (onThinking) onThinking(d.thinking);
+        }
         else if (d.type === 'input_json_delta') {
           const b = blocks.get(json.index ?? 0);
           if (b) b.args += d.partial_json || '';
         }
-        break;   // thinking_delta se ignora: no exponemos el razonamiento interno
+        break;
       }
       case 'message_delta':
         if (json.usage?.output_tokens != null) {
@@ -455,6 +529,7 @@ async function streamAnthropic(cfg, { fetchFn, messages, tools, signal, onText }
   return {
     text: text.trim(),
     toolCalls: [...blocks.values()].map(b => ({ id: b.id, type: 'function', function: { name: b.name, arguments: b.args || '{}' } })),
+    reasoning: reasoning.trim(),
     aborted,
     usage,
   };
@@ -505,6 +580,8 @@ function buildBodyResponses(cfg, messages, tools) {
   const body = { model: cfg.model, stream: true, input };
   if (instructions) body.instructions = instructions;
   if (typeof cfg.temperature === 'number') body.temperature = cfg.temperature;
+  // resumen del razonamiento (solo modelos que lo soportan; en los demás sería un 400)
+  if (needsThinkingFlag(cfg, 'responses')) body.reasoning = { summary: 'auto' };
   if (cfg.maxTokens) body.max_output_tokens = cfg.maxTokens;
   if (tools && tools.length) {
     body.tools = tools.map(t => ({
@@ -517,7 +594,7 @@ function buildBodyResponses(cfg, messages, tools) {
   return body;
 }
 
-async function streamResponses(cfg, { fetchFn, messages, tools, signal, onText }) {
+async function streamResponses(cfg, { fetchFn, messages, tools, signal, onText, onThinking }) {
   const url = joinUrl(cfg.baseUrl, '/responses');
   const resp = await fetchFn(url, {
     method: 'POST',
@@ -528,6 +605,7 @@ async function streamResponses(cfg, { fetchFn, messages, tools, signal, onText }
   if (!resp.ok) throw httpError(resp, cfg, await resp.text().catch(() => ''));
 
   let text = '';
+  let reasoning = '';
   let usage = null;
   let failure = null;
   const calls = new Map();   // item_id -> { id, name, args }
@@ -538,6 +616,14 @@ async function streamResponses(cfg, { fetchFn, messages, tools, signal, onText }
     switch (type) {
       case 'response.output_text.delta':
         if (json.delta) { text += json.delta; onText(json.delta); }
+        break;
+      // resumen del razonamiento (se pide con reasoning.summary = 'auto')
+      case 'response.reasoning_summary_text.delta':
+      case 'response.reasoning_text.delta':
+        if (json.delta) {
+          reasoning += json.delta;
+          if (onThinking) onThinking(json.delta);
+        }
         break;
       case 'response.output_item.added':
         if (json.item?.type === 'function_call') {
@@ -568,6 +654,7 @@ async function streamResponses(cfg, { fetchFn, messages, tools, signal, onText }
   return {
     text: text.trim(),
     toolCalls: [...calls.values()].map(c => ({ id: c.id, type: 'function', function: { name: c.name, arguments: c.args || '{}' } })),
+    reasoning: reasoning.trim(),
     aborted,
     usage,
   };
@@ -597,5 +684,6 @@ module.exports = {
   FORMATS, OPENCODE_MODEL_FORMAT, DEFAULT_SILENCE_MS, detectFormat, authHeaders,
   buildBodyOpenAI, buildBodyAnthropic, buildBodyResponses,
   toAnthropicMessages, toResponsesInput, parseSSEBlock, textOf, imagesOf,
+  needsThinkingFlag, thinkingBudget, reasoningDelta,
   stream,
 };

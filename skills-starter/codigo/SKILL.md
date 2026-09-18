@@ -1,7 +1,18 @@
 ---
 name: codigo
 description: Escritura y revisión de código de calidad. Usar al programar, refactorizar, depurar, escribir scripts o revisar PRs.
-version: 1.0.0
+version: 1.1.0
+category: Desarrollo
+agents:
+  - orchestrator
+  - coding
+  - verification
+triggers:
+  - programa
+  - arregla el bug
+  - refactoriza
+  - escribe un script
+  - tests
 ---
 
 # Skill: Código

@@ -33,9 +33,9 @@ The recommended option is the Windows installer:
 
 | Package | Description |
 |---|---|
-| [**SAGITARI-Setup-3.1.1.exe**](https://github.com/dario90vlc/sagitari/releases/download/v3.1.1/SAGITARI-Setup-3.1.1.exe) | Installer with shortcuts and uninstaller |
-| [**SAGITARI-Portable-3.1.1.exe**](https://github.com/dario90vlc/sagitari/releases/download/v3.1.1/SAGITARI-Portable-3.1.1.exe) | Single executable, no installation |
-| [**Release notes**](https://github.com/dario90vlc/sagitari/releases/tag/v3.1.1) | Changes, security fixes, and SHA-256 hashes |
+| [**SAGITARI-Setup-3.2.0.exe**](https://github.com/dario90vlc/sagitari/releases/download/v3.2.0/SAGITARI-Setup-3.2.0.exe) | Installer with shortcuts and uninstaller |
+| [**SAGITARI-Portable-3.2.0.exe**](https://github.com/dario90vlc/sagitari/releases/download/v3.2.0/SAGITARI-Portable-3.2.0.exe) | Single executable, no installation |
+| [**Release notes**](https://github.com/dario90vlc/sagitari/releases/tag/v3.2.0) | Changes, security fixes, and SHA-256 hashes |
 
 > **Windows SmartScreen:** the binaries are currently unsigned, so Windows may show a warning on the first run. Choose *More info → Run anyway* if you trust the download. Verify the SHA-256 hash published in the release notes.
 
@@ -46,9 +46,11 @@ The recommended option is the Windows installer:
 ### An agent that executes
 
 - **Terminal and files** — inspect, create, edit, and organize work in your filesystem.
-- **Browser automation** — control Chrome or Edge through DevTools Protocol: navigate, click, type, read, manage tabs, and capture screenshots.
 - **Desktop actions** — open applications and URLs, manage windows, clipboard, notifications, and multimedia.
-- **Vision and attachments** — attach images, code, documents, and text files; images can be sent to vision-capable models.
+- **Browser v2** — drives Chrome or Edge like a person: an inventory with each control's **accessible name** (even icon-only buttons), inside **web components and iframes**, clicks re-located by fingerprint that warn when something covers them, real waits (`wait_for`), console and network errors (`logs`), dialogs, file uploads, keyboard shortcuts, lists and checkboxes, history, and downloads into a known folder.
+- **Parallel work** — orders in the same message run at once behind **per-resource locks**: there is only one browser, disk writes queue up, and Stop kills everything in flight.
+- **Code with a safety net** — it knows how **your** project is verified (tests, build, lint) and syntax-checks every file as it writes it, so the error comes back right away instead of three steps later. `apply_patch` makes several edits across several files at once (all of them or none) and, before handing you anything as done, a **review agent** reads the turn's diff looking for what's wrong (broken contracts, missed edge cases, leftovers of the old name). Turn it off in Settings ▸ Delegation and verification.
+- **Project map** — on large projects it indexes files and symbols (`repo_map`, `find_symbol`) instead of reading them one by one, so it doesn't get lost in 100,000 lines or settle for four local edits.
 
 ### Flexible intelligence
 
@@ -66,6 +68,7 @@ The recommended option is the Windows installer:
 - Six accent palettes plus live glow color and intensity controls.
 - Separate conversations, live agent telemetry, structured local run logs, and optional developer metrics.
 - Voice input through Windows speech recognition and text-to-speech output.
+- **Visible reasoning (optional)**: reasoning models (Claude, the o-series and GPT-5, DeepSeek R1…) show their thinking in a collapsible block above the answer; it streams live while they think, folds itself as soon as they start answering, and is never read out loud. Turn it on in Settings ▸ Agent.
 - **Voice mode**: press the mic and talk; the assistant hears you, does the work and answers out loud. Hands-free: it sends when you stop talking, it shows you the text while you speak and starts answering out loud as soon as it has the first sentence instead of waiting for the whole reply. If you speak while it talks, it shuts up and listens; and you can stop it by saying “para” or with the panel's **Parar** button. Everything stays on your machine, with a local neural voice (Piper) and high-accuracy local dictation (Whisper) installable from Settings. `Alt`+click on the mic keeps the classic dictation into the text box.
 
 ## Safety first
@@ -136,7 +139,7 @@ npm run uicheck           # exercise the live renderer
 npm run dist              # build NSIS installer + portable executable
 ```
 
-The release workflow runs syntax checks, tests, smoke, UI checks, builds both Windows artifacts, verifies the output, generates release notes, and publishes SHA-256 hashes. The release tag must match the version in `package.json` — for this release, `v3.1.1`.
+The release workflow runs syntax checks, tests, smoke, UI checks, builds both Windows artifacts, verifies the output, generates release notes, and publishes SHA-256 hashes. The release tag must match the version in `package.json` — for this release, `v3.2.0`.
 
 ## Project structure
 
