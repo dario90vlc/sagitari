@@ -1797,6 +1797,7 @@ ipcMain.handle('update:download', async () => {
     const dl = await updater.downloadTo(asset.url, target.path, { onProgress: (p) => sendUpdate({ type: 'progress', ...p }) });
     // el sha512 publicado manda: si no cuadra, ese archivo no se ejecuta
     let expected = null;
+    let errorYml = null;
     if (r.assets && r.assets.yml) {
       try {
         const y = await (await fetch(r.assets.yml.url, { headers: { 'User-Agent': 'SAGITARI-updater' }, signal: AbortSignal.timeout(15000) })).text();
@@ -1805,21 +1806,27 @@ ipcMain.handle('update:download', async () => {
         // edición portable no podía actualizarse nunca porque se comparaba contra
         // el hash del Setup (updater.sha512For documenta la regla).
         expected = updater.sha512For(parsed, asset.name);
-      } catch {}
+      } catch (e) { errorYml = e.message; }
     }
+    // Por qué no hay firma con la que comparar. Antes se contaba siempre como «la
+    // release no publica latest.yml», que era falso y despistaba cuando el yml
+    // existía pero no listaba este binario (le pasó al portable en la 3.2.1).
+    const motivo = updater.motivoSinFirma({
+      tieneYml: !!(r.assets && r.assets.yml), assetName: asset.name, expected, error: errorYml,
+    });
     // Sin hash publicado no hay verificación posible: se descarta igual que si
     // no cuadrara. Antes `expected === null` dejaba `verified` en null y el
     // binario se marcaba como listo para ejecutarse SIN comprobar nada.
     const verified = expected ? expected === dl.sha512 : false;
     if (verified !== true) {
       await fsp.rm(target.path, { force: true }).catch(() => {});
-      runlog.log({ agent: 'sagitari', event: 'update_verify_failed', version: r.latest, reason: expected ? 'hash' : 'sin hash publicado' });
+      runlog.log({ agent: 'sagitari', event: 'update_verify_failed', version: r.latest, asset: asset.name, reason: expected ? 'hash' : motivo });
       sendUpdate({ type: 'error', message: expected
         ? 'La descarga no coincide con la firma publicada; se ha descartado.'
-        : 'La release no publica la firma sha512 del binario; se ha descartado por seguridad.' });
+        : 'La release no publica la firma sha512 de este archivo; se ha descartado por seguridad.' });
       return { ok: false, error: expected
         ? 'la verificación sha512 falló: el archivo se ha descartado'
-        : 'no se pudo verificar la descarga (la release no publica latest.yml): descartada' };
+        : motivo + ': descartado por seguridad. Puedes instalarlo a mano desde ' + (r.url || 'https://github.com/' + updater.REPO + '/releases') };
     }
     updateReady = { path: target.path, name: asset.name, verified, expected, version: r.latest, kind };
     // firma Authenticode: se consulta para poder decírselo al usuario. El hash

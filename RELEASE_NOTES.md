@@ -1,3 +1,67 @@
+# SAGITARI 3.2.2
+
+**El portable ya puede actualizarse solo.** La app verifica cada descarga contra la firma
+publicada en la release, y ese manifiesto (`latest.yml`) solo llevaba la firma del **instalador**:
+quien usaba el portable descargaba los 110 MB y los veía desaparecer con un «no se pudo verificar la
+descarga», sin manera de avanzar. Ahora la release publica la firma de **los dos** binarios, y el
+CI **se niega a publicar** si alguno se queda sin firmar, así que no puede repetirse. / **The
+portable can update itself now.** The app verifies every download against the signature published in
+the release, and that manifest (`latest.yml`) only carried the **installer's** signature: portable
+users downloaded 110 MB and watched them vanish with a “the download could not be verified”, with no
+way forward. The release now publishes the signature of **both** binaries, and CI **refuses to
+publish** if any of them is unsigned, so it cannot happen again.
+
+> **Si vienes de la 3.1.1 o de cualquier versión anterior y usas la edición INSTALADA, este salto
+> hay que hacerlo a mano UNA vez** —descarga el instalador de esta página y ejecútalo—, porque
+> esas versiones llevan el lanzador del instalador roto (corregido en la 3.2.1). Si usas el
+> **portable**, no hace falta: descarga el portable nuevo y sustitúyelo. / **If you are on 3.1.1 or
+> any earlier version and you use the INSTALLED edition, you have to take this step by hand ONCE**
+> —download the installer from this page and run it— because those versions carry the broken
+> installer launcher (fixed in 3.2.1). If you use the **portable**, you do not need to: download
+> the new portable and replace it.
+
+## Correcciones / Fixes
+
+- **La release firma todos sus binarios, no solo el instalador.** El `latest.yml` que genera
+  electron-builder describe únicamente el Setup, así que el portable no tenía ninguna firma contra
+  la que compararse y la app lo descartaba por seguridad —correctamente, pero sin salida—. El
+  workflow ahora completa el manifiesto con la firma sha512 de **cada** `.exe` del `dist/` antes de
+  publicar, y usa para ello **el mismo lector que la app** (`main/updater.js`): lo que se publica es
+  exactamente lo que la app va a ver. / **The release signs all its binaries, not just the
+  installer.** The `latest.yml` electron-builder generates only describes the Setup, so the portable
+  had no signature to compare against and the app discarded it for safety —correctly, but with no
+  way out—. The workflow now completes the manifest with the sha512 of **every** `.exe` in `dist/`
+  before publishing, using **the same reader as the app** (`main/updater.js`): what is published is
+  exactly what the app will look at.
+- **Y no se publica a medias: el CI lo comprueba.** Antes de subir nada, el workflow verifica que
+  cada binario tenga su firma en el manifiesto **y que esa firma sea la del binario** (no la de
+  otro); si algo falla, la release no sale. Es el mismo gate que hoy habría parado la 3.2.1. /
+  **And nothing ships half-signed: CI checks it.** Before uploading anything, the workflow verifies
+  that every binary has its signature in the manifest **and that the signature is that binary's**
+  (not another one's); if anything fails, the release does not go out. It is the same gate that
+  would have stopped 3.2.1 today.
+- **Cuando algo no se puede verificar, la app lo dice de verdad.** El aviso era «la release no
+  publica latest.yml» aunque el manifiesto existiera: ahora distingue si falta el manifiesto, si no
+  se pudo leer o si la release no firma **ese** archivo (con su nombre), y añade el enlace de la
+  release para instalarlo a mano, así que el usuario nunca se queda en un «no se pudo descargar» sin
+  saber qué hacer. / **When something cannot be verified, the app now says the truth.** The message
+  used to be “the release does not publish latest.yml” even when the manifest existed: it now
+  distinguishes whether the manifest is missing, could not be read, or does not sign **that** file
+  (naming it), and adds the release link to install it by hand, so the user is never left with a
+  “could not download” and nothing to do.
+
+## Cómo viene probado / How it is tested
+
+- **335 pruebas en verde**, dos nuevas: el manifiesto se completa de verdad en una carpeta de
+  prueba (firma correcta de cada binario, el hash superior sigue siendo el del Setup, idempotente y
+  corrige una firma equivocada) y el gate del CI **falla** si un binario se queda sin firma —la
+  regresión exacta de la 3.2.1—. / **335 tests green**, two new: the manifest is really completed in
+  a test folder (each binary's correct signature, the top-level hash still the Setup's, idempotent,
+  and it fixes a wrong signature) and the CI gate **fails** when a binary is left unsigned —the exact
+  3.2.1 regression—.
+- Y el texto que ve el usuario cuando una descarga no se puede verificar, con sus cuatro casos. /
+  And the message the user sees when a download cannot be verified, with its four cases.
+
 # SAGITARI 3.2.1
 
 **La actualización ya se instala de verdad.** Hasta ahora, pulsar **Cerrar e instalar** cerraba la

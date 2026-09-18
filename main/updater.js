@@ -107,6 +107,22 @@ function sha512For(parsed, assetName) {
   return parsed.path === assetName ? (parsed.sha512 || null) : null;
 }
 
+/**
+ * Por qué no hay firma publicada con la que verificar `assetName` (null si la hay).
+ *
+ * La app descarta cualquier binario que no pueda verificar, así que este texto es
+ * lo único que el usuario llega a leer: decía siempre «la release no publica
+ * latest.yml» y eso era falso en el fallo de la 3.2.1 —el yml existía y estaba
+ * bien, solo que el que genera electron-builder firma el Setup y no el portable,
+ * así que la edición portable descargaba 110 MB y los tiraba sin explicar por qué.
+ */
+function motivoSinFirma({ tieneYml, assetName, expected, error } = {}) {
+  if (expected) return null;
+  if (!tieneYml) return 'la release no publica latest.yml';
+  if (error) return 'no se pudo leer el latest.yml de la release (' + error + ')';
+  return 'esta release no publica la firma de ' + assetName + ' (latest.yml solo firma el instalador)';
+}
+
 /** sha512 en base64 (el formato que usa latest.yml), o null si no se pudo leer. */
 function sha512Of(file) {
   try { return crypto.createHash('sha512').update(fs.readFileSync(file)).digest('base64'); } catch { return null; }
@@ -349,4 +365,4 @@ function hostKind({ isPackaged, env = process.env } = {}) {
   return env.PORTABLE_EXECUTABLE_DIR ? 'portable' : 'nsis';
 }
 
-module.exports = { REPO, API_LATEST, parseVersion, compareVersions, pickAssets, assetFor, parseLatestYml, sha512For, sha512Of, checkForUpdate, downloadTarget, downloadTo, hostKind, signatureOf, installHelperScript, afterExitCommand, pendingFor };
+module.exports = { REPO, API_LATEST, parseVersion, compareVersions, pickAssets, assetFor, parseLatestYml, sha512For, motivoSinFirma, sha512Of, checkForUpdate, downloadTarget, downloadTo, hostKind, signatureOf, installHelperScript, afterExitCommand, pendingFor };

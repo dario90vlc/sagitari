@@ -2874,6 +2874,76 @@ test('updater: una instalación a medias se recuerda solo mientras sirva', () =>
   eq(updater.pendingFor('basura', '3.2.0'), null);
 });
 
+test('updater: el motivo de no tener firma dice la verdad', () => {
+  // El texto que ve el usuario cuando se descarta una descarga. Decía siempre «la
+  // release no publica latest.yml» y en la 3.2.1 eso era mentira: el yml estaba,
+  // solo que no firmaba el portable, así que no había forma de saber qué pasaba.
+  eq(updater.motivoSinFirma({ tieneYml: true, assetName: 'x.exe', expected: 'abc' }), null, 'con firma no hay motivo');
+  ok(/no publica latest\.yml$/.test(updater.motivoSinFirma({ tieneYml: false, assetName: 'SAGITARI-Portable-3.2.1.exe' })),
+    'sin yml se dice que falta el manifiesto');
+  const sinEntrada = updater.motivoSinFirma({ tieneYml: true, assetName: 'SAGITARI-Portable-3.2.1.exe' });
+  ok(/no publica la firma de SAGITARI-Portable-3\.2\.1\.exe/.test(sinEntrada), 'si el yml está pero no firma ESTE archivo, se dice cuál: ' + sinEntrada);
+  ok(/no publica la firma de/.test(updater.motivoSinFirma({ tieneYml: true, assetName: 'x.exe' })),
+    'y no se confunde con «la release no publica latest.yml»');
+  ok(/no se pudo leer/.test(updater.motivoSinFirma({ tieneYml: true, assetName: 'x.exe', error: 'timeout' })),
+    'si el yml no se pudo leer, se dice eso, no que no exista');
+});
+
+test('updater: latest.yml firma TODOS los binarios y el CI corta si falta alguno', () => {
+  // Regresión de la 3.2.1: electron-builder solo firma el Setup, así que la edición
+  // portable descargaba 110 MB, no encontraba su firma y los tiraba. Este es el
+  // gate del workflow: con el portable sin firmar, la release no se publica.
+  const { spawnSync } = require('child_process');
+  const script = path.join(__dirname, '..', 'scripts', 'latest-yml.js');
+  const dir = tmpDir('sagi-latest-yml-');
+  const setup = 'SAGITARI-Setup-9.9.9.exe';
+  const portable = 'SAGITARI-Portable-9.9.9.exe';
+  for (const f of [setup, portable]) fs.writeFileSync(path.join(dir, f), 'binario falso de prueba: ' + f);
+  const sha = (f) => updater.sha512Of(path.join(dir, f));
+  const correr = (extra = []) => spawnSync(process.execPath, [script, dir, ...extra], { cwd: path.join(__dirname, '..'), encoding: 'utf8' });
+  const escribirYml = (contenido) => fs.writeFileSync(path.join(dir, 'latest.yml'), contenido);
+  const contenido = [
+    'version: 9.9.9',
+    'files:',
+    '  - url: ' + setup,
+    '    sha512: ' + sha(setup),
+    '    size: ' + fs.statSync(path.join(dir, setup)).size,
+    'path: ' + setup,
+    'sha512: ' + sha(setup),
+    "releaseDate: '2026-01-01T00:00:00.000Z'",
+    '',
+  ].join('\n');
+
+  escribirYml(contenido);
+  const antes = correr(['--check']);
+  ok(antes.status !== 0, 'sin firma para el portable el gate no puede pasar');
+  ok(/Portable/.test(antes.stderr), 'y el gate dice cuál falta: ' + antes.stderr);
+
+  const hecho = correr();
+  eq(hecho.status, 0, 'completar el manifiesto no puede fallar: ' + hecho.stderr);
+  const yml = fs.readFileSync(path.join(dir, 'latest.yml'), 'utf8');
+  const parsed = updater.parseLatestYml(yml);
+  for (const f of [setup, portable]) {
+    eq(updater.sha512For(parsed, f), sha(f), 'la firma publicada de ' + f + ' es la del binario, no la de otro');
+  }
+  eq(parsed.version, '9.9.9', 'la versión del manifiesto no se toca');
+  eq(parsed.path, setup, 'el hash de nivel superior sigue siendo el del Setup');
+  eq(parsed.sha512, sha(setup), 'y con el valor del Setup');
+  ok(/releaseDate: '2026-01-01T00:00:00.000Z'/.test(yml), 'la fecha de la release se conserva');
+  eq(correr(['--check']).status, 0, 'con todos firmados, el gate pasa');
+
+  correr();
+  eq(fs.readFileSync(path.join(dir, 'latest.yml'), 'utf8'), yml, 'volver a ejecutarlo no cambia el fichero');
+
+  escribirYml(yml.replace(sha(portable), 'ZmlybWEgcXVlIG5vIGVzIGxhIGRlbCBiaW5hcmlv'));
+  const malo = correr(['--check']);
+  ok(malo.status !== 0, 'una firma que no es la del binario tampoco puede publicarse');
+  ok(/no es la del binario/.test(malo.stderr), 'y se explica: ' + malo.stderr);
+  correr();
+  eq(updater.sha512For(updater.parseLatestYml(fs.readFileSync(path.join(dir, 'latest.yml'), 'utf8')), portable), sha(portable),
+    'completar corrige también una firma equivocada');
+});
+
 /* ---------- reparaciones: regresiones que no pueden volver ---------- */
 
 test('skills: un id con .. o separadores no puede salir del almacén', async () => {

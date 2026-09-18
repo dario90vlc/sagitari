@@ -72,6 +72,47 @@ arranque siguiente, si la versión sigue siendo la vieja:
 `updater.pendingFor()` decide si el aviso sigue teniendo sentido: se borra solo en cuanto la
 versión instalada alcanza la que se intentó (o si el fichero está corrupto).
 
+## Segundo defecto (3.2.2): el portable no tenía firma publicada
+
+Corregido el lanzamiento, seguía habiendo un usuario que no podía actualizarse: el que usa el
+**portable**. Su app descargaba los 110 MB y los tiraba con «No se pudo descargar: no se pudo
+verificar la descarga (la release no publica latest.yml)». El registro del propio usuario lo dejó
+claro sin ambigüedad:
+
+```json
+{"event":"update_download_start","version":"3.2.1","asset":"SAGITARI-Portable-3.2.1.exe"}
+{"event":"update_verify_failed","version":"3.2.1","reason":"sin hash publicado"}
+```
+
+El manifiesto **sí** existía (345 bytes). El problema es que el `latest.yml` que genera
+electron-builder describe **solo el Setup**: el binario portable no aparece en `files:`, así que
+`sha512For(parsed, 'SAGITARI-Portable-….exe')` devolvía `null` y la app —que descarta cualquier
+binario que no pueda verificar, y hace bien— se quedaba sin nada contra lo que comparar. Una
+edición portable no podía actualizarse **nunca**. Y el mensaje culpaba al manifiesto entero, que era
+falso, lo que convirtió un fallo de empaquetado en un misterio.
+
+### El arreglo
+
+1. **La release firma todos sus binarios.** `scripts/latest-yml.js` completa el manifiesto con la
+   firma sha512 y el tamaño de **cada** `SAGITARI-*.exe` del `dist/`, conservando `path` y el
+   `sha512` de nivel superior apuntando al Setup (que es lo que espera un consumidor de
+   `latest.yml`). Usa `parseLatestYml` / `sha512For` / `sha512Of` de `main/updater.js`, es decir,
+   **el mismo lector que la app**. Es idempotente.
+2. **El CI no publica a medias.** El workflow lo ejecuta antes de subir nada y después comprueba con
+   `--check` que cada binario tenga firma **y que esa firma sea la suya** (una entrada que firmara
+   otro archivo es peor que ninguna). Si falla, la release no sale: es el gate que hoy habría
+   parado la 3.2.1.
+3. **El aviso dice la verdad.** `updater.motivoSinFirma()` distingue «no hay manifiesto», «no se
+   pudo leer» y «este archivo no está firmado en el manifiesto» (con su nombre), y la aplicación
+   añade el enlace de la release para instalarlo a mano.
+
+Esta corrección **también rescata a los portables ya instalados** desde la 3.1.0: su `sha512For`
+es idéntico (busca por `url` en `files:`), así que en cuanto el manifiesto firma el portable, la
+verificación les cuadra y la app les ofrece el archivo. Además, el flujo del portable **no pasa por
+el lanzador roto** —deja el ejecutable nuevo al lado y abre la carpeta—, así que no necesitan el
+paso manual. El 3.2.1 publicado se parcheó en el momento (se reemplazó el asset `latest.yml` por
+uno con las dos firmas) para no hacerles esperar a una versión nueva.
+
 ## Cómo queda probado
 
 - `test/run.js`: el guion del ayudante (ruta con `'`, `&` y `%`, `-EncodedCommand` que decodifica al
@@ -79,17 +120,31 @@ versión instalada alcanza la que se intentó (o si el fichero está corrupto).
   `pendingFor` con sus cuatro casos y **una prueba de integración que ejecuta el ayudante de
   verdad** contra un señuelo y comprueba que recibe `/S --updated` y deja su diario — el fallo
   original, cubierto para que no vuelva.
+- `test/run.js`: el manifiesto se completa de verdad en una carpeta de prueba —firma correcta de
+  **cada** binario, el hash superior sigue siendo el del Setup, idempotente y corrige una firma
+equivocada— y el gate del CI **falla** si un binario se queda sin firma (la regresión de la
+  3.2.1). Más los cuatro casos de `motivoSinFirma`.
 - `scripts/ui-check.js`: la tarjeta de Ajustes pinta la instalación a medias con su botón
   «Reintentar la instalación», y si el archivo ya no está invita a descargarla.
 
-## Nota para la próxima release (importante)
+**335 pruebas en verde** con todo esto, más `uicheck`, `smoke` y `navcheck`.
 
-Todas las versiones publicadas desde **v2.2.1** (v3.0.0, v3.0.1, v3.1.0, v3.1.1 y v3.2.0) llevan
-este lanzamiento roto, así que **quien tenga una de ellas no podrá actualizarse sola a la versión
-corregida**: el primer salto hay que hacerlo a mano. Las notas de la release que incluya este
-arreglo deben decirlo, y basta con descargar el instalador de la página de releases una vez; a
-partir de ahí el actualizador ya funciona.
+## Estado de las releases
 
-La prueba que había antes de publicar no cubría este camino (el motor se probaba con `fetch`
-inyectado, pero nadie ejecutaba el lanzamiento real). Es el tipo de fallo que solo aparece al
-lanzar un proceso de verdad, así que el test que lo cubre ahora lanza uno.
+- **3.2.1** (publicada): arregla el lanzamiento del instalador y el aviso de la instalación a medias.
+  Su `latest.yml` se parcheó a mano después, para que los portables ya instalados pudieran
+  actualizarse sin esperar a otra versión.
+- **3.2.2** (esta): firma de todos los binarios en la release, gate en el CI y aviso correcto. Es la
+  primera que no puede volver a fallar por esta vía.
+
+### Lo que sigue haciendo falta a mano (una vez)
+
+Todas las versiones desde **v2.2.1** (v3.0.0, v3.0.1, v3.1.0, v3.1.1 y v3.2.0) llevan el lanzador
+roto: **la edición instalada de una de ellas no puede actualizarse sola** y hay que descargar el
+instalador una vez. La edición **portable** de la 3.1.0 en adelante sí queda rescatada (su flujo no
+usa ese lanzador y su `sha512For` es el mismo). Las notas de cada release lo dicen.
+
+La prueba que había antes de publicar no cubría ninguno de los dos caminos: el motor se probaba con
+`fetch` inyectado y nadie ejecutaba el lanzamiento real, y del manifiesto solo se comprobaba que
+existiera. Los dos fallos son del mismo tipo —solo se ven al ejecutar o al publicar de verdad—, así
+que las pruebas que los cubren ahora lanzan un proceso real y pasan por el gate del CI.

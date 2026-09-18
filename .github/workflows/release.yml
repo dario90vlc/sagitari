@@ -87,6 +87,14 @@ jobs:
         # los assets, así que la página quedaba sin notas. Publica la acción.
         run: npm run dist -- --publish never
 
+      - name: Completar latest.yml con todos los binarios
+        # electron-builder solo firma el Setup en latest.yml. El portable se quedaba
+        # SIN firma publicada, así que la app descartaba su descarga («no se pudo
+        # verificar la descarga») y la edición portable no podía actualizarse: pasó
+        # en la 3.2.1. El script firma todos los .exe del dist usando el MISMO lector
+        # que la app (main/updater.js).
+        run: node scripts/latest-yml.js dist
+
       - name: Verificar artefactos antes de publicar
         shell: bash
         run: |
@@ -100,6 +108,10 @@ jobs:
               echo "OK $(wc -c < "$f") bytes  ${f}"
             fi
           done
+          # El gate que impide repetir el fallo de la 3.2.1: sin firma publicada de
+          # CADA binario, la app descarta la descarga y el usuario no puede
+          # actualizarse. Si aquí se corta, la release no sale.
+          node scripts/latest-yml.js dist --check
           exit ${missing}
 
       - name: Build release body (notes + SHA-256)
