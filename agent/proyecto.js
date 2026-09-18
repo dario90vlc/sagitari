@@ -236,7 +236,8 @@ function bloquePrompt(workspace) {
   if (p.tests) lineas.push(`- Tests: ${p.tests}  ← ejecútalo para verificar lo que cambias antes de dar algo por hecho.`);
   if (p.build) lineas.push(`- Compilación/tipos: ${p.build}`);
   if (p.lint) lineas.push(`- Lint: ${p.lint}`);
-  lineas.push('- Al escribir código, la sintaxis se comprueba sola y el error vuelve al instante: si te llega uno, arréglalo en el mismo turno.');
+  lineas.push('- Al escribir código se comprueba sola la SINTAXIS, y además pasan los comprobadores del proyecto sobre lo que has cambiado: si te llega un error, arréglalo en el mismo turno (los que ya estaban en el archivo antes de que lo tocaras se te dicen aparte: no los arregles salvo que se te pida).');
+  if (p.tests || p.build) lineas.push('- Al terminar el turno, la comprobación de arriba se EJECUTA sobre lo que hay en disco; si falla, se te devuelve la salida y tienes que arreglarlo antes de cerrar.');
   return lineas.join('\n');
 }
 

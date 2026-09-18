@@ -8,8 +8,11 @@ const path = require('path');
 const skills = require('./skills');
 const memory = require('./memory');
 const proyecto = require('./proyecto');
+const diagnosticos = require('./diagnosticos');
 const repomap = require('./repomap');
 const cambios = require('./cambios');
+const busqueda = require('./busqueda');   // v2.5: búsqueda híbrida (exacta + relevancia)
+const hooks = require('./hooks');
 const mcpTransport = require('./mcp-transport');
 const { killTree } = require('./proc');
 
@@ -153,21 +156,169 @@ async function revisarSintaxis(absPath) {
   return `${c.etiqueta}: ${lineaDelError(res.stderr || res.stdout)}`;
 }
 
+/* --------------------------------------------------------------------------- *
+ *  v2.5: diagnósticos del PROYECTO sobre lo que se acaba de escribir
+ *
+ *  La sintaxis la comprueba `revisarSintaxis` con el checker del lenguaje. Esto
+ *  es lo otro: pasar los comprobadores DEL PROYECTO (ESLint, Ruff, Flake8, Mypy)
+ *  sobre los archivos tocados y devolver los hallazgos que caen en las líneas que
+ *  este turno ha cambiado. Un tipo que no cuadra o una variable que no existe se
+ *  ven AHORA, no tres pasos después.
+ *
+ *  Dos reglas que evitan que esto estorbe:
+ *   · un comprobador que no está en el equipo o que tarda demasiado se APARTA
+ *     (se recuerda y no se vuelve a intentar), porque eso no es un error del código.
+ *   · los hallazgos que caen fuera de las líneas tocadas son PREEXISTENTES: se
+ *     cuentan y se dicen, pero no se le exigen.
+ * --------------------------------------------------------------------------- */
+
+const CHECK_APARTADO = new Set();   // 'id|espacio': no está instalado o no se pudo lanzar
+const CHECK_LENTO = new Map();      // 'id|espacio' -> hasta cuándo no repetirlo (es caro aquí)
+const CHECK_LENTO_MS = 12000;       // a partir de aquí, este comprobador estorba en cada escritura
+const CHECK_APARTADO_MS = 10 * 60 * 1000;
+const claveCheck = (ws, id) => id + '|' + String(ws || '');
+
+/** Aparta un comprobador (no está en el equipo, o es demasiado caro en este proyecto). */
+function apartarCheck(ws, id, ms) {
+  if (ms) CHECK_LENTO.set(claveCheck(ws, id), Date.now() + ms);
+  else CHECK_APARTADO.add(claveCheck(ws, id));
+}
+
+/** Lanza un comprobador del plan y devuelve su salida, o null si hay que saltarlo. */
+async function lanzarCheck(ws, c, archivos) {
+  const clave = claveCheck(ws, c.id);
+  if (CHECK_APARTADO.has(clave)) return null;
+  const hasta = CHECK_LENTO.get(clave);
+  if (hasta && Date.now() < hasta) return null;
+  const prog = c.clase === 'py-modulo' ? 'python' : (c.clase === 'node-entrada' ? 'node' : c.prog);
+  const argv = [
+    ...(c.clase === 'node-entrada' ? [c.entrada] : []),
+    ...(c.clase === 'py-modulo' ? ['-m', c.modulo] : []),
+    ...c.args,
+    ...archivos,
+  ];
+  let res;
+  const t0 = Date.now();
+  try {
+    const r = mcpTransport.resolveCommand(prog, argv);
+    res = await runProg(r.file, r.argv, { env: r.env, verbatim: r.verbatim, timeout: c.timeoutMs || 20000, cwd: ws });
+  } catch { apartarCheck(ws, c.id); return null; }
+  if (diagnosticos.pareceFalloDeHerramienta(res)) { apartarCheck(ws, c.id); return null; }
+  const ms = Date.now() - t0;
+  if (ms > CHECK_LENTO_MS) apartarCheck(ws, c.id, CHECK_APARTADO_MS);
+  return res;
+}
+
 /**
- * Texto del resultado de una escritura, con la comprobación de sintaxis pegada.
- * Si no compila se devuelve como FALLO (con el motivo y diciendo que el archivo
+ * Pasa los comprobadores del proyecto sobre los archivos recién escritos.
+ * @returns {{texto: string, errores: number}} `errores` = hallazgos NUEVOS de tipo error.
+ */
+async function revisarEstatico(ws, archivos) {
+  if (!ws) return { texto: '', errores: 0 };
+  let checks = [];
+  try { checks = diagnosticos.planPorArchivos(ws, archivos); } catch { return { texto: '', errores: 0 }; }
+  if (!checks.length) return { texto: '', errores: 0 };
+  const lineasDe = (abs) => cambios.lineasCambiadas(ws, abs);
+  const partes = [];
+  let errores = 0;
+  for (const c of checks) {
+    let res = null;
+    try { res = await lanzarCheck(ws, c, archivos); } catch { res = null; }
+    if (!res) continue;
+    const salida = String(res.stdout || '') + (String(res.stderr || '').trim() ? '\n' + String(res.stderr) : '');
+    if (!salida.trim()) continue;
+    let parsed = { hallazgos: [], sinUbicar: 0 };
+    try { parsed = diagnosticos.parsear(salida, { formato: c.formato, raiz: ws, herramienta: c.etiqueta }); } catch { continue; }
+    const clas = diagnosticos.clasificar(parsed.hallazgos, { lineasDe });
+    if (!clas.nuevos.length && !clas.preexistentes.length) continue;
+    errores += clas.nuevos.filter(h => h.severidad === 'error').length;
+    const txt = diagnosticos.resumen(clas, { etiqueta: c.etiqueta, raiz: ws, otrosArchivos: parsed.sinUbicar });
+    if (txt) partes.push(txt);
+  }
+  return { texto: partes.join('\n'), errores };
+}
+
+/* --------------------------------------------------------------------------- *
+ *  v2.5: tus hooks (Ajustes ▸ Agente)
+ *
+ *  `hookEditar` se lanza después de cada escritura y su salida se le enseña al modelo;
+ *  `hookCerrar` lo lanza el agente antes de cerrar el turno. La plantilla la escribe el
+ *  usuario y aquí solo se expanden sus marcadores, con LAS RUTAS ENTRE COMILLAS (una
+ *  ruta de Windows con espacios, sin comillas, es un comando roto).
+ * --------------------------------------------------------------------------- */
+
+/**
+ * Ejecuta un hook del usuario. Nunca lanza: un hook roto es información, no una excepción.
+ * @returns {Promise<{ok: boolean, code: number|null, texto: string, comando: string, ms: number}>}
+ */
+async function ejecutarHook(plantilla, { ws = '', archivos = [], timeoutMs = 60000, registerKillable = null } = {}) {
+  const comando = hooks.expandir(plantilla, { ws, archivos });
+  const t0 = Date.now();
+  if (!String(comando).trim()) return { ok: false, code: null, texto: 'hook vacío', comando, ms: 0 };
+  let r = null;
+  try {
+    r = await run(comando, { cwd: ws || undefined, timeout: timeoutMs, maxBuffer: 2 * 1024 * 1024, registerKillable });
+  } catch (e) {
+    return { ok: false, code: null, texto: String((e && e.message) || e), comando, ms: Date.now() - t0 };
+  }
+  const salida = String(r.stdout || '') + (String(r.stderr || '').trim() ? '\n' + String(r.stderr) : '');
+  return { ok: r.code === 0, code: r.code, texto: salida, comando, ms: Date.now() - t0 };
+}
+
+/**
+ * Lanza el comando de comprobación del proyecto (sus pruebas, o su compilación).
+ * Va por aquí y no por `run_command` a propósito: es la comprobación de la propia
+ * app (como el chequeo de sintaxis), así que no pide confirmación al usuario ni
+ * cuenta como una acción del modelo. Se ejecuta con cwd en el espacio de trabajo.
+ */
+async function ejecutarComandoVerificacion(comando, { cwd, timeoutMs = 300000, registerKillable } = {}) {
+  return run(String(comando), { cwd, timeout: timeoutMs, registerKillable, maxBuffer: 8 * 1024 * 1024 });
+}
+
+/**
+ * Texto del resultado de una escritura, con la comprobación de sintaxis y los
+ * diagnósticos del proyecto pegados.
+ * Si algo está mal se devuelve como FALLO (con el motivo y diciendo que el archivo
  * SÍ quedó escrito): el modelo lo ve como un paso fallido y lo arregla ya, y la
  * tarjeta del chat se marca en rojo en vez de dar el cambio por bueno.
  */
-async function resultadoEscritura(absPath, okText, { checked = [] } = {}) {
+async function resultadoEscritura(absPath, okText, { checked = [], workspace = null, settings = null } = {}) {
+  const archivos = [absPath, ...checked];
   const fallos = [];
-  for (const f of [absPath, ...checked]) {
+  for (const f of archivos) {
     if (fallos.length >= 3) break;
     const mal = await revisarSintaxis(f);
     if (mal) fallos.push(`${path.basename(f)}: ${mal}`);
   }
-  if (!fallos.length) return `OK: ${okText}`;
-  return `Error: ${okText}, pero NO compila:\n- ${fallos.join('\n- ')}\nEl archivo queda tal cual (no se deshace). Arréglalo antes de seguir con otra cosa.`;
+  if (fallos.length) {
+    return `Error: ${okText}, pero NO compila:\n- ${fallos.join('\n- ')}\nEl archivo queda tal cual (no se deshace). Arréglalo antes de seguir con otra cosa.`;
+  }
+  // v2.5: el hook del usuario tras escribir (formatear, lint --fix…). Se le enseña al
+  // modelo, pero NO convierte el paso en un fallo: el archivo ya está escrito y el
+  // hook es tuyo — un prettier ausente no es un error del código que él ha escrito.
+  // El que sí manda es `hookCerrar` (lo lanza el agente antes de cerrar el turno).
+  let textoHook = '';
+  const plantillaHook = (settings && settings.settings && String(settings.settings.hookEditar || '').trim()) || '';
+  if (plantillaHook && workspace) {
+    let h = null;
+    try { h = await ejecutarHook(plantillaHook, { ws: workspace, archivos }); } catch { h = null; }
+    if (h) {
+      textoHook = hooks.resumen(h, { etiqueta: 'Hook', comando: plantillaHook });
+      if (!h.ok) textoHook = '⚠ ' + textoHook + '\n(el archivo queda escrito; si el fallo es del código recién escrito, arréglalo)';
+    }
+  }
+  const conHook = (texto) => (textoHook ? texto + '\n' + textoHook : texto);
+  // La comprobación del proyecto es opcional (Ajustes ▸ Agente) y necesita saber
+  // en qué se ejecuta el robot: sin espacio de trabajo no se puede comprobar nada.
+  const activo = !(settings && settings.settings && settings.settings.diagnosticosEscritura === false);
+  if (!activo || !workspace) return conHook(`OK: ${okText}`);
+  let est = { texto: '', errores: 0 };
+  try { est = await revisarEstatico(workspace, archivos); } catch { est = { texto: '', errores: 0 }; }
+  if (!est.texto) return conHook(`OK: ${okText}`);
+  if (est.errores) {
+    return conHook(`Error: ${okText}, y la comprobación del proyecto encontró ${est.errores} error(es) en eso:\n${est.texto}\nEl archivo queda escrito: arréglalo antes de seguir con otra cosa.`);
+  }
+  return conHook(`OK: ${okText}\n${est.texto}`);
 }
 
 const clip = (s, n = 8000) => {
@@ -357,7 +508,8 @@ async function executeTool(name, args, ctx) {
         throw e;
       }
       repomap.invalidar(workspace);
-      return await resultadoEscritura(p, `${content.length} bytes escritos en ${p}`);
+      busqueda.invalidar(workspace);   // el índice de búsqueda también se queda viejo
+      return await resultadoEscritura(p, `${content.length} bytes escritos en ${p}`, { workspace, settings });
     }
     case 'edit_file': {
       const p = inWs(args.path);
@@ -384,7 +536,8 @@ async function executeTool(name, args, ctx) {
       cambios.recordar(workspace, p, text);
       await fsp.writeFile(p, replaced, 'utf8');
       repomap.invalidar(workspace);
-      return await resultadoEscritura(p, `${args.replace_all ? count : 1} reemplazo(s) en ${p}`);
+      busqueda.invalidar(workspace);   // el índice de búsqueda también se queda viejo
+      return await resultadoEscritura(p, `${args.replace_all ? count : 1} reemplazo(s) en ${p}`, { workspace, settings });
     }
     /* v2.4: mapa del repositorio e índice de símbolos. En un proyecto grande, leer
        archivo a archivo se come el contexto y aun así se pierden cosas; esto responde
@@ -392,6 +545,13 @@ async function executeTool(name, args, ctx) {
     case 'repo_map': {
       const dir = args.path ? inWs(args.path) : workspace;
       return clip(repomap.mapa(dir, { maxChars: Number(args.max_chars) || 7000 }), 20000);
+    }
+    /* v2.5: búsqueda híbrida (coincidencia exacta + relevancia). Es lo que hace que en un
+       proyecto grande el agente no vaya leyendo archivos a ciegas. */
+    case 'search_code': {
+      const q = String(args.query || args.q || args.name || '').trim();
+      if (!q) return 'Error: dime qué buscas (query).';
+      return clip(busqueda.textoBusqueda(workspace, q, { limit: Math.min(Math.max(Number(args.limit) || 12, 1), 40) }), 12000);
     }
     case 'find_symbol': {
       const q = String(args.name || args.query || '').trim();
@@ -430,8 +590,9 @@ async function executeTool(name, args, ctx) {
       }
       for (const plan of planes) { cambios.recordar(workspace, plan.p, plan.antes); await fsp.writeFile(plan.p, plan.despues, 'utf8'); }
       repomap.invalidar(workspace);
+      busqueda.invalidar(workspace);   // el índice de búsqueda también se queda viejo
       const resumen = planes.map(pl => `${path.basename(pl.p)} (${pl.n})`).join(', ');
-      return await resultadoEscritura(planes[0].p, `${planes.length} archivo(s) actualizados: ${resumen}`, { checked: planes.map(x => x.p) });
+      return await resultadoEscritura(planes[0].p, `${planes.length} archivo(s) actualizados: ${resumen}`, { checked: planes.map(x => x.p), workspace, settings });
     }
     case 'list_dir': {
       const root = inWs(args.path);
@@ -532,4 +693,9 @@ async function executeTool(name, args, ctx) {
   }
 }
 
-module.exports = { executeTool, openUrlAllowed };
+module.exports = {
+  executeTool, openUrlAllowed, ejecutarComandoVerificacion, ejecutarHook, revisarEstatico, revisarSintaxis,
+  /* Solo para las pruebas: el estado adaptativo (lo que se ha apartado) no debe
+     arrastrarse entre casos. */
+  __test: { _resetChecks: () => { CHECK_APARTADO.clear(); CHECK_LENTO.clear(); } },
+};

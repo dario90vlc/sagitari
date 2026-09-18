@@ -33,9 +33,9 @@ La opción recomendada es el instalador de Windows:
 
 | Paquete | Descripción |
 |---|---|
-| [**SAGITARI-Setup-3.2.2.exe**](https://github.com/dario90vlc/sagitari/releases/download/v3.2.2/SAGITARI-Setup-3.2.2.exe) | Instalador con accesos directos y desinstalador |
-| [**SAGITARI-Portable-3.2.2.exe**](https://github.com/dario90vlc/sagitari/releases/download/v3.2.2/SAGITARI-Portable-3.2.2.exe) | Ejecutable único, sin instalación |
-| [**Notas de la versión**](https://github.com/dario90vlc/sagitari/releases/tag/v3.2.2) | Cambios, correcciones de seguridad y hashes SHA-256 |
+| [**SAGITARI-Setup-3.2.3.exe**](https://github.com/dario90vlc/sagitari/releases/download/v3.2.3/SAGITARI-Setup-3.2.3.exe) | Instalador con accesos directos y desinstalador |
+| [**SAGITARI-Portable-3.2.3.exe**](https://github.com/dario90vlc/sagitari/releases/download/v3.2.3/SAGITARI-Portable-3.2.3.exe) | Ejecutable único, sin instalación |
+| [**Notas de la versión**](https://github.com/dario90vlc/sagitari/releases/tag/v3.2.3) | Cambios, correcciones de seguridad y hashes SHA-256 |
 
 > **Windows SmartScreen:** los binarios no tienen firma digital actualmente, por lo que Windows puede mostrar un aviso la primera vez. Pulsa *Más información → Ejecutar de todas formas* si confías en la descarga. Comprueba el hash SHA-256 publicado en las notas de la release.
 
@@ -140,7 +140,7 @@ npm run uicheck           # probar el renderer en vivo
 npm run dist              # crear instalador NSIS + portable
 ```
 
-El workflow de release ejecuta la comprobación de sintaxis, tests, smoke, UI, compilación de los dos artefactos de Windows, verificación de archivos y generación de hashes SHA-256. El tag debe coincidir con la versión de `package.json`; para esta release es `v3.2.2`.
+El workflow de release ejecuta la comprobación de sintaxis, tests, smoke, UI, compilación de los dos artefactos de Windows, verificación de archivos y generación de hashes SHA-256. El tag debe coincidir con la versión de `package.json`; para esta release es `v3.2.3`.
 
 ## Estructura del proyecto
 

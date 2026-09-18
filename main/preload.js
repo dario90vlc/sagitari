@@ -117,6 +117,10 @@ contextBridge.exposeInMainWorld('sagitari', {
   updateDownload: () => ipcRenderer.invoke('update:download'),
   updateInstall: () => ipcRenderer.invoke('update:install'),
   updateRetry: () => ipcRenderer.invoke('update:retry'),
+  undoChanges: () => ipcRenderer.invoke('cambios:deshacer'),
+  undoState: () => ipcRenderer.invoke('cambios:estado'),
+  instruccionesInfo: () => ipcRenderer.invoke('agent:instrucciones'),
+  instruccionesCrear: () => ipcRenderer.invoke('agent:instrucciones-crear'),
   updatePage: () => ipcRenderer.invoke('update:page'),
   onUpdate: on('update:event', ([ev]) => [ev]),
 

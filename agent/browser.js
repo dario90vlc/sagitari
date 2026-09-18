@@ -182,11 +182,24 @@ const HELPERS_JS = `(() => {
     } catch (err) {}
     return out;
   };
+  /* Espera a que la página pinte, SIN poder colgarse.
+     OJO, esto era un fallo real: esperar a requestAnimationFrame a secas no se resuelve
+     nunca si la ventana del navegador está oculta, minimizada o tapada por otra
+     aplicación —Chromium deja de dar frames— y como el comando viaja por Runtime.evaluate
+     con awaitPromise, moría a los 30 s con un CDP timeout sin explicar nada. Y esa es la
+     situación NORMAL: el agente trabaja mientras el usuario está en SAGITARI, con el
+     navegador detrás. Dos frames si se ve; y un tope de tiempo que siempre cierra. */
+  window.__sagPintar = (ms) => new Promise((r) => {
+    let listo = false;
+    const fin = () => { if (!listo) { listo = true; r(); } };
+    try { requestAnimationFrame(() => requestAnimationFrame(fin)); } catch (err) { setTimeout(fin, 0); }
+    setTimeout(fin, Number(ms) > 0 ? Number(ms) : 150);
+  });
   /* Deja el elemento a la vista y devuelve coordenadas FRESCAS, diciendo si algo
      lo tapa y si se ha movido entre medidas. */
   window.__sagPoint = async (el) => {
     try { el.scrollIntoView({ block: 'center', inline: 'center' }); } catch (err) {}
-    await new Promise((r) => requestAnimationFrame(() => requestAnimationFrame(r)));
+    await window.__sagPintar(150);
     const a = el.getBoundingClientRect();
     await new Promise((r) => setTimeout(r, 60));
     const b = el.getBoundingClientRect();
@@ -677,6 +690,20 @@ class Browser {
       `--user-data-dir=${this.profileDir}`,
       '--no-first-run', '--no-default-browser-check',
       '--disable-session-crashed-bubble', '--hide-crash-restore-bubble',
+      /* Estos tres son los que hacen que el navegador se pueda manejar con su ventana
+         DETRÁS de la app, que es como se usa de verdad (el usuario está en SAGITARI y el
+         navegador trabaja por debajo). Sin ellos Chromium deja de dar frames y de acusar
+         recibo de la entrada a la ventana oculta, y cada acción —un clic, un tipeo, una
+         espera de pintado— se quedaba colgada hasta el timeout de 30 s. */
+      '--disable-background-timer-throttling',
+      '--disable-backgrounding-occluded-windows',
+      '--disable-renderer-backgrounding',
+      /* Y este, que es SOLO de Windows y nos costó un rato: el sistema avisa a Chromium
+         cuando una ventana queda tapada por otra, y entonces Chromium la «congela» —deja
+         de producir frames y de acusar recibo de la entrada—. Para un navegador que el
+         usuario ve, es una optimización; para uno que maneja un agente por debajo, es la
+         diferencia entre clicar y quedarse esperando 30 s. */
+      '--disable-features=CalculateNativeWinOcclusion',
       '--start-maximized', target,
     ];
     const child = spawn(exe, args, { windowsHide: true, stdio: 'ignore' });

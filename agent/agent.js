@@ -7,7 +7,11 @@ const { allToolDefs } = require('./tools');
 const cambios = require('./cambios');
 const proyecto = require('./proyecto');
 const repomap = require('./repomap');
-const { executeTool } = require('./executors');
+const { executeTool, ejecutarComandoVerificacion, ejecutarHook } = require('./executors');
+const diagnosticos = require('./diagnosticos');   // v2.5: hallazgos del proyecto y comprobación de cierre
+const contexto = require('./contexto');           // v2.5: presupuesto de contexto (y qué hacer cuando no cabe)
+const hooks = require('./hooks');                 // v2.5: tus comandos enganchados al agente
+const instrucciones = require('./instrucciones'); // v2.5: SAGITARI.md / AGENTS.md del proyecto
 const skills = require('./skills');
 const memory = require('./memory');
 const checkpoints = require('./checkpoints');
@@ -165,6 +169,11 @@ class Agent {
     this._lastCmdSeq = -1;
     this._gateUsed = false;              // la verificación de cierre solo puede pedirse una vez
     this._reviewed = false;              // la revisión del cambio también, una por turno
+    this._cierreAuto = false;            // v2.5: la comprobación del proyecto (pruebas) ya se hizo
+    this._avisadoCtx = false;            // v2.5: ya se avisó de que el contexto va apretado
+    this._intentosArreglo = 0;           // v2.5: vueltas de «falló → arréglalo → repito» (0 y no undefined:
+                                         // `undefined++` es NaN, y `NaN >= tope` siempre es falso)
+    this._lastCmd = '';                  // v2.5: última orden del modelo (para no repetir sus pruebas)
     this._skillsLoaded = new Set();      // ids de skills ya cargadas en este turno (su cuerpo no se repite)
     this.guardrails = new Guardrails(opts.guardrailsPolicy || {});   // límites + permisos
     this._llmTimeoutMs = null;           // ms sin datos del proveedor antes de cortar (null = default)
@@ -442,6 +451,10 @@ class Agent {
     this._lastCmdSeq = -1;
     this._gateUsed = false;
     this._reviewed = false;
+    this._cierreAuto = false;            // v2.5: comprobación del proyecto una vez por turno
+    this._intentosArreglo = 0;           // v2.5: vueltas de «falló → arréglalo → repito»
+    this._avisadoCtx = false;            // v2.5: aviso de contexto apretado, una vez por turno
+    this._lastCmd = '';
     this._skillsLoaded = new Set();
 
     // ---- checkpoint: persistir la tarea si es suficientemente larga ----
@@ -513,6 +526,9 @@ class Agent {
       + `\n\nESPACIO DE TRABAJO: ${ws}`
       + '\n- Es la carpeta por defecto para crear/modificar archivos; las rutas relativas resuelven aquí.'
       + '\n- Solo toques otras ubicaciones si el usuario lo pide explícitamente (ruta absoluta).'
+      // v2.5: las reglas de la casa (SAGITARI.md / AGENTS.md). Van las primeras del bloque
+      // estable y marcadas como obligatorias: el usuario manda sobre las costumbres del modelo.
+      + (() => { try { const b = instrucciones.bloquePrompt(ws); return b ? '\n\n' + b : ''; } catch { return ''; } })()
       // v2.4: lo que se sabe del proyecto (comandos que EXISTEN) y su mapa si es grande.
       // Van en el bloque estable: cambian poco y así el prefijo sigue siendo cacheable.
       + (() => { try { const b = proyecto.bloquePrompt(ws); return b ? '\n\n' + b : ''; } catch { return ''; } })()
@@ -535,6 +551,19 @@ class Agent {
       ...(this._resumen ? [{ role: 'user', content: this._resumen }] : []),
       ...payloadMessages(this.history),
     ];
+
+    // ---- v2.5: presupuesto de contexto ----
+    /* Se mide lo que va a viajar (mensajes + las definiciones de herramientas, que en un
+       agente son miles de tokens que nadie cuenta). Si no sobra sitio, se le dice al modelo
+       qué hacer con eso —no solo que hay poco— porque es él quien puede contestar más corto
+       y leer por tramos en vez de volver a pegar archivos enteros. */
+    try {
+      const ctx0 = contexto.presupuesto({ messages, tools: allToolDefs(), cfg });
+      this._ctxUso = ctx0.uso;
+      const nota = contexto.notaPresupuesto(ctx0);
+      if (nota && messages[0]) messages[0] = { ...messages[0], content: String(messages[0].content) + '\n\n' + nota };
+      runlog.log({ agent: 'sagitari', task: taskId, event: 'context', uso: Math.round(ctx0.uso * 100) / 100, tokens: ctx0.total, ventana: ctx0.ventana, estado: ctx0.estado });
+    } catch {}
 
     // ---- v1.6: router + cadena de fallback ----
     const { category, chain } = this._chainFor(settings, userText, { hasImage: !!imageDataUrl });
@@ -615,6 +644,27 @@ class Agent {
         }
         break;   // subagente detenido: entrega lo que tenga
       }
+      /* v2.5 — presupuesto de contexto, en CADA paso. Un turno largo acumula volcados de
+         archivos y salidas de comandos, y son justo lo que ya no hace falta volver a
+         enviar. Se sueltan los bloques MÁS ANTIGUOS del request (con sus herramientas,
+         que si no el proveedor rechaza la petición) hasta que vuelva a caber; el
+         historial y la conversación que ve el usuario no se tocan. */
+      try {
+        const ctx = contexto.presupuesto({ messages, tools: toolsOverride || allToolDefs(), cfg: chain[0] || {} });
+        this._ctxUso = ctx.uso;
+        if (ctx.estado === 'apretado') {
+          const rec = contexto.recortarMensajes(messages, toolsOverride || allToolDefs(), chain[0] || {});
+          if (rec.quitados) {
+            messages = rec.messages;   // solo el request: el historial sigue entero
+            runlog.log({ agent: 'sagitari', task: taskId, event: 'context_trim', bloques: rec.quitados, tokensLiberados: rec.tokensLiberados, uso: Math.round(ctx.uso * 100) / 100 });
+            if (onStatus && p.account) onStatus('Contexto al ' + Math.round(ctx.uso * 100) + '%: se sueltan ' + rec.quitados + ' bloque(s) antiguos del envío (~' + rec.tokensLiberados + ' tokens)');
+          }
+        }
+        if (ctx.estado === 'apretado' && p.account && !this._avisadoCtx) {
+          this._avisadoCtx = true;
+          this.emit({ type: 'contexto', uso: ctx.uso, tokens: ctx.total, ventana: ctx.ventana });
+        }
+      } catch {}
       const t0 = Date.now();
       // si el stream falla (o lo aborta el usuario) la excepción sube tal cual:
       // el salto entre modelos ya lo resuelve _streamWithFallback
@@ -795,7 +845,12 @@ class Agent {
             if (!failed) {
               const tname = tc.function.name;
               if (tname === 'write_file' || tname === 'edit_file' || tname === 'apply_patch') { this._writes++; this._lastWriteSeq = this._toolSeq; }
-              else if (tname === 'run_command') { this._cmds++; this._lastCmdSeq = this._toolSeq; }
+              else if (tname === 'run_command') {
+                this._cmds++; this._lastCmdSeq = this._toolSeq;
+                // v2.5: qué orden fue, para no volver a lanzar la misma comprobación
+                // que el propio modelo ya ejecutó después de su última escritura
+                this._lastCmd = String((r.args && r.args.command) || '');
+              }
             }
             // v2.0: observar hábitos del usuario (hechos de uso, no conversación)
             try { habits.observe('tool', { name: tc.function.name, args: r.args }); } catch {}
@@ -833,6 +888,16 @@ class Agent {
         closePendingCalls('(no ejecutada: ejecución detenida o tope alcanzado)');
         continue; // next loop: model reacts to tool results
       }
+
+      /* ---- v2.5: COMPROBACIÓN DEL PROYECTO antes de cerrar.
+
+         La diferencia con las puertas de abajo: esto no se lo pregunta al modelo, lo
+         EJECUTA la app con el comando del proyecto (sus pruebas, o su compilación) y le
+         devuelve la salida REAL. Si falla, el turno no cierra: se le pasa el fallo y
+         vuelve a intentarlo, hasta el tope de intentos de Ajustes. Es el ciclo «prueba
+         que falla → arreglo → repito» corriendo solo, en vez de depender de que el
+         modelo se acuerde de comprobar lo que acaba de escribir. */
+      if (p.account && await this._chequeoCierre({ settings, signal, messages, res })) continue;
 
       /* ---- v2.4: PUERTA DE CIERRE (revisión del CAMBIO + cierre verificado).
 
@@ -891,6 +956,16 @@ class Agent {
         this.emit({ type: 'task_done', runId: task.runId, goal: task.goal });
       }
       this.currentRun = null;
+      /* v2.5: si el turno ha tocado archivos, la interfaz ofrece deshacerlo con la
+         pre-imagen que ya se guardó para revisar el cambio. Se avisa ANTES de cerrar la
+         burbuja para que caiga en el mismo bloque de mensajes. */
+      if (p.account) {
+        try {
+          const wsUndo = (settings.settings && settings.settings.workspace) || path.join(os.homedir(), 'Desktop', 'Sagitari');
+          const plan = cambios.planDeshacer(wsUndo);
+          if (plan.length) this.emit({ type: 'can_undo', files: plan.slice(0, 24).map(x => x.ruta) });
+        } catch {}
+      }
       this.emit({ type: 'assistant_done', text: res.text, runId: p.background ? (task && task.runId) : undefined });
       return;
     }
@@ -1111,6 +1186,100 @@ class Agent {
       }
     } catch (e) { result = 'Error: ' + e.message; }
     return result;
+  }
+
+  /**
+   * v2.5: comprobación del proyecto antes de cerrar el turno.
+   *
+   * Ejecuta el comando de verificación que deduce `proyecto.js` (las pruebas del
+   * proyecto; si no hay, la compilación o los tipos) sobre lo que hay ahora mismo en
+   * disco y devuelve la salida real al modelo. Si falla, el turno NO cierra: se le da
+   * el fallo y otra vuelta, hasta `intentosArreglo` veces.
+   *
+   * Tres cosas que evitan que estorbe: se hace UNA vez por turno; no se ejecuta si el
+   * usuario lo apagó (`verificacionCierre: false`) o si el proyecto no declara cómo
+   * comprobarse; y no se repite si el propio modelo ya lanzó esa misma orden después
+   * de su última escritura.
+   *
+   * @returns {Promise<boolean>} true si ya ha inyectado el fallo y el bucle debe seguir.
+   */
+  async _chequeoCierre({ settings = {}, signal = null, messages = [], res = {} } = {}) {
+    if (this._cierreAuto) return false;
+    const policy = settings.settings || {};
+    if (policy.verificacionCierre === false) return false;
+    if (!this._writes) return false;
+    const ws = policy.workspace || path.join(os.homedir(), 'Desktop', 'Sagitari');
+    // v2.5: tu hook de cierre (Ajustes ▸ Agente). Manda: si falla, el turno no cierra.
+    const plantillaHook = String(policy.hookCerrar || '').trim();
+    let plan = null;
+    try { plan = diagnosticos.planCierre(proyecto.perfil(ws)); } catch { plan = null; }
+    if (!plan && !plantillaHook) { this._cierreAuto = true; return false; }   // no hay nada que ejecutar
+    if (!plantillaHook && this._lastCmdSeq > this._lastWriteSeq && this._lastCmd.includes(plan.comando)) {
+      this._cierreAuto = true;   // el modelo ya lo comprobó él mismo después de escribir
+      return false;
+    }
+    /* OJO: `_cierreAuto` NO se marca aquí. Si se marcara al empezar, tras devolver el
+       fallo al modelo la comprobación no volvería a ejecutarse nunca y el ciclo
+       «falla → arreglo → repito» se quedaría en «falla → arreglo → me lo creo»: se
+       marca cuando pasa, cuando el proyecto no tiene nada que ejecutar o cuando ya no
+       quedan intentos. */
+    const t0 = Date.now();
+    const etiqueta = plan ? plan.etiqueta : 'Comprobación final';
+    let r = null;
+    let comando = plantillaHook;
+    let texto = '';
+    // El hook del usuario va primero: es su puerta y es la barata.
+    if (plantillaHook) {
+      this.emit({ type: 'status', text: etiqueta + ': ejecutando tu hook «' + plantillaHook + '»…' });
+      let h = null;
+      try { h = await ejecutarHook(plantillaHook, { ws, archivos: cambios.archivosTocados(ws), timeoutMs: 180000, registerKillable: (k) => { this.runningTools.set('cierre', k); this.runningTool = k; } }); }
+      catch (e) { h = { ok: false, code: null, texto: String((e && e.message) || e), comando: plantillaHook }; }
+      finally { this.runningTools.delete('cierre'); }
+      if (signal && signal.aborted) return false;
+      r = { code: h.ok ? 0 : (h.code === undefined ? null : h.code), stdout: h.texto, stderr: '' };
+      texto = hooks.resumen(h, { etiqueta, comando: plantillaHook });
+      comando = h.comando || plantillaHook;
+      if (h.ok && plan) { r = null; comando = plan.comando; texto = ''; }   // el hook pasó: sigue la comprobación del proyecto
+      else if (h.ok) { this._verified = true; this._cierreAuto = true;
+        runlog.log({ agent: 'sagitari', event: 'close_check', check: 'hook', command: comando, ok: true, durationMs: Date.now() - t0 });
+        this.emit({ type: 'tool_result', name: etiqueta, ok: true, durationMs: Date.now() - t0, result: hooks.recortar(texto, 1200) });
+        return false; }
+    }
+    if (!r) {
+      this.emit({ type: 'status', text: etiqueta + ': ejecutando «' + plan.comando + '»…' });
+      try {
+        r = await ejecutarComandoVerificacion(plan.comando, {
+          cwd: ws, timeoutMs: plan.timeoutMs,
+          registerKillable: (k) => { this.runningTools.set('cierre', k); this.runningTool = k; },
+        });
+      } catch (e) { r = { code: null, stdout: '', stderr: String((e && e.message) || e) }; }
+      finally { this.runningTools.delete('cierre'); }
+      if (signal && signal.aborted) return false;
+      texto = diagnosticos.resumenEjecucion(r, { etiqueta, comando: plan.comando });
+    }
+    const ok = r.code === 0;
+    runlog.log({
+      agent: 'sagitari', task: this.currentRun ? this.currentRun.runId : undefined, event: 'close_check',
+      check: plan ? plan.id : 'hook', command: comando, ok, code: r.code, durationMs: Date.now() - t0,
+    });
+    // La tarjeta del chat lo enseña como una herramienta más: el usuario ve QUÉ se ejecutó
+    // y qué salió, en vez de tener que creerse un «verificado».
+    this.emit({ type: 'tool_result', name: etiqueta, ok, durationMs: Date.now() - t0, result: String(texto).slice(0, 1200) });
+    if (ok) { this._verified = true; this._cierreAuto = true; return false; }
+    const intentos = Math.max(0, Math.min(5, Number(policy.intentosArreglo ?? 2)));
+    if (this._intentosArreglo >= intentos) {
+      this._cierreAuto = true;
+      // Sin vueltas: se cierra igual (el fallo ya está a la vista) pero queda dicho.
+      this.emit({ type: 'status', text: etiqueta + ': sigue fallando tras ' + this._intentosArreglo + ' intento(s); cierro y te lo dejo a la vista' });
+      return false;
+    }
+    this._intentosArreglo++;
+    runlog.log({ agent: 'sagitari', event: 'close_check_retry', check: plan ? plan.id : 'hook', attempt: this._intentosArreglo });
+    this.emit({ type: 'status', text: etiqueta + ': ha fallado; se lo devuelvo al modelo para que lo arregle (' + this._intentosArreglo + '/' + intentos + ')' });
+    this.history.push({ role: 'assistant', content: res.text });
+    messages.push({ role: 'assistant', content: res.text });
+    messages.push({ role: 'user', content: CIERRE_FALLO_PROMPT(etiqueta) + '\n\n' + texto });
+    return true;
   }
 
   /**
@@ -1344,6 +1513,10 @@ class Agent {
     const category = opts.category || models.classify(text, { hasImage: !!opts.hasImage });
     let chain = settings.settings?.modelRouting === false ? [primary] : models.fallbackChain(settings, category);
     if (!chain.length) chain = [primary];
+    /* v2.5: caché de prompt del proveedor. Viaja en cada entrada de la cadena para que el
+       protocolo sepa si puede marcar los puntos de corte (y para poder apagarlo en Ajustes:
+       hay proveedores compatibles que rechazan el campo). */
+    chain = chain.map(c => ({ ...c, cachePrompt: settings.settings?.promptCache !== false }));
     /* v2.2: modelo por agente (opcional, `agentRouting`). El modelo ELEGIDO por el usuario
        manda siempre en el chat —hubo una queja legítima cuando el router lo cambiaba en
        silencio—; esto solo afecta a los subagentes, y solo si el usuario lo activa: al que
@@ -1395,6 +1568,12 @@ const REVIEW_GATE_PROMPT = `ANTES DE CERRAR: has modificado archivos en este tur
 2. RIESGO: decide — arréglalo, o explica en una línea por qué se queda así.
 3. SUGERENCIA: no obliga; ignóralas si no aportan.
 4. No repitas la respuesta que ya diste (el usuario ya la tiene). Añade solo lo que cambia: una línea por hallazgo atendido, o «Revisado: sin hallazgos» si venía OK.`;
+
+/** Instrucción del ciclo automático: la comprobación del proyecto ha fallado de verdad. */
+const CIERRE_FALLO_PROMPT = (etiqueta) => `ANTES DE CERRAR: has modificado archivos y «${etiqueta}» del proyecto ha FALLADO con lo que hay ahora en disco. La salida real va abajo.
+1. Arréglalo con herramientas: el que no pasa es el código, no la comprobación. Nada de tocar la comprobación para que pase.
+2. Vuelve a ejecutarla y mira la salida; si ya no puedes (falta algo del entorno), dilo tal cual.
+3. NO repitas la respuesta que ya diste. Termina con una sola línea: «Verificado: <qué ejecutaste y qué salió>».`;
 
 const VERIFY_GATE_PROMPT = `ANTES DE CERRAR: has modificado archivos o ejecutado cambios en este turno y no hay ninguna comprobación posterior al último cambio. No cierres a ciegas.
 1. Comprueba de verdad el resultado con herramientas: vuelve a leer lo escrito, ejecuta lo que creaste o modifica y mira la salida, o delega en verification con un criterio de éxito verificable (delegate con agent=verification y expect).

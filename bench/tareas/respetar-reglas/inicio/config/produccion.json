@@ -1,0 +1,5 @@
+{
+  "entorno": "produccion",
+  "reintentos": 2,
+  "timeoutMs": 30000
+}

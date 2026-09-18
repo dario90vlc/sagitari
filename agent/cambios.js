@@ -22,6 +22,8 @@ const MAX_BYTES_ORIGINAL = 2 * 1024 * 1024;
 
 /* workspace -> Map(rutaAbsoluta -> contenido anterior | null si no existía) */
 const guardados = new Map();
+/* workspace -> Set(rutas cuya pre-imagen NO se pudo leer: no se pueden restaurar) */
+const noRestaurables = new Map();
 
 /** El contenido de un archivo tal y como estaba, o null si no existía / no es texto. */
 function leerAntes(absPath) {
@@ -45,7 +47,22 @@ function recordar(workspace, absPath, contenidoAnterior) {
   const mapa = guardados.get(workspace);
   if (mapa.has(absPath)) return;
   if (mapa.size >= MAX_ARCHIVOS * 4) return;   // un turno que toca cien archivos no se revisa así
-  mapa.set(absPath, contenidoAnterior === undefined ? leerAntes(absPath) : contenidoAnterior);
+  let antes = contenidoAnterior;
+  if (antes === undefined) {
+    antes = leerAntes(absPath);
+    /* '' significa dos cosas distintas: un archivo vacío de verdad, o uno que no se
+       pudo leer (binario o enorme). Para revisar daba igual; para DESHACER no: escribir
+       '' en un binario de 30 MB lo dejaría a cero. Se marca y el deshacer lo respeta. */
+    if (antes === '') {
+      try {
+        if (fs.statSync(absPath).size > 0) {
+          if (!noRestaurables.has(workspace)) noRestaurables.set(workspace, new Set());
+          noRestaurables.get(workspace).add(absPath);
+        }
+      } catch {}
+    }
+  }
+  mapa.set(absPath, antes);
 }
 
 /** Lo que hay guardado para un espacio de trabajo (para decidir si hay algo que revisar). */
@@ -156,6 +173,41 @@ function diff(workspace, opts = {}) {
   return partes.join('\n');
 }
 
+/**
+ * Líneas del archivo ACTUAL (1-based) que han cambiado en este turno, o null si no
+ * se puede saber (no hay pre-imagen, el archivo es nuevo de este turno o el cambio
+ * fue masivo).
+ *
+ * Sirve para no culpar al agente del desorden que YA estaba en el archivo: los
+ * diagnósticos del proyecto que caen fuera de estas líneas son preexistentes, y
+ * exigirle esos convierte cada comprobación en una invitación a refactorizar lo que
+ * nadie le ha pedido (que es justo lo que la regla 4 de los subagentes prohíbe).
+ */
+function lineasCambiadas(workspace, absPath) {
+  const mapa = guardados.get(workspace);
+  if (!mapa || !mapa.has(absPath)) return null;
+  const antes = mapa.get(absPath);
+  if (antes === null || antes === undefined) return null;   // archivo nuevo: todo es nuevo
+  let ahora = null;
+  try { ahora = fs.readFileSync(absPath, 'utf8'); } catch { return null; }
+  const ops = diffLineas(antes, ahora);
+  /* `diffLineas` devuelve SOLO el tramo del medio: las líneas iguales del principio no
+     vienen en la lista. Sin contarlas, la numeración salía desplazada y una línea
+     tocada arriba del archivo se daba por no tocada (y al revés). */
+  const A = String(antes).split(/\r?\n/), B = String(ahora).split(/\r?\n/);
+  let ini = 0;
+  while (ini < A.length && ini < B.length && A[ini] === B[ini]) ini++;
+  const set = new Set();
+  let n = ini;                                            // línea en el archivo nuevo
+  for (const o of ops) {
+    if (o.tipo === '~') return null;                     // cambio masivo: no se puede afinar
+    if (o.tipo === ' ') { n++; continue; }
+    if (o.tipo === '-') continue;                        // esa línea ya no existe
+    if (o.tipo === '+') { n++; set.add(n); }
+  }
+  return set;
+}
+
 /** Resumen de una línea: qué archivos cambiaron (para logs y para el prompt). */
 function resumen(workspace) {
   const mapa = guardados.get(workspace);
@@ -163,7 +215,86 @@ function resumen(workspace) {
   return [...mapa.keys()].map(a => nombreRel(workspace, a)).join(', ');
 }
 
-function olvidar(workspace) { guardados.delete(workspace); }
-function limpiar() { guardados.clear(); }
+/* --------------------------------------------------------------------------- *
+ *  v2.5: deshacer el turno
+ *
+ *  La pre-imagen que ya se guardaba para revisar el cambio sirve también para
+ *  volver atrás: es la misma información vista al revés. Lo que NO se puede
+ *  restaurar son los archivos que no se pudieron leer antes (binarios o enormes):
+ *  ahí la pre-imagen es '' y escribirla vaciaría el archivo, así que se marcan y
+ *  el deshacer los deja como están, diciéndolo.
+ * --------------------------------------------------------------------------- */
 
-module.exports = { recordar, leerAntes, diff, resumen, hay, olvidar, limpiar, diffLineas, hunk, MAX_ARCHIVOS };
+/** ¿Hay algo que deshacer en este espacio de trabajo? */
+function puedeDeshacer(workspace) { return hay(workspace); }
+
+/** Archivos que tocaría deshacer, con su acción ({rel, accion}). */
+function planDeshacer(workspace) {
+  const mapa = guardados.get(workspace);
+  if (!mapa) return [];
+  const no = noRestaurables.get(workspace) || new Set();
+  const out = [];
+  for (const [abs, antes] of mapa) {
+    const rel = nombreRel(workspace, abs);
+    if (no.has(abs)) out.push({ ruta: rel, rutaAbs: abs, accion: 'no-restaurable' });
+    else if (antes === null) out.push({ ruta: rel, rutaAbs: abs, accion: 'borrar' });
+    else out.push({ ruta: rel, rutaAbs: abs, accion: 'restaurar' });
+  }
+  return out;
+}
+
+/**
+ * Deshace los cambios del turno: restaura lo que se modificó, borra lo que se creó.
+ *
+ * Solo toca lo que está DENTRO del espacio de trabajo y solo los archivos que este
+ * turno tocó (la lista sale de la pre-imagen, no de adivinar). Después se olvida el
+ * turno: no se puede deshacer dos veces ni «deshacer» un deshacer que ya no aplica.
+ *
+ * @returns {{archivos: Array<{ruta, accion}>, restaurados: number, borrados: number, fallos: number}}
+ */
+function deshacer(workspace, { soloRel = null } = {}) {
+  const mapa = guardados.get(workspace);
+  const vacio = { archivos: [], restaurados: 0, borrados: 0, fallos: 0 };
+  if (!mapa || !mapa.size) return vacio;
+  const no = noRestaurables.get(workspace) || new Set();
+  const raiz = String(workspace || '').replace(/[\\/]+$/, '').toLowerCase();
+  const archivos = [];
+  let restaurados = 0, borrados = 0, fallos = 0;
+  for (const [abs, antes] of mapa) {
+    if (!String(abs).toLowerCase().startsWith(raiz)) { archivos.push({ ruta: nombreRel(workspace, abs), accion: 'fuera-del-espacio' }); continue; }
+    if (soloRel && nombreRel(workspace, abs) !== soloRel) continue;
+    const rel = nombreRel(workspace, abs);
+    if (no.has(abs)) { archivos.push({ ruta: rel, accion: 'no-restaurable' }); fallos++; continue; }
+    try {
+      if (antes === null) {
+        if (fs.existsSync(abs)) fs.unlinkSync(abs);
+        archivos.push({ ruta: rel, accion: 'borrado' });
+        borrados++;
+      } else {
+        fs.writeFileSync(abs, antes, 'utf8');
+        archivos.push({ ruta: rel, accion: 'restaurado' });
+        restaurados++;
+      }
+    } catch (e) {
+      archivos.push({ ruta: rel, accion: 'fallo', error: String((e && e.message) || e) });
+      fallos++;
+    }
+  }
+  // lo deshecho ya no está pendiente de revisión ni de deshacer
+  olvidar(workspace);
+  noRestaurables.delete(workspace);
+  return { archivos, restaurados, borrados, fallos };
+}
+
+/** Rutas absolutas que este turno ha tocado (para hooks, resúmenes y avisos). */
+function archivosTocados(workspace) {
+  return planDeshacer(workspace).map(x => x.rutaAbs).filter(Boolean);
+}
+
+function olvidar(workspace) { guardados.delete(workspace); }
+function limpiar() { guardados.clear(); noRestaurables.clear(); }
+
+module.exports = {
+  recordar, leerAntes, diff, resumen, hay, olvidar, limpiar, diffLineas, hunk, lineasCambiadas,
+  puedeDeshacer, planDeshacer, deshacer, archivosTocados, MAX_ARCHIVOS,
+};

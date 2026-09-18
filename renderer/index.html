@@ -133,6 +133,10 @@
           <footer class="chatfoot">
             <div id="skillMenu" class="skillmenu" hidden></div>
           <div class="composer slim" id="composer">
+            <div id="undoBar" class="btnrow" hidden style="align-items:center;gap:10px">
+              <span class="subnote" id="undoText" style="margin:0"></span>
+              <button class="btn ghost" id="undoBtn">Deshacer el cambio</button>
+            </div>
             <div id="attachStrip" class="attachstrip" hidden></div>
             <div class="compline">
             <div class="modeseg" id="modeSeg" title="Modo del agente (Alt+M para cambiar)"></div>
@@ -573,12 +577,43 @@
                 <div class="sw" id="swVerificar" aria-label="Verificación antes de cerrar"></div></div>
               <div class="swrow srow" data-keys="revisar revision codigo diff cambio revisor calidad"><span class="st"><b>Revisar el cambio antes de cerrar</b><small>Cuando una tarea modifica archivos, un agente de revisión lee el diff antes de dártelo por hecho y busca lo que está mal: contratos rotos, casos límite, restos del nombre viejo. Si encuentra algo bloqueante, SAGITARI lo arregla en el mismo turno. Apágalo si prefieres respuestas más rápidas.</small></span>
                 <div class="sw" id="swRevisar" aria-label="Revisar el cambio antes de cerrar"></div></div>
+              <div class="swrow srow" data-keys="diagnosticos escribir comprobar lint errores proyecto tipos eslint ruff mypy"><span class="st"><b>Comprobar el proyecto al escribir</b><small>Cada vez que SAGITARI escribe un archivo, pasa los comprobadores del proyecto (ESLint, Ruff, Flake8, Mypy) sobre las líneas que ha cambiado y el fallo vuelve al instante, en el mismo paso. Lo que ya estaba mal en el archivo no cuenta como suyo. Apágalo si prefieres que escribir no ejecute nada.</small></span>
+                <div class="sw" id="swDiagnosticos" aria-label="Comprobar el proyecto al escribir"></div></div>
+              <div class="swrow srow" data-keys="pruebas test cierre ejecutar verificar npm test compilacion"><span class="st"><b>Ejecutar las pruebas al cerrar</b><small>Antes de darte el turno por terminado, SAGITARI ejecuta el comando de pruebas del proyecto —o su compilación si no hay pruebas— y mira la salida de verdad. Si falla, se le devuelve el fallo y lo arregla: el turno no cierra en verde con algo roto.</small></span>
+                <div class="sw" id="swCierre" aria-label="Ejecutar las pruebas al cerrar"></div></div>
+              <div class="swrow srow" data-keys="cache prompt contexto ahorro coste rapido tokens proveedor"><span class="st"><b>Aprovechar el caché de prompt</b><small>El prompt de cada paso (herramientas, mapa del proyecto, reglas y conversación) se guarda en el proveedor y se relee a una fracción del precio, con la misma respuesta. Se apaga solo si usas un proveedor compatible que no entienda el campo y te rechace las peticiones.</small></span>
+                <div class="sw" id="swCache" aria-label="Aprovechar el caché de prompt"></div></div>
               <div class="grid2">
                 <div class="field srow" data-keys="subagentes delegaciones limite equipo tope"><label for="grDelegations">SUBAGENTES POR TURNO (0 = sin tope)</label><input type="number" id="grDelegations" min="0" /></div>
                 <div class="field srow" data-keys="paralelo simultaneo concurrencia herramientas rapidez"><label for="parTools">HERRAMIENTAS EN PARALELO (1-4)</label><input type="number" id="parTools" min="1" max="4" /></div>
               </div>
+              <div class="grid2">
+                <div class="field srow" data-keys="intentos arreglo fallo pruebas reintentos vueltas"><label for="verAttempts">INTENTOS DE ARREGLAR UN FALLO (0-5)</label><input type="number" id="verAttempts" min="0" max="5" /></div>
+              </div>
               <div class="subnote">Varias órdenes del mismo mensaje se ejecutan a la vez cuando no chocan: el navegador es uno solo, la escritura en disco va en cola y la terminal admite dos comandos. Con 1, todo va en orden.</div>
               <div class="subnote">Cada subagente tiene su propio presupuesto de pasos, así que sin este tope un turno largo acaba en una cadena de delegaciones. Al alcanzarlo, SAGITARI no se detiene: termina la tarea con lo que ya tiene.</div>
+            </div>
+
+            <div class="setcard">
+              <div class="sc-head"><b>Reglas del proyecto y hooks</b><span class="sc-hint">Cómo se comporta dentro de tus repositorios</span></div>
+              <div class="srow" data-keys="sagitari md agents md reglas instrucciones convenciones proyecto estilo">
+                <div class="subnote" style="margin-top:0">Si el proyecto tiene un <b>SAGITARI.md</b> o un <b>AGENTS.md</b> en su raíz (o en <b>.sagitari/</b>), sus reglas se leen siempre, antes de tocar nada: convenciones, qué no tocar, cómo se llama cada cosa. Valen también para los subagentes. En la carpeta de datos puedes tener un <b>AGENTS.md</b> con las tuyas, para todos los proyectos a la vez.</div>
+                <div id="instrList" class="instrlist"></div>
+                <div class="btnrow" style="margin:12px 0 0">
+                  <button class="btn ghost" id="instrReload"><span class="bi"><i data-i="refresh"></i></span> Comprobar</button>
+                  <button class="btn ghost" id="instrCreate"><span class="bi"><i data-i="plus"></i></span> Crear SAGITARI.md</button>
+                </div>
+              </div>
+              <div class="field srow" data-keys="hook editar escribir formatear prettier lint fix comando automatico">
+                <label for="hookEditar">HOOK TRAS ESCRIBIR UN ARCHIVO (OPCIONAL)</label>
+                <input type="text" id="hookEditar" placeholder="npx prettier --write {{file}}" spellcheck="false" />
+                <div class="subnote">Se ejecuta después de escribir y su salida se le enseña al modelo. Marcadores: <b>{{file}}</b> (el archivo), <b>{{files}}</b> (todos los de ese paso), <b>{{dir}}</b> (el espacio de trabajo); se ponen entre comillas solos.</div>
+              </div>
+              <div class="field srow" data-keys="hook cerrar pruebas lint comprobar comando final">
+                <label for="hookCerrar">HOOK ANTES DE CERRAR EL TURNO (OPCIONAL)</label>
+                <input type="text" id="hookCerrar" placeholder="npm run lint" spellcheck="false" />
+                <div class="subnote">Se ejecuta antes de dar el turno por terminado. Si falla, el turno no cierra: SAGITARI lee la salida y lo arregla, igual que con las pruebas del proyecto.</div>
+              </div>
             </div>
 
             <div class="setcard">

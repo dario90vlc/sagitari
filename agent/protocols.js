@@ -453,12 +453,23 @@ function buildBodyAnthropic(cfg, messages, tools) {
   const budget = needsThinkingFlag(cfg, 'anthropic') ? thinkingBudget(cfg.maxTokens) : 0;
   if (budget) body.thinking = { type: 'enabled', budget_tokens: budget };
   else if (typeof cfg.temperature === 'number' && cfg.temperature > 0) body.temperature = cfg.temperature;
-  if (system) body.system = system;
+  /* v2.5 — CACHÉ DE PROMPT. Este prompt lleva 22 herramientas, el mapa del repositorio y
+     las reglas del proyecto: son decenas de miles de tokens que se vuelven a mandar en
+     CADA paso del turno. El caché de Anthropic los guarda y los relee a una décima parte
+     del precio, y para eso solo hace falta marcar dónde acaba lo que no cambia:
+     el bloque de sistema y la última herramienta. Se puede apagar (`cachePrompt: false`)
+     porque un proveedor compatible que no entienda el campo rechazaría la petición. */
+  const cache = cfg.cachePrompt !== false;
+  const marca = cache ? [{ cache_control: { type: 'ephemeral' } }] : [];
+  if (system) body.system = [{ type: 'text', text: system, ...(marca[0] || {}) }];
   if (tools && tools.length) {
-    body.tools = tools.map(t => ({
+    body.tools = tools.map((t, i) => ({
       name: t.function?.name || t.name,
       description: t.function?.description || t.description || '',
       input_schema: t.function?.parameters || t.parameters || { type: 'object', properties: {} },
+      // el punto de corte se pone en la ÚLTIMA herramienta: el bloque de herramientas
+      // va antes de los mensajes, así que marcando la última se cachea entero
+      ...(cache && i === tools.length - 1 ? { cache_control: { type: 'ephemeral' } } : {}),
     }));
   }
   return body;

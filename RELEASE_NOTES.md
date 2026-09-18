@@ -1,3 +1,144 @@
+# SAGITARI 3.2.3
+
+**El navegador por fin se puede manejar con su ventana detrás de la app.** Es el caso normal
+—trabajas en SAGITARI y el navegador hace lo suyo por debajo— y era justo donde se rompía:
+Windows le avisa a Chromium de que su ventana está tapada, Chromium la congela para ahorrar
+batería y, a partir de ahí, cada clic y cada tipeo se quedaban esperando hasta morir con un
+«CDP timeout» a los 30 segundos, sin decir por qué. Ahora el navegador se lanza con la
+configuración que usa cualquier automatización profesional y ninguna espera interna puede
+quedarse sin cerrar. / **The browser can finally be driven with its window behind the app.**
+That is the normal case —you work in SAGITARI while the browser does its job underneath— and
+it was exactly where it broke: Windows tells Chromium its window is covered, Chromium freezes
+it to save power, and from then on every click and keystroke waited until it died with a “CDP
+timeout” after 30 seconds, saying nothing about why. The browser now launches with the same
+settings any professional automation uses, and no internal wait can hang forever.
+
+Y el resto es lo que convierte a SAGITARI en un agente en el que se puede confiar para trabajar
+de verdad: **puedes deshacer lo que hizo** (por turno o por archivo), **lee las reglas de tu
+proyecto** si tienes un `SAGITARI.md` o un `AGENTS.md`, **ejecuta tus comandos** cuando escribo y
+antes de cerrar el turno, **los errores de tu proyecto vuelven solos** tras cada escritura, y hay
+un **banco de tareas** para medir al agente con números en vez de con sensaciones. / And the
+rest is what turns SAGITARI into an agent you can trust with real work: **undo what it did**
+(per turn or per file), it **follows your project's rules** when you have a `SAGITARI.md` or
+`AGENTS.md`, it **runs your commands** on every write and before the turn closes, **your
+project's errors come back on their own** after each write, and there is a **task bench** to
+measure the agent with numbers instead of with feelings.
+
+## Novedades / What's new
+
+- **Deshacer, de verdad.** El trabajo del turno se puede revertir entero o archivo por archivo
+  (`Deshacer` aparece en el chat en cuanto hay algo que deshacer). El agente ya guardaba cómo
+  estaba cada archivo antes de tocarlo para poder revisar el cambio; ahora eso se usa también
+  para devolverlo a como estaba, avisando de lo que NO se puede restaurar. / **Undo, for real.**
+  A turn's work can be reverted as a whole or file by file (`Undo` appears in the chat as soon
+  as there is something to undo). The agent already kept a copy of every file before touching
+  it in order to review the change; now that is used to put it back, warning about what cannot
+  be restored.
+- **Las reglas de tu proyecto mandan.** Un `SAGITARI.md` o `AGENTS.md` en la raíz (o en
+  `.sagitari/`) se lee SIEMPRE, antes de tocar nada, y también lo leen los subagentes. En
+  Ajustes ▸ Agente se ve qué archivos se están leyendo (y se crea la plantilla con un botón);
+  en tu carpeta de datos puedes tener un `AGENTS.md` tuyo, válido para todos los proyectos. /
+  **Your project's rules win.** A `SAGITARI.md` or `AGENTS.md` at the root (or in `.sagitari/`)
+  is read ALWAYS, before touching anything, and the subagents read it too. Settings ▸ Agent
+  shows which files are being read (and creates the template with one button); your data folder
+  can hold your own `AGENTS.md`, valid for every project.
+- **Tus comandos, enganchados al agente (hooks).** Un comando tras cada escritura (formatear,
+  `lint --fix`, lo que quieras: `{{file}}`, `{{files}}`, `{{dir}}` con las rutas ya entre
+  comillas) y otro antes de cerrar el turno. Si el de cierre falla, el turno **no** cierra: el
+  agente lee la salida y lo arregla, igual que con tus pruebas. / **Your commands, hooked into
+  the agent.** One command after every write (format, `lint --fix`, whatever: `{{file}}`,
+  `{{files}}`, `{{dir}}` with paths already quoted) and another before the turn closes. If the
+  closing one fails, the turn does **not** close: the agent reads the output and fixes it, just
+  like with your tests.
+- **El agente se comprueba a sí mismo con tu proyecto.** Tras cada archivo escrito se pasan los
+  comprobadores de TU proyecto (ESLint, Ruff, Flake8, Mypy…) sobre las líneas que ha cambiado y
+  el fallo vuelve en el mismo paso; lo que ya estaba mal en el archivo no se le exige. Al cerrar,
+  se ejecutan tus pruebas (o tu compilación) y, si fallan, el turno no termina hasta arreglarlas
+  (con tope de intentos, ajustable). / **The agent checks itself against your project.** After
+  every file written, YOUR project's checkers (ESLint, Ruff, Flake8, Mypy…) run over the lines it
+  changed and the failure comes back in the same step; what was already wrong in the file is not
+  demanded of it. On close, your tests (or your build) run and, if they fail, the turn does not
+  end until they are fixed (with an adjustable retry cap).
+- **Búsqueda híbrida (`search_code`).** Coincidencia exacta con ripgrep cuando está en el equipo
+  (y un barrido propio cuando no) **más** un ranking por relevancia calculado en local, sin claves
+  ni servicios. Sirve para las dos preguntas de siempre: «dónde se usa esto» y «dónde está lo que
+  decide X», aunque no sepas cómo se llama. / **Hybrid search (`search_code`).** Exact matching
+  with ripgrep when it is on the machine (with its own sweep when it is not) **plus** a relevance
+  ranking computed locally, with no keys and no services. It answers both classic questions:
+  “where is this used” and “where is whatever decides X”, even when you do not know its name.
+- **El contexto tiene presupuesto.** Se mide lo que se manda (mensajes y las definiciones de las
+  22 herramientas, que son miles de tokens que nadie cuenta) y, cuando ya no cabe, se sueltan del
+  envío los bloques más antiguos —el historial y la conversación no se tocan— avisando en el chat.
+  Además, la caché de prompt del proveedor se aprovecha por defecto (se puede apagar). /
+  **Context has a budget.** What is sent is measured (messages plus the definitions of the 22
+  tools, which are thousands of tokens nobody counts) and, when it no longer fits, the oldest
+  blocks are dropped from the request —history and conversation are untouched— with a notice in
+  the chat. On top of that, the provider's prompt cache is used by default (it can be turned off).
+- **Banco de tareas (`npm run banco`).** Tres tareas con punto de partida, objetivo y criterio
+  objetivo de éxito (las pruebas del propio proyecto de la tarea), y un informe con pasos, tokens,
+  tiempo y coste. Compara con una línea base y **falla** si algo que pasaba ya no pasa: cambiar un
+  prompt, una skill o la orquestación deja de ser una apuesta. / **Task bench (`npm run banco`).**
+  Three tasks with a starting point, a goal and an objective success criterion (the task's own
+  project tests), plus a report with steps, tokens, time and cost. It compares against a baseline
+  and **fails** if something that used to pass no longer does: changing a prompt, a skill or the
+  orchestration stops being a gamble.
+
+## Interfaz / Interface
+
+- **El razonamiento se puede leer de un vistazo.** Mientras el modelo piensa, la cabecera cuenta
+  el tiempo en vivo; al plegarse queda un **resumen de una línea** de lo que estaba pensando, y
+  abierto dice cuánto pensó y cuántas líneas. / **Reasoning is readable at a glance.** While the
+  model thinks, the header counts time live; once collapsed it leaves a **one-line summary** of
+  what it was thinking, and when opened it reports how long it thought and how many lines.
+- **Las tarjetas de herramientas informan solas.** El tiempo corre mientras trabajan (un comando
+  largo ya no parece colgado), un **fallo se lee en la propia cabecera** sin desplegar la tarjeta,
+  y el resultado dice cuántas líneas trae antes de abrirlo. / **Tool cards report on their own.**
+  The timer runs while they work (a long command no longer looks stuck), a **failure is readable in
+  the header itself** without expanding the card, and the result says how many lines it carries
+  before you open it.
+- **El icono de la app es el de SAGITARI**, también en la barra de tareas. Comprobado en los
+  binarios publicados: llevan los seis tamaños del icono de la app (16 a 256), no el de Electron.
+  En desarrollo el proceso es `electron.exe`, así que ahí puede verse el de Electron: es del
+  binario, no de la app. / **The app icon is SAGITARI's**, including in the taskbar. Verified on the
+  published binaries: they carry all six sizes of the app icon (16 to 256), not Electron's. In
+  development the process is `electron.exe`, so Electron's icon may show there: it belongs to the
+  binary, not the app.
+
+## Correcciones / Fixes
+
+- **El navegador se cuelga 30 s por acción cuando su ventana no está delante.** Dos causas, las
+  dos corregidas: una espera de pintado basada en `requestAnimationFrame` sin tope (Chromium no da
+  frames a una ventana oculta, así que la promesa no se resolvía nunca) y el congelado por oclusión
+  de Windows. Se arregla con los flags de automatización (`--disable-backgrounding-occluded-windows`,
+  `--disable-renderer-backgrounding`, `--disable-background-timer-throttling`,
+  `--disable-features=CalculateNativeWinOcclusion`) y con esperas que siempre cierran. La batería
+  contra un Chrome real pasa entera en el escenario que antes fallaba. / **The browser hangs 30 s
+  per action when its window is not in front.** Two causes, both fixed: a paint wait built on
+  `requestAnimationFrame` with no cap (Chromium gives no frames to an occluded window, so the
+  promise never resolved) and Windows' occlusion freezing. Fixed with the standard automation flags
+  and with waits that always close. The suite against a real Chrome now passes fully in the
+  scenario that used to fail.
+- **El ciclo «prueba → falla → arreglo → repito» repetía de verdad.** El contador de intentos
+  nacía sin inicializar (`undefined++` es `NaN`, y `NaN >= tope` siempre es falso), así que el tope
+  no existía y la comprobación no se repetía tras un arreglo: el turno se cerraba creyendo que
+  estaba comprobado. / **The “test → fail → fix → retry” cycle really retries.** The attempt counter
+  was born uninitialised, so the cap did not exist and the check was not repeated after a fix.
+- **Las reglas de un proyecto no entran dos veces.** En Windows `SAGITARI.md` y `sagitari.md` son el
+  mismo archivo: ahora se deduplica por ruta real (antes el texto iba duplicado al prompt). / **A
+  project's rules do not enter twice.** On Windows `SAGITARI.md` and `sagitari.md` are the same file:
+  it is now deduplicated by real path.
+- **La búsqueda exacta ya no se queda muda.** Sin ruta explícita, y con la entrada estándar siendo
+  un tubo, ripgrep esperaba a que se cerrara en vez de buscar; y fuera de un repositorio de git no
+  aplicaba el `.gitignore`, así que devolvía lo que el usuario tiene mandado ignorar. / **Exact
+  search is no longer mute.** Without an explicit path, and with standard input being a pipe,
+  ripgrep waited for it to close instead of searching; and outside a git repository it did not apply
+  `.gitignore`.
+- **`latest.yml` firmaba solo el instalador** (arreglado en la 3.2.2 y con verificación propia en
+  el CI desde entonces). / **`latest.yml` only signed the installer** (fixed in 3.2.2, with its own
+  CI verification since then).
+
+---
+
 # SAGITARI 3.2.2
 
 **El portable ya puede actualizarse solo.** La app verifica cada descarga contra la firma

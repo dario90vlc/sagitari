@@ -1,0 +1,13 @@
+{
+  "nombre": "sumar-utilidad",
+  "etiquetas": ["crear", "codigo"],
+  "objetivo": "Crea el módulo `src/suma.js` que exporte una función `suma(a, b)` en CommonJS (con `module.exports`), y su prueba en `test/suma.test.js` usando el runner de Node (`node:test` y `node:assert`) que compruebe la suma de dos números. Al terminar, `npm test` tiene que pasar en verde.",
+  "comprobar": "npm test",
+  "espera": [
+    { "archivo": "src/suma.js", "contiene": "module.exports" },
+    { "archivo": "test/suma.test.js", "existe": true }
+  ],
+  "pasosMax": 20,
+  "tiempoMaxMs": 240000,
+  "nota": "Lo mínimo: crear dos archivos que encajan entre ellos y que las pruebas de verdad lo confirmen."
+}

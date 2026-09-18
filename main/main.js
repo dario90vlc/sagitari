@@ -12,6 +12,10 @@ const { spawn } = require('child_process');
 
 const DEV = process.argv.includes('--dev');
 const SMOKE = process.argv.includes('--smoke');
+/* Banco de pruebas de TAREAS: mide al agente (¿hace bien el trabajo?), no al código.
+   Va por aquí y no por un script de Node a propósito: la clave del proveedor está
+   cifrada con el almacén del sistema y solo este proceso puede descifrarla. */
+const BANCO = process.argv.includes('--banco');
 // Las comprobaciones automáticas (smoke, ui-check) abren la app SIN mostrar
 // ventana: hasta ahora la ventana se abría y se cerraba sola dos veces durante
 // probar.bat, y eso se ve exactamente igual que «la app se cierra sola».
@@ -78,7 +82,8 @@ const CONFIG_FILE = path.join(CONFIG_DIR, 'config.json');
 let config = {
   providers: [],                 // [{id, name, baseUrl, apiKey, models:[], activeModel}]
   active: null,                  // {providerId, name, baseUrl, apiKey, model, temperature, vision}
-  settings: { theme: 'violet', uiColor: 'violet', glowColor: 'match', glowStrength: 1, ttsEnabled: true, voiceLang: 'es-ES', glowEnabled: true, userName: 'Darío', mode: 'act', maxConcurrentTasks: 1, autoResumeTasks: true, llmTimeoutMs: 120000, showThinking: false, reviewGate: true, parallelTools: 3 },
+  settings: { theme: 'violet', uiColor: 'violet', glowColor: 'match', glowStrength: 1, ttsEnabled: true, voiceLang: 'es-ES', glowEnabled: true, userName: 'Darío', mode: 'act', maxConcurrentTasks: 1, autoResumeTasks: true, llmTimeoutMs: 120000, showThinking: false, reviewGate: true, parallelTools: 3, diagnosticosEscritura: true, verificacionCierre: true, intentosArreglo: 2, promptCache: true,
+    hookEditar: '', hookCerrar: '' },
   mcp: { enabled: true, servers: [] },   // servidores MCP del usuario (ver main/mcp-config.js)
 };
 
@@ -277,6 +282,15 @@ function createChatWindow() {
     icon: path.join(__dirname, '..', 'renderer', 'assets', 'sagitari.ico'),
     show: !HIDDEN
   });
+  /* Icono de la ventana (barra de tareas). Ya viaja en las opciones de arriba, pero en
+     Windows el icono del botón de la barra puede quedarse con el del ejecutable si la
+     ventana se crea antes de que el sistema lo pida: fijarlo otra vez al arrancar es la
+     forma barata de que salga SIEMPRE el de SAGITARI. En desarrollo el proceso es
+     `electron.exe`, así que ahí puede verse el de Electron: es del binario, no de la app
+     (las versiones publicadas llevan el nuestro, con sus seis tamaños). */
+  if (process.platform === 'win32') {
+    try { win.setIcon(path.join(__dirname, '..', 'renderer', 'assets', 'sagitari.ico')); } catch {}
+  }
   win.loadFile(INDEX_HTML);
   // La ventana no navega fuera de su index.html local: si un enlace o un script
   // lo intenta, se cancela (las URLs http/https se abren en el navegador del
@@ -604,6 +618,27 @@ ipcMain.handle('settings:set', (e, patch) => {
     const n = Math.round(Number(clean.parallelTools));
     if (!Number.isFinite(n) || n < 1 || n > 4) delete clean.parallelTools; else clean.parallelTools = n;
   }
+  /* v2.5 — verificación real: booleanos estrictos (como verifyGate) para que un «false»
+     en texto no pueda dejarlos encendidos sin querer, y el número de vueltas de arreglo
+     topado: sin tope, un proyecto que no compila dejaba el turno girando para siempre. */
+  // v2.5: caché de prompt del proveedor (activo por defecto; se apaga si un proveedor
+  // compatible rechaza el campo `cache_control`)
+  if ('promptCache' in clean && typeof clean.promptCache !== 'boolean') delete clean.promptCache;
+  if ('diagnosticosEscritura' in clean && typeof clean.diagnosticosEscritura !== 'boolean') delete clean.diagnosticosEscritura;
+  if ('verificacionCierre' in clean && typeof clean.verificacionCierre !== 'boolean') delete clean.verificacionCierre;
+  if ('intentosArreglo' in clean) {
+    const n = Math.round(Number(clean.intentosArreglo));
+    if (!Number.isFinite(n) || n < 0 || n > 5) delete clean.intentosArreglo; else clean.intentosArreglo = n;
+  }
+  /* v2.5 — tus hooks (Ajustes ▸ Agente). Una sola línea cada uno y sin saltos de línea:
+     un hook es UN comando; si alguien pega un guion de varias líneas, se queda la primera
+     y se le dice, en vez de ejecutar algo que no ha leído. */
+  for (const k of ['hookEditar', 'hookCerrar']) {
+    if (!(k in clean)) continue;
+    let v = String(clean[k] == null ? '' : clean[k]).trim();
+    if (v.length > 500) v = v.slice(0, 500).trim();
+    clean[k] = v;
+  }
   config.settings = { ...config.settings, ...clean };
   const saved = persistConfig();
   if ('glowEnabled' in clean && !clean.glowEnabled) glow('off');
@@ -636,6 +671,9 @@ ipcMain.handle('agents:live', () => ({
 // ---- v1.2 memoria avanzada: metadata + selección por relevancia (agent/memory.js) ----
 const memory = require('../agent/memory');
 const checkpoints = require('../agent/checkpoints');
+const cambios = require('../agent/cambios');    // v2.5: pre-imágenes del turno (revisión y deshacer)
+const repomap = require('../agent/repomap');    // v2.5: hay que invalidarlo cuando se deshace
+const instrucciones = require('../agent/instrucciones'); // v2.5: SAGITARI.md / AGENTS.md del proyecto
 ipcMain.handle('memory:list', () => memory.list());
 
 // ---------- skills ----------
@@ -1949,14 +1987,150 @@ ipcMain.handle('update:retry', async () => {
   return { ...r, pending: r.ok ? r.pending : pendingInfo() };
 });
 
+/* Deshacer el turno: vuelve a dejar los archivos como estaban antes de que el agente
+   los tocara. La pre-imagen la guarda agent/cambios.js en cada escritura (para revisar el
+   cambio), así que aquí solo hay que decidir si se puede y aplicarlo.
+
+   Se niega con el agente trabajando: deshacer mientras hay una escritura en vuelo
+   restauraría un archivo que la herramienta está a punto de volver a escribir. */
+ipcMain.handle('cambios:deshacer', async () => {
+  if (agent && agent.isBusy()) return { ok: false, error: 'SAGITARI está trabajando ahora mismo: detén la tarea antes de deshacer' };
+  const ws = getWorkspace();
+  if (!cambios.puedeDeshacer(ws)) return { ok: false, error: 'no hay ningún cambio de este turno que deshacer' };
+  const plan = cambios.planDeshacer(ws);
+  let r;
+  try { r = cambios.deshacer(ws); }
+  catch (e) { return { ok: false, error: 'no se pudo deshacer: ' + ((e && e.message) || e) } }
+  try { repomap.invalidar(ws); } catch {}
+  runlog.log({ agent: 'sagitari', event: 'undo_turn', archivos: r.archivos.length, restaurados: r.restaurados, borrados: r.borrados, fallos: r.fallos });
+  return { ok: true, ...r, plan: plan.length };
+});
+
+/** ¿Hay algo que deshacer ahora mismo? (para que la interfaz no ofrezca un botón inútil) */
+ipcMain.handle('cambios:estado', async () => {
+  const ws = getWorkspace();
+  const plan = cambios.puedeDeshacer(ws) ? cambios.planDeshacer(ws) : [];
+  return { ok: true, puede: plan.length > 0, archivos: plan.map(x => x.ruta) };
+});
+
+/* Reglas del proyecto (SAGITARI.md / AGENTS.md): la interfaz enseña CUÁLES se están
+   leyendo y sus tamaños. Es la respuesta a «¿por qué el agente no hace lo que dice mi
+   AGENTS.md?»: porque no hay ninguno, o está en otra carpeta, o se está recortando. */
+ipcMain.handle('agent:instrucciones', async () => {
+  const ws = getWorkspace();
+  try {
+    const { fuentes } = instrucciones.leer(ws);
+    return { ok: true, workspace: ws, fuentes, candidatos: instrucciones.candidatas(ws).map(c => c.etiqueta) };
+  } catch (e) { return { ok: false, error: (e && e.message) || String(e), fuentes: [], candidatos: [] } }
+});
+
+/** Crea una plantilla de SAGITARI.md en el proyecto (sin pisar nada si ya existe). */
+ipcMain.handle('agent:instrucciones-crear', async () => {
+  const ws = getWorkspace();
+  const destino = path.join(ws, 'SAGITARI.md');
+  if (fs.existsSync(destino)) return { ok: true, yaExistia: true, ruta: destino };
+  const plantilla = [
+    '# Reglas de este proyecto (SAGITARI)',
+    '',
+    '<!-- SAGITARI lee este archivo SIEMPRE, antes de tocar nada, y también sus subagentes.',
+    '     Escribe aquí solo lo que no se deduce del código: convenciones, límites, atajos. -->',
+    '',
+    '## Cómo se ejecuta esto',
+    '- Tests: `npm test`',
+    '- Compilar / tipos: `npm run build`',
+    '- Lint: `npm run lint`',
+    '',
+    '## Convenciones',
+    '- (idioma de los comentarios, estilo, estructura de carpetas, nombres)',
+    '',
+    '## No tocar sin permiso',
+    '- (carpetas o archivos generados, migraciones, releases)',
+    '',
+    '## Antes de dar algo por hecho',
+    '- (qué hay que ejecutar o comprobar en ESTE proyecto)',
+    '',
+  ].join('\n');
+  try {
+    fs.writeFileSync(destino, plantilla, 'utf8');
+    runlog.log({ agent: 'sagitari', event: 'instructions_created', ruta: destino });
+    return { ok: true, ruta: destino };
+  } catch (e) { return { ok: false, error: (e && e.message) || String(e) } }
+});
+
 ipcMain.handle('update:page', async () => {
   const url = (lastUpdate && lastUpdate.url) || `https://github.com/${updater.REPO}/releases`;
   try { await shell.openExternal(url); return { ok: true }; } catch (e) { return { ok: false, error: e.message }; }
 });
 
+/* --------------------------------------------------------------------------- *
+ *  `--banco`: el banco de pruebas de tareas (npm run banco)
+ *
+ *  Usa TU proveedor real, con tu configuración y tus ajustes, porque lo que se mide es
+ *  el agente tal y como lo usas. Escribe en el registro de la app (son corridas de
+ *  verdad) y no abre ninguna ventana: corre y sale con un código que sirve para el CI
+ *  cuando se compara con la línea base.
+ * --------------------------------------------------------------------------- */
+async function correrBancoYsalir() {
+  const banco = require('../agent/banco');
+  const arg = (n) => { const i = process.argv.indexOf(n); return i >= 0 && i + 1 < process.argv.length ? process.argv[i + 1] : null; };
+  const hay = (n) => process.argv.includes(n);
+  if (!config.active || !config.active.baseUrl || !config.active.model) {
+    console.error('[banco] no hay proveedor activo con modelo: configúralo en Ajustes y vuelve a intentarlo');
+    app.exit(2); return;
+  }
+  const dirTareas = arg('--dir') || banco.DIR_POR_DEFECTO;
+  const filtro = arg('--tarea');
+  console.log('[banco] ' + config.active.model + (filtro ? ' · solo «' + filtro + '»' : ' · todas las tareas'));
+  const informe = await banco.correrTodo({
+    dir: dirTareas,
+    filtro,
+    settings: config,
+    conservar: hay('--conservar'),
+    // Cada tarea estrena agente: reutilizarlo arrastraría el historial de la anterior
+    // (y mediría un agente con ventaja, que es justo lo que no queremos).
+    nuevoAgente: () => {
+      const a = new Agent({ emit: (e) => {
+        if (e && e.type === 'tool' && e.name) process.stdout.write('    · ' + e.name + '\n');
+      } });
+      a.setPolicy(config.security);
+      return a;
+    },
+  });
+  for (const m of informe.malas) console.error('[banco] tarea ignorada — ' + m.error);
+  console.log('\n' + banco.tabla(informe));
+  if (hay('--json')) console.log(JSON.stringify(informe));
+  try {
+    const f = path.join(DATA_DIR, 'banco', 'informe-' + new Date().toISOString().replace(/[:.]/g, '-') + '.json');
+    fs.mkdirSync(path.dirname(f), { recursive: true });
+    fs.writeFileSync(f, JSON.stringify(informe, null, 2));
+    console.log('  Informe: ' + f);
+  } catch {}
+  let codigo = informe.resumen.pasaron === informe.resumen.tareas ? 0 : 1;
+  if (hay('--guardar-base') || hay('--base')) {
+    const fBase = path.join(__dirname, '..', 'bench', 'linea-base.json');
+    if (hay('--guardar-base')) { banco.guardarBase(fBase, informe); console.log('  Línea base actualizada: ' + fBase); }
+    if (hay('--base')) {
+      const base = banco.leerBase(fBase);
+      if (!base) console.log('  (sin línea base con la que comparar)');
+      else {
+        const c = banco.comparar(informe, base);
+        console.log('  Comparado con la línea base de ' + (base.cuando || '?') + (base.modelo ? ' (' + base.modelo + ')' : ''));
+        for (const r of c.regresiones) console.log('    REGRESIÓN  ' + r.nombre + ': ' + (r.motivos || []).join('; '));
+        for (const r of c.mejoras) console.log('    mejor      ' + r.nombre);
+        for (const r of c.nuevos) console.log('    nueva      ' + r.nombre + (r.pasa ? ' (pasa)' : ' (falla)'));
+        for (const r of c.faltantes) console.log('    ya no está ' + r.nombre);
+        for (const a of c.avisos) console.log('    más caro   ' + a.nombre + ': ' + Math.round(a.antesMs / 1000) + 's→' + Math.round(a.ms / 1000) + 's, ' + a.antesTokens + '→' + a.tokens + ' tokens');
+        if (c.hayRegresion) codigo = 1;
+      }
+    }
+  }
+  app.exit(codigo);
+}
+
 app.whenReady().then(() => {
   if (!gotLock) return;
   loadConfig();
+  if (BANCO) { correrBancoYsalir().catch((e) => { console.error('[banco] ' + ((e && e.message) || e)); app.exit(1); }); return; }
   // ¿se quedó una instalación a medias en la sesión anterior? `pendingFor` la
   // descarta sola si ya estamos en la versión nueva (o si el aviso está roto).
   updatePending = updater.pendingFor(readPending(), app.getVersion());

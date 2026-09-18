@@ -84,6 +84,7 @@ const ChatKit = (function () {
     use_skill:       { label: 'Skill',            icon: 'spark',    verb: 'Aplicando skill' },
     repo_map:        { label: 'Mapa del proyecto', icon: 'map',     verb: 'Mapeando el proyecto' },
     find_symbol:     { label: 'Buscar símbolo',   icon: 'search',   verb: 'Buscando dónde se define' },
+    search_code:     { label: 'Buscar en el proyecto', icon: 'search', verb: 'Buscando en el código' },
     apply_patch:     { label: 'Cambios en varios archivos', icon: 'save', verb: 'Aplicando cambios' },
     delegate:        { label: 'Subagente',        icon: 'agents',   verb: 'Delegando' },
   };
@@ -113,6 +114,7 @@ const ChatKit = (function () {
     use_skill: ['name'],
     repo_map: ['path'],
     find_symbol: ['query', 'name'],
+    search_code: ['query', 'q'],
     apply_patch: ['changes', 'summary'],
     delegate: ['agent', 'task'],
     notify: ['title', 'message'],

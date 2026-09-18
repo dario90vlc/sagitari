@@ -255,7 +255,7 @@ function bloquePrompt(workspace, opts = {}) {
     lineas.push(l);
     usado += l.length + 1;
   }
-  lineas.push('- Para el resto: repo_map (por carpetas) y find_symbol (dónde se define algo). Antes de leer un archivo entero, busca su símbolo.');
+  lineas.push('- Para el resto: repo_map (por carpetas), find_symbol (dónde se define algo) y search_code (busca por CONTENIDO: coincidencias exactas + lo más relacionado). Antes de leer un archivo entero, busca.');
   return lineas.join('\n');
 }
 
@@ -319,5 +319,5 @@ function textoBusqueda(workspace, consulta, opts = {}) {
 
 module.exports = {
   construir, indice, invalidar, mapa, bloquePrompt, buscar, textoBusqueda, simbolosDe,
-  IGNORADOS, MAX_FICHEROS, _resetForTests,
+  IGNORADOS, MAX_FICHEROS, reglasIgnoradas, ignoradoPorRegla, _resetForTests,
 };

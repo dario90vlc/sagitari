@@ -938,6 +938,100 @@ test('protocols: detectFormat elige el endpoint por proveedor y modelo', () => {
   eq(protocols.detectFormat({ baseUrl: 'https://opencode.ai/zen/go/v1', model: 'opencode-go/qwen3.8-max' }), 'anthropic', 'admite id con prefijo');
 });
 
+test('contexto: mide lo que se manda y suelta lo viejo cuando ya no cabe', () => {
+  const contexto = require('../agent/contexto');
+
+  // La medida: los mensajes Y las herramientas. Las definiciones de herramientas son
+  // miles de tokens que nadie cuenta y que se pagan en cada paso.
+  const herramientas = [{ type: 'function', function: { name: 'read_file', description: 'lee un archivo del proyecto', parameters: { type: 'object', properties: { path: { type: 'string' } } } } }];
+  const m = contexto.medir([{ role: 'user', content: 'hola' }], herramientas);
+  ok(m.herramientas > 0, 'las herramientas cuentan: ' + m.herramientas + ' tokens');
+  eq(m.total, m.mensajes + m.herramientas, 'y el total es mensajes + herramientas');
+  ok(contexto.estimarTokens('x'.repeat(360)) === 100, 'la estimación es por caracteres (≈3,6 por token): ' + contexto.estimarTokens('x'.repeat(360)));
+  eq(contexto.medir([], []).total, 0, 'sin nada, cero');
+
+  // La ventana: por familia de modelo, y se puede forzar
+  eq(contexto.ventanaDe({ model: 'claude-sonnet-4' }), 200000, 'un Claude tiene 200k');
+  eq(contexto.ventanaDe({ model: 'gpt-4o' }), 128000);
+  eq(contexto.ventanaDe({ model: 'lo-que-sea' }), 128000, 'sin dato se asume 128k (avisar antes es mejor que quedarse corto)');
+  eq(contexto.ventanaDe({ model: 'lo-que-sea', contextWindow: 32000 }), 32000, 'y el usuario puede fijarla');
+
+  // Los tres tramos
+  const grande = [{ role: 'system', content: 'x'.repeat(1000) }, { role: 'user', content: 'y'.repeat(1000) }];
+  eq(contexto.presupuesto({ messages: grande, tools: [], cfg: { model: 'gpt-4o' } }).estado, 'hola', 'un prompt pequeño va holgado');
+  const medio = [{ role: 'user', content: 'y'.repeat(128000 * 0.65 * 3.6) }];
+  eq(contexto.presupuesto({ messages: medio, tools: [], cfg: { model: 'gpt-4o' } }).estado, 'ajustado', 'al 65% ya va ajustado');
+  const lleno = [{ role: 'user', content: 'y'.repeat(128000 * 0.9 * 3.6) }];
+  const pl = contexto.presupuesto({ messages: lleno, tools: [], cfg: { model: 'gpt-4o' } });
+  eq(pl.estado, 'apretado', 'al 90% está apretado');
+  ok(pl.libre >= 0, 'y el sitio libre no se va a negativo');
+  eq(contexto.notaPresupuesto({ estado: 'hola', uso: 0.1 }), '', 'con sitio de sobra no se le dice nada al modelo: no hay nada que hacer con ese dato');
+  ok(/PRESUPUESTO DE CONTEXTO/.test(contexto.notaPresupuesto(pl)), 'y apretado se le dice qué hacer (leer por tramos, no repetir), no solo cuánto queda');
+
+  /* Soltar lo viejo: se sueltan bloques ENTEROS (un assistant con sus tool_result),
+     porque soltar el assistant y dejar sus resultados haría que el proveedor rechazara
+     la petición. Y el sistema y la cola reciente no se tocan nunca. */
+  const conversacion = [{ role: 'system', content: 'reglas' }];
+  for (let i = 1; i <= 30; i++) {
+    conversacion.push({ role: 'user', content: 'pregunta ' + i });
+    conversacion.push({ role: 'assistant', content: '', tool_calls: [{ id: 'c' + i, function: { name: 'read_file', arguments: '{}' } }] });
+    conversacion.push({ role: 'tool', tool_call_id: 'c' + i, content: 'v'.repeat(15000) });
+  }
+  const rec = contexto.recortarMensajes(conversacion, [], { model: 'gpt-4o' });
+  ok(rec.quitados > 0, 'con el contexto lleno se sueltan bloques: ' + rec.quitados);
+  ok(rec.tokensLiberados > 0, 'y se informan los tokens que se dejan de pagar: ' + rec.tokensLiberados);
+  eq(rec.messages[0].role, 'system', 'el bloque de sistema se queda (es lo único que no se puede perder)');
+  const sueltos = rec.messages.filter(x => x.role === 'tool' && !rec.messages.some(y => y.role === 'assistant' && (y.tool_calls || []).some(c => c.id === x.tool_call_id)));
+  eq(sueltos.length, 0, 'y no queda ningún resultado de herramienta huérfano (el proveedor rechazaría la petición)');
+  eq(rec.messages[1].role, 'user', 'la conversación recortada empieza por el usuario');
+  ok(rec.messages.length >= 7, 'se conserva una cola suficiente para seguir trabajando: ' + rec.messages.length + ' mensajes');
+  const corta = [{ role: 'system', content: 'reglas' }, { role: 'user', content: 'hola' }];
+  eq(contexto.recortarMensajes(corta, [], { model: 'claude-sonnet-4' }).quitados, 0, 'si cabe, no se suelta nada');
+  const sinSistema = contexto.recortarMensajes([{ role: 'user', content: 'y'.repeat(500000) }], [], { model: 'gpt-4o' });
+  ok(sinSistema.quitados >= 0, 'sin nada que soltar tampoco se rompe');
+});
+
+test('protocolos: la caché de prompt se marca donde toca y se puede apagar', () => {
+  const protocolos = require('../agent/protocols');
+  const messages = [{ role: 'system', content: 'eres sagitari' }, { role: 'user', content: 'hola' }];
+  const tools = [
+    { type: 'function', function: { name: 'a', description: 'x', parameters: { type: 'object' } } },
+    { type: 'function', function: { name: 'b', description: 'y', parameters: { type: 'object' } } },
+  ];
+  const body = protocolos.buildBodyAnthropic({ model: 'claude-sonnet-4', maxTokens: 100 }, messages, tools);
+  eq(Array.isArray(body.system) && body.system[0].type, 'text', 'el sistema viaja como bloque');
+  eq(body.system[0].cache_control.type, 'ephemeral', 'marcado para el caché (ahí está el prompt que no cambia)');
+  ok(!body.tools[0].cache_control, 'el corte no se pone en la primera herramienta');
+  eq(body.tools[1].cache_control.type, 'ephemeral', 'sino en la ÚLTIMA: así se cachea el bloque de herramientas entero');
+  ok(body.tools[1].input_schema && body.tools[1].description, 'y las herramientas siguen viajando como antes');
+
+  const sin = protocolos.buildBodyAnthropic({ model: 'claude-sonnet-4', maxTokens: 100, cachePrompt: false }, messages, tools);
+  ok(!sin.system[0] || !sin.system[0].cache_control, 'con el ajuste apagado no se marca nada (hay proveedores compatibles que rechazan el campo)');
+  ok(!sin.tools[1].cache_control, 'ni en las herramientas');
+});
+
+test('agent: el caché de prompt sale en la petición de verdad (y se apaga desde Ajustes)', async () => {
+  const { Agent } = require('../agent/agent');
+  const sink = {};
+  const agent = new Agent({
+    fetchFn: fakeFetch([evData({ choices: [{ delta: { content: 'ok' } }] })], sink),
+    emit: () => {},
+    screenshotFn: async () => ({}),
+  });
+  // cadena de un proveedor Anthropic: el ajuste tiene que llegar hasta la petición
+  const base = { active: { name: 'x', baseUrl: 'https://api.anthropic.com/v1', apiKey: 'k', model: 'claude-sonnet-4' }, settings: { mode: 'act', modelRouting: false } };
+  const { chain } = agent._chainFor(base, 'hola');
+  eq(chain[0].cachePrompt, true, 'la cadena lleva el ajuste (activo por defecto)');
+  const sinCache = agent._chainFor({ ...base, settings: { ...base.settings, promptCache: false } }, 'hola');
+  eq(sinCache.chain[0].cachePrompt, false, 'y se puede apagar desde Ajustes');
+
+  // …y se ve en el cuerpo real que se manda al proveedor
+  await agent._streamOnce({ ...base.active, format: 'anthropic', cachePrompt: true }, [{ role: 'system', content: 'sys' }, { role: 'user', content: 'hola' }], new AbortController().signal);
+  ok(Array.isArray(sink.body.system) && sink.body.system[0].cache_control, 'el cuerpo enviado lleva el punto de caché: ' + JSON.stringify(sink.body.system).slice(0, 80));
+  await agent._streamOnce({ ...base.active, format: 'anthropic', cachePrompt: false }, [{ role: 'system', content: 'sys' }, { role: 'user', content: 'hola' }], new AbortController().signal);
+  ok(!sink.body.system[0].cache_control, 'y con el ajuste apagado, no');
+});
+
 test('protocols: authHeaders usa Bearer salvo en Anthropic (x-api-key)', () => {
   const o = protocols.authHeaders({ apiKey: 'k' }, 'openai');
   eq(o.Authorization, 'Bearer k');
@@ -988,7 +1082,10 @@ test('protocols: anthropic usa /messages, x-api-key y ensambla tool_use', async 
   eq(sink.url, 'https://opencode.ai/zen/go/v1/messages');
   eq(sink.headers['x-api-key'], 'k');
   eq(sink.body.max_tokens, 4096, 'Messages exige max_tokens');
-  eq(sink.body.system, 'sys');
+  // v2.5: el bloque de sistema viaja como bloque de texto MARCADO para el caché de prompt
+  // (antes era una cadena suelta): es el prefijo que no cambia entre paso y paso del turno.
+  eq(sink.body.system[0].text, 'sys');
+  eq(sink.body.system[0].cache_control.type, 'ephemeral');
   eq(res.text, 'Vale');
   eq(res.toolCalls[0].function.name, 'run_command');
   eq(res.toolCalls[0].function.arguments, '{"cmd":"dir"}');
@@ -5408,6 +5505,717 @@ test('proyecto: un error de sintaxis vuelve al modelo en el MISMO paso', async (
   ok(!/NO compila/.test(String(bien)), 'uno correcto no añade ruido: ' + String(bien).slice(0, 80));
 });
 
+/* ---------- v2.5: diagnósticos del proyecto (lo que el comprobador sabe del código) ---------- */
+
+test('diagnosticos: lee la salida REAL de cada comprobador', () => {
+  const d = require('../agent/diagnosticos');
+  const raiz = path.join('C:', 'proj');
+
+  // tsc: src/a.ts(12,5): error TS2322: Type 'string' is not assignable to type 'number'.
+  const tsc = d.parsear("src/a.ts(12,5): error TS2322: Type 'string' is not assignable to type 'number'.\nsrc/b.ts(3,1): warning TS6133: 'x' is declared but its value is never read.", { formato: 'tsc', raiz, herramienta: 'tsc' });
+  eq(tsc.hallazgos.length, 2, 'tsc: dos hallazgos');
+  eq(tsc.hallazgos[0].archivo, path.join(raiz, 'src', 'a.ts'), 'con la ruta resuelta contra la raíz');
+  eq(tsc.hallazgos[0].linea, 12); eq(tsc.hallazgos[0].columna, 5);
+  eq(tsc.hallazgos[0].severidad, 'error'); eq(tsc.hallazgos[0].codigo, 'TS2322');
+  ok(/not assignable/.test(tsc.hallazgos[0].mensaje), 'y el mensaje completo: ' + tsc.hallazgos[0].mensaje);
+  eq(tsc.hallazgos[1].severidad, 'aviso', 'un warning de tsc es aviso, no error');
+
+  // eslint --format json (lo que de verdad devuelve)
+  const eslint = d.parsear(JSON.stringify([
+    { filePath: path.join(raiz, 'src', 'a.js'), messages: [
+      { line: 7, column: 3, severity: 2, ruleId: 'no-unused-vars', message: "'x' is assigned a value but never used." },
+      { line: 9, column: 1, severity: 1, ruleId: 'no-console', message: 'Unexpected console statement.' },
+    ] },
+  ]), { formato: 'eslint', raiz, herramienta: 'ESLint' });
+  eq(eslint.hallazgos.length, 2, 'eslint: saca los dos mensajes del JSON');
+  eq(eslint.hallazgos[0].codigo, 'no-unused-vars'); eq(eslint.hallazgos[0].severidad, 'error');
+  eq(eslint.hallazgos[1].severidad, 'aviso', 'severity 1 de eslint es aviso');
+  eq(d.parsear('esto no es JSON\nsrc/a.js:3:1: error: algo', { formato: 'eslint', raiz }).hallazgos.length, 1,
+    'si eslint no devuelve JSON, no se pierde el hallazgo: cae al formato genérico');
+
+  // ruff / flake8: src/a.py:12:5: F401 `x` imported but unused
+  const ruff = d.parsear('src/a.py:12:5: F401 `os` imported but unused', { formato: 'ruff', raiz });
+  eq(ruff.hallazgos.length, 1); eq(ruff.hallazgos[0].codigo, 'F401'); eq(ruff.hallazgos[0].linea, 12);
+
+  // mypy: src/a.py:12: error: Incompatible types in assignment  [assignment]
+  const mypy = d.parsear('src/a.py:12: error: Incompatible types in assignment (expression has type "str", variable has type "int")  [assignment]', { formato: 'mypy', raiz });
+  eq(mypy.hallazgos[0].codigo, 'assignment', 'mypy: se queda con el código del final');
+  ok(/Incompatible types/.test(mypy.hallazgos[0].mensaje), 'y el mensaje limpio: ' + mypy.hallazgos[0].mensaje);
+
+  // go vet: ./a.go:12:5: undefined: cosa
+  const go = d.parsear('./a.go:12:5: undefined: cosa', { formato: 'go', raiz });
+  eq(go.hallazgos[0].archivo, path.join(raiz, 'a.go'), 'go: ./ delante no estorba');
+
+  // clippy: la ubicación va en la línea «-->» de después de la cabecera
+  const clippy = d.parsear('error[E0308]: mismatched types\n  --> src/main.rs:12:5\n   |\n12 |     let x: i32 = "hola";', { formato: 'clippy', raiz });
+  eq(clippy.hallazgos.length, 1); eq(clippy.hallazgos[0].archivo, path.join(raiz, 'src', 'main.rs'));
+  eq(clippy.hallazgos[0].codigo, 'E0308'); eq(clippy.hallazgos[0].linea, 12);
+
+  // genérico: cualquier «archivo:línea: mensaje»
+  const gen = d.parsear('Compilando...\nsrc/a.js:4:3: error: falta un paréntesis\nlisto', { formato: 'generico', raiz });
+  eq(gen.hallazgos.length, 1, 'genérico: solo la línea con pinta de diagnóstico: ' + JSON.stringify(gen.hallazgos.map(h => h.mensaje)));
+  eq(gen.hallazgos[0].linea, 4);
+
+  // lo que apunta FUERA del proyecto no se acepta como hallazgo del proyecto
+  const fuera = d.parsear('C:\\otro\\sitio\\x.js:1:1: error: ajeno', { formato: 'generico', raiz });
+  eq(fuera.hallazgos.length, 0, 'un hallazgo de fuera del espacio de trabajo no se le atribuye al proyecto');
+  eq(fuera.sinUbicar, 1, 'pero se cuenta como no ubicado');
+
+  // y un comprobador que no está en el equipo NUNCA es un error del código
+  ok(d.pareceFalloDeHerramienta({ code: 1, stderr: 'python: No module named flake8' }), 'un módulo que no existe es un fallo de la herramienta');
+  ok(d.pareceFalloDeHerramienta({ code: 9009, stderr: "'ruff' no se reconoce como un comando interno o externo" }), 'y un programa que no está, también');
+  ok(d.pareceFalloDeHerramienta({ code: null }), 'si no se pudo ni lanzar, tampoco se culpa al código');
+  ok(!d.pareceFalloDeHerramienta({ code: 1, stdout: 'src/a.js:3:1: error: algo tuyo' }), 'un error de código con salida normal sí se le atribuye');
+});
+
+test('diagnosticos: lo que ya estaba mal en el archivo no cuenta como suyo', () => {
+  const d = require('../agent/diagnosticos');
+  const cambios = require('../agent/cambios');
+  cambios.limpiar();
+  const ws = tmpDir('sagi-diag-');
+  const archivo = path.join(ws, 'a.js');
+  const antes = ['const a = 1;', 'const b = 2;', 'const c = 3;', '// viejo', 'module.exports = { a, b, c };', ''].join('\n');
+  fs.writeFileSync(archivo, antes);
+  cambios.recordar(ws, archivo, antes);
+  // el turno cambia SOLO la línea 2
+  const ahora = ['const a = 1;', 'const b = "dos";', 'const c = 3;', '// viejo', 'module.exports = { a, b, c };', ''].join('\n');
+  fs.writeFileSync(archivo, ahora);
+  const cambiadas = cambios.lineasCambiadas(ws, archivo);
+  ok(cambiadas && cambiadas.has(2) && !cambiadas.has(4), 'sabe qué líneas se han tocado: ' + JSON.stringify([...cambiadas]));
+
+  const hallazgos = [
+    { archivo, linea: 2, columna: 1, severidad: 'error', codigo: 'X', mensaje: 'introducido ahora', herramienta: 'ESLint' },
+    { archivo, linea: 4, columna: 1, severidad: 'error', codigo: 'Y', mensaje: 'ya estaba ahí', herramienta: 'ESLint' },
+  ];
+  const clas = d.clasificar(hallazgos, { lineasDe: (abs) => cambios.lineasCambiadas(ws, abs) });
+  eq(clas.nuevos.length, 1, 'solo el de la línea tocada es nuevo');
+  eq(clas.nuevos[0].mensaje, 'introducido ahora');
+  eq(clas.preexistentes.length, 1, 'el otro se marca como preexistente');
+  ok(d.hayErroresNuevos(clas), 'y hay errores nuevos que atender');
+  eq(d.hayErroresNuevos({ nuevos: [{ severidad: 'aviso' }], preexistentes: clas.preexistentes }), false, 'un aviso nuevo no bloquea el cierre (solo los errores)');
+
+  const texto = d.resumen(clas, { etiqueta: 'ESLint', raiz: ws });
+  ok(/1 error\(es\) en lo que has tocado/.test(texto), 'el resumen dice cuántos son suyos: ' + texto.split('\n')[0]);
+  ok(/a\.js:2/.test(texto), 'y dónde');
+  ok(/NO has tocado/.test(texto), 'y avisa de que los otros no son suyos');
+  ok(!/a\.js:4/.test(texto.split('\n').filter(l => l.startsWith('- ')).join('\n')), 'sin listar los preexistentes como tareas pendientes');
+
+  // un archivo NUEVO de este turno: todo lo que diga el comprobador es suyo
+  const nuevo = path.join(ws, 'nuevo.js');
+  cambios.recordar(ws, nuevo, null);
+  fs.writeFileSync(nuevo, 'const x = 1;\n');
+  ok(cambios.lineasCambiadas(ws, nuevo) === null, 'sin pre-imagen no se puede afinar (todo cuenta como nuevo)');
+  cambios.limpiar();
+});
+
+test('diagnosticos: el plan solo propone lo que de verdad se puede ejecutar', () => {
+  const d = require('../agent/diagnosticos');
+  const vacio = tmpDir('sagi-plan-vacio-');
+  eq(d.planPorArchivos(vacio, [path.join(vacio, 'a.js')]).length, 0, 'sin config ni binario de ESLint no se propone nada (mejor nada que un error inventado)');
+  eq(d.planPorArchivos(vacio, [path.join(vacio, 'a.txt')]).length, 0, 'y un archivo que no es código tampoco tiene comprobador');
+
+  const conEslint = tmpDir('sagi-plan-eslint-');
+  fs.mkdirSync(path.join(conEslint, 'node_modules', 'eslint', 'bin'), { recursive: true });
+  fs.writeFileSync(path.join(conEslint, 'node_modules', 'eslint', 'bin', 'eslint.js'), '// fake\n');
+  const planJs = d.planPorArchivos(conEslint, [path.join(conEslint, 'a.js')]);
+  eq(planJs.length, 1, 'con el binario del proyecto, se propone ESLint');
+  eq(planJs[0].id, 'eslint'); eq(planJs[0].clase, 'node-entrada');
+  ok(planJs[0].args.includes('json'), 'en formato JSON, que es el que se puede leer de verdad');
+  eq(d.planPorArchivos(conEslint, [path.join(conEslint, 'a.py')]).length, 0, 'y no se propone para un .py');
+
+  const py = tmpDir('sagi-plan-py-');
+  fs.writeFileSync(path.join(py, 'requirements.txt'), 'ruff==0.6.0\nmypy\n');
+  const planPy = d.planPorArchivos(py, [path.join(py, 'a.py')]);
+  const ids = planPy.map(c => c.id).sort();
+  eq(ids.join(','), 'mypy,ruff', 'en Python se proponen los que el proyecto declara: ' + ids.join(','));
+  eq(d.planPorArchivos(py, [path.join(py, 'a.js')]).length, 0, 'y no se le echan encima a un archivo de JavaScript');
+
+  // El CIERRE: mandan las pruebas; si no las hay, la compilación
+  const proyecto = require('../agent/proyecto');
+  proyecto._resetForTests();
+  eq(d.planCierre({ tests: 'npm test', build: 'npm run build' }).id, 'pruebas', 'si hay pruebas, se ejecutan las pruebas');
+  eq(d.planCierre({ tests: 'npm test', build: 'npm run build' }).comando, 'npm test');
+  eq(d.planCierre({ build: 'npx tsc --noEmit' }).id, 'compilacion', 'sin pruebas se comprueba la compilación');
+  eq(d.planCierre({ build: 'npx tsc --noEmit' }).formato, 'tsc', 'y se sabe que esa salida es de tsc (para leerla bien)');
+  eq(d.planCierre({}), null, 'sin nada declarado no hay comprobación que ejecutar');
+
+  const real = tmpDir('sagi-plan-real-');
+  fs.writeFileSync(path.join(real, 'package.json'), JSON.stringify({ name: 'x', scripts: { test: 'node t.js', lint: 'eslint .' } }));
+  fs.writeFileSync(path.join(real, 'pnpm-lock.yaml'), 'lockfileVersion: 9\n');
+  proyecto._resetForTests();
+  eq(d.planCierre(proyecto.perfil(real)).comando, 'pnpm test', 'y con el gestor real del proyecto, no un npm a la ligera');
+});
+
+test('diagnosticos: el comprobador del proyecto corre de verdad y su fallo vuelve a la escritura', async () => {
+  const { executeTool, __test } = require('../agent/executors');
+  const cambios = require('../agent/cambios');
+  __test._resetChecks(); cambios.limpiar();
+  const ws = tmpDir('sagi-diag-e2e-');
+  // Un ESLint de mentira pero REAL: es un proceso Node que devuelve JSON de ESLint.
+  // Marca la línea 2 como error; lo que se comprueba es el circuito completo
+  // (plan → proceso → parseo → clasificación → texto del resultado), no ESLint.
+  fs.mkdirSync(path.join(ws, 'node_modules', 'eslint', 'bin'), { recursive: true });
+  fs.writeFileSync(path.join(ws, 'node_modules', 'eslint', 'bin', 'eslint.js'), [
+    "const path = require('path');",
+    'const argv = process.argv.slice(2);',
+    'const archivos = [];',
+    "for (let i = 0; i < argv.length; i++) { if (argv[i] === '--format') { i++; continue; } if (argv[i].startsWith('--')) continue; archivos.push(argv[i]); }",
+    "const out = archivos.map(f => ({ filePath: path.resolve(f), messages: [{ line: 2, column: 1, severity: 2, ruleId: 'regla-x', message: 'esto lo has roto tú' }] }));",
+    'process.stdout.write(JSON.stringify(out));',
+    'process.exit(1);',
+  ].join('\n'));
+  fs.writeFileSync(path.join(ws, 'package.json'), JSON.stringify({ name: 'x', scripts: { test: 'node t.js' } }));
+
+  // El archivo ya existía con una línea mala DENTRO de la zona que no se toca:
+  // el proceso marca siempre la línea 2, así que si el cambio va en la 4, el
+  // hallazgo es PREEXISTENTE y no puede teñir de rojo la escritura.
+  const archivo = path.join(ws, 'a.js');
+  const antes = ['const uno = 1;', 'const malo = 2;', 'const tres = 3;', 'const cuatro = 4;', ''].join('\n');
+  fs.writeFileSync(archivo, antes);
+  const soloOtraLinea = await executeTool('edit_file', { path: 'a.js', old_string: 'const cuatro = 4;', new_string: 'const cuatro = 40;' }, { workspace: ws });
+  ok(!/^Error:/.test(String(soloOtraLinea)), 'un hallazgo preexistente no convierte la escritura en un fallo: ' + String(soloOtraLinea).slice(0, 200));
+  ok(/ya estaban ahí/.test(String(soloOtraLinea)), 'pero se dice que está ahí: ' + String(soloOtraLinea).slice(0, 200));
+
+  // Ahora el turno toca la línea 2: el mismo hallazgo es NUEVO y la escritura va en rojo
+  const cambiandoLaMala = await executeTool('edit_file', { path: 'a.js', old_string: 'const malo = 2;', new_string: 'const malo = 22;' }, { workspace: ws });
+  ok(/^Error:/.test(String(cambiandoLaMala)), 'si el error cae en lo que se acaba de escribir, es un FALLO del paso');
+  ok(/regla-x/.test(String(cambiandoLaMala)) && /esto lo has roto tú/.test(String(cambiandoLaMala)), 'con el hallazgo real del comprobador: ' + String(cambiandoLaMala).slice(0, 240));
+
+  // Con la comprobación apagada en Ajustes, no se ejecuta nada
+  const apagado = await executeTool('edit_file', { path: 'a.js', old_string: 'const tres = 3;', new_string: 'const tres = 33;' }, { workspace: ws, settings: { settings: { diagnosticosEscritura: false } } });
+  ok(/^OK:/.test(String(apagado)) && !/regla-x/.test(String(apagado)), 'apagado en Ajustes, la escritura no ejecuta comprobadores: ' + String(apagado).slice(0, 120));
+
+  // Y un comprobador que no existe en el equipo se aparta, no se culpa al código
+  const ws2 = tmpDir('sagi-diag-sin-herr-');
+  fs.mkdirSync(path.join(ws2, 'node_modules', 'eslint', 'bin'), { recursive: true });
+  fs.writeFileSync(path.join(ws2, 'node_modules', 'eslint', 'bin', 'eslint.js'), "require('paquete-que-no-existe-jamas');");
+  __test._resetChecks(); cambios.limpiar();
+  const sinHerramienta = await executeTool('write_file', { path: 'b.js', content: 'const ok = 1;\n' }, { workspace: ws2 });
+  ok(/^OK:/.test(String(sinHerramienta)), 'si el comprobador no arranca, la escritura no se marca como rota: ' + String(sinHerramienta).slice(0, 200));
+  __test._resetChecks(); cambios.limpiar();
+});
+
+test('verificación de cierre: las pruebas del proyecto mandan, y su fallo vuelve al modelo', async () => {
+  const { Agent } = require('../agent/agent');
+  const proyecto = require('../agent/proyecto');
+  const proyectoCon = (guion) => {
+    const dir = tmpDir('sagi-cierre-');
+    fs.writeFileSync(path.join(dir, 'package.json'), JSON.stringify({ name: 'x', scripts: { test: 'node t.js' } }));
+    fs.writeFileSync(path.join(dir, 't.js'), guion);
+    proyecto._resetForTests();
+    return dir;
+  };
+  const rojo = proyectoCon('process.stdout.write("FAIL: 2 pruebas fallaron\\n"); process.exit(1);');
+  const verde = proyectoCon('process.stdout.write("ok 3 pruebas\\n");');
+
+  /* 1) Falla: el turno NO cierra y el modelo recibe la salida real con la orden de arreglarlo */
+  const eventos = [];
+  const a1 = new Agent({ emit: (e) => eventos.push(e) });
+  a1._writes = 1;
+  const messages = [];
+  const sigue = await a1._chequeoCierre({ settings: { settings: { workspace: rojo } }, messages, res: { text: 'ya está hecho' } });
+  eq(sigue, true, 'con las pruebas en rojo, el bucle sigue en vez de cerrar');
+  eq(messages.length, 2, 'su respuesta se conserva y se le añade el fallo (no se pierde lo que ya dijo)');
+  ok(/FALLÓ/.test(messages[1].content), 'se le dice que falló: ' + messages[1].content.split('\n')[0]);
+  ok(/FAIL: 2 pruebas fallaron/.test(messages[1].content), 'con la salida REAL del comando, no un resumen inventado');
+  ok(/Arréglalo con herramientas/.test(messages[1].content), 'y con la instrucción de arreglarlo y volver a comprobar');
+  ok(eventos.some(e => e.type === 'tool_result' && e.ok === false), 'la tarjeta del chat lo enseña: el usuario ve qué se ejecutó y qué salió');
+  ok(eventos.some(e => e.type === 'status' && /fallado/.test(e.text || '')), 'y se anuncia que se le devuelve al modelo');
+
+  /* 2) Mientras queden intentos, SÍ se repite: es el «vuelve a comprobar» del ciclo.
+     Si no se repitiera, el ciclo sería «falla → arreglo → me lo creo». */
+  const antes = eventos.length;
+  const segunda = await a1._chequeoCierre({ settings: { settings: { workspace: rojo, intentosArreglo: 4 } }, messages: [], res: { text: 'arreglado' } });
+  eq(segunda, true, 'vuelve a comprobar lo arreglado (no se queda en «arreglado» a ciegas)');
+  ok(eventos.length > antes, 'y lo enseña otra vez en el chat');
+  // hasta que se agotan los intentos: entonces deja de comprobar y cierra
+  const muchas = [];
+  for (let i = 0; i < 5; i++) await a1._chequeoCierre({ settings: { settings: { workspace: rojo, intentosArreglo: 4 } }, messages: muchas, res: {} });
+  eq(await a1._chequeoCierre({ settings: { settings: { workspace: rojo, intentosArreglo: 4 } }, messages: [], res: {} }), false,
+    'con los intentos agotados ya no se vuelve a ejecutar');
+
+  /* 3) Tope de intentos: cuando se agotan, cierra igual (con el fallo a la vista) */
+  const a2 = new Agent({ emit: () => {} });
+  a2._writes = 1; a2._intentosArreglo = 2;
+  eq(await a2._chequeoCierre({ settings: { settings: { workspace: rojo, intentosArreglo: 2 } }, messages: [], res: {} }), false,
+    'con los intentos agotados cierra: no se queda girando para siempre');
+
+  /* 4) En verde: cierra y queda marcado como verificado de verdad */
+  const a3 = new Agent({ emit: () => {} });
+  a3._writes = 1;
+  eq(await a3._chequeoCierre({ settings: { settings: { workspace: verde } }, messages: [], res: {} }), false, 'en verde cierra');
+  eq(a3._verified, true, 'y con evidencia real, así la puerta de verificación no le pregunta otra vez');
+
+  /* 5) Apagado en Ajustes: no ejecuta nada */
+  const a4 = new Agent({ emit: () => { throw new Error('no debería emitir nada'); } });
+  a4._writes = 1;
+  eq(await a4._chequeoCierre({ settings: { settings: { workspace: rojo, verificacionCierre: false } }, messages: [], res: {} }), false,
+    'con la comprobación apagada no se ejecuta nada');
+
+  /* 6) Un proyecto sin pruebas ni compilación no tiene nada que ejecutar */
+  const a5 = new Agent({ emit: () => { throw new Error('no debería emitir nada'); } });
+  a5._writes = 1;
+  eq(await a5._chequeoCierre({ settings: { settings: { workspace: tmpDir('sagi-cierre-vacio-') } }, messages: [], res: {} }), false,
+    'sin tests ni build declarados, no se inventa un comando');
+
+  /* 7) Si el modelo ya lanzó ESA orden después de su última escritura, no se repite */
+  const a6 = new Agent({ emit: () => {} });
+  a6._writes = 1; a6._lastWriteSeq = 3; a6._lastCmdSeq = 4; a6._lastCmd = 'npm test';
+  const ev6 = [];
+  a6.emit = (e) => ev6.push(e);
+  eq(await a6._chequeoCierre({ settings: { settings: { workspace: rojo } }, messages: [], res: {} }), false, 'no se duplica un npm test que el modelo ya corrió');
+  eq(ev6.length, 0, 'ni se lanza nada');
+  // …pero si el comando que corrió era otra cosa, sí se ejecuta el del proyecto
+  const a7 = new Agent({ emit: () => {} });
+  a7._writes = 1; a7._lastWriteSeq = 3; a7._lastCmdSeq = 4; a7._lastCmd = 'git status';
+  eq(await a7._chequeoCierre({ settings: { settings: { workspace: rojo } }, messages: [], res: { text: 'hecho' } }), true,
+    'un `git status` no es haber verificado: el proyecto se comprueba igual');
+
+  /* 8) Y está CABLEADO en el bucle de cierre: una comprobación que exista pero a la que
+     nadie llame no comprueba nada (es el fallo que este bloque viene a cerrar). */
+  const agentSrc = fs.readFileSync(path.join(__dirname, '..', 'agent', 'agent.js'), 'utf8');
+  ok(/if \(p\.account && await this\._chequeoCierre\(/.test(agentSrc), 'el bucle de cierre del agente llama a la comprobación del proyecto');
+  const cierreIdx = agentSrc.indexOf('await this._chequeoCierre(');
+  const finalIdx = agentSrc.indexOf('// Final text answer — cierre del protocolo VERIFY', cierreIdx);
+  ok(cierreIdx > 0 && finalIdx > cierreIdx, 'y lo hace ANTES de aceptar el cierre del turno, no después');
+});
+
+test('deshacer: el turno vuelve a como estaba y no toca lo que no tocó', () => {
+  const cambios = require('../agent/cambios');
+  cambios.limpiar();
+  const ws = tmpDir('sagi-undo-');
+  const modificado = path.join(ws, 'a.js');
+  const nuevo = path.join(ws, 'nuevo.js');
+  const intacto = path.join(ws, 'intacto.js');
+  fs.writeFileSync(modificado, 'const a = 1;\n');
+  fs.writeFileSync(intacto, 'const b = 2;\n');
+  cambios.recordar(ws, modificado, 'const a = 1;\n');   // existía
+  cambios.recordar(ws, nuevo, null);                    // lo creó el turno
+  fs.writeFileSync(modificado, 'const a = 999;\nconst roto = ;\n');
+  fs.writeFileSync(nuevo, 'console.log(1);\n');
+
+  ok(cambios.puedeDeshacer(ws), 'hay algo que deshacer tras un turno que escribe');
+  eq(cambios.planDeshacer(ws).length, 2, 'y son los dos archivos del turno, no el intacto');
+  eq(cambios.planDeshacer(ws).find(x => /nuevo\.js$/.test(x.ruta)).accion, 'borrar', 'al creado le toca borrarse');
+
+  const r = cambios.deshacer(ws);
+  eq(r.restaurados, 1, 'uno restaurado');
+  eq(r.borrados, 1, 'y uno borrado');
+  eq(r.fallos, 0);
+  eq(fs.readFileSync(modificado, 'utf8'), 'const a = 1;\n', 'el modificado vuelve a su contenido de antes');
+  eq(fs.existsSync(nuevo), false, 'y el creado desaparece');
+  eq(fs.readFileSync(intacto, 'utf8'), 'const b = 2;\n', 'lo que no tocó el turno se queda como estaba');
+  eq(cambios.puedeDeshacer(ws), false, 'no se puede deshacer dos veces lo mismo');
+  eq(cambios.deshacer(ws).archivos.length, 0, 'y deshacer sin nada no rompe ni miente');
+
+  /* Un archivo que no se pudo leer antes (binario o enorme) NO se puede restaurar:
+     escribir la pre-imagen vacía lo dejaría a cero. Se deja como está y se dice. */
+  const binario = path.join(ws, 'datos.bin');
+  fs.writeFileSync(binario, Buffer.from([1, 0, 2, 3, 4]));
+  cambios.recordar(ws, binario);                        // sin contenido: se lee del disco
+  fs.writeFileSync(binario, Buffer.from([9, 9, 9, 9, 9, 9]));
+  const planBin = cambios.planDeshacer(ws);
+  eq(planBin.length, 1, 'el binario entra en el plan');
+  eq(planBin[0].accion, 'no-restaurable', 'pero marcado como no restaurable');
+  const r2 = cambios.deshacer(ws);
+  eq(r2.fallos, 1, 'y el deshacer lo cuenta como fallo, no como éxito');
+  eq(fs.readFileSync(binario).length, 6, 'el archivo se queda con su contenido actual (no se vacía)');
+  cambios.limpiar();
+
+  /* Y está CABLEADO de punta a punta: sin esto, el módulo sería un adorno. */
+  const read = (p) => fs.readFileSync(path.join(__dirname, '..', p), 'utf8');
+  ok(/ipcMain\.handle\('cambios:deshacer'/.test(read('main/main.js')), 'el proceso principal expone deshacer');
+  ok(/undoChanges: \(\) => ipcRenderer\.invoke\('cambios:deshacer'\)/.test(read('main/preload.js')), 'y llega al renderer por el puente');
+  ok(/case 'can_undo'/.test(read('renderer/app.js')) && /id="undoBar"/.test(read('renderer/index.html')),
+    'la interfaz ofrece deshacer cuando el turno toca archivos');
+  ok(/type: 'can_undo'/.test(read('agent/agent.js')), 'y el agente lo avisa al cerrar el turno');
+});
+
+test('instrucciones: las reglas de la casa se leen siempre, y sin comerse el contexto', () => {
+  const instr = require('../agent/instrucciones');
+  instr._resetForTests();
+  const ws = tmpDir('sagi-instr-');
+  eq(instr.bloquePrompt(ws), '', 'un proyecto sin reglas no mete ningún bloque en el prompt');
+
+  fs.writeFileSync(path.join(ws, 'AGENTS.md'), 'Usa tabuladores.\n');
+  let b = instr.bloquePrompt(ws);
+  ok(/OBLIGATORIAS/.test(b), 'el bloque se marca como obligatorio (si no, el modelo lo trata como sugerencia)');
+  ok(/Usa tabuladores/.test(b), 'con el texto del proyecto: ' + b.slice(0, 120));
+  ok(/AGENTS\.md/.test(b), 'y diciendo de qué archivo sale');
+
+  // SAGITARI.md manda: va primero (es el nombre propio de la app)
+  fs.writeFileSync(path.join(ws, 'SAGITARI.md'), 'En este repo los tests son `make check`.\n');
+  instr._resetForTests();
+  b = instr.bloquePrompt(ws);
+  ok(b.indexOf('make check') < b.indexOf('tabuladores'), 'SAGITARI.md se lee antes que AGENTS.md');
+  eq(instr.leer(ws).fuentes.length, 2, 'y se informan las dos fuentes, sin duplicar por mayúsculas (para enseñarlas en Ajustes)');
+
+  /* En Windows y macOS el sistema no distingue mayúsculas: `AGENTS.md` y `agents.md`
+     son el MISMO archivo, así que sin deduplicar por ruta real las reglas entrarían
+     dos veces en el prompt. Se prueba en su propio proyecto para no tocar el de arriba
+     (en Windows escribir `agents.md` pisa a `AGENTS.md`). */
+  const wsCaso = tmpDir('sagi-instr-caso-');
+  fs.writeFileSync(path.join(wsCaso, 'AGENTS.md'), 'reglas');
+  instr._resetForTests();
+  eq(instr.leer(wsCaso).fuentes.length, 1, 'un solo archivo, una sola fuente');
+  fs.writeFileSync(path.join(wsCaso, 'agents.md'), 'reglas');
+  instr._resetForTests();
+  eq(instr.leer(wsCaso).fuentes.length, process.platform === 'linux' ? 2 : 1,
+    'el mismo archivo con otra caja no cuenta dos veces (y en Linux, que sí distingue, son dos de verdad)');
+  instr._resetForTests();
+
+  // El bloque se lee SIEMPRE, no cuando "encaja": eso es lo que lo hace una regla
+  ok(/make check/.test(instr.bloquePrompt(ws)), 'sigue ahí consulta tras consulta');
+
+  // Un archivo enorme no puede comerse la ventana: se recorta y se dice
+  fs.writeFileSync(path.join(ws, 'AGENTS.md'), 'x'.repeat(20000));
+  instr._resetForTests();
+  const grande = instr.leer(ws);
+  ok(grande.texto.length < 10000, 'el bloque tiene tope de tamaño: ' + grande.texto.length);
+  ok(/recortado/.test(grande.texto), 'y avisa de que se ha recortado');
+  ok(grande.fuentes.some(f => f.recortado), 'la fuente queda marcada como recortada');
+
+  // Cambiar el archivo se nota sin reiniciar nada (caché por firma)
+  fs.writeFileSync(path.join(ws, 'AGENTS.md'), 'ahora distinto');
+  ok(/ahora distinto/.test(instr.bloquePrompt(ws)), 'editar las reglas se nota en la consulta siguiente (caché con firma)');
+
+  // …y está CABLEADO: un módulo que nadie lee no manda nada
+  const rd = (p) => fs.readFileSync(path.join(__dirname, '..', p), 'utf8');
+  ok(/instrucciones\.bloquePrompt\(ws\)/.test(rd('agent/agent.js')), 'el agente principal las mete en su prompt');
+  ok(/require\('\.\/instrucciones'\)\.bloquePrompt/.test(rd('agent/subagents.js')), 'y los subagentes también las reciben');
+  ok(/ipcMain\.handle\('agent:instrucciones'/.test(rd('main/main.js')), 'Ajustes puede enseñar cuáles se leen');
+  instr._resetForTests();
+});
+
+test('hooks: tus comandos, con las rutas citadas y sin romper el turno', async () => {
+  const hooks = require('../agent/hooks');
+  const { ejecutarHook } = require('../agent/executors');
+  const ws = tmpDir('sagi-hook-');
+  const conEspacios = path.join(ws, 'mi carpeta', 'a b.js');
+
+  const c1 = hooks.expandir('npx prettier --write {{file}}', { ws, archivos: ['a b.js'] });
+  ok(/"[^"]*a b\.js"/.test(c1), 'una ruta con espacios va entre comillas (sin eso el comando está roto): ' + c1);
+  ok(path.isAbsolute(c1.match(/"([^"]+)"/)[1]), 'y se pasa la ruta ABSOLUTA: el cwd del hook ya es el proyecto');
+  ok(!/\{\{/.test(hooks.expandir('lint {{files}} en {{dir}}', { ws, archivos: ['a.js', 'b.js'] })), 'no queda ningún marcador sin sustituir');
+  eq((hooks.expandir('{{files}}', { ws, archivos: ['a.js', 'b.js'] }).match(/"/g) || []).length, 4, '{{files}} cita CADA archivo por separado');
+  ok(hooks.tieneMarcadores('x {{file}}') && !hooks.tieneMarcadores('npm run lint'), 'se sabe si una plantilla usa marcadores');
+
+  // Ejecución real: un proceso de verdad, no un doble
+  const okHook = await ejecutarHook('"' + process.execPath + '" -e "process.stdout.write(String(process.argv.length > 1))" {{file}}', { ws, archivos: ['x.js'] });
+  eq(okHook.ok, true, 'un hook que sale 0 queda OK: ' + okHook.texto.slice(0, 120));
+  eq(okHook.code, 0);
+  const malHook = await ejecutarHook('"' + process.execPath + '" -e "process.exit(3)"', { ws });
+  eq(malHook.ok, false, 'y uno que falla se nota (código ' + malHook.code + ')');
+  eq(malHook.code, 3, 'con su código de salida, no un «falló» genérico');
+  const resumen = hooks.resumen(malHook, { etiqueta: 'Hook', comando: 'lint' });
+  ok(/código 3/.test(resumen), 'el resumen que ve el modelo dice el código: ' + resumen.slice(0, 120));
+  ok(/recortada/.test(hooks.resumen({ ok: true, texto: 'y'.repeat(5000) }, { comando: 'x' })), 'una salida enorme se recorta (no se come el contexto)');
+
+  // En la escritura: la salida del hook llega al modelo, pero un hook roto no es un error del código
+  const { executeTool, __test } = require('../agent/executors');
+  __test._resetChecks();
+  const ws2 = tmpDir('sagi-hook-write-');
+  const eco = path.join(ws2, 'eco.js');
+  fs.writeFileSync(eco, 'process.stdout.write("formateado: " + process.argv[2] + "\\n");');
+  let out = await executeTool('write_file', { path: 'a.js', content: 'const a = 1;\n' }, {
+    workspace: ws2, settings: { settings: { workspace: ws2, hookEditar: '"' + process.execPath + '" eco.js {{file}}' } },
+  });
+  ok(/^OK:/.test(String(out)), 'la escritura sigue siendo OK aunque el hook corra: ' + String(out).slice(0, 120));
+  ok(/formateado: /.test(String(out)), 'y la salida del hook se le enseña al modelo: ' + String(out).slice(-160));
+
+  out = await executeTool('write_file', { path: 'b.js', content: 'const b = 2;\n' }, {
+    workspace: ws2, settings: { settings: { workspace: ws2, hookEditar: '"' + process.execPath + '" -e "process.exit(1)"' } },
+  });
+  ok(/^OK:/.test(String(out)), 'un hook que falla NO convierte la escritura en un fallo (el archivo sí quedó escrito)');
+  ok(/Hook .* falló \(código 1\)/.test(String(out)), 'pero se dice, para que no pase en silencio: ' + String(out).slice(-200));
+  __test._resetChecks();
+});
+
+test('hook de cierre: si tu comando falla, el turno no cierra', async () => {
+  const { Agent } = require('../agent/agent');
+  const ws = tmpDir('sagi-hook-cierre-');
+  fs.writeFileSync(path.join(ws, 'rojo.js'), 'process.stdout.write("algo mal\\n"); process.exit(1);');
+  const base = { workspace: ws };
+
+  // 1) Falla: vuelve al modelo como cualquier otra comprobación
+  const ev = [];
+  const a = new Agent({ emit: (e) => ev.push(e) });
+  a._writes = 1;
+  const messages = [];
+  const cont = await a._chequeoCierre({
+    settings: { settings: { ...base, hookCerrar: '"' + process.execPath + '" rojo.js' } },
+    messages, res: { text: 'listo' },
+  });
+  eq(cont, true, 'el turno sigue: el hook no ha pasado');
+  ok(/algo mal/.test(messages[1].content), 'y al modelo le llega la salida REAL del hook: ' + messages[1].content.split('\n')[0]);
+  ok(ev.some(e => e.type === 'tool_result' && e.ok === false), 'el usuario ve la tarjeta en rojo');
+  ok(ev.some(e => /tu hook/.test(e.text || '')), 'y se anuncia que es tu hook lo que se ejecuta');
+
+  // 2) Pasa: cierra, y queda marcado como verificado con evidencia real
+  const a2 = new Agent({ emit: () => {} });
+  a2._writes = 1;
+  const cont2 = await a2._chequeoCierre({
+    settings: { settings: { ...base, hookCerrar: '"' + process.execPath + '" -e "process.stdout.write(\'ok\')"' } },
+    messages: [], res: { text: 'listo' },
+  });
+  eq(cont2, false, 'con el hook en verde, el turno cierra');
+  eq(a2._verified, true, 'y consta que se comprobó de verdad');
+
+  // 3) Un hook de cierre existe aunque el proyecto no declare pruebas: se ejecuta igual
+  eq(await a2._chequeoCierre({ settings: { settings: { ...base, hookCerrar: 'x' } }, messages: [], res: {} }), false,
+    'ya cerrado, no se vuelve a ejecutar (una vez por turno)');
+
+  // …y está cableado en el ciclo (si nadie lo llama, no existe)
+  const src = fs.readFileSync(path.join(__dirname, '..', 'agent', 'agent.js'), 'utf8');
+  ok(/policy\.hookCerrar/.test(src) && /await ejecutarHook\(/.test(src), 'el cierre del agente lanza el hook del usuario');
+  ok(/hookCerrar/.test(fs.readFileSync(path.join(__dirname, '..', 'renderer', 'index.html'), 'utf8')),
+    'y se puede configurar en Ajustes');
+});
+
+test('búsqueda híbrida: coincidencia exacta y relevancia, y encima cableada', async () => {
+  const busqueda = require('../agent/busqueda');
+  busqueda._resetForTests();
+  const ws = tmpDir('sagi-busca-');
+  fs.mkdirSync(path.join(ws, 'src'), { recursive: true });
+  fs.mkdirSync(path.join(ws, 'node_modules'), { recursive: true });
+  fs.mkdirSync(path.join(ws, 'ignorados'), { recursive: true });
+  fs.writeFileSync(path.join(ws, 'src', 'descuento.js'), [
+    '// Aplica un descuento porcentual al precio base de un articulo.',
+    'function precioConDescuento(precio, descuentoPct) {',
+    '  return precio - (precio * descuentoPct) / 100;',
+    '}',
+    'module.exports = { precioConDescuento };',
+  ].join('\n'));
+  fs.writeFileSync(path.join(ws, 'src', 'otro.js'), 'function nada() { return 1; }\n'.repeat(30));
+  // estos dos contienen la palabra buscada: si aparecen, el buscador no respeta lo ignorado
+  fs.writeFileSync(path.join(ws, 'node_modules', 'dep.js'), 'descuento descuento descuento\n');
+  fs.writeFileSync(path.join(ws, 'ignorados', 'secreto.js'), 'descuento descuento descuento\n');
+  fs.writeFileSync(path.join(ws, '.gitignore'), 'ignorados/\n');
+
+  // Términos: se separa camelCase y se quitan las palabras vacías (si no, «de la para» pesa igual)
+  ok(busqueda.terminos('precioConDescuento').includes('descuento'), 'separa camelCase: ' + busqueda.terminos('precioConDescuento').join(','));
+  ok(!busqueda.terminos('el precio de la cosa').includes('para'), 'y no deja pasar palabras vacías');
+  ok(busqueda.trocear('a\n'.repeat(200)).every(t => t.length <= 40), 'los bloques que se puntúan tienen tope de líneas');
+  const listados = busqueda.listar(ws).map(f => f.ruta);
+  ok(listados.includes('src/descuento.js'), 'lista el código del proyecto');
+  ok(!listados.some(r => r.startsWith('node_modules/')), 'y no entra en node_modules');
+  ok(!listados.some(r => r.startsWith('ignorados/')), 'ni en lo que el .gitignore manda ignorar: ' + listados.join(','));
+
+  // La coincidencia exacta: el nombre del símbolo lleva directo al archivo (y a la línea)
+  const r1 = busqueda.buscar(ws, 'precioConDescuento', { limit: 5 });
+  ok(r1.hits.length, 'encuentra un símbolo por su nombre');
+  eq(r1.hits[0].ruta, 'src/descuento.js', 'y lo primero es el archivo donde está: ' + r1.hits[0].ruta);
+  eq(r1.hits[0].tipo, 'exacta', 'marcado como coincidencia exacta');
+  ok(r1.hits[0].linea >= 1, 'con su línea');
+  ok(/ripgrep|barrido/.test(r1.metodo), 'y diciendo con qué se buscó: ' + r1.metodo);
+
+  /* La relevancia: palabras que no aparecen juntas ni en ese orden, pero que describen
+     ese archivo. Se prueba con la mitad exacta APAGADA a propósito: mezcladas, las
+     coincidencias literales de «descuento» y «articulo» tapan el resultado de relevancia
+     y el test mediría otra cosa (rg encuentra la palabra suelta en la misma zona). */
+  const r2 = busqueda.buscar(ws, 'articulo descuento precio base porcentual', { limit: 5, exactas: 0 });
+  ok(r2.hits.length, 'sin coincidencia literal, la relevancia devuelve algo');
+  eq(r2.hits[0].ruta, 'src/descuento.js', 'y lo primero es el archivo que habla de eso: ' + JSON.stringify(r2.hits.map(h => h.ruta)));
+  ok(r2.hits.every(h => h.tipo === 'relevancia'), 'marcados como relevancia, no como exactas');
+  ok((r2.hits[0].texto || '').length > 0, 'y con una línea de contexto para saber qué es: ' + (r2.hits[0].texto || '').slice(0, 60));
+  const r2b = busqueda.buscar(ws, 'articulo descuento precio base porcentual', { limit: 5 });
+  ok(r2b.hits.some(h => h.ruta === 'src/descuento.js'), 'y mezclada con la exacta también llega al archivo correcto: ' + JSON.stringify(r2b.hits.map(h => h.ruta)));
+  eq(new Set(r2b.hits.map(h => h.ruta + ':' + h.linea)).size, r2b.hits.length, 'sin repetir el mismo sitio dos veces');
+
+  // Lo ignorado no se cuela, ni siquiera en la mitad de relevancia
+  const r3 = busqueda.buscar(ws, 'descuento', { limit: 20 });
+  ok(!r3.hits.some(h => /node_modules|ignorados/.test(h.ruta)), 'no aparece ni node_modules ni lo ignorado: ' + r3.hits.map(h => h.ruta).join(','));
+
+  // El texto que ve el modelo dice de dónde sale cada cosa y qué hacer después
+  const txt = busqueda.textoBusqueda(ws, 'precioConDescuento');
+  ok(/resultado\(s\)/.test(txt) && /src\/descuento\.js:\d+/.test(txt), 'el texto lleva ruta y línea: ' + txt.split('\n')[1]);
+  ok(/read_file/.test(txt), 'y le dice que lea el tramo, no el archivo entero');
+  const ninguna = busqueda.textoBusqueda(ws, 'zzzz-no-existe-zzz');
+  ok(/Sin resultados/.test(ninguna) && /repo_map/.test(ninguna), 'sin resultados no se inventa nada: propone otra vía');
+
+  // …y todo esto está CABLEADO como herramienta del agente
+  const r4 = await require('../agent/executors').executeTool('search_code', { query: 'precioConDescuento' }, { workspace: ws });
+  ok(/src\/descuento\.js/.test(String(r4)), 'la herramienta search_code devuelve los mismos resultados: ' + String(r4).slice(0, 120));
+  ok(/^Error:/.test(String(await require('../agent/executors').executeTool('search_code', {}, { workspace: ws }))), 'y pide la consulta si no se le da');
+  const rd = (p) => fs.readFileSync(path.join(__dirname, '..', p), 'utf8');
+  ok(/name: 'search_code'/.test(rd('agent/tools.js')), 'la herramienta está declarada para el modelo');
+  ok(/case 'search_code'/.test(rd('agent/executors.js')), 'y despachada en el ejecutor');
+  ok(/search_code/.test(rd('agent/repomap.js')), 'y el mapa del proyecto le enseña que existe');
+  ok(/busqueda\.invalidar\(workspace\)/.test(rd('agent/executors.js')), 'y el índice se invalida al escribir (si no, buscaría en el mundo de antes)');
+  busqueda._resetForTests();
+});
+
+test('banco: una tarea mal escrita se dice, y el veredicto no se inventa', () => {
+  const banco = require('../agent/banco');
+  const raiz = tmpDir('sagi-banco-tareas-');
+
+  // Una tarea SIN criterio de éxito no puede entrar: da la sensación de medir sin medir.
+  const sinCriterio = path.join(raiz, 'sin-criterio');
+  fs.mkdirSync(sinCriterio, { recursive: true });
+  fs.writeFileSync(path.join(sinCriterio, 'tarea.json'), JSON.stringify({ nombre: 'x', objetivo: 'haz algo' }));
+  const r1 = banco.leerTarea(sinCriterio);
+  eq(r1.ok, false, 'sin «espera» ni «comprobar» la tarea no vale');
+  ok(/no hay forma de saber/.test(r1.error), 'y se explica por qué: ' + r1.error);
+
+  const sinObjetivo = path.join(raiz, 'sin-objetivo');
+  fs.mkdirSync(sinObjetivo, { recursive: true });
+  fs.writeFileSync(path.join(sinObjetivo, 'tarea.json'), JSON.stringify({ nombre: 'x', comprobar: 'npm test' }));
+  eq(banco.leerTarea(sinObjetivo).ok, false, 'sin objetivo tampoco: no se sabe qué pedirle al agente');
+
+  // Las de verdad: las tres que vienen con la app tienen que ser válidas (si el banco de
+  // serie está roto, el número que da no vale para nada)
+  const { ok: reales, malas } = banco.tareas();
+  eq(malas.length, 0, 'las tareas de serie están bien escritas: ' + JSON.stringify(malas));
+  ok(reales.length >= 3, 'y hay unas cuantas: ' + reales.map(t => t.nombre).join(', '));
+  ok(reales.every(t => t.objetivo && (t.espera.length || t.comprobar)), 'todas traen objetivo y criterio');
+
+  // Esperas: contenido, ausencia y «no lo toques»
+  const ws = tmpDir('sagi-banco-espera-');
+  fs.writeFileSync(path.join(ws, 'a.js'), 'const x = 1;\n');
+  const antes = { 'a.js': 'const x = 1;\n' };
+  ok(banco.revisarEsperas(ws, [{ archivo: 'a.js', contiene: 'const x' }], antes).ok, 'un archivo con el contenido esperado pasa');
+  eq(banco.revisarEsperas(ws, [{ archivo: 'a.js', contiene: 'otra cosa' }], antes).fallos.length, 1, 'y con otro contenido, falla');
+  eq(banco.revisarEsperas(ws, [{ archivo: 'basura.txt', noExiste: true }], antes).ok, true, '«noExiste» se cumple si no está');
+  fs.writeFileSync(path.join(ws, 'basura.txt'), 'x');
+  eq(banco.revisarEsperas(ws, [{ archivo: 'basura.txt', noExiste: true }], antes).ok, false, 'y falla en cuanto aparece');
+  ok(banco.revisarEsperas(ws, [{ archivo: 'a.js', sinCambios: true }], antes).ok, 'sinCambios pasa si el archivo sigue igual');
+  fs.writeFileSync(path.join(ws, 'a.js'), 'const x = 2;\n');
+  ok(/se modificó/.test(banco.revisarEsperas(ws, [{ archivo: 'a.js', sinCambios: true }], antes).fallos[0]),
+    'y avisa si se tocó lo que no se debía: ' + banco.revisarEsperas(ws, [{ archivo: 'a.js', sinCambios: true }], antes).fallos[0]);
+
+  // Veredicto: manda el mundo (el código de salida), no la opinión del modelo
+  ok(banco.juzgar({}).pasa, 'sin nada que objetar, pasa');
+  const malo = banco.juzgar({ comprobacion: { comando: 'npm test', code: 1 }, tarea: { comprobar: 'npm test' } });
+  eq(malo.pasa, false, 'una prueba que sale con error tumba la tarea');
+  ok(/código 1/.test(malo.motivos[0]), 'y el motivo cita el código real: ' + malo.motivos[0]);
+  eq(banco.juzgar({ tarea: { comprobar: 'npm test' } }).pasa, false, 'no ejecutar la comprobación tampoco cuela como éxito');
+  ok(!banco.juzgar({ pasos: 30, tarea: { pasosMax: 20 } }).pasa, 'pasarse de pasos es fallar');
+  ok(!banco.juzgar({ ms: 5000, tarea: { tiempoMaxMs: 1000 } }).pasa, 'y pasarse de tiempo también');
+  ok(!banco.juzgar({ error: 'se cayó' }).pasa, 'un error del agente no se puede leer como éxito');
+});
+
+test('banco: compara con la línea base y avisa de lo que se encarece', () => {
+  const banco = require('../agent/banco');
+  const base = {
+    cuando: 'ayer',
+    resultados: [
+      { nombre: 'sigue-bien', pasa: true, ms: 1000, tokens: 100 },
+      { nombre: 'se-rompio', pasa: true, ms: 1000, tokens: 100 },
+      { nombre: 'mejoro', pasa: false, ms: 1000, tokens: 100 },
+      { nombre: 'desaparecio', pasa: true, ms: 1000, tokens: 100 },
+    ],
+  };
+  const hoy = {
+    resultados: [
+      { nombre: 'sigue-bien', pasa: true, ms: 1000, tokens: 100 },
+      { nombre: 'se-rompio', pasa: false, ms: 900, tokens: 90, motivos: ['x'] },
+      { nombre: 'mejoro', pasa: true, ms: 900, tokens: 90 },
+      { nombre: 'nueva', pasa: true, ms: 10, tokens: 10 },
+      { nombre: 'cara', pasa: true, ms: 2000, tokens: 200 },
+    ],
+  };
+  const c = banco.comparar(hoy, base);
+  eq(c.regresiones.length, 1, 'una regresión: la que pasaba y ya no');
+  eq(c.regresiones[0].nombre, 'se-rompio');
+  eq(c.hayRegresion, true, 'y hay regresión, así que el gate corta');
+  eq(c.mejoras.length, 1, 'una mejora: la que fallaba y ya pasa');
+  eq(c.nuevos.length, 2, 'las tareas nuevas se cuentan aparte (una puede pasar y otra no)');
+  eq(c.faltantes.length, 1, 'y una tarea que ya no está se dice: ' + c.faltantes[0].nombre);
+  // La tarea «cara» no está en la base, así que no se compara; la que sí se encarece es
+  // la que pasa igual, para que se vea el precio de lo que se gana.
+  const c2 = banco.comparar(
+    { resultados: [{ nombre: 'sigue-bien', pasa: true, ms: 4000, tokens: 500 }] },
+    { resultados: [{ nombre: 'sigue-bien', pasa: true, ms: 1000, tokens: 100 }] });
+  eq(c2.hayRegresion, false, 'encarecerse no es regresión: la tarea sigue pasando');
+  eq(c2.avisos.length, 1, 'pero se avisa: ' + JSON.stringify(c2.avisos[0]));
+
+  // La base se guarda y se relee tal cual (es lo que hace que sirva de referencia)
+  const f = path.join(tmpDir('sagi-banco-base-'), 'linea-base.json');
+  banco.guardarBase(f, { cuando: 'hoy', modelo: 'm', resumen: { tareas: 1, pasaron: 1 }, resultados: [{ nombre: 'a', pasa: true }] });
+  const leida = banco.leerBase(f);
+  eq(leida.resultados[0].nombre, 'a', 'la línea base se relee');
+  eq(banco.leerBase(f + '.no-existe'), null, 'sin línea base no se inventa una');
+});
+
+test('banco: corre una tarea de verdad, con el agente y el comando reales', async () => {
+  const banco = require('../agent/banco');
+  const { Agent } = require('../agent/agent');
+  const raiz = tmpDir('sagi-banco-run-');
+
+  /* Una tarea de mentira pero completa: punto de partida en disco, objetivo, una
+     comprobación que ES un proceso real y una espera sobre lo que quede escrito. */
+  const dirT = path.join(raiz, 'ok');
+  fs.mkdirSync(path.join(dirT, 'inicio'), { recursive: true });
+  fs.writeFileSync(path.join(dirT, 'inicio', 'README.md'), 'punto de partida\n');
+  fs.writeFileSync(path.join(dirT, 'tarea.json'), JSON.stringify({
+    nombre: 'ok', objetivo: 'crea saludo.txt', comprobar: 'node -e "process.exit(0)"',
+    espera: [{ archivo: 'saludo.txt', contiene: 'hola' }], tiempoMaxMs: 60000,
+  }));
+
+  /* El agente es real (bucle, herramientas, permisos, comprobación de cierre) y el
+     MODELO es de mentira: escribe el archivo y contesta. Así el banco se prueba de
+     punta a punta sin gastar un céntimo en una llamada de verdad. */
+  const tarea = banco.leerTarea(dirT).tarea;
+  const guion = [
+    () => toolTurn('b1', 'write_file', { path: 'saludo.txt', content: 'hola\n' }),
+    () => sseTurn('Listo: creé el archivo.'),
+  ];
+  let n = 0;
+  const agente = new Agent({
+    fetchFn: async () => guion[Math.min(n++, guion.length - 1)](),
+    emit: (e) => { if (e.type === 'confirm_request') setTimeout(() => agente.resolveConfirm(e.id, true), 0); },
+    screenshotFn: async () => ({}),
+  });
+  const settings = { active: { name: 'x', baseUrl: 'https://api.openai.com/v1', apiKey: 'k', model: 'gpt-4o' }, settings: { mode: 'act', modelRouting: false } };
+  const r = await banco.correrTarea(tarea, { agent: agente, settings });
+  eq(r.pasa, true, 'la tarea pasa: ' + r.motivos.join('; '));
+  eq(r.comprobacion.code, 0, 'la comprobación se ejecutó de verdad y salió bien');
+  ok(r.pasos >= 1, 'y se cuentan los pasos: ' + r.pasos);
+  eq(r.conservado, false, 'si pasa, el espacio temporal se limpia (no se acumula basura)');
+
+  /* Y cuando falla, el espacio se CONSERVA: el valor del banco está en poder mirar el
+     desastre, y su ruta tiene que salir en el informe. */
+  const dirM = path.join(raiz, 'falla');
+  fs.mkdirSync(path.join(dirM, 'inicio'), { recursive: true });
+  fs.writeFileSync(path.join(dirM, 'inicio', 'README.md'), 'x\n');
+  fs.writeFileSync(path.join(dirM, 'tarea.json'), JSON.stringify({
+    nombre: 'falla', objetivo: 'no crea nada', comprobar: 'node -e "process.exit(2)"',
+    espera: [{ archivo: 'falta.txt', existe: true }], tiempoMaxMs: 60000,
+  }));
+  const tareaM = banco.leerTarea(dirM).tarea;
+  const agenteVago = { chat: async () => {}, getMeta: () => ({ toolCalls: 0, tokensIn: 5, tokensOut: 5 }) };
+  const rm = await banco.correrTarea(tareaM, { agent: agenteVago, settings });
+  eq(rm.pasa, false, 'la tarea que no cumple, falla');
+  ok(rm.motivos.some(m => /falta\.txt/.test(m)), 'con el motivo concreto (no se creó el archivo): ' + rm.motivos.join('; '));
+  ok(rm.motivos.some(m => /código 2/.test(m)), 'y también el de la comprobación que salió mal');
+  eq(rm.conservado, true, 'y el espacio de trabajo se conserva para poder mirarlo');
+  ok(fs.existsSync(rm.espacio), 'en la ruta que anuncia el informe: ' + rm.espacio);
+
+  /* `correrTodo` pasa por todas las tareas del directorio y resume (con la fábrica de
+     agentes, que es como lo usa la app: cada tarea estrena agente). */
+  const informe = await banco.correrTodo({
+    dir: raiz, settings,
+    nuevoAgente: () => {
+      let m = 0;
+      const a = new Agent({
+        fetchFn: async () => [() => toolTurn('t1', 'write_file', { path: 'saludo.txt', content: 'hola\n' }), () => sseTurn('hecho')][Math.min(m++, 1)](),
+        emit: (e) => { if (e.type === 'confirm_request') setTimeout(() => a.resolveConfirm(e.id, true), 0); },
+        screenshotFn: async () => ({}),
+      });
+      return a;
+    },
+  });
+  eq(informe.resumen.tareas, 2, 'el banco corre todas las tareas del directorio');
+  eq(informe.resumen.pasaron, 1, 'y cuenta cuántas pasaron (la que falla es la que debe fallar)');
+  ok(/FALLA/.test(banco.tabla(informe)) && /falta\.txt/.test(banco.tabla(informe)), 'la tabla de consola dice cuál falla y por qué');
+
+  // Y está CABLEADO: un banco que no se puede lanzar no mide nada
+  const rd = (p) => fs.readFileSync(path.join(__dirname, '..', p), 'utf8');
+  ok(/"banco": "node scripts\/banco\.js"/.test(rd('package.json')), 'hay un script de npm para lanzarlo');
+  ok(/const BANCO = process\.argv\.includes\('--banco'\)/.test(rd('main/main.js')), 'la app corre el banco con tu proveedor real (la clave está cifrada: solo el proceso principal la descifra)');
+  ok(/--guardar-base/.test(rd('main/main.js')) && /--base/.test(rd('main/main.js')), 'y sabe comparar con la línea base para servir de gate');
+});
+
 test('repomap: índice en memoria, mapa por carpetas y búsqueda de símbolos', () => {
   const repomap = require('../agent/repomap');
   repomap._resetForTests();
@@ -5613,7 +6421,9 @@ test('prompt: el proyecto y su mapa viajan en el bloque estable, no en lo volát
   const sys = sink.body.messages[0].content;
   ok(/PROYECTO/.test(sys) && /npm test/.test(sys), 'el prompt dice cómo se verifica este proyecto: ' + String(sys).slice(String(sys).indexOf('PROYECTO'), String(sys).indexOf('PROYECTO') + 120));
   ok(/MAPA DEL PROYECTO/.test(sys), 'y trae el mapa cuando el proyecto es grande');
-  ok(/la sintaxis se comprueba sola/.test(sys), 'y le dice que un error de sintaxis le volverá al instante');
+  ok(/se comprueba sola la SINTAXIS/.test(sys), 'y le dice que un error de sintaxis le volverá al instante');
+  ok(/comprobadores del proyecto/.test(sys), 'y que además pasan los comprobadores del proyecto sobre lo que cambie');
+  ok(/se EJECUTA sobre lo que hay en disco/.test(sys), 'y que la comprobación se ejecuta al cerrar: si falla, no cierra');
   ok(sys.indexOf('PROYECTO') > 0 && sys.indexOf('PROYECTO') < sys.indexOf('MEMORIA'), 'el proyecto va en el bloque ESTABLE (antes de la memoria, que cambia cada turno)');
   ok(/review — revisar un CAMBIO/.test(subagents.DELEGATION_GUIDE), 'y el orquestador sabe que puede delegar la revisión');
   ok(/REVISIÓN DEL CAMBIO: activa/.test(sys), 'con la política activa dicha en claro');
@@ -5799,6 +6609,7 @@ test('agent: dos herramientas del mismo mensaje dejan su resultado en orden', as
 
 test('browser 2: los ayudantes de página son JS válido y traen lo que faltaba', () => {
   const { __test } = require('../agent/browser');
+  const browserSrc = fs.readFileSync(path.join(__dirname, '..', 'agent', 'browser.js'), 'utf8');
   // si el código que se inyecta tiene un error de sintaxis, solo se vería en un navegador
   // de verdad: aquí se compila sin ejecutarlo
   ok(typeof new Function(__test.HELPERS_JS) === 'function', 'los ayudantes se compilan');
@@ -5811,6 +6622,19 @@ test('browser 2: los ayudantes de página son JS válido y traen lo que faltaba'
   ok(/elementFromPoint/.test(h), 'comprueba que nada tapa el elemento antes de pulsar');
   ok(/scrollIntoView/.test(h), 'trae a la vista lo que está fuera de pantalla');
   ok(/__sagFind/.test(h) && /__sagSel/.test(h), 'y sabe reencontrar un elemento por su huella');
+  /* v2.5.1 — manejar el navegador con su ventana DETRÁS de la app (lo normal: el usuario
+     está en SAGITARI y el navegador trabaja por debajo). Dos fallos reales que se veían
+     como «CDP timeout» a los 30 s en cada clic:
+       · una espera de pintado a base de requestAnimationFrame SIN tope: con la ventana
+         oculta o minimizada, Chromium no da frames y la promesa no se resolvía nunca;
+       · Windows avisa a Chromium de que la ventana está tapada y Chromium la congela
+         (deja de acusar recibo de la entrada), así que hay que decírselo con los flags. */
+  ok(/__sagPintar/.test(h), 'las esperas de pintado pasan por un ayudante que siempre cierra');
+  ok(/setTimeout\(fin/.test(h), 'con tope de tiempo, no solo con frames');
+  ok(!/requestAnimationFrame\(\(\) => requestAnimationFrame\(r\)\)/.test(browserSrc), 'ninguna espera sin cerrar (rAF no se dispara con la ventana oculta)');
+  ok(/CalculateNativeWinOcclusion/.test(browserSrc), 'y el navegador no se congela cuando su ventana queda tapada');
+  ok(/disable-backgrounding-occluded-windows/.test(browserSrc) && /disable-renderer-backgrounding/.test(browserSrc),
+    'ni cuando pasa a segundo plano (los mismos flags que usa cualquier automatización)');
   const inv = __test.inventoryJs();
   ok(/total/.test(inv) && /off/.test(inv), 'el inventario dice cuántos hay y marca lo que está fuera de pantalla');
   ok(/frame/.test(inv) && /testid/.test(inv) && /disabled/.test(inv), 'y en qué marco está, su testid y si está deshabilitado');

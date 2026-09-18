@@ -653,10 +653,23 @@ const AFTER = {
   const llegoRazon = await esperar('document.querySelectorAll(".msg.ai").length > ' + aiAntes + ' && !!document.querySelector(".msg.ai:last-child .thinkblock")', 25000);
   if (llegoRazon) console.log('  ok   el razonamiento del modelo se pinta en su propio bloque');
   else { failed++; console.log('  FALLO no apareció el bloque de razonamiento (guion: ' + llm.guion.length + ' respuestas sin usar)'); }
-  await judge('el bloque trae el razonamiento, su duración, su botón de copiar y queda plegado',
-    '(function(){ const b = document.querySelector(".msg.ai:last-child .thinkblock"); if (!b) return { bloque: false }; const cuerpo = b.querySelector(".think-body"); const r = { marca: !!cuerpo && cuerpo.textContent.indexOf(' + JSON.stringify(MARCA_RAZON) + ') >= 0, meta: b.querySelector(".th-meta").textContent, copiar: !!b.querySelector(".th-copy"), plegado: !b.classList.contains("open") }; return (r.marca && r.copiar && r.plegado && /^pensó/.test(r.meta)) ? true : r; })()');
+  /* v2.5: la cabecera es informativa de verdad. Plegado enseña un resumen de una línea (para
+     seguir el hilo sin abrir cada bloque) y abierto, la duración y cuántas líneas pensó. */
+  await judge('el bloque trae el razonamiento, su resumen, su botón de copiar y queda plegado',
+    '(function(){ const b = document.querySelector(".msg.ai:last-child .thinkblock"); if (!b) return { bloque: false }; const cuerpo = b.querySelector(".think-body"); const meta = () => b.querySelector(".th-meta").textContent; const plegado = meta(); const head = b.querySelector(".think-head"); head.click(); const abierto = meta(); head.click(); const otraVez = meta(); const r = { marca: !!cuerpo && cuerpo.textContent.indexOf(' + JSON.stringify(MARCA_RAZON) + ') >= 0, copiar: !!b.querySelector(".th-copy"), plegadoAlLlegar: !b.classList.contains("open"), resumen: plegado, abierto: abierto, vuelve: otraVez === plegado }; return (r.marca && r.copiar && r.plegadoAlLlegar && /[a-zA-Z]/.test(plegado) && !/^pensando/.test(plegado) && /^pensó .* · \\d+ línea/.test(abierto) && r.vuelve) ? true : r; })()');
+  await judge('el resumen plegado dice algo del razonamiento, no una etiqueta vacía',
+    '(function(){ const b = document.querySelector(".msg.ai:last-child .thinkblock"); if (!b || !b.classList.contains("closed")) return false; const t = b.querySelector(".th-meta").textContent.trim(); return t.length > 10 && !/^pensó$/.test(t) && !/^pensando/.test(t); })()');
   await judge('el razonamiento NO entra en la respuesta (ni se leería en voz alta)',
     '(function(){ const m = document.querySelector(".msg.ai:last-child"); if (!m) return false; const c = m.querySelector(".bubble").cloneNode(true); c.querySelectorAll(".thinkblock,.tgroup").forEach(x => x.remove()); const t = c.textContent || ""; return t.indexOf(' + JSON.stringify(MARCA_RAZON) + ') < 0 && /no había tal archivo/.test(t); })()');
+  /* v2.5: dentro de una tarjeta, un fallo se lee en la propia cabecera (sin desplegarla) y
+     el tiempo corre mientras la herramienta trabaja. Se comprueba con una tarjeta real del
+     chat: primero en marcha (el cronómetro avanza) y después fallida. */
+  await evaluate('(function(){ toolCard({ name: "run_command", args: { command: "prueba-de-interfaz" } }); return true; })()');
+  await new Promise(r => setTimeout(r, 900));
+  await judge('mientras una herramienta corre, su tarjeta enseña el tiempo en marcha',
+    '(function(){ const c = document.querySelector(".msg.ai:last-child .tcard.run:last-of-type"); if (!c) return { tarjeta: false }; const t = c.querySelector(".tcard-time").textContent.trim(); return /^[\\d,.]+ s$/.test(t) ? true : { tiempo: t }; })()');
+  await judge('un fallo se lee en la cabecera de la tarjeta, sin desplegarla',
+    '(function(){ const c = document.querySelector(".msg.ai:last-child .tcard.run:last-of-type"); if (!c) return { tarjeta: false }; completeToolCard({ name: "run_command", ok: false, result: "Error: el comando no existe en este equipo" }); const n = c.querySelector(".tcard-note"); const r = { clase: c.className, nota: n && n.textContent }; return (c.classList.contains("err") && !!n && /no existe en este equipo/.test(n.textContent) && !n.textContent.startsWith("Error:") && !c.classList.contains("open")) ? true : r; })()');
   await judge('la cabecera del grupo avisa del fallo con el grupo plegado',
     '(function(){ const g = document.querySelector(".msg.ai:last-child .tgroup:not(.team)"); if (!g) return false; const f = g.querySelector(".tg-fails"); return !!f && !f.hidden && /1 fallo/.test(f.textContent) && g.classList.contains("has-fails"); })()');
   /* El separador de día: antes lo estampaba CADA respuesta del agente (doce veces en una
@@ -735,6 +748,13 @@ const AFTER = {
     '(function(){ const cards = [...document.querySelectorAll(".tcard.dcard")]; const rev = cards.find(c => /Revisor/.test(c.textContent || "")); if (!rev) return { tarjeta: false }; const conTexto = [...document.querySelectorAll(".msg.ai")].slice(-2).map(m => { const c = m.cloneNode(true); c.querySelectorAll(".tgroup,.thinkblock").forEach(x => x.remove()); return c.textContent || ""; }).join(" | "); return (new RegExp(' + JSON.stringify(MARCA_REV) + ').test(rev.textContent || "") && /sin hallazgos bloqueantes/.test(rev.textContent || "") && /pasa la revisi[oó]n/.test(conTexto)) ? true : { informe: (rev.textContent || "").slice(0, 110), cierre: conTexto.slice(0, 160) }; })()');
   await judge('Ajustes trae la revisión del cambio activada (y es apagable)',
     '(function(){ const sw = document.querySelector("#swRevisar"); return !!sw && sw.classList.contains("on"); })()');
+  /* v2.5: la verificación REAL se configura desde aquí (comprobadores del proyecto al
+     escribir y ejecución de las pruebas al cerrar). Se comprueba que existen, que vienen
+     encendidas y que el clic apaga de verdad el ajuste, no solo el dibujo del interruptor. */
+  await judge('la comprobación del proyecto al escribir viene activada y es apagable',
+    '(async function(){ const sw = document.querySelector("#swDiagnosticos"); if (!sw) return "no existe el interruptor"; const venia = sw.classList.contains("on") && CFG.settings.diagnosticosEscritura !== false; sw.click(); await new Promise(r => setTimeout(r, 500)); const apagado = !sw.classList.contains("on") && CFG.settings.diagnosticosEscritura === false; sw.click(); await new Promise(r => setTimeout(r, 500)); return (venia && apagado && sw.classList.contains("on")) ? true : { venia, apagado, final: sw.classList.contains("on") }; })()');
+  await judge('las pruebas de cierre vienen activadas y su tope de intentos es editable',
+    '(async function(){ const sw = document.querySelector("#swCierre"); const inp = document.querySelector("#verAttempts"); if (!sw || !inp) return "faltan controles"; const venia = sw.classList.contains("on") && inp.value === "2"; inp.value = "1"; inp.dispatchEvent(new Event("change")); await new Promise(r => setTimeout(r, 500)); const guardado = CFG.settings.intentosArreglo === 1 && inp.value === "1"; inp.value = "2"; inp.dispatchEvent(new Event("change")); await new Promise(r => setTimeout(r, 400)); return (venia && guardado) ? true : { venia, guardado, valor: inp.value }; })()');
   /* En Node: el diff del turno tiene que haber llegado AL MODELO y el archivo tiene que
      estar en el disco. La primera es la prueba de que la revisión no es decorado; la
      segunda, de que el permiso y la escritura atómica funcionaron de verdad. */

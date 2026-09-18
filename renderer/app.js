@@ -607,6 +607,65 @@ function cerrarHerramientas() {
    va ANTES de todo lo demás: se lee en vivo mientras piensa y se pliega solo
    cuando empieza a contestar. Nunca se pronuncia —la lectura por frases solo mira
    los `delta`— ni se copia con el mensaje: es texto interno, no la respuesta. */
+/**
+ * Primera línea con sustancia de un texto: es el resumen que se enseña cuando el bloque
+ * está plegado. Se quitan vallas de código y marcas de markdown porque un resumen que
+ * empieza por «#» o «- » no informa de nada.
+ */
+function primeraLineaUtil(texto, max = 130) {
+  const lineas = String(texto || '')
+    .replace(/```[\s\S]*?```/g, ' ')
+    .split(/\r?\n/)
+    .map(l => l.replace(/^[\s>*#\-•]+/, '').replace(/\*\*/g, '').trim())
+    .filter(l => l.length >= 18);
+  const t = lineas[0] || '';
+  return t.length > max ? t.slice(0, max - 1).trimEnd() + '…' : t;
+}
+
+/** Cuántas líneas tiene el razonamiento (dato barato que da idea de su profundidad). */
+function nLineas(texto) { return String(texto || '').split(/\r?\n/).filter(l => l.trim()).length; }
+
+/* Reloj del razonamiento: mientras el modelo piensa, la cabecera dice cuánto lleva. Sin
+   esto, un modelo que se toma 40 s en razonar parece colgado. El resumen plegado y el
+   dato de duración se pintan en `metaRazonamiento`. */
+let thinkTimer = 0;
+let thinkVivo = null;
+/** Segundos para los relojes EN VIVO: «0,4 s», «12,4 s», «45 s». (fmtDuration da «400 ms»
+    para lo que dura menos de un segundo, que en un contador que corre cada 250 ms parpadea.) */
+function segundosUI(ms) {
+  const s = Math.max(0, Number(ms) || 0) / 1000;
+  return (s < 10 ? s.toFixed(1) : String(Math.round(s))).replace('.', ',') + ' s';
+}
+
+function metaRazonamiento(d) {
+  const el = d && d.querySelector && d.querySelector('.th-meta');
+  if (!el) return;
+  const cerrado = d.classList.contains('closed');
+  if (!d._terminado) {
+    el.classList.remove('gist');
+    el.textContent = 'pensando… ' + segundosUI(Date.now() - (d._inicio || Date.now()));
+    return;
+  }
+  if (cerrado) {
+    // plegado: manda el resumen. Es lo que permite seguir el hilo sin abrir cada bloque.
+    const g = primeraLineaUtil(d._texto);
+    el.classList.toggle('gist', !!g);
+    el.textContent = g || ('pensó ' + K.fmtDuration(d._ms || 0));
+    return;
+  }
+  el.classList.remove('gist');
+  el.textContent = 'pensó ' + K.fmtDuration(d._ms || 0) + ' · ' + nLineas(d._texto) + ' líneas';
+}
+function relojRazonamiento(d) {
+  thinkVivo = d;
+  if (thinkTimer) return;
+  thinkTimer = setInterval(() => {
+    const t = thinkVivo;
+    if (!t || !t.isConnected || t._terminado) { clearInterval(thinkTimer); thinkTimer = 0; thinkVivo = null; return; }
+    metaRazonamiento(t);
+  }, 250);
+}
+
 function ensureThinkBlock() {
   const b = ensureAssistantBubble();
   if (!pendingTurn.think || !pendingTurn.think.isConnected) {
@@ -619,11 +678,13 @@ function ensureThinkBlock() {
       + `<span class="th-chev">${ic('chevron')}</span></div>`
       + '<div class="think-body"></div>';
     const head = d.querySelector('.think-head');
+    d._inicio = Date.now();
     const toggle = () => {
       const open = d.classList.toggle('open');
       d.classList.toggle('closed', !open);
       head.setAttribute('aria-expanded', open ? 'true' : 'false');
       d._tocado = true;   // si el usuario lo abre, ya no se cierra solo
+      metaRazonamiento(d);   // plegado enseña el resumen; abierto, la duración y las líneas
     };
     head.onclick = (e) => { if (e.target.closest('.th-copy')) return; toggle(); };
     head.addEventListener('keydown', (e) => {
@@ -633,6 +694,7 @@ function ensureThinkBlock() {
     // el razonamiento va el PRIMERO: se piensa antes de usar herramientas y de responder
     b.insertBefore(d, b.firstChild);
     pendingTurn.think = d;
+    relojRazonamiento(d);
   }
   return pendingTurn.think;
 }
@@ -672,6 +734,7 @@ function cerrarRazonamiento() {
   d.classList.remove('open');
   d.classList.add('closed');
   d.querySelector('.think-head').setAttribute('aria-expanded', 'false');
+  metaRazonamiento(d);
 }
 
 /** Abre la tarjeta de una herramienta que empieza a ejecutarse. */
@@ -683,6 +746,13 @@ function toolCard(ev) {
   card.className = 'tcard run';
   card.dataset.tool = ev.name;
   card._t0 = Date.now();
+  /* Reloj de la tarjeta: mientras corre, cuenta. Un comando que tarda 40 s sin decir
+     nada se lee como «se ha colgado»; con el tiempo en marcha, se lee como trabajo. */
+  card._tick = setInterval(() => {
+    if (!card.isConnected || !card.classList.contains('run')) { clearInterval(card._tick); return; }
+    const el = card.querySelector('.tcard-time');
+    if (el) el.textContent = segundosUI(Date.now() - (card._t0 || Date.now()));
+  }, 400);
   const sub = ev.subagent && K.subagent(ev.subagent);
   const args = K.summarizeArgs(ev.name, ev.args);
   card.innerHTML = `
@@ -732,16 +802,32 @@ function completeToolCard(ev) {
   card.classList.remove('run');
   card.classList.add(ok ? 'done' : 'err');
   if (!ok) pendingTurn.fails = (pendingTurn.fails || 0) + 1;
+  clearInterval(card._tick);
   const took = ms || (Date.now() - (card._t0 || Date.now()));
   card.querySelector('.tcard-ic').innerHTML = ic(ok ? 'check' : 'alert');
   card.querySelector('.tcard-time').textContent = K.fmtDuration(took);
+  /* Un fallo tiene que poder leerse SIN desplegar la tarjeta: la primera línea del error
+     va en la cabecera. Antes había que abrir cada tarjeta roja para saber qué pasó. */
+  if (!ok) {
+    const head = card.querySelector('.tcard-head');
+    if (head && !head.querySelector('.tcard-note')) {
+      const note = document.createElement('span');
+      note.className = 'tcard-note';
+      const linea = String(ev.result || '').split(/\r?\n/).map(s => s.trim()).find(Boolean) || 'falló sin decir por qué';
+      note.textContent = linea.replace(/^Error:\s*/i, '').slice(0, 160);
+      note.title = String(ev.result || '').slice(0, 2000);
+      head.insertBefore(note, head.querySelector('.tcard-time'));
+    }
+  }
   const body = card.querySelector('.tcard-body');
   const old = body.querySelector('[data-result]');
   if (old) old.remove();
   const wrap = document.createElement('div');
   wrap.dataset.result = '1';
-  wrap.innerHTML = `<div class="tb-label">RESULTADO<button class="tcard-copy" title="Copiar resultado">${ic('copy')}</button></div>`
-    + `<pre>${esc(K.clip(String(ev.result || ''), 1200)) || '(sin salida)'}</pre>`;
+  const salida = String(ev.result || '');
+  const cuantas = salida ? salida.split(/\r?\n/).length : 0;
+  wrap.innerHTML = `<div class="tb-label">RESULTADO${cuantas > 1 ? ' · ' + cuantas + ' líneas' : ''}<button class="tcard-copy" title="Copiar resultado">${ic('copy')}</button></div>`
+    + `<pre>${esc(K.clip(salida, 1200)) || '(sin salida)'}</pre>`;
   wrap.querySelector('.tcard-copy').onclick = (e) => { e.stopPropagation(); copyText(ev.result, 'Resultado copiado'); };
   body.appendChild(wrap);
   pendingTurn.totalMs += took;
@@ -887,6 +973,49 @@ function equipoCierra(ev) {
   const enMarcha = equipoEnMarcha();
   pendingTurn.team.meta.textContent = enMarcha ? `${enMarcha} en marcha` : 'todos han terminado';
 }
+
+/* ---- v2.5: deshacer el cambio del turno ---------------------------------- */
+
+/** Ofrece deshacer los archivos que ha tocado el turno ({files} son rutas relativas). */
+function mostrarDeshacer(archivos) {
+  const bar = $('#undoBar');
+  if (!bar) return;
+  const lista = Array.isArray(archivos) ? archivos : [];
+  const txt = $('#undoText');
+  if (txt) {
+    const muestra = lista.slice(0, 3).join(', ') + (lista.length > 3 ? '…' : '');
+    txt.textContent = lista.length === 1
+      ? 'Se ha cambiado 1 archivo (' + muestra + ').'
+      : 'Se han cambiado ' + lista.length + ' archivos (' + muestra + ').';
+  }
+  bar.hidden = false;
+}
+
+function ocultarDeshacer() { const bar = $('#undoBar'); if (bar) bar.hidden = true; }
+
+if ($('#undoBtn')) $('#undoBtn').onclick = async (e) => {
+  const btn = e.currentTarget;
+  if (btn.disabled) return;
+  btn.disabled = true;
+  try {
+    const r = await window.sagitari.undoChanges();
+    if (!r || r.ok === false) {
+      // si el motor dice que ya no hay nada que deshacer, el botón no debe quedarse ahí
+      if (r && /no hay ningún cambio/.test(String(r.error || ''))) ocultarDeshacer();
+      showToast('No se pudo deshacer: ' + ((r && r.error) || 'error desconocido'));
+      return;
+    }
+    ocultarDeshacer();
+    const partes = [];
+    if (r.restaurados) partes.push(r.restaurados + ' restaurado(s)');
+    if (r.borrados) partes.push(r.borrados + ' borrado(s)');
+    if (r.fallos) partes.push(r.fallos + ' sin poder tocar (no se pudo leer su contenido antes)');
+    showToast('Cambios del turno deshechos: ' + (partes.join(', ') || 'no había nada') );
+    feed('Cambio del turno deshecho', 'blu');
+  } catch (err) {
+    showToast('No se pudo deshacer: ' + ((err && err.message) || err));
+  } finally { btn.disabled = false; }
+};
 
 function toolChip(text, state) {
   const b = ensureAssistantBubble();
@@ -1430,7 +1559,7 @@ window.sagitari.onAgentEvent((ev) => {
       d._texto = (d._texto || '') + ev.text;
       d._desde = d._desde || Date.now();
       d._hasta = Date.now();
-      d.querySelector('.th-meta').textContent = 'pensando…';
+      // el texto de la cabecera lo lleva el reloj (pensando… 12,4 s): aquí no se pisa
       scheduleThinkRender(d);
       setChatStatus('Razonando…');
       break;
@@ -1446,8 +1575,9 @@ window.sagitari.onAgentEvent((ev) => {
         break;
       }
       const ms = (d._desde && d._hasta) ? (d._hasta - d._desde) : Number(ev.durationMs) || 0;
-      // por debajo del segundo no hay nada que medir: «pensó 0 ms» no dice nada
-      d.querySelector('.th-meta').textContent = ms >= 1000 ? 'pensó ' + K.fmtDuration(ms) : 'pensó';
+      d._terminado = true;   // para el reloj
+      d._ms = ms;
+      metaRazonamiento(d);
       // SÍNCRONO a propósito: es el cierre del bloque (ver scheduleThinkRender)
       thinkTarget = null;
       pintarRazonamiento(d);
@@ -1505,6 +1635,14 @@ window.sagitari.onAgentEvent((ev) => {
       scroll();
       break;
     }
+    /* v2.5: el turno ha tocado archivos y se pueden deshacer. Se ofrece AHÍ, justo
+       encima del compositor, que es donde el usuario está mirando cuando decide volver
+       atrás; desaparece al enviar el mensaje siguiente (el turno nuevo empieza con su
+       propia pre-imagen) y al deshacer. */
+    case 'can_undo': {
+      mostrarDeshacer(ev.files);
+      break;
+    }
     case 'assistant_done': {
       /* El texto del STREAM es el que se ha estado leyendo por frases (y puede traer más
          que el markdown final): se guarda ANTES de cerrar la burbuja, porque
@@ -1535,6 +1673,15 @@ window.sagitari.onAgentEvent((ev) => {
       feed('Límite de seguridad', 'err');
       showToast(ev.reason);
       break;
+    /* v2.5: el contexto se está llenando. No es un error —el turno sigue y se sueltan
+       bloques antiguos del envío— pero conviene saberlo: la respuesta se vuelve más
+       corta y, si el turno va muy largo, lo que toca es empezar una conversación nueva. */
+    case 'contexto': {
+      const pct = Math.round((ev.uso || 0) * 100);
+      const aprox = ev.tokens ? ' (~' + Math.round(ev.tokens / 1000) + 'k de ' + Math.round((ev.ventana || 0) / 1000) + 'k tokens)' : '';
+      feed('Contexto al ' + pct + '%' + aprox + ': se sueltan los bloques más antiguos del envío (la conversación se conserva)', 'pur');
+      break;
+    }
     case 'paused':
       busy = false;
       setSendMode();
@@ -1867,6 +2014,9 @@ function setSendMode() {
    guardarraíles e historial. */
 async function enviarTexto(text, atts = []) {
   goto('chat');
+  // v2.5: el turno nuevo empieza su propia pre-imagen, así que el ofrecimiento de
+  // deshacer el anterior ya no aplica
+  ocultarDeshacer();
   // el turno del usuario queda sellado con el modo con el que se envió: en el
   // historial se ve de un vistazo qué respondió cada modo
   currentRunMode = K.mode(mode).key;
@@ -2884,9 +3034,19 @@ async function initSecurity() {
     // Revisión del cambio: ACTIVA por defecto (es la pieza que evita que el código
     // salga sin que nadie lo haya leído); solo se lee como apagada si es false
     if ($('#swRevisar')) $('#swRevisar').classList.toggle('on', CFG.settings.reviewGate !== false);
+    // v2.5: verificación real, activada por defecto (comprobadores del proyecto al
+    // escribir y pruebas al cerrar); solo se leen como apagadas si son false
+    if ($('#swCache')) $('#swCache').classList.toggle('on', CFG.settings.promptCache !== false);
+    if ($('#swDiagnosticos')) $('#swDiagnosticos').classList.toggle('on', CFG.settings.diagnosticosEscritura !== false);
+    if ($('#swCierre')) $('#swCierre').classList.toggle('on', CFG.settings.verificacionCierre !== false);
+    if ($('#verAttempts')) $('#verAttempts').value = CFG.settings.intentosArreglo ?? 2;
+    // v2.5: tus hooks. Se guardan como texto tal cual (una línea = un comando).
+    if ($('#hookEditar')) $('#hookEditar').value = CFG.settings.hookEditar || '';
+    if ($('#hookCerrar')) $('#hookCerrar').value = CFG.settings.hookCerrar || '';
     if (CFG.settings.devMode) { devMode = true; $('#devModeSw').classList.add('on'); paintMeta(); }
   } catch {}
   renderSecurity();
+  paintInstrucciones();   // v2.5: qué reglas del proyecto se están leyendo ahora mismo
 }
 /** Lee un campo numérico de límites respetando el `min`/`max` declarado y lo
     escribe de vuelta. loopThreshold<=1 hacía que el agente declarase bucle en la
@@ -2950,6 +3110,82 @@ if ($('#swRevisar')) $('#swRevisar').onclick = async (e) => {
   await window.sagitari.setSettings({ reviewGate: on });
   showToast(on ? 'Cada cambio se revisará antes de cerrar' : 'Revisión del cambio desactivada');
 };
+if ($('#swCache')) $('#swCache').onclick = async (e) => {
+  const on = !e.currentTarget.classList.contains('on');
+  e.currentTarget.classList.toggle('on', on);
+  CFG.settings.promptCache = on;
+  await window.sagitari.setSettings({ promptCache: on });
+  showToast(on ? 'Se reutilizará el prompt cacheado del proveedor' : 'Caché de prompt desactivado (cada paso se paga entero)');
+};
+if ($('#swDiagnosticos')) $('#swDiagnosticos').onclick = async (e) => {
+  const on = !e.currentTarget.classList.contains('on');
+  e.currentTarget.classList.toggle('on', on);
+  CFG.settings.diagnosticosEscritura = on;
+  await window.sagitari.setSettings({ diagnosticosEscritura: on });
+  showToast(on ? 'Al escribir se comprobará el proyecto (los fallos vuelven al instante)' : 'Comprobación al escribir desactivada');
+};
+if ($('#swCierre')) $('#swCierre').onclick = async (e) => {
+  const on = !e.currentTarget.classList.contains('on');
+  e.currentTarget.classList.toggle('on', on);
+  CFG.settings.verificacionCierre = on;
+  await window.sagitari.setSettings({ verificacionCierre: on });
+  showToast(on ? 'Antes de cerrar se ejecutarán las pruebas del proyecto' : 'Pruebas de cierre desactivadas');
+};
+if ($('#verAttempts')) $('#verAttempts').onchange = async (e) => {
+  const v = Math.max(0, Math.min(5, Number(e.target.value) || 0));
+  e.target.value = v;
+  CFG.settings.intentosArreglo = v;
+  await window.sagitari.setSettings({ intentosArreglo: v });
+  showToast(v ? 'Si una prueba falla, se lo devolveré hasta ' + v + ' vez(ces)' : 'Si una prueba falla, no se reintentará');
+};
+/* --------------------------------------------------------------------------- *
+ *  v2.5: reglas del proyecto (SAGITARI.md / AGENTS.md) y tus hooks.
+ *  Las reglas no se editan aquí: se editan en el archivo, que es del proyecto y va
+ *  a su git. Aquí se ve CUÁLES se están leyendo (para que nadie se pregunte por qué
+ *  el agente hace algo raro, o por qué no obedece un archivo que no existe).
+ * --------------------------------------------------------------------------- */
+/** Pinta la lista de ficheros de reglas que se están leyendo ahora mismo. */
+async function paintInstrucciones() {
+  const cont = $('#instrList');
+  if (!cont) return;
+  let info = { fuentes: [], candidatos: [], workspace: '' };
+  try { info = await window.sagitari.instruccionesInfo(); } catch {}
+  const fuentes = info.fuentes || [];
+  if (!fuentes.length) {
+    cont.innerHTML = '<span class="instrnone">No hay ninguna: SAGITARI usa solo sus propias reglas. Creando una, tus convenciones mandan sobre ellas.</span>';
+  } else {
+    cont.innerHTML = fuentes.map(f => '<span class="instrfile" title="' + esc(String(f.ruta || '')) + '">'
+      + '<i data-i="check"></i>' + esc(String(f.etiqueta || ''))
+      + (f.donde === 'usuario' ? ' <em>(tus reglas globales)</em>' : ' <em>(' + (f.chars || 0) + ' caracteres leídos' + (f.recortado ? ', recortado' : '') + ')</em>') + '</span>').join('');
+  }
+  cont.querySelectorAll('[data-i]').forEach(el => { el.innerHTML = ic(el.dataset.i); });
+}
+if ($('#instrReload')) $('#instrReload').onclick = async () => {
+  await paintInstrucciones();
+  showToast('Reglas del proyecto releídas');
+};
+if ($('#instrCreate')) $('#instrCreate').onclick = async () => {
+  try {
+    const r = await window.sagitari.instruccionesCrear();
+    if (r && r.yaExistia) { showToast('Ya existe: ' + r.ruta); return; }
+    if (r && r.ok) { await paintInstrucciones(); showToast('Creado ' + r.ruta + ' — ábrelo y escribe tus reglas'); }
+    else showToast('No se pudo crear: ' + ((r && r.error) || 'error desconocido'));
+  } catch (e) { showToast('No se pudo crear el archivo'); }
+};
+const guardarHook = (id, campo, aviso) => {
+  const el = $(id);
+  if (!el) return;
+  el.onchange = async () => {
+    const v = String(el.value || '').trim();
+    if (/\n/.test(String(el.value || ''))) showToast('Un hook es UN comando: me quedo con la primera línea');
+    el.value = v;
+    CFG.settings[campo] = v;
+    await window.sagitari.setSettings({ [campo]: v });
+    showToast(v ? aviso : 'Hook desactivado');
+  };
+};
+guardarHook('#hookEditar', 'hookEditar', 'Se ejecutará tras cada escritura');
+guardarHook('#hookCerrar', 'hookCerrar', 'Se ejecutará antes de cerrar el turno');
 if ($('#swThinking')) $('#swThinking').onclick = async (e) => {
   const on = !e.currentTarget.classList.contains('on');
   e.currentTarget.classList.toggle('on', on);

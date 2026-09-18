@@ -23,6 +23,7 @@ const RISK = {
   read_file: 'safe',
   view_image: 'safe',   // leer una imagen que el usuario señala: mismo nivel que leer un archivo
   repo_map: 'safe',     // leer el índice del proyecto: no toca nada
+  search_code: 'safe',  // buscar en el proyecto: solo lee
   find_symbol: 'safe',
   apply_patch: 'confirm',   // escribe: varios archivos, pero escribe
   list_dir: 'safe',
@@ -97,6 +98,21 @@ const defs = [
           path: { type: 'string', description: 'Carpeta a mapear (por defecto, el espacio de trabajo)' },
           max_chars: { type: 'number', description: 'Tope de tamaño del mapa (por defecto 7000)' }
         }
+      }
+    }
+  },
+  {
+    type: 'function',
+    function: {
+      name: 'search_code',
+      description: 'Busca en el proyecto por CONTENIDO, no por nombre: devuelve las coincidencias exactas y, además, los sitios más relacionados con lo que pides (aunque no aparezcan esas palabras). Úsalo cuando no sepas cómo se llama algo («dónde se decide si una actualización se puede aplicar») o para saber dónde se usa un símbolo. Es la forma barata de orientarte antes de leer archivos.',
+      parameters: {
+        type: 'object',
+        properties: {
+          query: { type: 'string', description: 'Qué buscas (palabras sueltas: se buscan por separado y se puntúa la relevancia)' },
+          limit: { type: 'number', description: 'Máximo de resultados (por defecto 12)' }
+        },
+        required: ['query']
       }
     }
   },
