@@ -13,6 +13,8 @@ const repomap = require('./repomap');
 const cambios = require('./cambios');
 const busqueda = require('./busqueda');   // v2.5: búsqueda híbrida (exacta + relevancia)
 const hooks = require('./hooks');
+const edicion = require('./edicion');     // v3.0: anclajes tolerantes a espacios
+const comandos = require('./comandos');   // v3.0: qué comando es peligroso y cuál no
 const mcpTransport = require('./mcp-transport');
 const { killTree } = require('./proc');
 
@@ -282,6 +284,35 @@ async function ejecutarComandoVerificacion(comando, { cwd, timeoutMs = 300000, r
  * SÍ quedó escrito): el modelo lo ve como un paso fallido y lo arregla ya, y la
  * tarjeta del chat se marca en rojo en vez de dar el cambio por bueno.
  */
+/* --------------------------------------------------------------------------- *
+ *  v3.0 — Anclajes tolerantes: el «¿querías esto?»
+ *
+ *  Un anclaje que solo falla por la sangría no puede ser un callejón sin salida:
+ *  el modelo tiene el texto delante y la corrección es de espacios. El error dice
+ *  el bloque EXACTO que hay en el archivo (con números de línea), el texto listo
+ *  para copiar y la llamada de una sola vez que lo aplica.
+ * --------------------------------------------------------------------------- */
+function detalleEdicion(etiqueta, texto, r) {
+  const cs = (r && r.candidatos) || [];
+  if (!cs.length) return `${etiqueta}: ${r.error}. Copia el texto exacto con read_file (respeta espacios y saltos de línea).`;
+  if (cs.length > 1) {
+    return `${etiqueta}: ${r.error}; ignorando la sangría aparece en ${cs.length} sitios (líneas ${cs.map(x => x.linea).join(', ')}). Añade más contexto para que sea único.`;
+  }
+  const c = cs[0];
+  return [
+    `${etiqueta}: ${r.error}. Esto es lo MÁS PARECIDO que hay en el archivo — casi siempre es solo la sangría o el final de línea:`,
+    edicion.marco(texto, c, { titulo: '¿Querías esto?' }),
+    'TEXTO EXACTO de ese bloque (ponlo tal cual en old_string):',
+    edicion.textoExacto(texto, c),
+    'FIN DEL TEXTO EXACTO.',
+    'Si era ESE bloque, repite la misma llamada añadiendo tolerar_espacios: true y se aplicará reajustando la sangría al archivo.',
+  ].join('\n');
+}
+
+function errorEdicion(p, texto, r) {
+  return 'Error en ' + p + ' — ' + detalleEdicion('no se pudo editar', texto, r);
+}
+
 async function resultadoEscritura(absPath, okText, { checked = [], workspace = null, settings = null } = {}) {
   const archivos = [absPath, ...checked];
   const fallos = [];
@@ -441,6 +472,13 @@ async function executeTool(name, args, ctx) {
       return `# Skill: ${s.name}\n\n${s.body}${scope}`;
     }
     case 'run_command': {
+      /* v3.0: se mira QUÉ se ejecuta, no solo quién lo pide. Lo que destruye el
+         sistema o los datos del usuario no se ejecuta aunque run_command esté en
+         «safe» o el usuario haya aprobado antes otro comando: para esto no hay
+         confirmación que valga. (guardrails.decide ya lo deniega; esto es la
+         misma barrera en el ejecutor, por si se llega por otro camino.) */
+      const cmdTexto = String(args.command ?? '');
+      if (comandos.clasificar(cmdTexto).nivel === 'prohibido') return comandos.mensajeProhibido(cmdTexto);
       const timeout = Math.min(Math.max(args.timeout_seconds || 60, 5), 300) * 1000;
       // chcp 65001 fuerza UTF-8 en cmd.exe para que los acentos no lleguen corruptos
       const r = await run(`chcp 65001>nul & ${args.command}`, { cwd: args.cwd ? inWs(args.cwd) : workspace, timeout, registerKillable: ctx.registerKillable });
@@ -527,17 +565,23 @@ async function executeTool(name, args, ctx) {
       if (!Buffer.from(text, 'utf8').equals(buf)) {
         return `Error: ${p} no está en UTF-8 (probablemente ANSI/CP1252); editarlo corrompería los acentos. Conviértelo a UTF-8 antes, o usa write_file con el contenido completo.`;
       }
-      const count = text.split(oldStr).length - 1;
-      if (count === 0) return `Error: old_string no encontrado en ${p}. Copia el texto exacto con read_file (respeta espacios y saltos de línea).`;
-      if (count > 1 && !args.replace_all) return `Error: old_string aparece ${count} veces en ${p}; incluye más contexto para que sea único o usa replace_all: true.`;
-      // la función evita que un `$&`/`$1` dentro del texto nuevo se interprete
-      // como patrón de reemplazo (el modelo edita código, no plantillas)
-      const replaced = args.replace_all ? text.split(oldStr).join(newStr) : text.replace(oldStr, () => newStr);
+      /* v3.0: anclaje tolerante a espacios. Si el texto no aparece exacto pero sí
+         ignorando la sangría, el error deja de ser un callejón: se devuelve
+         «¿querías esto?» con el bloque EXACTO y la vía de una sola llamada
+         (tolerar_espacios: true), que reajusta la sangría en vez de destruirla. */
+      const r = edicion.aplicar(text, oldStr, newStr, {
+        replaceAll: !!args.replace_all,
+        tolerar: args.tolerar_espacios === true,
+      });
+      if (!r.ok) return errorEdicion(p, text, r);
       cambios.recordar(workspace, p, text);
-      await fsp.writeFile(p, replaced, 'utf8');
+      await fsp.writeFile(p, r.texto, 'utf8');
       repomap.invalidar(workspace);
       busqueda.invalidar(workspace);   // el índice de búsqueda también se queda viejo
-      return await resultadoEscritura(p, `${args.replace_all ? count : 1} reemplazo(s) en ${p}`, { workspace, settings });
+      const relato = `${r.veces} reemplazo(s) en ${p}` + (r.modo === 'tolerante'
+        ? ` — el anclaje no coincidía al carácter: aplicado sobre las líneas ${r.linea}-${r.linea + r.lineas - 1} reajustando la sangría al archivo`
+        : '');
+      return await resultadoEscritura(p, relato, { workspace, settings });
     }
     /* v2.4: mapa del repositorio e índice de símbolos. En un proyecto grande, leer
        archivo a archivo se come el contexto y aun así se pierden cosas; esto responde
@@ -578,12 +622,14 @@ async function executeTool(name, args, ctx) {
         let texto;
         try { texto = await fsp.readFile(p, 'utf8'); }
         catch (e) { errores.push(`${c.path}: no pude leerlo (${e.code || e.message})`); continue; }
-        const veces = texto.split(oldStr).length - 1;
-        if (veces === 0) { errores.push(`${c.path}: old_string no encontrado (copia el texto exacto con read_file)`); continue; }
-        if (veces > 1 && !c.replace_all) { errores.push(`${c.path}: old_string aparece ${veces} veces; añade contexto o usa replace_all`); continue; }
-        const siguiente = c.replace_all ? texto.split(oldStr).join(newStr) : texto.replace(oldStr, () => newStr);
+        // v3.0: el mismo anclaje tolerante que edit_file, por cambio y para todo el parche
+        const r = edicion.aplicar(texto, oldStr, newStr, {
+          replaceAll: !!c.replace_all,
+          tolerar: c.tolerar_espacios === true || args.tolerar_espacios === true,
+        });
+        if (!r.ok) { errores.push(detalleEdicion(c.path, texto, r)); continue; }
         if (planes.some(x => x.p === p)) { errores.push(`${c.path}: dos cambios sobre el mismo archivo en una llamada (junta el texto en uno)`); continue; }
-        planes.push({ p, antes: texto, despues: siguiente, n: c.replace_all ? veces : 1 });
+        planes.push({ p, antes: texto, despues: r.texto, n: r.veces, modo: r.modo, linea: r.linea, lineas: r.lineas });
       }
       if (errores.length) {
         return `Error: no se ha escrito NADA (el parche se aplica entero o no se aplica):\n- ${errores.join('\n- ')}`;
@@ -591,7 +637,7 @@ async function executeTool(name, args, ctx) {
       for (const plan of planes) { cambios.recordar(workspace, plan.p, plan.antes); await fsp.writeFile(plan.p, plan.despues, 'utf8'); }
       repomap.invalidar(workspace);
       busqueda.invalidar(workspace);   // el índice de búsqueda también se queda viejo
-      const resumen = planes.map(pl => `${path.basename(pl.p)} (${pl.n})`).join(', ');
+      const resumen = planes.map(pl => `${path.basename(pl.p)} (${pl.n}${pl.modo === 'tolerante' ? ', sangría reajustada' : ''})`).join(', ');
       return await resultadoEscritura(planes[0].p, `${planes.length} archivo(s) actualizados: ${resumen}`, { checked: planes.map(x => x.p), workspace, settings });
     }
     case 'list_dir': {

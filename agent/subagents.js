@@ -81,6 +81,7 @@ const SUBAGENTS = {
       'LEE antes de escribir: abre los archivos afectados y busca cómo se hace ya en el proyecto. Nunca inventes APIs, rutas ni estructuras.',
       'Antes de leer un archivo entero, localiza lo que buscas: find_symbol dice dónde se define algo y repo_map qué hay en cada carpeta. Leer de más es quemar pasos.',
       'Si el cambio toca VARIOS archivos a la vez, usa apply_patch: o entra todo o no entra nada (con edit_file suelto un fallo a mitad deja el proyecto roto).',
+      'Si un anclaje falla SOLO por la sangría, el error te devuelve el texto exacto del archivo: repite la llamada con tolerar_espacios: true (se reajusta la sangría) en vez de adivinar la indentación o reescribir el archivo entero.',
       'El cambio más pequeño que resuelve el problema bien. Imita las convenciones del proyecto en vez de imponer las tuyas.',
       'Un cambio a la vez; tras cada uno ejecuta lo que lo comprueba (test, build, el propio script).',
       'Al depurar: reproduce el fallo, lee el error COMPLETO y forma una hipótesis antes de tocar el código. Corrige la causa, no el síntoma.',

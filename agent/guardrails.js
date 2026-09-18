@@ -22,6 +22,8 @@ const LEVELS = ['safe', 'confirm', 'restricted'];
    edit_file faltara en una y que la otra declarara 'clipboard_read', una
    herramienta que no existe. El override del usuario siempre gana. */
 const { RISK: DEFAULT_RISK } = require('./tools');
+// v3.0: qué comando es peligroso no se decide por el nivel de la herramienta
+const comandos = require('./comandos');
 
 /* Coste por 1M tokens (USD) — estimación para el límite de coste. Claves por
    familia de modelo; lo no reconocido usa el default. El override del usuario
@@ -120,6 +122,13 @@ function forcedConfirmReason(name, args = {}) {
   // el portapapeles puede llevar contraseñas, códigos de un solo uso o datos
   // bancarios: leerlo nunca es automático (escribir en él sí es inocuo)
   if (name === 'clipboard') return a.action === 'write' ? null : 'Leer el portapapeles (puede contener contraseñas o códigos)';
+  /* v3.0: un comando sensible exige confirmación SIEMPRE, aunque el usuario tenga
+     run_command en «safe». Es la misma regla que ya vale para las acciones
+     sensibles del navegador: la seguridad gana a la comodidad. */
+  if (name === 'run_command') {
+    const c = comandos.clasificar(a.command);
+    return c.nivel === 'sensible' ? `COMANDO SENSIBLE: ${c.motivo}` : null;
+  }
   if (name !== 'browser_control') return null;
 
   // `eval` ejecuta JavaScript arbitrario dentro de la página y `profile` cambia
@@ -433,6 +442,14 @@ class Guardrails {
    * usuario tenga browser_control en 'safe' (la seguridad gana a la comodidad).
    */
   decide(name, args = {}) {
+    /* v3.0: hay comandos que no se ejecutan pase lo que pase. No es una pregunta
+       al usuario —no hay nada que aprobar: destruyen el sistema o sus datos—. */
+    if (name === 'run_command') {
+      const c = comandos.clasificar(args && args.command);
+      if (c.nivel === 'prohibido') {
+        return { action: 'deny', reason: `Comando prohibido: ${c.motivo}. No se ejecuta ni con permiso: hazlo tú si de verdad lo necesitas.` };
+      }
+    }
     const forced = forcedConfirmReason(name, args);
     if (forced) {
       const sig = this.signature(name, args);

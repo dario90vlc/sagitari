@@ -135,24 +135,26 @@ const defs = [
     type: 'function',
     function: {
       name: 'apply_patch',
-      description: 'Aplica VARIOS cambios de texto en uno o varios archivos en una sola llamada, y de forma atómica: si algún anclaje (old_string) no existe o es ambiguo, no se escribe nada. Úsalo para cambios que abarcan varios archivos (renombrar una función y sus llamadas, añadir un campo y sus usos) en vez de encadenar edit_file.',
+      description: 'Aplica VARIOS cambios de texto en uno o varios archivos en una sola llamada, y de forma atómica: si algún anclaje (old_string) no existe o es ambiguo, no se escribe nada. Úsalo para cambios que abarcan varios archivos (renombrar una función y sus llamadas, añadir un campo y sus usos) en vez de encadenar edit_file. Si un anclaje falla solo por la SANGRAFÍA, el error te devuelve el texto exacto que hay en el archivo: repite la llamada con tolerar_espacios: true y se aplicará reajustando la sangría.',
       parameters: {
         type: 'object',
         properties: {
           changes: {
             type: 'array',
-            description: 'Lista de cambios. Cada uno: {path, old_string, new_string, replace_all?}',
+            description: 'Lista de cambios. Cada uno: {path, old_string, new_string, replace_all?, tolerar_espacios?}',
             items: {
               type: 'object',
               properties: {
                 path: { type: 'string' },
                 old_string: { type: 'string', description: 'Texto exacto que hay en el archivo (con su sangría)' },
                 new_string: { type: 'string' },
-                replace_all: { type: 'boolean', description: 'Reemplazar todas las apariciones (por defecto: solo si es única)' }
+                replace_all: { type: 'boolean', description: 'Reemplazar todas las apariciones (por defecto: solo si es única)' },
+                tolerar_espacios: { type: 'boolean', description: 'Acepta el anclaje aunque la sangría o el final de línea no coincidan exactamente (se reajusta la sangría al archivo). Úsalo tras un error que te haya enseñado el texto exacto.' }
               },
               required: ['path', 'old_string', 'new_string']
             }
-          }
+          },
+          tolerar_espacios: { type: 'boolean', description: 'Aplica lo mismo a TODOS los cambios del parche' }
         },
         required: ['changes']
       }
@@ -177,14 +179,15 @@ const defs = [
     type: 'function',
     function: {
       name: 'edit_file',
-      description: 'Edita un archivo existente con un reemplazo anclado por texto exacto: cambia old_string por new_string y escribe el resultado. old_string debe ser único en el archivo; si aparece varias veces y quieres cambiarlas todas, usa replace_all: true. El archivo debe existir (no lo crea): para crear un archivo nuevo o reescribirlo entero usa write_file.',
+      description: 'Edita un archivo existente con un reemplazo anclado por texto exacto: cambia old_string por new_string y escribe el resultado. old_string debe ser único en el archivo; si aparece varias veces y quieres cambiarlas todas, usa replace_all: true. El archivo debe existir (no lo crea): para crear un archivo nuevo o reescribirlo entero usa write_file. Si el anclaje falla solo por la SANGRAFÍA, el error te devuelve el texto exacto que hay en el archivo: repite la llamada con tolerar_espacios: true y se aplicará reajustando la sangría.',
       parameters: {
         type: 'object',
         properties: {
           path: { type: 'string', description: 'Ruta del archivo a editar' },
           old_string: { type: 'string', description: 'Texto exacto a reemplazar (debe ser único salvo replace_all: true)' },
           new_string: { type: 'string', description: 'Texto de reemplazo' },
-          replace_all: { type: 'boolean', description: 'Reemplaza todas las ocurrencias (default false)' }
+          replace_all: { type: 'boolean', description: 'Reemplaza todas las ocurrencias (default false)' },
+          tolerar_espacios: { type: 'boolean', description: 'Acepta el anclaje aunque la sangría o el final de línea no coincidan exactamente: se aplica reajustando la sangría al archivo. Úsalo cuando un error te haya enseñado el texto exacto del bloque.' }
         },
         required: ['path', 'old_string', 'new_string']
       }

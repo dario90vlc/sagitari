@@ -18,6 +18,7 @@ const checkpoints = require('./checkpoints');
 const { Guardrails } = require('./guardrails');
 const runlog = require('./runlog');
 const subagents = require('./subagents');
+const arboles = require('./arboles');       // v3.0: árboles de trabajo por subagente
 const models = require('./models');
 const habits = require('./habits');
 const opencode = require('./opencode');   // identificación de sesión (OpenCode Go/Zen)
@@ -1336,6 +1337,26 @@ class Agent {
     const expect = (expectPedido || this._expectDeReserva()).slice(0, 1000);
     const reserva = !expectPedido && !!expect;
     const ws = (ctx.settings.settings && ctx.settings.settings.workspace) || path.join(os.homedir(), 'Desktop', 'Sagitari');
+    /* v3.0 — AISLAMIENTO (hueco 6). Si el especialista va a ESCRIBIR y el proyecto es
+       un repositorio git, trabaja en su PROPIO árbol de trabajo: ve el proyecto
+       entero —con los cambios sin commitear del usuario incluidosa— escribe donde
+       quiera y al terminar sus cambios vuelven como un parche VERIFICADO.
+       Es lo que permite que dos especialistas trabajen de verdad a la vez: sin esto
+       el semáforo los serializa, pero se siguen leyendo los archivos a medio cambiar. */
+    let arbol = null;
+    const escribeElArbol = ['write_file', 'edit_file', 'apply_patch'].some((t) => spec.allowTools.includes(t));
+    if (escribeElArbol && ctx.settings.settings && ctx.settings.settings.arbolesAislados !== false) {
+      try { arbol = await arboles.crear(ws); } catch { arbol = null; }
+      if (arbol) {
+        this.emit({ type: 'status', text: `🌳 ${spec.name}: en un árbol aislado (sus cambios vuelven verificados)` });
+        runlog.log({ agent: 'sagitari', event: 'arbol_crear', subagent: spec.key, id: arbol.id });
+      }
+    }
+    // Todo el trabajo del subagente —sus herramientas, sus comprobadores, sus reglas—
+    // apunta al árbol cuando lo hay: su «espacio de trabajo» es ese, no el del usuario.
+    const settingsTrabajo = arbol
+      ? { ...ctx.settings, settings: { ...(ctx.settings.settings || {}), workspace: arbol.dir } }
+      : ctx.settings;
     // v2.2: el tablero del chat necesita saber que EMPIEZA una delegación (no solo que
     // acaba): quién, qué y con qué criterio, en vivo.
     this.emit({
@@ -1376,8 +1397,8 @@ class Agent {
     let finalText = '';
     try {
       await sub._runWithSystem(
-        subagents.subagentSystemPrompt(spec.key, ws, { skillsIndex, suggested }),
-        ctx.settings,
+        subagents.subagentSystemPrompt(spec.key, arbol ? arbol.dir : ws, { skillsIndex, suggested }),
+        settingsTrabajo,
         brief,
         subagents.toolDefsFor(spec.key),
         signal,
@@ -1399,6 +1420,35 @@ class Agent {
         this.emit({ type: 'status', text: over.reason });
       }
     }
+    /* v3.0 — fusión VERIFICADA. El parche se comprueba con `git apply --check` antes
+       de aplicarse: si no entra limpio, NO se toca el árbol del usuario y el
+       subagente lo dice en vez de fingir que su trabajo está puesto. */
+    let fusion = null;
+    if (arbol && signal.aborted) {
+      /* El usuario detuvo la tarea: fusionar aquí metería en su proyecto un trabajo
+         a medias sin que lo haya pedido. Se descarta y se dice. */
+      await arboles.descartar(arbol);
+      this.emit({ type: 'status', text: `Se descartó el trabajo sin terminar de ${spec.name} (detuviste la tarea)` });
+    } else if (arbol) {
+      try {
+        fusion = await arboles.fusionar(arbol, {
+          // las pre-imágenes se registran ANTES de aplicar: así la fusión se puede
+          // deshacer como cualquier otro cambio del turno
+          preparar: (rels) => { for (const rel of rels) { try { cambios.recordar(ws, path.join(ws, rel)); } catch {} } },
+        });
+      } catch (e) {
+        fusion = { ok: false, archivos: [], conflicto: String((e && e.message) || e) };
+      }
+      await arboles.descartar(arbol, { conservar: !!(fusion && !fusion.ok && !fusion.vacio) });
+      runlog.log({
+        agent: 'sagitari', event: 'arbol_fusionar', subagent: spec.key,
+        ok: !!(fusion && fusion.ok), archivos: ((fusion && fusion.archivos) || []).length,
+        conflicto: fusion && fusion.conflicto ? String(fusion.conflicto).slice(0, 200) : undefined,
+      });
+      if (fusion && fusion.ok && fusion.vacio) this.emit({ type: 'status', text: `${spec.name} terminó sin dejar cambios` });
+      else if (fusion && fusion.ok) this.emit({ type: 'status', text: `Fusión al proyecto: ${fusion.archivos.length} archivo(s)` });
+      else if (fusion) this.emit({ type: 'status', text: `No pude fusionar el árbol de ${spec.name}: ${fusion.conflicto}` });
+    }
     const parsed = subagents.parseSubagentResult(finalText);
     // v2.1: una verificación que no falla cuenta como prueba para el cierre
     if (spec.key === 'verification' && parsed.status !== 'FAILED') this._verified = true;
@@ -1415,10 +1465,20 @@ class Agent {
       task: taskText,
       result: parsed.result, details: parsed.details, evidence: parsed.evidence,
       durationMs: Date.now() - t0,
+      // v3.0: qué volvió del árbol aislado (la tarjeta del chat lo puede enseñar)
+      fusion: fusion ? { ok: !!fusion.ok, vacio: !!fusion.vacio, archivos: fusion.archivos || [], conflicto: fusion.conflicto || null, dir: arbol && arbol.conservado ? arbol.dir : null } : undefined,
     });
     const evidence = parsed.evidence ? `\nEVIDENCIA: ${parsed.evidence}` : '';
     const board = subagents.formatDelegationBoard(this._delegations);
-    return `RESULTADO DE ${spec.name} (${parsed.status}):\n${parsed.result}${parsed.details ? '\nDETALLES: ' + parsed.details : ''}${evidence}${board ? `\n\nTABLERO DE ESTE TURNO (subagentes ya usados):\n${board}` : ''}`;
+    /* La fusión hay que contarla: si no entró, el orquestador NO puede presentar el
+       trabajo como hecho — es justo el error que esto viene a evitar. */
+    let notaFusion = '';
+    if (arbol && fusion) {
+      if (fusion.ok && !fusion.vacio) notaFusion = `\nFUSIÓN: aplicados ${fusion.archivos.length} archivo(s) al proyecto del usuario desde el árbol aislado${fusion.archivos.length ? ': ' + fusion.archivos.slice(0, 10).join(', ') : ''}.`;
+      else if (fusion.ok) notaFusion = '\nFUSIÓN: el subagente terminó sin cambiar archivos.';
+      else notaFusion = `\nFUSIÓN CON CONFLICTO: sus cambios NO se aplicaron al proyecto del usuario (${fusion.conflicto}). Dilo tal cual; no lo presentes como hecho. El árbol queda en ${arbol.dir} por si hay que mirarlo.`;
+    }
+    return `RESULTADO DE ${spec.name} (${parsed.status}):\n${parsed.result}${parsed.details ? '\nDETALLES: ' + parsed.details : ''}${evidence}${notaFusion}${board ? `\n\nTABLERO DE ESTE TURNO (subagentes ya usados):\n${board}` : ''}`;
   }
 
   /**

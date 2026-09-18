@@ -626,6 +626,11 @@ ipcMain.handle('settings:set', (e, patch) => {
   if ('promptCache' in clean && typeof clean.promptCache !== 'boolean') delete clean.promptCache;
   if ('diagnosticosEscritura' in clean && typeof clean.diagnosticosEscritura !== 'boolean') delete clean.diagnosticosEscritura;
   if ('verificacionCierre' in clean && typeof clean.verificacionCierre !== 'boolean') delete clean.verificacionCierre;
+  /* v3.0 — aislamiento: los subagentes que ESCRIBEN trabajan en su propio árbol de
+     trabajo de git y sus cambios vuelven como un parche verificado. Activo por defecto;
+     se puede apagar para que escriban directamente sobre el proyecto (más rápido, pero
+     dos especialistas a la vez vuelven a pisarse). */
+  if ('arbolesAislados' in clean && typeof clean.arbolesAislados !== 'boolean') delete clean.arbolesAislados;
   if ('intentosArreglo' in clean) {
     const n = Math.round(Number(clean.intentosArreglo));
     if (!Number.isFinite(n) || n < 0 || n > 5) delete clean.intentosArreglo; else clean.intentosArreglo = n;

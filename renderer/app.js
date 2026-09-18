@@ -3039,6 +3039,7 @@ async function initSecurity() {
     if ($('#swCache')) $('#swCache').classList.toggle('on', CFG.settings.promptCache !== false);
     if ($('#swDiagnosticos')) $('#swDiagnosticos').classList.toggle('on', CFG.settings.diagnosticosEscritura !== false);
     if ($('#swCierre')) $('#swCierre').classList.toggle('on', CFG.settings.verificacionCierre !== false);
+    if ($('#swArboles')) $('#swArboles').classList.toggle('on', CFG.settings.arbolesAislados !== false);
     if ($('#verAttempts')) $('#verAttempts').value = CFG.settings.intentosArreglo ?? 2;
     // v2.5: tus hooks. Se guardan como texto tal cual (una línea = un comando).
     if ($('#hookEditar')) $('#hookEditar').value = CFG.settings.hookEditar || '';
@@ -3130,6 +3131,13 @@ if ($('#swCierre')) $('#swCierre').onclick = async (e) => {
   CFG.settings.verificacionCierre = on;
   await window.sagitari.setSettings({ verificacionCierre: on });
   showToast(on ? 'Antes de cerrar se ejecutarán las pruebas del proyecto' : 'Pruebas de cierre desactivadas');
+};
+if ($('#swArboles')) $('#swArboles').onclick = async (e) => {
+  const on = !e.currentTarget.classList.contains('on');
+  e.currentTarget.classList.toggle('on', on);
+  CFG.settings.arbolesAislados = on;
+  await window.sagitari.setSettings({ arbolesAislados: on });
+  showToast(on ? 'Los subagentes que escriben trabajarán en un árbol de git aislado' : 'Los subagentes escribirán directamente sobre el proyecto');
 };
 if ($('#verAttempts')) $('#verAttempts').onchange = async (e) => {
   const v = Math.max(0, Math.min(5, Number(e.target.value) || 0));

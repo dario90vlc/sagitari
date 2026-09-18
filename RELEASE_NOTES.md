@@ -1,3 +1,74 @@
+# SAGITARI 3.3.0
+
+**Los subagentes que escriben dejan de pisarse.** Cuando SAGITARI reparte un trabajo grande
+entre sus especialistas, los que escriben código trabajan ahora cada uno en su **propio árbol
+de git** —con tu proyecto tal y como lo tienes, incluidos los cambios sin guardar— y al terminar
+sus cambios vuelven al proyecto **como un parche que se comprueba antes de aplicarse**. Si algo
+no encaja, no se aplica nada, se te dice por qué y el árbol queda ahí para mirarlo: nunca un
+proyecto a medias. Y de paso, **lo que destruiría tu equipo ya no se ejecuta**: formatear una
+unidad, gestionar particiones, borrar dentro de Windows o la raíz de un disco no son una
+pregunta que puedas contestar que sí, y lo delicado (push forzado, publicar un paquete,
+instalar en el equipo, borrados recursivos, el registro, tareas programadas, descargar y
+ejecutar) pregunta siempre, aunque tengas la terminal en automático. / **Writing subagents stop
+stepping on each other.** When SAGITARI splits a big job across its specialists, the ones that
+write code each work now in their **own git worktree** —with your project exactly as you have
+it, unsaved changes included— and when they finish their work comes back to the project **as a
+patch that is checked before it is applied**. If it does not fit, nothing is applied, you are
+told why, and the worktree stays put so you can look at it: never a half-changed project. And
+along the way, **what would destroy your machine no longer runs**: formatting a drive, managing
+partitions, deleting inside Windows or the root of a disk are not a question you can answer yes
+to, and the delicate stuff (force-push, publishing a package, installing system-wide, recursive
+deletes, the registry, scheduled tasks, download-and-run) always asks, even with the terminal
+set to automatic.
+
+Y la tercera es la que más vas a notar en el día a día: un anclaje de edición que solo fallaba
+por la **sangría** ya no es un callejón sin salida. SAGITARI te enseña el bloque exacto que hay
+en el archivo, con sus números de línea, y arregla el cambio **reajustando la sangría** en lugar
+de destruirla. / And the third one is the one you will notice most day to day: an edit anchor
+that only failed because of **indentation** is no longer a dead end. SAGITARI shows you the
+exact block that is in the file, with its line numbers, and fixes the change **by readjusting
+the indentation** instead of destroying it.
+
+## Novedades / What's new
+
+- **Aislar a los subagentes que escriben.** Cada especialista que escribe código (`coding`,
+  `file`) trabaja en un árbol de trabajo de git propio: ve el proyecto entero —con tus cambios
+  sin guardar y tus archivos nuevos—, escribe donde quiera y al cerrar vuelve un parche que se
+  comprueba con `git apply --check` **antes** de tocar nada. Si entra, los archivos quedan como
+  cualquier otro cambio del turno: **se pueden deshacer**. Si no entra, no se aplica nada y se
+  te dice por qué y dónde quedó el árbol. Se apaga en Ajustes ▸ Agente, y sin git (o sin
+  commits) funciona como siempre. / **Isolate writing subagents.** Every code-writing
+  specialist (`coding`, `file`) works in its own git worktree: it sees the whole project —your
+  unsaved changes and your new files included—, writes wherever it wants, and on finish a patch
+  comes back that is checked with `git apply --check` **before** anything is touched. If it
+  applies, the files are like any other change of the turn: **they can be undone**. If it does
+  not, nothing is applied and you are told why and where the worktree stayed. It can be turned
+  off in Settings ▸ Agent, and without git (or without commits) it works as always.
+- **Los comandos se juzgan por lo que hacen, no por quién los pide.** Antes `run_command` tenía
+  un único nivel de riesgo: el de la herramienta entera, así que poner «Terminal» en automático
+  —o aprobar una vez un comando— autorizaba por igual `git status` y `format C:`. Ahora hay
+  tres escalones: lo que solo lee no molesta; lo sensible pide confirmación **siempre** (push
+  forzado, `git reset --hard`, publicar, instalar en el equipo, borrados recursivos, el
+  registro, servicios y tareas programadas, usuarios, cortafuegos, apagar el equipo, descargar
+  y ejecutar); y lo que destruye el sistema **no se ejecuta**, ni con tu permiso. / **Commands
+  are judged by what they do, not by who asks.** `run_command` used to have a single risk level:
+  the whole tool's, so setting “Terminal” to automatic —or approving one command once—
+  authorised `git status` and `format C:` alike. There are now three tiers: read-only commands
+  do not bother you; sensitive ones always ask (force-push, `git reset --hard`, publishing,
+  installing system-wide, recursive deletes, the registry, services and scheduled tasks, users,
+  firewall, powering the machine off, download-and-run); and what destroys the system does not
+  run at all, not even with your permission.
+- **La sangría ya no mata una edición.** Un anclaje que no coincidía al carácter devuelve un
+  «¿Querías esto?» con el bloque real numerado, el texto exacto para copiar y una salida de una
+  sola llamada (`tolerar_espacios`), que reajusta la sangría al archivo **línea a línea** (los
+  tabuladores cuentan como tabuladores, no como un carácter). Con varias coincidencias no elige
+  por su cuenta: te dice en cuántos sitios aparece. Nunca aplica una suposición en silencio. /
+  **Indentation no longer kills an edit.** An anchor that did not match to the character now
+  returns a “Did you mean this?” with the real block numbered, the exact text to copy and a
+  one-call way out (`tolerar_espacios`) that readjusts the indentation to the file **line by
+  line** (tabs count as tabs, not as one character). With several matches it does not choose on
+  its own: it tells you how many places it found. It never applies a guess silently.
+
 # SAGITARI 3.2.3
 
 **El navegador por fin se puede manejar con su ventana detrás de la app.** Es el caso normal
