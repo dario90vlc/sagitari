@@ -3519,12 +3519,32 @@ test('updater: informa de la firma digital del binario descargado', async () => 
   /* El hash publicado en la release demuestra integridad, no autenticidad: si el
      repo se compromete, el binario y su hash cambian juntos. La firma Authenticode
      es el único anclaje externo, así que el usuario tiene que ver si falta. */
-  const sistema = path.join(process.env.SystemRoot || 'C:/Windows', 'System32', 'notepad.exe');
-  // Si la sonda desapareciera de la imagen del runner, el fallo sería del binario
-  // y no de la consulta: conviene poder distinguirlo por el mensaje.
-  ok(fs.existsSync(sistema), 'la sonda existe en esta máquina (' + sistema + ')');
-  const firmado = await updater.signatureOf(sistema);
-  ok(firmado, 'un binario de sistema tiene firma consultable');
+  /* Varias sondas y no una: lo que se prueba es el MECANISMO (que la app sepa leer
+     una firma Authenticode real), no que la imagen de un runner concreto traiga
+     justo ese binario. Si la sonda desaparece, el mensaje lo dice. */
+  const sondas = ['notepad.exe', 'cmd.exe', 'powershell.exe']
+    .map((n) => path.join(process.env.SystemRoot || 'C:/Windows', 'System32', n))
+    .filter((p) => fs.existsSync(p));
+  ok(sondas.length > 0, 'hay al menos una sonda de sistema en esta máquina');
+  /* La consulta arranca PowerShell en frío, y en un runner recién despierto eso se
+     pasaba del presupuesto: la prueba fallaba por el RELOJ, no por la firma (así se
+     cayó la release de la 3.3.0 en CI, con el mismo binario que pasa en local). Se
+     le da margen y una segunda oportunidad, que es lo que la prueba mide de verdad:
+     que la consulta responde y que un binario de sistema está firmado. */
+  const consulta = async (f) => {
+    for (let intento = 0; intento < 2; intento++) {
+      const r = await updater.signatureOf(f, { timeoutMs: 45000 });
+      if (r) return r;
+      await new Promise((res) => setTimeout(res, 1500));
+    }
+    return null;
+  };
+  let firmado = null;
+  for (const sonda of sondas) {
+    firmado = await consulta(sonda);
+    if (firmado) break;
+  }
+  ok(firmado, 'un binario de sistema tiene firma consultable (sondas: ' + sondas.join(', ') + ')');
   eq(firmado.status, 'Valid');
   ok(/Microsoft/.test(firmado.signer || ''), 'y se informa de quién lo firma (' + firmado.signer + ')');
   // Un fichero que no es una imagen PE válida no sirve como sonda sin firmar:

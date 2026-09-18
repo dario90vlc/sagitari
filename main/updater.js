@@ -240,7 +240,13 @@ async function downloadTo(url, dest, { fetchFn = fetch, onProgress = null, timeo
  * Se informa al usuario; con `NotSigned` se lo decimos en vez de callarlo.
  * Devuelve null si no se pudo consultar (no es Windows, sin PowerShell…).
  */
-function signatureOf(file, { spawnFn = spawn, env = process.env, timeoutMs = 8000 } = {}) {
+/* El presupuesto por defecto era 8 s y se quedaba corto en el peor caso real: el
+   arranque en frío de PowerShell en una máquina cargada (un runner de CI recién
+   despierto, o el equipo del usuario con todo abierto) puede pasar de ahí. El
+   resultado no era un error visible, sino «no se pudo consultar» sobre un binario
+   perfectamente firmado — es decir, la app alarmando sin motivo. 20 s sigue siendo
+   un tope: si en ese tiempo no contesta, no se inventa un estado. */
+function signatureOf(file, { spawnFn = spawn, env = process.env, timeoutMs = 20000 } = {}) {
   return new Promise((resolve) => {
     try {
       if (process.platform !== 'win32') return resolve(null);
