@@ -33,9 +33,9 @@ The recommended option is the Windows installer:
 
 | Package | Description |
 |---|---|
-| [**SAGITARI-Setup-3.2.0.exe**](https://github.com/dario90vlc/sagitari/releases/download/v3.2.0/SAGITARI-Setup-3.2.0.exe) | Installer with shortcuts and uninstaller |
-| [**SAGITARI-Portable-3.2.0.exe**](https://github.com/dario90vlc/sagitari/releases/download/v3.2.0/SAGITARI-Portable-3.2.0.exe) | Single executable, no installation |
-| [**Release notes**](https://github.com/dario90vlc/sagitari/releases/tag/v3.2.0) | Changes, security fixes, and SHA-256 hashes |
+| [**SAGITARI-Setup-3.2.1.exe**](https://github.com/dario90vlc/sagitari/releases/download/v3.2.1/SAGITARI-Setup-3.2.1.exe) | Installer with shortcuts and uninstaller |
+| [**SAGITARI-Portable-3.2.1.exe**](https://github.com/dario90vlc/sagitari/releases/download/v3.2.1/SAGITARI-Portable-3.2.1.exe) | Single executable, no installation |
+| [**Release notes**](https://github.com/dario90vlc/sagitari/releases/tag/v3.2.1) | Changes, security fixes, and SHA-256 hashes |
 
 > **Windows SmartScreen:** the binaries are currently unsigned, so Windows may show a warning on the first run. Choose *More info → Run anyway* if you trust the download. Verify the SHA-256 hash published in the release notes.
 
@@ -139,7 +139,7 @@ npm run uicheck           # exercise the live renderer
 npm run dist              # build NSIS installer + portable executable
 ```
 
-The release workflow runs syntax checks, tests, smoke, UI checks, builds both Windows artifacts, verifies the output, generates release notes, and publishes SHA-256 hashes. The release tag must match the version in `package.json` — for this release, `v3.2.0`.
+The release workflow runs syntax checks, tests, smoke, UI checks, builds both Windows artifacts, verifies the output, generates release notes, and publishes SHA-256 hashes. The release tag must match the version in `package.json` — for this release, `v3.2.1`.
 
 ## Project structure
 

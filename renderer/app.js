@@ -3323,7 +3323,7 @@ if ($('#openDataDirBtn')) $('#openDataDirBtn').onclick = async () => {
    El motor vive en main/updater.js (comprobar, descargar, verificar el sha512 y
    lanzar el instalador): aquí solo se pinta el estado y se pide la acción.
    Nada se descarga ni se instala sin un clic del usuario. */
-let updState = { kind: null, current: null, latest: null, available: false, ready: null, status: 'idle', error: null, progress: null };
+let updState = { kind: null, current: null, latest: null, available: false, ready: null, pending: null, status: 'idle', error: null, progress: null };
 let updInitDone = false;   // la comprobación al abrir Ajustes se hace UNA vez, no en cada render
 let updNotified = false;   // el toast de «nueva versión» no se repite en toda la sesión
 
@@ -3342,14 +3342,17 @@ function updSize(n) {
 function updMsg(text) { const el = $('#updMsg'); if (el) el.textContent = text || ''; }
 
 /** Pinta la tarjeta «Actualizaciones». GLOBAL para poder comprobarla desde fuera.
-    `state = { kind, current, latest, available, ready, status, error, progress }`
-    con `status` ∈ 'idle' | 'checking' | 'downloading' | 'ready'. */
+    `state = { kind, current, latest, available, ready, pending, status, error, progress }`
+    con `status` ∈ 'idle' | 'checking' | 'downloading' | 'ready'.
+    `pending` es una instalación que se intentó y no cuajó (la app se cerró para
+    instalarse y al volver seguía la versión vieja): se ofrece reintentarla. */
 function renderUpdate(state) {
   const v = state || {};
   const s = {
     kind: v.kind || null, current: v.current || null, latest: v.latest || null,
     available: !!v.available, ready: v.ready || null, status: v.status || 'idle',
-    error: v.error || null, progress: v.progress || null
+    error: v.error || null, progress: v.progress || null,
+    pending: v.pending && v.pending.version ? v.pending : null
   };
   // un archivo con verificación fallida no existe (main lo descarta): `verified`
   // sólo puede valer true cuando hay algo listo para instalar
@@ -3383,16 +3386,21 @@ function renderUpdate(state) {
     dl.disabled = busy;
   }
   const inst = $('#updInstallBtn');
+  // El botón sirve para dos cosas: instalar lo que se acaba de descargar, o
+  // reintentar la instalación que se quedó a medias (los dos acaban cerrando la app).
+  const reintento = !ready && !!s.pending && s.kind !== 'portable';
   if (inst) {
-    const puede = !!ready && s.kind !== 'dev';
+    const puede = (!!ready && s.kind !== 'dev') || reintento;
     inst.hidden = !puede;
     if (puede) {
-      const portable = s.kind === 'portable';
+      const portable = !reintento && s.kind === 'portable';
       const lbl = $('#updInstallLabel');
-      if (lbl) lbl.textContent = portable ? 'Abrir carpeta' : 'Instalar y cerrar';
+      if (lbl) lbl.textContent = reintento ? 'Reintentar la instalación' : (portable ? 'Abrir carpeta' : 'Instalar y cerrar');
       inst.setAttribute('aria-label', portable
         ? 'Abrir la carpeta con el archivo descargado'
-        : 'Instalar la actualización; Sagitari se cerrará para instalarse');
+        : (reintento
+          ? 'Volver a intentar la instalación de la versión ' + (s.pending.version || '') + '; Sagitari se cerrará para instalarse'
+          : 'Instalar la actualización; Sagitari se cerrará para instalarse'));
     }
     inst.disabled = busy;
   }
@@ -3413,6 +3421,11 @@ function renderUpdate(state) {
   // notas: modo de ejecución, firma y qué pasará exactamente al instalar
   const notes = [];
   if (s.kind === 'dev') notes.push('Estás ejecutando desde el código fuente; para actualizarte, compila o usa el instalador.');
+  if (s.pending && !ready) {
+    notes.push(s.pending.exists
+      ? 'La instalación de la versión ' + s.pending.version + ' no llegó a completarse (el asistente no pudo instalarla). El archivo sigue descargado: puedes reintentarlo o abrirlo a mano desde ' + s.pending.path + '.'
+      : 'La instalación de la versión ' + s.pending.version + ' no llegó a completarse y el archivo descargado ya no está: descarga la actualización otra vez.');
+  }
   if (ready) {
     if (ready.signed === false) notes.push('Esta actualización no está firmada digitalmente: se instala solo con la verificación SHA-512 publicada en la release.');
     else if (ready.signed === true && ready.signer) notes.push('Firmada digitalmente por ' + ready.signer + '.');
@@ -3439,6 +3452,7 @@ async function refreshUpdate() {
     updState.available = !!r.available;
     updState.kind = r.kind || updState.kind;
     updState.ready = r.ready || updState.ready;
+    updState.pending = r.pending || null;   // el motor la descarta sola si ya no aplica
     updState.error = r.ok === false ? (r.error || 'error desconocido') : null;
   } catch (e) {
     updState.error = String((e && e.message) || e || 'error desconocido');
@@ -3490,8 +3504,16 @@ if ($('#updInstallBtn')) $('#updInstallBtn').onclick = async () => {
   const btn = $('#updInstallBtn');
   if (btn.disabled) return;
   btn.disabled = true;
+  // con algo recién descargado se instala eso; si no, se reintenta lo pendiente
+  const reintento = !updState.ready && !!updState.pending;
   try {
-    const r = await window.sagitari.updateInstall();
+    const r = reintento ? await window.sagitari.updateRetry() : await window.sagitari.updateInstall();
+    if (r && 'pending' in r) {
+      // el motor decidió qué queda pendiente (p. ej. descartó un instalador que ya
+      // no está): la tarjeta se queda con eso en vez de seguir ofreciendo un fantasma
+      updState.pending = r.pending || null;
+      renderUpdate(updState);
+    }
     if (!r || r.ok === false) { updMsg('No se pudo instalar: ' + ((r && r.error) || 'error desconocido')); return; }
     updMsg(r.manual
       ? 'Archivo listo: ejecútalo desde la carpeta que se acaba de abrir.'
@@ -3531,6 +3553,15 @@ if (window.sagitari.onUpdate) window.sagitari.onUpdate((ev) => {
     updState.available = false;
     updState.latest = ev.version || updState.latest;
     updState.status = updState.ready ? 'ready' : 'idle';
+    renderUpdate(updState);
+    return;
+  }
+  // La instalación de la sesión anterior no cuajó: decirlo y ofrecer reintentarla
+  // (es lo único que se puede hacer: para instalar hay que cerrar la app).
+  if (ev.type === 'install-failed') {
+    updState.pending = { version: ev.version || null, path: ev.path || null, exists: ev.exists !== false };
+    setBadge('#nbUpdate', 1, { hot: true });
+    showToast('La actualización a ' + (ev.version || 'la versión nueva') + ' no se llegó a instalar · Ajustes → Acerca de');
     renderUpdate(updState);
     return;
   }

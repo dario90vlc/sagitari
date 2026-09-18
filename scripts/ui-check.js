@@ -334,6 +334,15 @@ const AFTER = {
   // Los atajos no deben dispararse mientras se escribe en un campo
   await judge('los atajos no saltan de vista escribiendo en el chat',
     '(function(){ var input = document.querySelector("#chatInput"); input.focus(); input.dispatchEvent(new KeyboardEvent("keydown", { key: "4", altKey: true, bubbles: true })); var on = document.querySelector(".view.on"); var ok = !!on && on.id === "view-chat"; input.blur(); return ok; })()');
+  /* ---- actualizaciones: una instalación que se quedó a medias se puede reintentar ----
+     El motor la recuerda en disco y el siguiente arranque la anuncia (para instalar hay
+     que cerrar la app, así que es el único momento en que se le puede contar). Aquí se
+     comprueba que la tarjeta la pinta con su botón: sin esto el usuario se quedaba en
+     «se cierra, aparece una terminal, no pasa nada» y sin forma de volver a intentarlo. */
+  await judge('la tarjeta de actualizaciones ofrece reintentar una instalación a medias',
+    '(function(){ if (typeof renderUpdate !== "function") return "renderUpdate no accesible"; var antes = JSON.stringify(updState); renderUpdate({ kind: "nsis", current: "3.2.0", latest: "3.2.1", available: true, ready: null, pending: { version: "3.2.1", path: "C:\\\\Temp\\\\sagitari-update\\\\SAGITARI-Setup-3.2.1.exe", exists: true } }); var b = document.querySelector("#updInstallBtn"), lbl = document.querySelector("#updInstallLabel"), nota = document.querySelector("#updNote"); var ok = !b.hidden && !b.disabled && lbl.textContent === "Reintentar la instalación" && !nota.hidden && /3\\.2\\.1/.test(nota.textContent); renderUpdate(JSON.parse(antes)); return ok; })()');
+  await judge('si el instalador pendiente ya no está, la tarjeta invita a descargarla otra vez',
+    '(function(){ if (typeof renderUpdate !== "function") return "renderUpdate no accesible"; var antes = JSON.stringify(updState); renderUpdate({ kind: "nsis", current: "3.2.0", latest: "3.2.1", available: true, ready: null, pending: { version: "3.2.1", path: "C:\\\\Temp\\\\ya-no-esta.exe", exists: false } }); var dl = document.querySelector("#updDownloadBtn"), nota = document.querySelector("#updNote"); var ok = !dl.hidden && !nota.hidden && /vuelve a descargar|descarga la actualización otra vez/i.test(nota.textContent) && /no llegó a completarse/.test(nota.textContent); renderUpdate(JSON.parse(antes)); return ok; })()');
   /* ---- selector de modelo: el clic tiene que llegar al menú ----
      Comprueba el recorrido completo del selector (abrir → pulsar una fila →
      menú cerrado y píldora actualizada) con eventos de ENTRADA del navegador en

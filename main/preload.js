@@ -116,6 +116,7 @@ contextBridge.exposeInMainWorld('sagitari', {
   updateCheck: () => ipcRenderer.invoke('update:check'),
   updateDownload: () => ipcRenderer.invoke('update:download'),
   updateInstall: () => ipcRenderer.invoke('update:install'),
+  updateRetry: () => ipcRenderer.invoke('update:retry'),
   updatePage: () => ipcRenderer.invoke('update:page'),
   onUpdate: on('update:event', ([ev]) => [ev]),
 

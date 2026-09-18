@@ -267,6 +267,80 @@ function signatureOf(file, { spawnFn = spawn, env = process.env, timeoutMs = 800
   });
 }
 
+/* ---------- lanzar el instalador cuando la app ya no esté ---------- */
+
+/**
+ * Guion del ayudante que instala la actualización DESPUÉS de que la app muera.
+ *
+ * Por qué existe: la app no puede reemplazarse a sí misma mientras corre (los
+ * ficheros están en uso) y el instalador de electron-builder, cuando lo lanza
+ * el propio proceso, se salta su comprobación de «app en ejecución» (mira el
+ * proceso PADRE, que sería SAGITARI.exe) y se queda a medias en silencio. Por
+ * eso el instalador lo lanza un tercero que espera a que no quede ninguna
+ * instancia viva.
+ *
+ * Se ejecuta con `-EncodedCommand` (base64 de UTF-16LE): así la ruta del
+ * instalador no tiene que sobrevivir a dos niveles de comillas —el intérprete
+ * de `cmd.exe` y el de Node—, que es justo lo que rompía el lanzamiento
+ * anterior. Una ruta con espacios, `/`, `&` o `%` es simplemente texto.
+ */
+function installHelperScript({ name, installer, args = '/S --updated', logPath, waitMs = 90000, graceMs = 1200 } = {}) {
+  const q = (s) => "'" + String(s == null ? '' : s).replace(/'/g, "''") + "'";   // literal de PowerShell
+  const lista = String(args || '').split(/\s+/).filter(Boolean).map(q).join(',');
+  const espera = Number.isFinite(waitMs) && waitMs > 0 ? Math.round(waitMs) : 90000;
+  const gracia = Number.isFinite(graceMs) && graceMs >= 0 ? Math.round(graceMs) : 1200;
+  // Ojo: dentro de los literales simples NO se interpola nada de JavaScript.
+  return [
+    "$ErrorActionPreference = 'Continue'",
+    '$log = ' + q(logPath),
+    'function Diag([string]$m) { try { Add-Content -LiteralPath $log -Value ((Get-Date -Format o) + " " + $m) -Encoding utf8 } catch {} }',
+    "Diag ('asistente iniciado (pid=' + $PID + ', PowerShell ' + $PSVersionTable.PSVersion.ToString() + ')')",
+    "if ($env:SAGITARI_NO_WINDOW_DEBUG) { Diag ('ventana del asistente=' + (Get-Process -Id $PID).MainWindowHandle) }",
+    "$fin = (Get-Date).AddMilliseconds(" + espera + ')' ,
+    '$espera = 0',
+    "while ((Get-Date) -lt $fin) {",
+    '  $viva = Get-Process -Name ' + q(name) + ' -ErrorAction SilentlyContinue',
+    '  if (-not $viva) { break }',
+    '  Start-Sleep -Milliseconds 400',
+    '  $espera += 400',
+    '}',
+    "Diag ('la app ya no esta en ejecucion (espera ' + $espera + ' ms)')",
+    'Start-Sleep -Milliseconds ' + gracia,
+    'try {',
+    '  Start-Process -FilePath ' + q(installer) + ' -ArgumentList ' + (lista || "'/S'") + ' -ErrorAction Stop',
+    "  Diag 'instalador lanzado'",
+    '} catch {',
+    "  Diag ('FALLO al lanzar el instalador: ' + $_.Exception.Message)",
+    '  exit 1',
+    '}',
+  ].join('\r\n');
+}
+
+/** Orden lista para `spawn`: el ayudante oculto, sin comillas que escapar. */
+function afterExitCommand(opts = {}) {
+  const script = installHelperScript(opts);
+  return {
+    file: 'powershell.exe',
+    // SIN `detached`: en Windows un PowerShell separado no llega a ejecutar
+    // nada (sale con 0 y se queda en nada) y un hijo normal sobrevive a la
+    // muerte del padre. Con `windowsHide` no aparece ninguna ventana.
+    args: ['-NoProfile', '-NonInteractive', '-WindowStyle', 'Hidden', '-EncodedCommand', Buffer.from(script, 'utf16le').toString('base64')],
+    script,
+  };
+}
+
+/**
+ * Instalación intentada que sigue sin cuajar: el binario descargado espera a
+ * que el usuario lo reintente. Devuelve null si ya no aplica (versión al día,
+ * o fichero del que no nos fiamos).
+ */
+function pendingFor(pending, currentVersion) {
+  if (!pending || typeof pending !== 'object') return null;
+  if (!pending.path || !pending.version) return null;
+  if (compareVersions(pending.version, currentVersion) <= 0) return null;
+  return { version: String(pending.version), path: String(pending.path), expected: pending.expected || null, at: pending.at || null };
+}
+
 /* ---------- modo de ejecución ---------- */
 
 /** Cómo está corriendo la app: instalada, portable o desde el código. */
@@ -275,4 +349,4 @@ function hostKind({ isPackaged, env = process.env } = {}) {
   return env.PORTABLE_EXECUTABLE_DIR ? 'portable' : 'nsis';
 }
 
-module.exports = { REPO, API_LATEST, parseVersion, compareVersions, pickAssets, assetFor, parseLatestYml, sha512For, sha512Of, checkForUpdate, downloadTarget, downloadTo, hostKind, signatureOf };
+module.exports = { REPO, API_LATEST, parseVersion, compareVersions, pickAssets, assetFor, parseLatestYml, sha512For, sha512Of, checkForUpdate, downloadTarget, downloadTo, hostKind, signatureOf, installHelperScript, afterExitCommand, pendingFor };

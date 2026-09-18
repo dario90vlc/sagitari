@@ -2818,6 +2818,62 @@ test('updater: cada modo guarda el binario donde toca', () => {
   eq(path.basename(evil.path), '.._.._evil_name.exe', 'el nombre no puede escapar de la carpeta');
 });
 
+test('updater: el ayudante que instala espera a la app y no juega con comillas', () => {
+  const installer = path.join('C:', 'Temp', "d'actualizacion & 100%", 'SAGITARI-Setup-3.2.1.exe');
+  const logPath = path.join('C:', 'Temp', "d'actualizacion & 100%", 'instalar.log');
+  const plan = updater.afterExitCommand({ name: 'SAGITARI', installer, logPath });
+  eq(plan.file, 'powershell.exe', 'nada de cmd.exe de por medio');
+  ok(plan.args.includes('-EncodedCommand'), 'el guion viaja codificado: no hay comillas que escapar');
+  ok(plan.args.includes('Hidden'), 'el ayudante no muestra ninguna ventana (era el «abre una terminal y se cierra»)');
+  eq(Buffer.from(plan.args[plan.args.length - 1], 'base64').toString('utf16le'), plan.script, 'lo que se ejecuta es el guion tal cual');
+  ok(plan.script.includes("'" + installer.replace(/'/g, "''") + "'"), 'la ruta va como literal de PowerShell, con sus comillas simples dobladas');
+  ok(plan.script.includes("'SAGITARI'"), 'espera a que no quede ninguna instancia de la app');
+  ok(plan.script.includes('Start-Process -FilePath'), 'y entonces lanza el instalador');
+  ok(plan.script.includes("'/S','--updated'"), 'en silencio y como actualización, no como instalación nueva');
+  ok(!/start ""/.test(plan.script), 'sin la línea de órdenes que rompía el lanzamiento');
+});
+
+test('updater: el ayudante lanza el instalador de verdad (integración)', async () => {
+  if (process.platform !== 'win32') return;   // el actualizador solo instala en Windows
+  const { spawn } = require('child_process');
+  const dir = tmpDir('sagi-ayudante-');
+  const probe = path.join(dir, 'probe.bat');
+  const argsFile = path.join(dir, 'args.txt');
+  const log = path.join(dir, 'instalar.log');
+  fs.writeFileSync(probe, '@echo off\r\necho %* > "' + argsFile + '"\r\n');
+  // Un nombre de proceso que no existe: el ayudante no espera y lanza ya. Esto es
+  // exactamente lo que antes no llegaba a pasar NUNCA (el señuelo no se ejecutaba).
+  const plan = updater.afterExitCommand({
+    name: 'SAGITARI-PROCESO-QUE-NO-EXISTE',
+    installer: probe, args: '/S --updated', logPath: log, graceMs: 100,
+  });
+  const hijo = spawn(plan.file, plan.args, { stdio: 'ignore', windowsHide: true });
+  hijo.on('error', () => {});
+  const esperar = async (f, ms) => {
+    const t0 = Date.now();
+    while (Date.now() - t0 < ms) { if (fs.existsSync(f)) return true; await new Promise((r) => setTimeout(r, 250)); }
+    return false;
+  };
+  ok(await esperar(argsFile, 25000), 'el instalador recibe la orden (antes no se ejecutaba nunca)');
+  ok(/\/S --updated/.test(fs.readFileSync(argsFile, 'utf8')), 'llega en silencio y en modo actualización');
+  ok(await esperar(log, 25000), 'el ayudante deja un registro de lo que hizo');
+  ok(/instalador lanzado/.test(fs.readFileSync(log, 'utf8')), 'y el registro dice que lo lanzó');
+  eq(fs.existsSync(path.join(dir, 'instalar.log.part')), false, 'sin restos a medias');
+});
+
+test('updater: una instalación a medias se recuerda solo mientras sirva', () => {
+  const p = { version: '3.2.1', path: 'C:/tmp/SAGITARI-Setup-3.2.1.exe', expected: 'abc', at: '2026-09-18T10:00:00Z' };
+  const vivo = updater.pendingFor(p, '3.2.0');
+  eq(vivo.version, '3.2.1', 'con la versión vieja en marcha, la instalación sigue pendiente');
+  eq(vivo.path, p.path); eq(vivo.expected, 'abc');
+  eq(updater.pendingFor(p, '3.2.1'), null, 'si ya se instaló, el aviso desaparece');
+  eq(updater.pendingFor(p, '3.3.0'), null, 'y tampoco se ofrece una versión anterior a la instalada');
+  eq(updater.pendingFor({ version: '3.2.1' }, '3.2.0'), null, 'sin ruta no hay nada que reintentar');
+  eq(updater.pendingFor({ path: 'x' }, '3.2.0'), null, 'ni sin versión');
+  eq(updater.pendingFor(null, '3.2.0'), null);
+  eq(updater.pendingFor('basura', '3.2.0'), null);
+});
+
 /* ---------- reparaciones: regresiones que no pueden volver ---------- */
 
 test('skills: un id con .. o separadores no puede salir del almacén', async () => {

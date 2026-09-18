@@ -1,3 +1,78 @@
+# SAGITARI 3.2.1
+
+**La actualización ya se instala de verdad.** Hasta ahora, pulsar **Cerrar e instalar** cerraba la
+app, abría una ventana de terminal, la cerraba y no instalaba nada: al volver a abrir seguías en la
+versión vieja. El motivo era una única orden de `cmd.exe` que **no llegaba a lanzar el instalador
+nunca** —comprobado con un señuelo, que jamás se ejecutaba—, así que lo único que se veía era la
+ventana de consola de un proceso «separado» en Windows. Ahora el instalador lo arranca un
+**asistente oculto** que espera a que no quede ninguna instancia de la app y luego actualiza en
+silencio, sin ventanas de por medio; y si una instalación se queda a medias, **el siguiente arranque
+te lo cuenta y te deja reintentarla**. / **Updates actually install now.** Until now, pressing
+**Close and install** closed the app, opened a terminal window, closed it, and installed nothing: on
+reopening you were still on the old version. The cause was a single `cmd.exe` command that **never
+reached the installer at all** —verified with a decoy, which was never executed—, so all you saw was
+the console window of a “detached” process on Windows. The installer is now launched by a **hidden
+helper** that waits until no instance of the app is left and then updates silently, with no windows
+in between; and if an installation is left half-done, **the next launch tells you and lets you retry**.
+
+> **Si vienes de la 3.2.0 o de cualquier versión anterior, este salto hay que hacerlo a mano UNA
+> vez** —descarga el instalador de esta página y ejecútalo—, porque esas versiones llevan el
+> lanzamiento roto y no pueden instalarse solas la corrección. A partir de ahí, el actualizador de
+> la app ya funciona. / **If you are on 3.2.0 or any earlier version, you have to take this step by
+> hand ONCE** —download the installer from this page and run it— because those versions carry the
+> broken launcher and cannot install the fix on their own. From then on, the in-app updater works.
+
+## Correcciones / Fixes
+
+- **«Cerrar e instalar» ya no se queda en nada.** El instalador lo lanza un guion de PowerShell
+  **oculto** que viaja en `-EncodedCommand` (base64 de UTF-16LE), así que la ruta del instalador es
+  texto y no una línea de órdenes que analizar: una ruta con espacios, `&`, `/` o `%` deja de ser un
+  problema, y se acabó la ventana de terminal. El asistente deja su diario en
+  `%TEMP%\sagitari-update\instalar.log`. / **“Close and install” no longer does nothing.** The
+  installer is launched by a **hidden** PowerShell script that travels in `-EncodedCommand`
+  (UTF-16LE base64), so the installer path is text rather than a command line to be parsed: a path
+  with spaces, `&`, `/` or `%` is no longer a problem, and the terminal window is gone. The helper
+  keeps its log in `%TEMP%\sagitari-update\instalar.log`.
+- **Se espera a que la app esté cerrada de verdad, no un margen adivinado.** El asistente espera
+  (hasta 90 s, sondeo cada 400 ms) a que no quede ninguna instancia de SAGITARI y da 1,2 s de gracia
+  al disco antes de lanzar el Setup con `/S --updated`. Sin esto, el instalador —que decide si hay
+  una app en ejecución mirando su proceso PADRE, que era SAGITARI.exe— se saltaba su comprobación y
+  se quedaba a medias con los ficheros en uso. / **It waits for the app to be really closed, not for
+  a guessed margin.** The helper waits (up to 90 s, polling every 400 ms) until no SAGITARI instance
+  is left and gives the disk a 1.2 s grace period before launching the Setup with `/S --updated`.
+  Without it, the installer —which decides whether an app is running by looking at its PARENT
+  process, which was SAGITARI.exe— skipped its check and stopped halfway with the files in use.
+- **La app no se cierra si el asistente no puede arrancar.** Antes de cerrarse se comprueba que el
+  ayudante sigue vivo: si muere en el primer segundo (sin PowerShell, o bloqueado por política), la
+  app **sigue abierta** y te dice por qué, en vez de dejarte cerrado y sin nada instalado. / **The
+  app no longer closes if the helper cannot start.** Before quitting, the app checks that the helper
+  is alive: if it dies within the first second (no PowerShell, or blocked by policy), the app **stays
+  open** and tells you why, instead of closing on you with nothing installed.
+- **Una instalación a medias deja de ser invisible.** Como para instalar hay que cerrar la app, en
+  el momento del fallo no hay a quién contárselo: el intento se anota en disco y el arranque
+  siguiente, si sigues en la versión vieja, te avisa con un aviso discreto, deja el punto en Ajustes
+  y ofrece **Reintentar la instalación** en **Ajustes ▸ Acerca de** (vuelve a comprobar el SHA-512
+  publicado antes de relanzarla). Si el archivo descargado ya no está, la tarjeta invita a
+  descargarla otra vez en vez de ofrecer un fantasma. / **A half-done installation is no longer
+  invisible.** Since installing requires closing the app, at the moment of failure there is nobody
+  to tell: the attempt is written to disk and, on the next launch, if you are still on the old
+  version, you get an unobtrusive notice, a dot in Settings, and a **Retry the installation** button
+  in **Settings ▸ About** (it re-checks the published SHA-512 before relaunching). If the downloaded
+  file is gone, the card invites you to download it again instead of offering a ghost.
+
+## Cómo viene probado / How it is tested
+
+- El lanzamiento real se prueba **ejecutando el asistente de verdad** contra un señuelo, que ahora
+  sí recibe `/S --updated` y deja su diario: el fallo original queda cubierto para que no vuelva.
+  Con el guion y su escapado, el estado pendiente y sus cuatro casos, **333 pruebas en verde**. /
+  The real launch is tested by **running the actual helper** against a decoy, which now does receive
+  `/S --updated` and writes its log: the original failure is covered so it cannot come back. With
+  the script and its escaping, the pending state and its four cases, **333 tests green**.
+- En la interfaz, dos comprobaciones nuevas: la tarjeta de Ajustes pinta una instalación a medias
+  con su botón **Reintentar la instalación**, y si el archivo ya no está invita a descargarla. /
+  In the UI, two new checks: the Settings card renders a half-done installation with its **Retry the
+  installation** button, and if the file is gone it invites you to download it again.
+
 # SAGITARI 3.2.0
 
 **SAGITARI deja de trabajar «a ciegas»: ahora maneja el navegador como una persona, revisa lo

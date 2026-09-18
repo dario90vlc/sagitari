@@ -1727,6 +1727,31 @@ function seedStarterSkills() {
 let lastUpdate = null;        // último resultado de la comprobación
 let updateReady = null;       // binario ya descargado y verificado
 
+/* Una instalación que se intentó y no llegó a cuajar. Como para instalar hay que
+   cerrar la app, el intento no puede contarlo nada al usuario en el momento: se
+   deja anotado en disco y el siguiente arranque, si la versión sigue siendo la
+   vieja, se lo dice con el botón para reintentarlo. Sin esto, un fallo deja al
+   usuario en un bucle de «se cierra y no pasa nada» sin saber por qué. */
+const UPDATE_PENDING_FILE = path.join(DATA_DIR, 'update-pending.json');
+let updatePending = null;
+
+function savePending(p) {
+  updatePending = p;
+  try { fs.writeFileSync(UPDATE_PENDING_FILE, JSON.stringify(p, null, 2)); } catch {}
+}
+function clearPending() {
+  updatePending = null;
+  try { fs.rmSync(UPDATE_PENDING_FILE, { force: true }); } catch {}
+}
+function readPending() {
+  try { return JSON.parse(fs.readFileSync(UPDATE_PENDING_FILE, 'utf8')); } catch { return null; }
+}
+function pendingInfo() {
+  return updatePending
+    ? { version: updatePending.version, path: updatePending.path, at: updatePending.at || null, exists: fs.existsSync(updatePending.path) }
+    : null;
+}
+
 function sendUpdate(ev) {
   try { if (win && !win.isDestroyed()) win.webContents.send('update:event', ev); } catch {}
 }
@@ -1756,6 +1781,7 @@ ipcMain.handle('update:check', async () => {
     notes: r.notes || null,
     kind: updater.hostKind({ isPackaged: app.isPackaged }),
     ready: updateReady ? { name: updateReady.name, version: updateReady.version, verified: updateReady.verified, signed: updateReady.signed, signer: updateReady.signer } : null,
+    pending: pendingInfo(),
   };
 });
 
@@ -1816,6 +1842,58 @@ ipcMain.handle('update:download', async () => {
   }
 });
 
+/**
+ * Lanza el instalador FUERA de la app y la cierra.
+ *
+ * Antes esto era un `cmd.exe /c "timeout … & start \"\" …"`: esa forma no
+ * lanzaba nada (el intérprete de `cmd.exe` y el escapado de Node se comían las
+ * comillas; comprobado con un señuelo, que nunca llegaba a ejecutarse), y el
+ * usuario veía una ventana de consola aparecer y cerrarse sin más. Ahora el
+ * instalador lo arranca un ayudante de PowerShell OCULTO que espera a que no
+ * quede ninguna instancia de SAGITARI (por eso también desaparece la ventana de
+ * terminal) y luego ejecuta el Setup en silencio. Que la app esté cerrada importa:
+ * el instalador de electron-builder mira el proceso PADRE para decidir si hay
+ * una app en ejecución, así que lanzado desde la propia app se saltaba esa
+ * comprobación y se quedaba a medias con los ficheros en uso.
+ */
+async function lanzarInstalador(d) {
+  const logPath = path.join(path.dirname(d.path), 'instalar.log');
+  const plan = updater.afterExitCommand({
+    name: path.basename(process.execPath, '.exe'),
+    installer: d.path,
+    args: '/S --updated',   // silencio total + «es una actualización, no una instalación nueva»
+    logPath,
+  });
+  let hijo;
+  try {
+    // Sin `detached`: en Windows un hijo normal sobrevive al cierre del padre y
+    // el modo separado deja a PowerShell sin ejecutar nada. Sin `detached` pero
+    // con `windowsHide`, además, no aparece ninguna ventana.
+    hijo = spawn(plan.file, plan.args, { stdio: 'ignore', windowsHide: true });
+  } catch (e) {
+    return { ok: false, error: 'no se pudo preparar el instalador: ' + e.message };
+  }
+  // Un ayudante que muere al instante (sin PowerShell, o bloqueado por política)
+  // dejaría al usuario con la app cerrada y nada instalado, que es exactamente
+  // el síntoma que había que arreglar: se comprueba ANTES de cerrar.
+  const fallo = await new Promise((resolve) => {
+    const t = setTimeout(() => resolve(null), 1200);   // sigue vivo → va bien
+    hijo.on('error', (e) => { clearTimeout(t); resolve(e.message); });
+    hijo.on('exit', (code) => { clearTimeout(t); resolve('terminó con código ' + code); });
+  });
+  if (fallo) {
+    runlog.log({ agent: 'sagitari', event: 'update_install_failed', version: d.version, reason: fallo });
+    return { ok: false, error: 'no se pudo arrancar el asistente de instalación (' + fallo + '). Puedes instalar a mano: ' + d.path };
+  }
+  savePending({ version: d.version, path: d.path, expected: d.expected || null, at: new Date().toISOString() });
+  const pendiente = pendingInfo();
+  runlog.log({ agent: 'sagitari', event: 'update_install', version: d.version, log: logPath });
+  // cierre ordenado (cierra Chrome, procesos de voz, tareas). El ayudante espera
+  // a que la app desaparezca de verdad, así que no hace falta adivinar un margen.
+  setTimeout(() => { try { app.quit(); } catch {} }, 500);
+  return { ok: true, manual: false, pending: pendiente };
+}
+
 ipcMain.handle('update:install', async () => {
   const d = updateReady;
   if (!d) return { ok: false, error: 'todavía no hay ninguna actualización descargada' };
@@ -1840,21 +1918,28 @@ ipcMain.handle('update:install', async () => {
       return { ok: false, error: 'el instalador ya no coincide con la firma: descartado' };
     }
   } catch (e) { return { ok: false, error: 'no se pudo verificar el instalador: ' + e.message }; }
-  try {
-    // el instalador no debe arrancar con la app aún viva: se lanza con dos
-    // segundos de margen y la app se cierra para que pueda reemplazar archivos.
-    // La ruta va por entorno, no interpolada en la línea de comandos: así ni un
-    // `&`/`%`/`^` en el nombre de usuario de %TEMP% puede alterar el comando.
-    spawn('cmd.exe', ['/d', '/c', 'timeout /t 2 /nobreak >nul & start "" "%SAGITARI_UPDATE%" /S'], {
-      detached: true, stdio: 'ignore', windowsHide: true,
-      env: { ...process.env, SAGITARI_UPDATE: d.path },
-    }).unref();
-  } catch (e) { return { ok: false, error: e.message }; }
-  runlog.log({ agent: 'sagitari', event: 'update_install', version: d.version });
-  // cierre ordenado (cierra Chrome, procesos de voz, tareas) y con margen de 2 s
-  // para que el instalador no encuentre archivos en uso
-  setTimeout(() => { try { app.quit(); } catch {} }, 500);
-  return { ok: true, manual: false };
+  return lanzarInstalador(d);
+});
+
+// Reintento de una instalación que se quedó a medias (el caso «se cierra y no
+// pasa nada»): se vuelve a comprobar el hash del fichero que quedó pendiente y
+// solo entonces se lanza otra vez.
+ipcMain.handle('update:retry', async () => {
+  const p = updatePending;
+  if (!p) return { ok: false, error: 'no hay ninguna instalación pendiente', pending: null };
+  if (!fs.existsSync(p.path)) {
+    clearPending();
+    return { ok: false, error: 'el instalador descargado ya no está en su sitio: vuelve a descargar la actualización', pending: null };
+  }
+  if (p.expected && updater.sha512Of(p.path) !== p.expected) {
+    await fsp.rm(p.path, { force: true }).catch(() => {});
+    clearPending();
+    runlog.log({ agent: 'sagitari', event: 'update_verify_failed', version: p.version, reason: 'hash cambiado antes de reintentar' });
+    return { ok: false, error: 'el instalador ya no coincide con la firma publicada: vuelve a descargar la actualización', pending: null };
+  }
+  const r = await lanzarInstalador({ path: p.path, version: p.version, expected: p.expected, kind: 'nsis', verified: true });
+  // el intento pudo volver a quedar a medias; la tarjeta se queda con lo que hay ahora
+  return { ...r, pending: r.ok ? r.pending : pendingInfo() };
 });
 
 ipcMain.handle('update:page', async () => {
@@ -1865,6 +1950,10 @@ ipcMain.handle('update:page', async () => {
 app.whenReady().then(() => {
   if (!gotLock) return;
   loadConfig();
+  // ¿se quedó una instalación a medias en la sesión anterior? `pendingFor` la
+  // descarta sola si ya estamos en la versión nueva (o si el aviso está roto).
+  updatePending = updater.pendingFor(readPending(), app.getVersion());
+  if (!updatePending) { try { fs.rmSync(UPDATE_PENDING_FILE, { force: true }); } catch {} }
   // migración: un config.json de una versión anterior trae las claves en claro;
   // se reescribe cifrado en cuanto arranca (el .bak conserva la copia previa)
   if (needsKeyEncryption()) {
@@ -1912,6 +2001,12 @@ app.whenReady().then(() => {
   // renderer muestra un aviso discreto y el botón queda en Ajustes. Nunca
   // interrumpe ni descarga nada por su cuenta (y no corre en los modos de prueba).
   if (!HEADLESS || UPDATE_API) setTimeout(() => { checkUpdates({ announce: true }).catch(() => {}); }, 12000);
+  // Si la sesión anterior se quedó a medias instalando, el usuario tiene que
+  // enterarse (y poder reintentarlo): para instalar se cierra la app, así que
+  // este es el único momento en que se le puede contar.
+  if (updatePending && (!HEADLESS || UPDATE_API)) setTimeout(() => {
+    sendUpdate({ type: 'install-failed', version: updatePending.version, path: updatePending.path, exists: fs.existsSync(updatePending.path) });
+  }, 12000);
 
   // Alt+Espacio era el atajo para ocultar la ventana, pero es el menú de sistema
   // de Windows: robarlo a nivel global con la app oculta y sin bandeja dejaba
