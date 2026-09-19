@@ -310,7 +310,7 @@ function signatureOf(file, { spawnFn = spawn, env = process.env, timeoutMs = 200
  * Se ejecuta DESLIGADO del árbol de la app (ver `afterExitCommand`), porque es lo
  * único que le permite sobrevivir a su cierre.
  */
-function installHelperScript({ name, installer, args = '/S --updated', logPath, waitMs = 90000, graceMs = 1200 } = {}) {
+function installHelperScript({ name, installer, args = '/S --updated', logPath, waitMs = 90000, graceMs = 1200, taskName = null } = {}) {
   // (el guion es agnóstico del lanzador: sirve igual bajo cmd que bajo PowerShell
   //  directo, que es justo lo que permite comparar las dos formas en el arnés)
   const q = (s) => "'" + String(s == null ? '' : s).replace(/'/g, "''") + "'";   // literal de PowerShell
@@ -326,11 +326,17 @@ function installHelperScript({ name, installer, args = '/S --updated', logPath, 
     "if ($env:SAGITARI_NO_WINDOW_DEBUG) { Diag ('ventana del asistente=' + (Get-Process -Id $PID).MainWindowHandle) }",
     "$fin = (Get-Date).AddMilliseconds(" + espera + ')' ,
     '$espera = 0',
+    // Latido cada ~10 s: si el ayudante muere, el diario dice CUÁNDO fue lo
+    // último que hizo en vez de quedarse en «asistente iniciado» para siempre
+    // (ese silencio es justo lo que dejó sin diagnosticar todos los fallos).
+    '$latido = 0',
     "while ((Get-Date) -lt $fin) {",
     '  $viva = Get-Process -Name ' + q(name) + ' -ErrorAction SilentlyContinue',
     '  if (-not $viva) { break }',
     '  Start-Sleep -Milliseconds 400',
     '  $espera += 400',
+    "  $latido += 400",
+    "  if ($latido -ge 10000) { $latido = 0; Diag ('sigo esperando a la app (llevo ' + $espera + ' ms)') }",
     '}',
     "Diag ('la app ya no esta en ejecucion (espera ' + $espera + ' ms)')",
     "$vivo = @(Get-Process -Name " + q(name) + " -ErrorAction SilentlyContinue).Count -gt 0",
@@ -350,7 +356,15 @@ function installHelperScript({ name, installer, args = '/S --updated', logPath, 
     "  Diag ('FALLO al lanzar el instalador: ' + $_.Exception.Message)",
     '  exit 1',
     '}',
-  ].join('\r\n');
+  ].join('\n') + (taskName
+    // Limpieza cuando el lanzador es el Programador de tareas: la tarea de un
+    // solo uso y este .ps1 no se quedan tirados. Va al final para no borrar
+    // nada si el instalador falló antes (el diario sigue ahí para diagnosticar).
+    ? '\n' + [
+      "try { schtasks /delete /tn " + q(taskName) + ' /f | Out-Null; Diag ' + q('tarea programada eliminada') + ' } catch {}',
+      "try { Remove-Item -LiteralPath $PSCommandPath -Force -ErrorAction Stop } catch { Diag ('no se pudo borrar el guion: ' + $_.Exception.Message) }",
+    ].join('\n')
+    : '');
 }
 
 /**
@@ -398,6 +412,84 @@ function afterExitCommand(opts = {}) {
   };
 }
 
+/* ---------- lanzamiento vía Programador de tareas (diseño 3.3.4) ----------
+ *
+ * Por qué existe: el diseño anterior (un cmd desligado que sostiene al
+ * PowerShell) sobrevivió 3/3 en el laboratorio pero muere en máquinas reales
+ * al cerrarse la app —medido en el diario de un usuario: cuatro intentos, en
+ * dos versiones distintas, todos con el asistente muerto tras su primera
+ * línea—. Depender de "sobrevivir al cierre" es frágil por construcción.
+ *
+ * La tarea programada la ejecuta el SERVICIO del Programador de tareas, no un
+ * hijo de la app: que SAGITARI se cierre, la mate el sistema o la tumbe el
+ * antivirus no afecta a algo que ya vive en otro árbol. Medido con una sonda
+ * (tarea que escribe un fichero, lanzada desde un padre que muere al instante):
+ * la marca aparece igual.
+ *
+ * Sin PowerShell ofuscado además: el ayudante viaja como .ps1 en disco (con
+ * BOM, para que la 5.1 lea bien los acentos) y se lanza con -ExecutionPolicy
+ * Bypass —solo para nuestro propio guion—, así que una política Restricted de
+ * la máquina tampoco lo frena. La tarea es de un solo uso y se autoborra al
+ * terminar (ver installHelperScript: taskName).
+ */
+
+const TASK_NAME = 'SAGITARI-actualizar';
+
+/** Ruta del guion del ayudante junto al instalador descargado. */
+function helperPsPath(dir) {
+  return path.join(dir, 'sagitari-instalar.ps1');
+}
+
+/** Escribe el guion con BOM (la PowerShell 5.1 lee mal los acentos sin ella). */
+function writeHelperPs(psPath, opts = {}) {
+  const script = installHelperScript(opts);
+  fs.mkdirSync(path.dirname(psPath), { recursive: true });
+  fs.writeFileSync(psPath, '﻿' + script, 'utf8');
+  return { psPath, script };
+}
+
+/** "HH:mm" local dentro de `minutes` minutos (para /st, que lo exige). */
+function taskTimePlus(minutes, base) {
+  const d = new Date((Number(base) || Date.now()) + Math.max(1, Number(minutes) || 5) * 60000);
+  const p = (n) => String(n).padStart(2, '0');
+  return p(d.getHours()) + ':' + p(d.getMinutes());
+}
+
+/** Lo que ejecuta la tarea: nuestro .ps1, oculto y sin depender de la política. */
+function taskRunLine(psPath) {
+  return 'powershell.exe -NoProfile -NonInteractive -WindowStyle Hidden -ExecutionPolicy Bypass -File "' + String(psPath) + '"';
+}
+
+/** argv de `schtasks /create` (sin shell: cada pieza va en su argumento). */
+function scheduleCreateArgs({ taskName = TASK_NAME, psPath, startTime } = {}) {
+  return ['/create', '/tn', taskName, '/tr', taskRunLine(psPath), '/sc', 'once', '/st', startTime, '/f'];
+}
+
+/**
+ * Programa y dispara la instalación. `execFn(cmd, argv)` ejecuta y devuelve
+ * { code, stdout, stderr } (por defecto, spawnSync: son llamadas locales y
+ * rápidas). Lanza si schtasks falla: el llamante decide el plan B.
+ */
+async function programarInstalacion({ dir, name, installer, args, logPath, waitMs, graceMs, taskName = TASK_NAME, execFn = null } = {}) {
+  const exec = execFn || ((cmd, argv) => {
+    const { spawnSync } = require('child_process');
+    const r = spawnSync(cmd, argv, { windowsHide: true, encoding: 'utf8' });
+    return { code: r.status, stdout: String(r.stdout || ''), stderr: String(r.stderr || '') };
+  });
+  const psPath = helperPsPath(dir);
+  const { script } = writeHelperPs(psPath, { name, installer, args, logPath, waitMs, graceMs, taskName });
+  const creada = await exec('schtasks', scheduleCreateArgs({ taskName, psPath, startTime: taskTimePlus(5) }));
+  if (creada.code !== 0) {
+    throw new Error('no se pudo programar la instalación (' + String((creada.stderr || creada.stdout || '').trim()).slice(0, 160) + ')');
+  }
+  const disparo = await exec('schtasks', ['/run', '/tn', taskName]);
+  if (disparo.code !== 0) {
+    try { await exec('schtasks', ['/delete', '/tn', taskName, '/f']); } catch {}
+    throw new Error('la tarea se programó pero no arrancó (' + String((disparo.stderr || disparo.stdout || '').trim()).slice(0, 160) + ')');
+  }
+  return { ok: true, taskName, psPath, script };
+}
+
 /**
  * Instalación intentada que sigue sin cuajar: el binario descargado espera a
  * que el usuario lo reintente. Devuelve null si ya no aplica (versión al día,
@@ -418,4 +510,4 @@ function hostKind({ isPackaged, env = process.env } = {}) {
   return env.PORTABLE_EXECUTABLE_DIR ? 'portable' : 'nsis';
 }
 
-module.exports = { REPO, API_LATEST, parseVersion, compareVersions, pickAssets, assetFor, parseLatestYml, sha512For, motivoSinFirma, sha512Of, checkForUpdate, downloadTarget, downloadTo, hostKind, signatureOf, installHelperScript, afterExitCommand, pendingFor };
+module.exports = { REPO, API_LATEST, parseVersion, compareVersions, pickAssets, assetFor, parseLatestYml, sha512For, motivoSinFirma, sha512Of, checkForUpdate, downloadTarget, downloadTo, hostKind, signatureOf, installHelperScript, afterExitCommand, pendingFor, TASK_NAME, helperPsPath, writeHelperPs, taskTimePlus, taskRunLine, scheduleCreateArgs, programarInstalacion };

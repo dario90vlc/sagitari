@@ -2943,6 +2943,42 @@ test('updater: el ayudante que instala espera a la app y no juega con comillas',
   ok(!/start ""/.test(plan.script), 'sin la línea de órdenes que rompía el lanzamiento');
 });
 
+test('updater: la vía tarea programa con schtasks y el guion lleva latido', async () => {
+  // taskTimePlus: formato HH:mm y salto de día
+  eq(updater.taskTimePlus(5, new Date(2026, 0, 1, 10, 30).getTime()), '10:35');
+  eq(updater.taskTimePlus(5, new Date(2026, 0, 1, 23, 58).getTime()), '00:03', 'cruza la medianoche');
+  ok(/^\d\d:\d\d$/.test(updater.taskTimePlus(5)), 'formato HH:mm');
+  // la línea de la tarea: oculta, con bypass solo para nuestro guion, ruta entrecomillada
+  const line = updater.taskRunLine('C:/dir con espacios/x.ps1');
+  ok(line.includes('-ExecutionPolicy Bypass'), 'la política Restricted de la máquina no lo frena');
+  ok(line.includes('-WindowStyle Hidden'), 'sin ventana');
+  ok(line.includes('"C:/dir con espacios/x.ps1"'), 'la ruta con espacios va entrecomillada: ' + line);
+  // create: sin shell, piezas separadas, /f para pisar restos de intentos viejos
+  const argv = updater.scheduleCreateArgs({ taskName: 'T', psPath: 'C:/x.ps1', startTime: '01:00' });
+  eq(argv[0], '/create');
+  ok(argv.includes('/tn') && argv.includes('T') && argv.includes('/sc') && argv.includes('/f'), argv.join(' '));
+  ok(!argv.some(a => /&&|\|/.test(a)), 'nada que parezca shell');
+  // programarInstalacion con exec falso: escribe el .ps1 y llama create+run
+  const dir = tmpDir('sagi-tarea-');
+  const llamadas = [];
+  const execFn = async (cmd, a) => { llamadas.push(cmd + ' ' + a.join(' ')); return { code: 0, stdout: 'OK', stderr: '' }; };
+  const r = await updater.programarInstalacion({ dir, name: 'APP', installer: 'C:/i/setup.exe', args: '/S', logPath: path.join(dir, 'instalar.log'), taskName: 'TAREA-TEST', execFn });
+  eq(r.ok, true);
+  eq(llamadas.length, 2, 'create y run, nada más: ' + JSON.stringify(llamadas));
+  ok(/^schtasks \/create /.test(llamadas[0]) && /\/tn TAREA-TEST/.test(llamadas[0]), llamadas[0]);
+  ok(/^schtasks \/run \/tn TAREA-TEST$/.test(llamadas[1]), llamadas[1]);
+  const ps = fs.readFileSync(path.join(dir, 'sagitari-instalar.ps1'));
+  ok(ps[0] === 0xEF && ps[1] === 0xBB && ps[2] === 0xBF, 'BOM para que la 5.1 lea los acentos');
+  const txt = ps.toString('utf8');
+  ok(/latido/.test(txt) && /sigo esperando/.test(txt), 'el diario lleva latido cada ~10 s');
+  ok(txt.includes("/delete /tn 'TAREA-TEST'"), 'la tarea de un solo uso se autoborra');
+  // si /create falla, no se intenta /run y el motivo llega al usuario
+  const bad = async () => ({ code: 1, stdout: '', stderr: 'acceso denegado' });
+  let fallo = '';
+  try { await updater.programarInstalacion({ dir: tmpDir('sagi-tarea2-'), name: 'A', installer: 'x', logPath: 'y', execFn: bad }); } catch (e) { fallo = e.message; }
+  ok(/no se pudo programar/.test(fallo) && /acceso denegado/.test(fallo), 'el motivo llega: ' + fallo);
+});
+
 test('updater: el ayudante lanza el instalador de verdad (integración)', async () => {
   if (process.platform !== 'win32') return;   // el actualizador solo instala en Windows
   const { spawn } = require('child_process');

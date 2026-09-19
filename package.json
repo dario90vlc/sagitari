@@ -1,7 +1,7 @@
 {
   "name": "sagitari",
   "productName": "SAGITARI",
-  "version": "3.3.3",
+  "version": "3.3.4",
   "description": "SAGITARI — agente de IA con control total del PC: chat, voz, navegador y automatización del sistema",
   "main": "main/main.js",
   "scripts": {

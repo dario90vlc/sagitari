@@ -12,6 +12,12 @@
    arnés es electron.exe con nombre único (para que `Get-Process` solo lo vea a él) y
    el ayudante se lanza con el código de producción, sin retocar nada.
 
+   Desde la 3.3.4 las pasadas usan el diseño 'tarea' (Programador de tareas, la
+   vía principal): si el señuelo se ejecuta tras cerrar el padre, la
+   supervivencia queda demostrada por construcción. El diseño 'nuevo'
+   (cmd desligado, plan B) sigue cubierto por la suite unitaria; el CONTROL
+   sigue siendo el PowerShell directo que debe NO instalar.
+
    Cada pasada comprueba:
      1. el ayudante arranca y deja su rastro ANTES de que la app se cierre;
      2. sobrevive al cierre (cuando mira, la app ya no está);
@@ -137,11 +143,36 @@ function escribirPadre(padreJs, padreTxt) {
 }
 
 /**
+ * Guion del padre para el diseño 'tarea' (3.3.4): programa la instalación con
+ * el Programador de tareas y sale. El ayudante lo ejecuta el servicio, no un
+ * hijo del padre: si el señuelo se ejecuta, la supervivencia está demostrada
+ * por construcción, no por suerte del árbol de procesos.
+ */
+function escribirPadreTarea(padreJs, padreTxt) {
+  fs.writeFileSync(padreJs, [
+    "'use strict';",
+    "const fs = require('fs');",
+    "const { app } = require('electron');",
+    "const [updaterPath, dir, name, installer, args, logPath, taskName, txt] = process.argv.slice(2);",
+    "const updater = require(updaterPath);",
+    "app.whenReady().then(async () => {",
+    "  try {",
+    "    await updater.programarInstalacion({ dir, name, installer, args, logPath, taskName, waitMs: 20000 });",
+    "    salir('programada=' + taskName);",
+    "  } catch (e) { salir('FALLO al programar: ' + (e && e.message)); }",
+    "});",
+    "function salir(info) { fs.writeFileSync(txt, info); setTimeout(() => app.quit(), 500); }",
+  ].join('\n'));
+}
+
+/**
  * Una pasada: monta el escenario, ejecuta el padre Electron y mide.
- * @param {{dir, nombre, diseño?: 'nuevo'|'antiguo', capMs?: number}} o
+ * @param {{dir, nombre, diseño?: 'nuevo'|'antiguo'|'tarea', capMs?: number}} o
+ *   'nuevo' = cmd desligado (plan B desde la 3.3.4), 'antiguo' = control que
+ *   debe fallar, 'tarea' = Programador de tareas (vía principal desde la 3.3.4).
  */
 async function pasada({ dir, nombre, exe = null, diseño = 'nuevo', capMs = 45000 }) {
-  const d = path.join(dir, diseño === 'nuevo' ? 'nuevo' : 'antiguo');
+  const d = path.join(dir, diseño === 'tarea' ? 'tarea' : (diseño === 'nuevo' ? 'nuevo' : 'antiguo'));
   fs.rmSync(d, { recursive: true, force: true });
   /* El runtime de Electron se monta UNA vez para todas las pasadas: el exe lleva el
      mismo nombre en las dos (el que `Get-Process` busca), así que compartirlo es
@@ -160,14 +191,22 @@ async function pasada({ dir, nombre, exe = null, diseño = 'nuevo', capMs = 4500
   const padreTxt = path.join(d, 'padre.txt');
   const padreJs = path.join(d, 'padre.js');
   fs.writeFileSync(senuelo, '@echo off\r\necho %* > "' + salida + '"\r\n');
-  escribirPadre(padreJs, padreTxt);
 
   const comun = { name: nombre, installer: senuelo, args: '/S --updated --force-run', logPath: log };
-  const plan = diseño === 'nuevo' ? updater.afterExitCommand(comun) : planAntiguo(comun);
+  // nombre de tarea propio por pasada: una tarea colgada de otra pasada no debe
+  // ni dispararse con este diario ni impedir crear la nuestra (/f la pisa igual).
+  const taskName = 'SAGVERIF-' + nombre;
+  let spawnArgs;
+  if (diseño === 'tarea') {
+    escribirPadreTarea(padreJs, padreTxt);
+    spawnArgs = [padreJs, path.join(RAIZ, 'main', 'updater.js'), d, nombre, senuelo, comun.args, log, taskName, padreTxt];
+  } else {
+    escribirPadre(padreJs, padreTxt);
+    const plan = diseño === 'nuevo' ? updater.afterExitCommand(comun) : planAntiguo(comun);
+    spawnArgs = [padreJs, plan.file, JSON.stringify(plan.args), JSON.stringify(plan.spawnOpts), log, padreTxt];
+  }
 
-  const hijo = spawn(exe, [
-    padreJs, plan.file, JSON.stringify(plan.args), JSON.stringify(plan.spawnOpts), log, padreTxt,
-  ], { stdio: 'ignore', windowsHide: true });
+  const hijo = spawn(exe, spawnArgs, { stdio: 'ignore', windowsHide: true });
   hijo.on('error', () => {});
   const capar = () => { try { hijo.kill(); } catch {} };
 
@@ -191,6 +230,11 @@ async function pasada({ dir, nombre, exe = null, diseño = 'nuevo', capMs = 4500
   const args = fs.existsSync(salida) ? fs.readFileSync(salida, 'utf8') : '';
   const padre = fs.existsSync(padreTxt) ? fs.readFileSync(padreTxt, 'utf8') : '(el padre no escribió nada)';
   capar();
+  // higiene: la tarea es de un solo uso y el ayudante se autoborra al terminar,
+  // pero si la pasada falló antes, no se deja basura en el Programador.
+  if (diseño === 'tarea') {
+    try { spawnSync('schtasks', ['/delete', '/tn', taskName, '/f'], { windowsHide: true }); } catch {}
+  }
   // la siguiente pasada no puede empezar con este proceso todavía vivo
   const limpio = await sinProceso(nombre);
   return {
@@ -224,7 +268,7 @@ async function verificar({ dir, pasadas = 1, conControl = true, capMs = 45000 } 
   const hechas = [];
   for (let i = 0; i < pasadas; i++) {
     const nom = i === 0 ? nombre : nombre + 'P' + i;
-    const p = await pasada({ dir: base, nombre: nom, exe: conNombre(nom), diseño: 'nuevo', capMs });
+    const p = await pasada({ dir: base, nombre: nom, exe: conNombre(nom), diseño: 'tarea', capMs });
     if (p.saltada) return { estado: 'sin-electron', pasadas: [p], control: null };
     hechas.push(p);
   }

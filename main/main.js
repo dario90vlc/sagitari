@@ -2040,7 +2040,7 @@ ipcMain.handle('update:download', async () => {
  */
 async function lanzarInstalador(d) {
   const logPath = path.join(path.dirname(d.path), 'instalar.log');
-  const plan = updater.afterExitCommand({
+  const comun = {
     name: path.basename(process.execPath, '.exe'),
     installer: d.path,
     // silencio total + «es una actualización, no una instalación nueva» + que la app
@@ -2048,19 +2048,33 @@ async function lanzarInstalador(d) {
     // justo cuando SÍ ha pasado algo)
     args: '/S --updated --force-run',
     logPath,
-  });
+  };
   // El diario del intento anterior confundiría la comprobación de abajo.
   try { await fsp.rm(logPath, { force: true }); } catch {}
-  let hijo;
+  // Vía principal (3.3.4): el Programador de tareas ejecuta al ayudante en el
+  // servicio del sistema, no como hijo de la app —sobrevive a su cierre por
+  // construcción, que es justo lo que el cmd desligado no garantizaba—.
+  let via = 'tarea programada';
   try {
-    hijo = spawn(plan.file, plan.args, plan.spawnOpts);
-    // desligado y sin referencia: el ayudante tiene que seguir ahí cuando la app ya
-    // no esté (es justo lo que fallaba), y a Node no le toca esperarlo
-    try { hijo.unref(); } catch {}
+    await updater.programarInstalacion({ dir: path.dirname(d.path), ...comun });
   } catch (e) {
-    return { ok: false, error: 'no se pudo preparar el instalador: ' + e.message };
+    // Plan B: el cmd desligado de siempre. En las máquinas donde el árbol
+    // sobrevive funciona (3/3 medido); donde no, el diario con latido dirá
+    // hasta dónde llegó. Mejor intentarlo que dejar al usuario sin nada.
+    via = 'clásica';
+    runlog.log({ agent: 'sagitari', event: 'update_install_fallback', version: d.version, reason: e.message });
+    const plan = updater.afterExitCommand(comun);
+    let hijo;
+    try {
+      hijo = spawn(plan.file, plan.args, plan.spawnOpts);
+      // desligado y sin referencia: el ayudante tiene que seguir ahí cuando la app ya
+      // no esté (es justo lo que fallaba), y a Node no le toca esperarlo
+      try { hijo.unref(); } catch {}
+    } catch (e2) {
+      return { ok: false, error: 'no se pudo preparar el instalador: ' + e2.message };
+    }
+    hijo.on('error', () => {});
   }
-  hijo.on('error', () => {});
   /* LA comprobación que importa, y ANTES de cerrar la app: se espera a que el
      ASISTENTE escriba su primera línea en el diario.
 
@@ -2084,7 +2098,7 @@ async function lanzarInstalador(d) {
     setTimeout(mirar, 150);
   });
   if (!arrancado) {
-    const reason = 'el asistente no llegó a arrancar (sin PowerShell o bloqueado por política)';
+    const reason = 'el asistente no llegó a arrancar (vía ' + via + ': sin PowerShell, tarea bloqueada o política del equipo)';
     runlog.log({ agent: 'sagitari', event: 'update_install_failed', version: d.version, reason });
     savePending({ version: d.version, path: d.path, expected: d.expected || null, signed: d.signed === true, at: new Date().toISOString() });
     const pendiente2 = pendingInfo();
@@ -2092,7 +2106,7 @@ async function lanzarInstalador(d) {
   }
   savePending({ version: d.version, path: d.path, expected: d.expected || null, signed: d.signed === true, at: new Date().toISOString() });
   const pendiente = pendingInfo();
-  runlog.log({ agent: 'sagitari', event: 'update_install', version: d.version, log: logPath });
+  runlog.log({ agent: 'sagitari', event: 'update_install', version: d.version, log: logPath, via });
   // cierre ordenado (cierra Chrome, procesos de voz, tareas). El ayudante espera
   // a que la app desaparezca de verdad, así que no hace falta adivinar un margen.
   setTimeout(() => { try { app.quit(); } catch {} }, 500);
