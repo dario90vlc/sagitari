@@ -867,8 +867,10 @@ class Agent {
                 this._lastCmd = String((r.args && r.args.command) || '');
               }
             }
-            // v2.0: observar hábitos del usuario (hechos de uso, no conversación)
-            try { habits.observe('tool', { name: tc.function.name, args: r.args }); } catch {}
+            // v2.0: observar hábitos del usuario (hechos de uso, no conversación).
+            // Se observan los args YA redactados: la memoria persiste en disco
+            // igual que el runlog y no debe guardar contraseñas ni claves.
+            try { habits.observe('tool', { name: tc.function.name, args: runlog.redactToolArgs(tc.function.name, r.args) }); } catch {}
             runlog.log({
               agent: 'sagitari', task: taskId, event: 'tool', tool: tc.function.name,
               args: r.args, durationMs: Date.now() - toolT0,

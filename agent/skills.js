@@ -23,6 +23,7 @@
 const fs = require('fs');
 const fsp = require('fs/promises');
 const path = require('path');
+const crypto = require('crypto');
 
 let SKILLS_DIR = path.join(require('./datadir').dataDir(), 'skills');
 
@@ -392,6 +393,49 @@ async function resolveRepoSkills(repo) {
   return { files, repo: `${owner}/${name}` };
 }
 
+/* Hash git-blob ("blob <bytes>\0<contenido>") de un Buffer: el formato exacto
+   que GitHub publica como `sha` en su API de árboles. Lógica pura. */
+function blobSha(buf) {
+  const b = Buffer.isBuffer(buf) ? buf : Buffer.from(String(buf == null ? '' : buf), 'utf8');
+  const h = crypto.createHash('sha1');
+  h.update(Buffer.from('blob ' + b.length + '\0', 'utf8'));
+  h.update(b);
+  return h.digest('hex');
+}
+
+/* Id estable de una skill: carpeta del SKILL.md, o el name si va en la raíz. */
+function skillIdFor(fpath, metaName) {
+  const dirPart = String(fpath || '').replace(/(^|\/)SKILL\.md$/i, '');
+  const segs = dirPart.split('/');
+  const last = segs[segs.length - 1] || '';
+  return slugifyId(last) || slugifyId(metaName) || 'skill';
+}
+
+/* Vista previa de una importación SIN escribir nada: lo que se instalaría si
+   el usuario confirma (id, nombre, descripción, tamaño). La UI la enseña ANTES
+   de pedir el segundo clic: una skill son instrucciones que el agente obedecerá,
+   no un texto inerte, y merecen consentimiento informado. */
+async function previewImport(repo) {
+  const { files, repo: repoName } = await resolveRepoSkills(repo);
+  const items = [];
+  const seen = new Set();
+  const MAX_PREVIEW = 20;
+  for (const f of files.slice(0, MAX_PREVIEW)) {
+    let raw;
+    try { raw = await fetchSkillMarkdown(f.url); } catch (e) {
+      items.push({ id: '', path: f.path, name: f.path, description: 'no se pudo descargar: ' + e.message, chars: 0, unreadable: true });
+      continue;
+    }
+    const fm = parseFrontMatter(raw);
+    if (!fm || !fm.meta.name) continue;
+    const id = skillIdFor(f.path, fm.meta.name);
+    if (seen.has(id)) continue;
+    seen.add(id);
+    items.push({ id, path: f.path, name: fm.meta.name, description: fm.meta.description || '', chars: raw.length });
+  }
+  return { repo: repoName, items, total: files.length, truncated: files.length > MAX_PREVIEW };
+}
+
 /** Importa skills desde un repo de GitHub. Devuelve lista de instaladas (+ omitidas). */
 async function importFromGitHub(repo) {
   const { files, repo: repoName } = await resolveRepoSkills(repo);
@@ -402,6 +446,13 @@ async function importFromGitHub(repo) {
     let raw;
     try { raw = await fetchSkillMarkdown(f.url); } catch (e) {
       skipped.push({ id: '', name: f.path, from: repoName, skipped: true, reason: e.message });
+      continue;
+    }
+    // Integridad: lo descargado tiene que ser el blob que listó la API (hash
+    // git "blob <bytes>\0<contenido>"). Si raw sirve otra cosa (carrera entre
+    // el árbol y la descarga, espejo manipulado), se descarta, no se instala.
+    if (f.sha && blobSha(Buffer.from(raw, 'utf8')) !== String(f.sha).toLowerCase()) {
+      skipped.push({ id: '', name: f.path, from: repoName, skipped: true, reason: 'el contenido descargado no coincide con el hash publicado por GitHub; descartado por seguridad' });
       continue;
     }
     const fm = parseFrontMatter(raw);
@@ -471,7 +522,7 @@ async function deleteSkill(id) {
 
 module.exports = {
   listSkills, promptIndex, promptIndexSync, skillAppliesTo, getSkill, setEnabled,
-  importFromGitHub, createSkill, deleteSkill, searchSkills, suggestSkillsFor,
+  importFromGitHub, previewImport, blobSha, skillIdFor, createSkill, deleteSkill, searchSkills, suggestSkillsFor,
   updateSkill, updateAll, writeSource, skillsDir, invalidarIndice,
   __test: {
     parseFrontMatter,

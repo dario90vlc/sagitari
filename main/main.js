@@ -755,7 +755,26 @@ ipcMain.handle('memory:list', () => memory.list());
 // ---------- skills ----------
 ipcMain.handle('skills:list', () => skills.listSkills());
 ipcMain.handle('skills:toggle', async (e, { id, enabled }) => { await skills.setEnabled(id, enabled); return skills.listSkills(); });
-ipcMain.handle('skills:import', async (e, repo) => skills.importFromGitHub(String(repo || '')));
+ipcMain.handle('skills:import', async (e, arg) => {
+  // Una skill son INSTRUCCIONES que el agente obedecerá, no un texto inerte:
+  // la primera llamada devuelve la vista previa y exige un segundo clic con
+  // confirm:true (consentimiento informado, sin modales nativos). Acepta el
+  // formato antiguo (string) para no romper llamadas existentes.
+  const repo = (arg && typeof arg === 'object') ? String(arg.repo || '') : String(arg || '');
+  const confirm = !!(arg && typeof arg === 'object' && arg.confirm === true);
+  if (!confirm) {
+    const preview = await skills.previewImport(repo);
+    runlog.log({ agent: 'sagitari', event: 'skills_import_preview', repo: preview.repo, total: preview.total });
+    return {
+      ok: false, needsConfirm: true, preview,
+      error: `«${preview.repo}» trae ${preview.total} skill(s): ` +
+        preview.items.map(s => s.name).join(', ') +
+        (preview.truncated ? `… (y más)` : '') +
+        `. Son instrucciones que el agente obedecerá: pulsa Importar otra vez para confirmar.`,
+    };
+  }
+  return skills.importFromGitHub(repo);
+});
 ipcMain.handle('skills:create', async (e, data) => skills.createSkill(data || {}));
 ipcMain.handle('skills:delete', async (e, id) => skills.deleteSkill(String(id || '')));
 ipcMain.handle('skills:search', async (e, q) => skills.searchSkills(String(q || '')));
@@ -842,11 +861,26 @@ const getWorkspace = () => config.settings.workspace || DEFAULT_WORKSPACE;
 ipcMain.handle('workspace:get', () => getWorkspace());
 ipcMain.handle('workspace:set', (e, dir) => {
   const p = String(dir || '').trim();
+  // Un workspace es donde el agente CREA, ESCRIBE y EJECUTA: no puede ser una
+  // ruta relativa (¿relativa a qué?), ni la raíz de una unidad, ni las carpetas
+  // del sistema, ni el directorio de datos de la app (ahí viven las API keys y
+  // las conversaciones). Un bug del renderer no puede convertir esto en un
+  // mkdir recursivo donde no toca.
   try {
-    if (!fs.existsSync(p)) fs.mkdirSync(p, { recursive: true });
-    if (!fs.statSync(p).isDirectory()) return { ok: false, error: 'La ruta no es una carpeta' };
-    config.settings.workspace = p; saveConfig();
-    return { ok: true, path: p };
+    if (!path.isAbsolute(p)) return { ok: false, error: 'La ruta tiene que ser absoluta' };
+    const norm = path.win32.normalize(p);
+    if (/^[a-z]:[\\/]?$/i.test(norm)) return { ok: false, error: 'La raíz de una unidad no puede ser el espacio de trabajo' };
+    const low = norm.toLowerCase();
+    const sysRx = /^[a-z]:\\(windows|program files|program files \(x86\)|programdata)([\\/]|$)/;
+    if (sysRx.test(low)) return { ok: false, error: 'Las carpetas del sistema no pueden ser el espacio de trabajo' };
+    let real = norm;
+    try { real = fs.realpathSync(norm); } catch {}
+    const inDir = (f, d) => { const r = path.relative(d, f); return r === '' || (!r.startsWith('..') && !path.isAbsolute(r)); };
+    if (inDir(real.toLowerCase(), CONFIG_DIR.toLowerCase())) return { ok: false, error: 'El directorio de datos de la app no puede ser el espacio de trabajo' };
+    if (!fs.existsSync(real)) fs.mkdirSync(real, { recursive: true });
+    if (!fs.statSync(real).isDirectory()) return { ok: false, error: 'La ruta no es una carpeta' };
+    config.settings.workspace = real; saveConfig();
+    return { ok: true, path: real };
   } catch (err) { return { ok: false, error: err.message }; }
 });
 ipcMain.handle('workspace:pick', async () => {
@@ -884,6 +918,23 @@ ipcMain.handle('conv:del', (e, id) => {
   return { ok: true };
 });
 
+/* Miniatura de un dataUrl de imagen (320 px de ancho) para guardar en la
+   conversación: la burbuja al reabrir enseña la miniatura en vez de un chip
+   ciego, y el JSON no engorda megabytes por cada pantallazo. Devuelve undefined
+   si no se pudo generar (formato raro, imagen vacía): el llamante guarda el
+   chip con el nombre. Solo proceso principal (usa nativeImage de Electron). */
+function thumbnailOf(dataUrl) {
+  try {
+    const { nativeImage } = require('electron');
+    const img = nativeImage.createFromDataURL(String(dataUrl || ''));
+    if (!img || img.isEmpty()) return undefined;
+    const size = img.getSize();
+    if (!size || !size.width || !size.height) return undefined;
+    if (size.width <= 320) return String(dataUrl);   // ya es pequeña: no se re-comprime
+    return img.resize({ width: 320 }).toDataURL();
+  } catch { return undefined; }
+}
+
 ipcMain.handle('chat:send', async (e, { text, imageDataUrl, attachments }) => {
   // el renderer manda string, pero un bug suyo no puede reventar el handler:
   // `body.slice(0,48)` asumía string y un texto no-string rompía el turno
@@ -917,8 +968,16 @@ ipcMain.handle('chat:send', async (e, { text, imageDataUrl, attachments }) => {
   // pidió cada cosa (ACT ejecuta, PLAN planifica, THINK razona)
   const sentMode = (config.settings && config.settings.mode) || 'act';
   // en la conversación guardamos los metadatos de los adjuntos (no el texto
-  // completo: las conversaciones pueden ser grandes y se leen en cada arranque)
-  const attMeta = atts.map(a => ({ name: a.name, kind: a.kind || (a.dataUrl ? 'image' : 'text'), size: a.size || 0, dataUrl: a.kind === 'image' ? a.dataUrl : undefined }));
+  // completo: las conversaciones pueden ser grandes y se leen en cada arranque).
+  // Las imágenes se guardan como MINIATURA (320 px): un pantallazo de 5 MB en
+  // base64 se relee entero en cada arranque y nunca se vuelve a enviar al
+  // modelo (el turno ya pasó). Sin miniatura, la tarjeta al reabrir enseña el
+  // chip con el nombre, igual que los adjuntos de texto.
+  const attMeta = atts.map(a => {
+    const kind = a.kind || (a.dataUrl ? 'image' : 'text');
+    const thumb = kind === 'image' && a.dataUrl ? thumbnailOf(a.dataUrl) : undefined;
+    return { name: a.name, kind, size: a.size || 0, ...(thumb ? { dataUrl: thumb } : {}) };
+  });
   c.messages.push({ role: 'user', content: body, ts: Date.now(), mode: sentMode, attachments: attMeta.length ? attMeta : undefined });
   c.updatedAt = Date.now();
   saveConvs();
@@ -1864,7 +1923,7 @@ function readPending() {
 }
 function pendingInfo() {
   return updatePending
-    ? { version: updatePending.version, path: updatePending.path, at: updatePending.at || null, exists: fs.existsSync(updatePending.path) }
+    ? { version: updatePending.version, path: updatePending.path, at: updatePending.at || null, exists: fs.existsSync(updatePending.path), signed: updatePending.signed }
     : null;
 }
 
@@ -2027,11 +2086,11 @@ async function lanzarInstalador(d) {
   if (!arrancado) {
     const reason = 'el asistente no llegó a arrancar (sin PowerShell o bloqueado por política)';
     runlog.log({ agent: 'sagitari', event: 'update_install_failed', version: d.version, reason });
-    savePending({ version: d.version, path: d.path, expected: d.expected || null, at: new Date().toISOString() });
+    savePending({ version: d.version, path: d.path, expected: d.expected || null, signed: d.signed === true, at: new Date().toISOString() });
     const pendiente2 = pendingInfo();
     return { ok: false, error: 'no se pudo arrancar el asistente de instalación: ' + reason + '. Puedes instalar a mano: ' + d.path, pending: pendiente2 };
   }
-  savePending({ version: d.version, path: d.path, expected: d.expected || null, at: new Date().toISOString() });
+  savePending({ version: d.version, path: d.path, expected: d.expected || null, signed: d.signed === true, at: new Date().toISOString() });
   const pendiente = pendingInfo();
   runlog.log({ agent: 'sagitari', event: 'update_install', version: d.version, log: logPath });
   // cierre ordenado (cierra Chrome, procesos de voz, tareas). El ayudante espera
@@ -2040,7 +2099,7 @@ async function lanzarInstalador(d) {
   return { ok: true, manual: false, pending: pendiente };
 }
 
-ipcMain.handle('update:install', async () => {
+ipcMain.handle('update:install', async (e, opts) => {
   const d = updateReady;
   if (!d) return { ok: false, error: 'todavía no hay ninguna actualización descargada' };
   if (!fs.existsSync(d.path)) return { ok: false, error: 'el archivo descargado ya no está en su sitio' };
@@ -2055,6 +2114,22 @@ ipcMain.handle('update:install', async () => {
   // que cualquier proceso del usuario puede escribir: se vuelve a comprobar el
   // hash justo antes de lanzarlo para cerrar esa ventana (TOCTOU).
   if (d.verified !== true || !d.expected) return { ok: false, error: 'esta actualización no está verificada; descártala y vuelve a intentarlo' };
+  // Puerta de binario sin firmar: el SHA-512 demuestra integridad pero no
+  // autenticidad (un repo comprometido sirve binario y hash a la vez), y los
+  // binarios actuales no llevan firma Authenticode. No se puede bloquear sin
+  // romper las actualizaciones propias, así que se exige consentimiento ACTIVO:
+  // la primera llamada vuelve con needsUnsignedConfirm y la instalación solo
+  // arranca cuando la UI reintenta con confirmUnsigned. Un aviso pasivo en la
+  // tarjeta no basta para ejecutar código arbitrario.
+  if (d.signed !== true && !(opts && opts.confirmUnsigned === true)) {
+    runlog.log({ agent: 'sagitari', event: 'update_unsigned_gate', version: d.version, signed: d.signed === true });
+    return {
+      ok: false, needsUnsignedConfirm: true,
+      error: d.signed === false
+        ? 'esta actualización NO está firmada digitalmente (solo verificada por SHA-512). Pulsa Instalar otra vez si aceptas instalarla igualmente.'
+        : 'no se pudo comprobar la firma digital de esta actualización (solo verificada por SHA-512). Pulsa Instalar otra vez si aceptas instalarla igualmente.',
+    };
+  }
   try {
     if (updater.sha512Of(d.path) !== d.expected) {
       await fsp.rm(d.path, { force: true }).catch(() => {});
@@ -2070,7 +2145,7 @@ ipcMain.handle('update:install', async () => {
 // Reintento de una instalación que se quedó a medias (el caso «se cierra y no
 // pasa nada»): se vuelve a comprobar el hash del fichero que quedó pendiente y
 // solo entonces se lanza otra vez.
-ipcMain.handle('update:retry', async () => {
+ipcMain.handle('update:retry', async (e, opts) => {
   const p = updatePending;
   if (!p) return { ok: false, error: 'no hay ninguna instalación pendiente', pending: null };
   if (!fs.existsSync(p.path)) {
@@ -2083,7 +2158,16 @@ ipcMain.handle('update:retry', async () => {
     runlog.log({ agent: 'sagitari', event: 'update_verify_failed', version: p.version, reason: 'hash cambiado antes de reintentar' });
     return { ok: false, error: 'el instalador ya no coincide con la firma publicada: vuelve a descargar la actualización', pending: null };
   }
-  const r = await lanzarInstalador({ path: p.path, version: p.version, expected: p.expected, kind: 'nsis', verified: true });
+  // Misma puerta que update:install: lo pendiente de versiones anteriores no
+  // trae estado de firma (signed undefined), y eso también exige confirmación.
+  if (p.signed !== true && !(opts && opts.confirmUnsigned === true)) {
+    runlog.log({ agent: 'sagitari', event: 'update_unsigned_gate', version: p.version, signed: false, retry: true });
+    return {
+      ok: false, needsUnsignedConfirm: true, pending: pendingInfo(),
+      error: 'esta actualización NO está firmada digitalmente (solo verificada por SHA-512). Pulsa Reintentar otra vez si aceptas instalarla igualmente.',
+    };
+  }
+  const r = await lanzarInstalador({ path: p.path, version: p.version, expected: p.expected, signed: p.signed === true, kind: 'nsis', verified: true });
   // el intento pudo volver a quedar a medias; la tarjeta se queda con lo que hay ahora
   return { ...r, pending: r.ok ? r.pending : pendingInfo() };
 });

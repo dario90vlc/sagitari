@@ -29,13 +29,12 @@ It is local-first by design. You choose the model and provider — cloud or loca
 
 ## Download
 
-The recommended option is the Windows installer:
+Get the latest version for Windows (installer or portable, pick yours on the release page):
 
 | Package | Description |
 |---|---|
-| [**SAGITARI-Setup-3.3.1.exe**](https://github.com/dario90vlc/sagitari/releases/download/v3.3.1/SAGITARI-Setup-3.3.1.exe) | Installer with shortcuts and uninstaller |
-| [**SAGITARI-Portable-3.3.1.exe**](https://github.com/dario90vlc/sagitari/releases/download/v3.3.1/SAGITARI-Portable-3.3.1.exe) | Single executable, no installation |
-| [**Release notes**](https://github.com/dario90vlc/sagitari/releases/tag/v3.3.1) | Changes, security fixes, and SHA-256 hashes |
+| [**⬇ Download SAGITARI for Windows**](https://github.com/dario90vlc/sagitari/releases/latest) | Installer (shortcuts + uninstaller) and portable single `.exe` |
+| [**Release notes**](https://github.com/dario90vlc/sagitari/releases) | Changes, security fixes, and SHA-256 hashes |
 
 > **Windows SmartScreen:** the binaries are currently unsigned, so Windows may show a warning on the first run. Choose *More info → Run anyway* if you trust the download. Verify the SHA-256 hash published in the release notes.
 
@@ -83,6 +82,7 @@ SAGITARI gives an agent real access to your computer, so safety is part of the p
 - **Restricted subagents** — each specialist receives only the tools it is allowed to use.
 - **Local data** — no account and no telemetry; API keys are stored using the Windows system keystore when available.
 - **Verified updates** — downloaded updates require the published SHA-512 and are checked again before installation.
+- **Two-click consent for unsigned updates and new skills** — installing an update without a digital signature, or importing skills from GitHub (instructions your agent will obey), shows you what is coming first and only proceeds when you click again.
 
 ## Quick start
 
@@ -139,7 +139,7 @@ npm run uicheck           # exercise the live renderer
 npm run dist              # build NSIS installer + portable executable
 ```
 
-The release workflow runs syntax checks, tests, smoke, UI checks, builds both Windows artifacts, verifies the output, generates release notes, and publishes SHA-256 hashes. The release tag must match the version in `package.json` — for this release, `v3.3.1`.
+The release workflow runs syntax checks, tests, smoke, UI checks, builds both Windows artifacts, verifies the output, generates release notes, and publishes SHA-256 hashes. The release tag must match the version in `package.json`.
 
 ## Project structure
 

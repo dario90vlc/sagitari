@@ -78,12 +78,92 @@ function ensureStream() {
   try { return openStream(); } catch { stream = null; return null; }
 }
 
+/* --------------------------------------------------------------------------- *
+ *  Redacción de secretos antes de persistir.
+ *
+ *  El log JSONL vive en disco en claro: los args de una herramienta pueden
+ *  llevar una contraseña (type en campo sensible), el texto del portapapeles,
+ *  una API key en args MCP o el contenido entero de un fichero. Sin esto, una
+ *  copia del log filtra secretos. Se redacta al escribir, no al leer: lo que
+ *  nunca se guardó no hay que perseguirlo después.
+ *  Lógica pura (sin I/O) para poder probarla entera.
+ * --------------------------------------------------------------------------- */
+
+/* Claves cuyo valor nunca se guarda (comparación en minúsculas, sin guiones). */
+const SECRET_KEYS = new Set([
+  'password', 'passwd', 'contrasena', 'contraseña', 'pin', 'token',
+  'apikey', 'api_key', 'auth', 'authorization', 'secret', 'secreto',
+  'cvv', 'cvc', 'tarjeta', 'cardnumber', 'iban', 'ssn', 'dni',
+]);
+
+/* Patrones de secretos dentro de texto libre (claves, Bearer, base64 de -enc). */
+const SECRET_PATTERNS = [
+  /sk-[A-Za-z0-9-_]{8,}/g,                    // OpenAI / compatibles
+  /xox[bpas]-[A-Za-z0-9-]+/g,                 // Slack
+  /gh[pousr]_[A-Za-z0-9]{8,}/g,               // GitHub
+  /Bearer\s+[A-Za-z0-9\-._~+/=]{8,}/gi,       // cabeceras de autorización
+  /(?<=["'=:]\s*)eyJ[A-Za-z0-9-_]{8,}\.[A-Za-z0-9-_]{8,}\.[A-Za-z0-9-_]{4,}/g, // JWT
+];
+
+const normKey = (k) => String(k || '').toLowerCase().replace(/[-_]/g, '');
+
+function redactText(v) {
+  let s = String(v);
+  for (const rx of SECRET_PATTERNS) {
+    rx.lastIndex = 0;
+    s = s.replace(rx, '[REDACTED]');
+  }
+  return s;
+}
+
+/* Campos largos que inundan el log y pueden arrastrar secretos: se recortan. */
+const TRUNCATE_KEYS = new Set(['content', 'text', 'body', 'result', 'output', 'command', 'error']);
+const MAX_ARG_CHARS = 300;
+
+function redactValue(key, v, tool) {
+  if (typeof v === 'string') {
+    if (SECRET_KEYS.has(normKey(key))) return '[REDACTED]';
+    // el texto tecleado o pegado puede ser una contraseña: sin marca no se sabe
+    if ((tool === 'clipboard' && (key === 'text' || key === 'content')) ||
+        (tool === 'browser_control' && key === 'text')) {
+      return v.length > MAX_ARG_CHARS ? v.slice(0, MAX_ARG_CHARS) + '…[truncado]' : redactText(v);
+    }
+    if (TRUNCATE_KEYS.has(normKey(key)) && v.length > MAX_ARG_CHARS) {
+      return redactText(v.slice(0, MAX_ARG_CHARS)) + '…[truncado]';
+    }
+    return redactText(v);
+  }
+  if (Array.isArray(v)) return v.map((x) => redactValue(key, x, tool));
+  if (v && typeof v === 'object') {
+    const out = {};
+    for (const k of Object.keys(v)) out[k] = redactValue(k, v[k], tool);
+    return out;
+  }
+  return v;
+}
+
+/** Args de una herramienta listos para guardar: secretos fuera, largos recortados. */
+function redactToolArgs(tool, args) {
+  if (!args || typeof args !== 'object') return args;
+  const out = {};
+  for (const k of Object.keys(args)) out[k] = redactValue(k, args[k], tool);
+  return out;
+}
+
+function redactEvent(event) {
+  if (!event || typeof event !== 'object') return event;
+  const out = { ...event };
+  if (out.args && typeof out.args === 'object') out.args = redactToolArgs(out.tool, out.args);
+  if (typeof out.error === 'string') out.error = redactText(out.error.slice(0, 200));
+  return out;
+}
+
 /** Append one structured event. Never throws — logging must not break the agent. */
 function log(event) {
   let s = ensureStream();
   if (!s) return;
   try {
-    const line = JSON.stringify({ ts: new Date().toISOString(), ...event }) + '\n';
+    const line = JSON.stringify({ ts: new Date().toISOString(), ...redactEvent(event) }) + '\n';
     // El tope se mide en BYTES, no en caracteres: con acentos y eñes (y emojis)
     // un `line.length` en UTF-16 subestima el tamaño real hasta 3-4×, así que el
     // fichero crecía muy por encima de MAX_BYTES antes de rotar.
@@ -133,7 +213,7 @@ function readRecent(n = 200) {
 function close() { try { stream && stream.end(); } catch {} stream = null; }
 
 module.exports = {
-  log, readRecent, currentLogFile, close, LOG_DIR,
+  log, readRecent, currentLogFile, close, LOG_DIR, redactToolArgs, redactEvent,
   /* Redirige el almacén y los topes para poder probar rotación y tamaño sin
      escribir 8 MB ni tocar los logs reales del usuario. */
   __test: {

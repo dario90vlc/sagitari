@@ -29,13 +29,12 @@ Es local-first por diseño. Tú eliges el modelo y el proveedor —en la nube o 
 
 ## Descarga
 
-La opción recomendada es el instalador de Windows:
+Descarga la última versión para Windows (instalador o portable, elige en la página de la release):
 
 | Paquete | Descripción |
 |---|---|
-| [**SAGITARI-Setup-3.3.1.exe**](https://github.com/dario90vlc/sagitari/releases/download/v3.3.1/SAGITARI-Setup-3.3.1.exe) | Instalador con accesos directos y desinstalador |
-| [**SAGITARI-Portable-3.3.1.exe**](https://github.com/dario90vlc/sagitari/releases/download/v3.3.1/SAGITARI-Portable-3.3.1.exe) | Ejecutable único, sin instalación |
-| [**Notas de la versión**](https://github.com/dario90vlc/sagitari/releases/tag/v3.3.1) | Cambios, correcciones de seguridad y hashes SHA-256 |
+| [**⬇ Descargar SAGITARI para Windows**](https://github.com/dario90vlc/sagitari/releases/latest) | Instalador (accesos directos + desinstalador) y portable en un solo `.exe` |
+| [**Notas de la versión**](https://github.com/dario90vlc/sagitari/releases) | Cambios, correcciones de seguridad y hashes SHA-256 |
 
 > **Windows SmartScreen:** los binarios no tienen firma digital actualmente, por lo que Windows puede mostrar un aviso la primera vez. Pulsa *Más información → Ejecutar de todas formas* si confías en la descarga. Comprueba el hash SHA-256 publicado en las notas de la release.
 
@@ -83,7 +82,8 @@ SAGITARI tiene acceso real a tu ordenador, por eso la seguridad forma parte del 
 - **Parada real** — detener una ejecución también cancela el proceso asociado cuando es posible.
 - **Subagentes limitados** — cada especialista solo recibe las herramientas permitidas.
 - **Datos locales** — sin cuentas ni telemetría; las API keys se guardan con el almacén seguro de Windows cuando está disponible.
-- **Actualizaciones verificadas** — las descargas exigen el SHA-512 publicado y vuelven a comprobarlo antes de instalar.
+- **Actualizaciones verificadas** — las actualizaciones descargadas exigen el SHA-512 publicado y se vuelven a comprobar antes de instalarse.
+- **Doble clic para lo sin firmar y las skills nuevas** — instalar una actualización sin firma digital, o importar skills de GitHub (órdenes que tu agente obedecerá), primero te enseña lo que viene y solo sigue cuando pulsas de nuevo.
 
 ## Inicio rápido
 
@@ -140,7 +140,7 @@ npm run uicheck           # probar el renderer en vivo
 npm run dist              # crear instalador NSIS + portable
 ```
 
-El workflow de release ejecuta la comprobación de sintaxis, tests, smoke, UI, compilación de los dos artefactos de Windows, verificación de archivos y generación de hashes SHA-256. El tag debe coincidir con la versión de `package.json`; para esta release es `v3.3.1`.
+El workflow de release ejecuta la comprobación de sintaxis, tests, smoke, UI, compilación de los dos artefactos de Windows, verificación de archivos y generación de hashes SHA-256. El tag debe coincidir con la versión de `package.json`.
 
 ## Estructura del proyecto
 

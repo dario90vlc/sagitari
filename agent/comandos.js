@@ -59,6 +59,13 @@ const SENSIBLES = [
   { rx: /\|\s*(bash|sh|zsh|powershell|pwsh|cmd|node|python|perl)\b/i, motivo: 'pasar la salida de un comando a un intérprete' },
   { rx: /\|\s*(iex|Invoke-Expression)\b/i, motivo: 'ejecutar código descargado al vuelo (Invoke-Expression)' },
 
+  // --- ofuscación y descarga remota (bypass del tubo clásico) ---
+  { rx: /\b(powershell|pwsh)(\.exe)?\b[^\n]*?(?:\s-(e|en|enc|encodedcommand)\b|EncodedCommand|FromBase64String)/i, motivo: 'ejecutar código ofuscado o codificado en base64 (PowerShell)' },
+  { rx: /DownloadString|DownloadFile|Invoke-WebRequest|Invoke-RestMethod|Start-BitsTransfer|Net\.WebClient|FromBase64String/i, motivo: 'descargar código o datos remotos para su ejecución' },
+  { rx: /\b(mshta|rundll32)(\.exe)?\b[^\n]*https?:/i, motivo: 'ejecutar código remoto con un binario del sistema (LOLBin)' },
+  { rx: /\bcertutil(\.exe)?\b[^\n]*-urlcache/i, motivo: 'descargar un archivo remoto con certutil' },
+  { rx: /(^|[\s&;|])start\s+"[^"]*"\s*https?:|(^|[\s&;|])start\s+https?:/i, motivo: 'abrir una URL desde la terminal' },
+
   // --- borrados (dentro del proyecto, pero borrados) ---
   { rx: /\b(del|erase)\b[^\n]*\s\/[a-z]*s/i, motivo: 'borrar de forma recursiva' },
   { rx: /\b(rd|rmdir)\b[^\n]*\s\/[a-z]*s/i, motivo: 'borrar carpetas de forma recursiva' },

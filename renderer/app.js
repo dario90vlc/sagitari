@@ -1448,6 +1448,21 @@ function importSummary(inst) {
 }
 
 // v1.7: marketplace de skills
+/* Importación en dos pasos: el primer clic trae la vista previa (qué skills,
+   de qué repo) y el segundo confirma. Una skill son instrucciones que el
+   agente obedecerá, no un texto inerte: instalar sin mirar es darle órdenes
+   a un desconocido. `say` pinta el aviso donde lo vea el usuario. */
+const skillImportArmed = {};   // repo -> true si ya se enseñó la previa
+async function skillsImportConfirmed(repo, say) {
+  const r = await window.sagitari.skillsImport(repo, skillImportArmed[repo] ? { confirm: true } : undefined);
+  if (r && r.needsConfirm) {
+    skillImportArmed[repo] = true;
+    say('Revisa antes de instalar — ' + (r.error || 'pulsa otra vez para confirmar.'));
+    return null;   // previa mostrada: el segundo clic instala
+  }
+  delete skillImportArmed[repo];
+  return r;
+}
 async function renderMarket() {
   const box = $('#marketList');
   if (!box) return;
@@ -1464,7 +1479,8 @@ async function renderMarket() {
       b.disabled = true;
       $('#marketMsg').textContent = 'Instalando ' + b.dataset.install + '…';
       try {
-        const inst = await window.sagitari.skillsImport(b.dataset.install);
+        const inst = await skillsImportConfirmed(b.dataset.install, (t) => { $('#marketMsg').textContent = t; });
+        if (!inst) { renderMarket(); return; }   // previa a la vista: el segundo clic confirma
         $('#marketMsg').textContent = importSummary(inst);
         renderSkills();
       } catch (e) { $('#marketMsg').textContent = 'Error: ' + (e.message || e); }
@@ -1491,7 +1507,11 @@ $('#marketSearchBtn').onclick = async () => {
     box.querySelectorAll('[data-install]').forEach(b => {
       b.onclick = async () => {
         b.disabled = true;
-        try { await window.sagitari.skillsImport(b.dataset.install); $('#marketMsg').textContent = 'Instalado: ' + b.dataset.install; renderSkills(); }
+        try {
+          const inst = await skillsImportConfirmed(b.dataset.install, (t) => { $('#marketMsg').textContent = t; });
+          if (!inst) { b.disabled = false; return; }   // previa a la vista: reactivar para el segundo clic
+          $('#marketMsg').textContent = 'Instalado: ' + b.dataset.install; renderSkills();
+        }
         catch (e) { $('#marketMsg').textContent = 'Error: ' + (e.message || e); }
       };
     });
@@ -3668,6 +3688,7 @@ if ($('#openDataDirBtn')) $('#openDataDirBtn').onclick = async () => {
 let updState = { kind: null, current: null, latest: null, available: false, ready: null, pending: null, status: 'idle', error: null, progress: null };
 let updInitDone = false;   // la comprobación al abrir Ajustes se hace UNA vez, no en cada render
 let updNotified = false;   // el toast de «nueva versión» no se repite en toda la sesión
+let updUnsignedArmed = false; // primer clic en Instalar con binario sin firmar: el segundo confirma
 
 /** «2.3.0» → «v2.3.0»; sin versión conocida, un guion. */
 function updVer(v) { return v ? 'v' + String(v).replace(/^v/i, '') : '—'; }
@@ -3829,10 +3850,11 @@ if ($('#updDownloadBtn')) $('#updDownloadBtn').onclick = async () => {
       updMsg('No se pudo descargar: ' + ((r && r.error) || 'error desconocido'));
       return;
     }
-    updState.ready = { name: r.name, version: r.version, verified: r.verified };
+    updState.ready = { name: r.name, version: r.version, verified: r.verified, signed: r.signed, signer: r.signer };
     updState.kind = r.kind || updState.kind;
     updState.status = 'ready';
     updState.progress = null;
+    updUnsignedArmed = false;   // otra descarga, otra decisión: el consentimiento no se hereda
     renderUpdate(updState);
   } catch (e) {
     updState.status = updState.ready ? 'ready' : 'idle';
@@ -3854,7 +3876,21 @@ if ($('#updInstallBtn')) $('#updInstallBtn').onclick = async () => {
     // usuario se quedaría con la ventana cerrada y nada instalado). Sin este aviso,
     // el botón parecía colgado durante esos segundos.
     updMsg('Preparando la instalación… no cierres la app todavía.');
-    const r = reintento ? await window.sagitari.updateRetry() : await window.sagitari.updateInstall();
+    let r = reintento ? await window.sagitari.updateRetry(updUnsignedArmed ? { confirmUnsigned: true } : undefined)
+      : await window.sagitari.updateInstall(updUnsignedArmed ? { confirmUnsigned: true } : undefined);
+    // Puerta de binario sin firmar: el motor exige consentimiento activo en dos
+    // pasos (sin modales nativos: el segundo clic ES la confirmación). El aviso
+    // queda escrito en la tarjeta, no solo en un toast que se pierde. Vale para
+    // instalar y para reintentar: lo pendiente también puede ir sin firmar.
+    if (r && r.ok === false && r.needsUnsignedConfirm) {
+      updMsg(reintento
+        ? 'Sin firma digital: solo SHA-512. Pulsa «Reintentar la instalación» OTRA VEZ para confirmar que la instalas igualmente.'
+        : 'Sin firma digital: solo SHA-512. Pulsa «Instalar y cerrar» OTRA VEZ para confirmar que la instalas igualmente.');
+      renderUpdate(updState);
+      updUnsignedArmed = true;
+      return;
+    }
+    updUnsignedArmed = false;
     if (r && 'pending' in r) {
       // el motor decidió qué queda pendiente (p. ej. descartó un instalador que ya
       // no está): la tarjeta se queda con eso en vez de seguir ofreciendo un fantasma
@@ -4262,7 +4298,8 @@ $('#skillImportBtn').onclick = async () => {
   msg.textContent = 'Importando desde ' + repo + '…';
   btn.disabled = true;
   try {
-    const inst = await window.sagitari.skillsImport(repo);
+    const inst = await skillsImportConfirmed(repo, (t) => { msg.textContent = t; });
+    if (!inst) return;   // previa a la vista: el segundo clic instala (el botón se reactiva en finally)
     msg.textContent = importSummary(inst);
     inp.value = '';
     renderSkills();
