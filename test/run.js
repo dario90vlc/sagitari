@@ -2919,10 +2919,16 @@ test('updater: el ayudante que instala espera a la app y no juega con comillas',
   const installer = path.join('C:', 'Temp', "d'actualizacion & 100%", 'SAGITARI-Setup-3.2.1.exe');
   const logPath = path.join('C:', 'Temp', "d'actualizacion & 100%", 'instalar.log');
   const plan = updater.afterExitCommand({ name: 'SAGITARI', installer, logPath });
-  eq(plan.file, 'powershell.exe', 'nada de cmd.exe de por medio');
+  eq(plan.file, 'powershell.exe', 'la app lanza el puente');
   ok(plan.args.includes('-EncodedCommand'), 'el guion viaja codificado: no hay comillas que escapar');
-  ok(plan.args.includes('Hidden'), 'el ayudante no muestra ninguna ventana (era el «abre una terminal y se cierra»)');
-  eq(Buffer.from(plan.args[plan.args.length - 1], 'base64').toString('utf16le'), plan.script, 'lo que se ejecuta es el guion tal cual');
+  ok(plan.args.includes('Hidden'), 'nada de ventanas (era el «abre una terminal y se cierra»)');
+  eq(Buffer.from(plan.encoded, 'base64').toString('utf16le'), plan.script, 'la etapa 2 viaja tal cual');
+  ok(/Invoke-CimMethod/.test(plan.bridge) && /Win32_Process/.test(plan.bridge),
+    'el puente le pide a WMI que cree al asistente FUERA del árbol de la app');
+  ok(plan.bridge.includes(plan.encoded), 'el puente lleva dentro al asistente (etapa 2)');
+  ok(plan.bridge.includes('puente:'), 'y si no puede crearlo, lo deja en el diario en vez de callarse');
+  ok(plan.script.includes('ExitCode'), 'y el diario recoge el código con el que salió el instalador');
+  ok(plan.script.includes('la app seguia en ejecucion'), 'y si la app seguía viva al lanzarlo, para poder diagnosticarlo');
   ok(plan.script.includes("'" + installer.replace(/'/g, "''") + "'"), 'la ruta va como literal de PowerShell, con sus comillas simples dobladas');
   ok(plan.script.includes("'SAGITARI'"), 'espera a que no quede ninguna instancia de la app');
   ok(plan.script.includes('Start-Process -FilePath'), 'y entonces lanza el instalador');
@@ -2951,11 +2957,57 @@ test('updater: el ayudante lanza el instalador de verdad (integración)', async 
     while (Date.now() - t0 < ms) { if (fs.existsSync(f)) return true; await new Promise((r) => setTimeout(r, 250)); }
     return false;
   };
+  const esperarTexto = async (f, rx, ms) => {
+    const t0 = Date.now();
+    while (Date.now() - t0 < ms) {
+      try { if (rx.test(fs.readFileSync(f, 'utf8'))) return true; } catch {}
+      await new Promise((r) => setTimeout(r, 200));
+    }
+    return false;
+  };
   ok(await esperar(argsFile, 25000), 'el instalador recibe la orden (antes no se ejecutaba nunca)');
   ok(/\/S --updated/.test(fs.readFileSync(argsFile, 'utf8')), 'llega en silencio y en modo actualización');
   ok(await esperar(log, 25000), 'el ayudante deja un registro de lo que hizo');
-  ok(/instalador lanzado/.test(fs.readFileSync(log, 'utf8')), 'y el registro dice que lo lanzó');
+  ok(await esperarTexto(log, /instalador lanzado/, 20000), 'y el registro dice que lo lanzó');
   eq(fs.existsSync(path.join(dir, 'instalar.log.part')), false, 'sin restos a medias');
+});
+
+test('updater: el ayudante SOBREVIVE al cierre de la app (regresión: «se cierra y no instala»)', async () => {
+  /* Esta es LA prueba que faltaba, y por eso el fallo vivió tanto: las demás
+     lanzaban al ayudante desde un proceso que seguía vivo, así que nunca se
+     ejercitaba el único caso que importa —la app se cierra y el ayudante tiene que
+     seguir ahí—. Windows mata el árbol de procesos del padre al cerrarse: un hijo
+     directo escribía su primera línea en el diario y ahí se quedaba, con la app
+     cerrada y sin instalar nada. Se reproduce de verdad: un proceso con nombre
+     ÚNICO (el equivalente a SAGITARI) lanza al ayudante con la orden real y sale. */
+  if (process.platform !== 'win32') return;
+  const { spawnSync } = require('child_process');
+  const dir = tmpDir('sagi-supervivencia-');
+  const nombre = 'sagi-padre-de-prueba';
+  const exe = path.join(dir, nombre + '.exe');
+  fs.copyFileSync(process.execPath, exe);   // nombre único: Get-Process solo ve al padre
+  const padre = path.join(dir, 'padre.js');
+  fs.writeFileSync(padre, [
+    "'use strict';",
+    "const { spawn } = require('child_process');",
+    'const updater = require(' + JSON.stringify(path.join(__dirname, '..', 'main', 'updater.js')) + ');',
+    'const [nombre, senuelo, logPath] = process.argv.slice(2);',
+    "const plan = updater.afterExitCommand({ name: nombre, installer: senuelo, args: '/S --updated', logPath, waitMs: 10000, graceMs: 100 });",
+    "const h = spawn(plan.file, plan.args, { stdio: 'ignore', windowsHide: true });",
+    'h.on(\'error\', () => {});',
+    'setTimeout(() => process.exit(0), 600);',   // la app sale medio segundo después
+  ].join('\n'));
+  const senuelo = path.join(dir, 'senuelo.bat');
+  const salida = path.join(dir, 'senuelo.txt');
+  const log = path.join(dir, 'instalar.log');
+  fs.writeFileSync(senuelo, '@echo off\r\necho %* > "' + salida + '"\r\n');
+  spawnSync(exe, [padre, nombre, senuelo, log], { stdio: 'ignore', windowsHide: true });
+  const t0 = Date.now();
+  while (Date.now() - t0 < 30000 && !fs.existsSync(salida)) await new Promise((r) => setTimeout(r, 300));
+  const diario = fs.existsSync(log) ? fs.readFileSync(log, 'utf8') : '';
+  ok(fs.existsSync(salida), 'el instalador se ejecuta DESPUÉS de que la app haya salido (diario: ' + diario.replace(/\s+/g, ' ').slice(0, 200) + ')');
+  ok(/\/S --updated/.test(fs.readFileSync(salida, 'utf8')), 'y con la orden de silencio y de actualización');
+  ok(/asistente iniciado/.test(diario), 'el diario conserva el rastro de lo que hizo: ' + diario.replace(/\s+/g, ' ').slice(0, 200));
 });
 
 test('updater: una instalación a medias se recuerda solo mientras sirva', () => {

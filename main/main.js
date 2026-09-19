@@ -1911,29 +1911,56 @@ async function lanzarInstalador(d) {
   const plan = updater.afterExitCommand({
     name: path.basename(process.execPath, '.exe'),
     installer: d.path,
-    args: '/S --updated',   // silencio total + «es una actualización, no una instalación nueva»
+    // silencio total + «es una actualización, no una instalación nueva» + que la app
+    // vuelva a abrirse al terminar (sin esto el usuario ve «se cierra y no pasa nada»
+    // justo cuando SÍ ha pasado algo)
+    args: '/S --updated --force-run',
     logPath,
   });
+  // El diario del intento anterior confundiría la comprobación de abajo.
+  try { await fsp.rm(logPath, { force: true }); } catch {}
   let hijo;
   try {
-    // Sin `detached`: en Windows un hijo normal sobrevive al cierre del padre y
-    // el modo separado deja a PowerShell sin ejecutar nada. Sin `detached` pero
-    // con `windowsHide`, además, no aparece ninguna ventana.
     hijo = spawn(plan.file, plan.args, { stdio: 'ignore', windowsHide: true });
   } catch (e) {
     return { ok: false, error: 'no se pudo preparar el instalador: ' + e.message };
   }
-  // Un ayudante que muere al instante (sin PowerShell, o bloqueado por política)
-  // dejaría al usuario con la app cerrada y nada instalado, que es exactamente
-  // el síntoma que había que arreglar: se comprueba ANTES de cerrar.
-  const fallo = await new Promise((resolve) => {
-    const t = setTimeout(() => resolve(null), 1200);   // sigue vivo → va bien
-    hijo.on('error', (e) => { clearTimeout(t); resolve(e.message); });
-    hijo.on('exit', (code) => { clearTimeout(t); resolve('terminó con código ' + code); });
+  hijo.on('error', () => {});
+  /* LA comprobación que importa, y ANTES de cerrar la app: se espera a que el
+     ASISTENTE (etapa 2, el que vive fuera del árbol de la app) escriba su primera
+     línea en el diario.
+
+     No se comprueba «¿sigue vivo el proceso que lancé?», y esa es justo la lección
+     de este fallo: todo lo que la app lanza muere con ella, así que un lanzador
+     «vivo» no prueba nada —el asistente anterior escribía su primera línea, moría
+     con la app y el diario se quedaba ahí para siempre, con el usuario mirando una
+     ventana cerrada y nada instalado—. Lo que prueba algo es el rastro de la etapa
+     que SÍ está fuera.
+
+     El presupuesto es amplio a propósito: el puente carga los módulos CIM de
+     PowerShell en frío antes de poder crear nada. */
+  const arrancado = await new Promise((resolve) => {
+    const t0 = Date.now();
+    const mirar = async () => {
+      try {
+        const t = await fsp.readFile(logPath, 'utf8');
+        if (t.includes('asistente iniciado')) return resolve(true);
+        if (/puente: (WMI devolvio|no pude crear)/.test(t)) return resolve(false);
+      } catch {}
+      if (Date.now() - t0 >= 30000) return resolve(false);
+      setTimeout(mirar, 200);
+    };
+    setTimeout(mirar, 150);
   });
-  if (fallo) {
-    runlog.log({ agent: 'sagitari', event: 'update_install_failed', version: d.version, reason: fallo });
-    return { ok: false, error: 'no se pudo arrancar el asistente de instalación (' + fallo + '). Puedes instalar a mano: ' + d.path };
+  if (!arrancado) {
+    const diario = await fsp.readFile(logPath, 'utf8').catch(() => '');
+    const reason = diario.includes('puente:')
+      ? 'el sistema no dejó crear el asistente fuera de la app (' + diario.split('puente:').pop().trim().slice(0, 160) + ')'
+      : 'el asistente no llegó a arrancar (sin PowerShell o bloqueado por política)';
+    runlog.log({ agent: 'sagitari', event: 'update_install_failed', version: d.version, reason });
+    savePending({ version: d.version, path: d.path, expected: d.expected || null, at: new Date().toISOString() });
+    const pendiente2 = pendingInfo();
+    return { ok: false, error: 'no se pudo arrancar el asistente de instalación: ' + reason + '. Puedes instalar a mano: ' + d.path, pending: pendiente2 };
   }
   savePending({ version: d.version, path: d.path, expected: d.expected || null, at: new Date().toISOString() });
   const pendiente = pendingInfo();

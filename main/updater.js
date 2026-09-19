@@ -305,6 +305,10 @@ function signatureOf(file, { spawnFn = spawn, env = process.env, timeoutMs = 200
  * instalador no tiene que sobrevivir a dos niveles de comillas —el intérprete
  * de `cmd.exe` y el de Node—, que es justo lo que rompía el lanzamiento
  * anterior. Una ruta con espacios, `/`, `&` o `%` es simplemente texto.
+ *
+ * OJO: este es el ASISTENTE (etapa 2), el que espera y lanza el instalador. NO es
+ * lo que la app ejecuta directamente: lo que la app ejecuta es el puente, porque
+ * todo proceso que la app lance por sí misma muere con ella (ver `puenteScript`).
  */
 function installHelperScript({ name, installer, args = '/S --updated', logPath, waitMs = 90000, graceMs = 1200 } = {}) {
   const q = (s) => "'" + String(s == null ? '' : s).replace(/'/g, "''") + "'";   // literal de PowerShell
@@ -327,10 +331,19 @@ function installHelperScript({ name, installer, args = '/S --updated', logPath, 
     '  $espera += 400',
     '}',
     "Diag ('la app ya no esta en ejecucion (espera ' + $espera + ' ms)')",
+    "$vivo = @(Get-Process -Name " + q(name) + " -ErrorAction SilentlyContinue).Count -gt 0",
+    "Diag ('al lanzar el instalador la app seguia en ejecucion: ' + $vivo)",
     'Start-Sleep -Milliseconds ' + gracia,
     'try {',
-    '  Start-Process -FilePath ' + q(installer) + ' -ArgumentList ' + (lista || "'/S'") + ' -ErrorAction Stop',
-    "  Diag 'instalador lanzado'",
+    // -PassThru -Wait: el diario recoge TAMBIÉN el código de salida del instalador.
+    // Sin él, un instalador que falla dejaba el mismo rastro que uno que no llegó a
+    // arrancar, y el usuario se quedaba sin saber qué había pasado.
+    '  $p = Start-Process -FilePath ' + q(installer) + ' -ArgumentList ' + (lista || "'/S'") + ' -PassThru -ErrorAction Stop',
+    "  Diag 'instalador lanzado'",   // ANTES de esperar: el rastro queda aunque el instalador tarde
+    '  if ($p) {',
+    '    $p.WaitForExit()',
+    '    Diag ("instalador termino con codigo " + $p.ExitCode)',
+    '  } else { Diag "el instalador no devolvio proceso (lo ejecuto Windows por asociacion)" }',
     '} catch {',
     "  Diag ('FALLO al lanzar el instalador: ' + $_.Exception.Message)",
     '  exit 1',
@@ -338,16 +351,58 @@ function installHelperScript({ name, installer, args = '/S --updated', logPath, 
   ].join('\r\n');
 }
 
-/** Orden lista para `spawn`: el ayudante oculto, sin comillas que escapar. */
+/**
+ * PUENTE (etapa 1): lo que la app lanza de verdad, y que puede morir con ella.
+ *
+ * Su único trabajo es pedirle al SISTEMA que cree al asistente (etapa 2) FUERA del
+ * árbol de procesos de la app. Todo lo que la app lanza por sí misma —hijo directo,
+ * `detached`, `cmd /c start`— muere cuando ella se cierra: está medido con la app
+ * real, no supuesto. Un proceso creado por WMI es hijo de WmiPrvSE.exe, no de
+ * SAGITARI, así que sobrevive (medido también: la etapa 2 vive y termina su trabajo
+ * con la app ya cerrada).
+ *
+ * El puente escribe en el mismo diario: si WMI no puede crear el proceso (política,
+ * WMI roto), eso queda registrado y la app NO se cierra, en vez de dejar al usuario
+ * con la ventana cerrada y nada instalado.
+ */
+function puenteScript({ script, logPath, nombre = 'SAGITARI' } = {}) {
+  const q = (s) => "'" + String(s == null ? '' : s).replace(/'/g, "''") + "'";   // literal de PowerShell
+  const b64 = Buffer.from(script, 'utf16le').toString('base64');
+  // El CommandLine va como literal de PowerShell de comillas simples: la base64 no
+  // tiene comillas, espacios, `$` ni acentos, así que no hay nada que interpretar.
+  const cmd = 'powershell.exe -NoProfile -NonInteractive -WindowStyle Hidden -EncodedCommand ' + b64;
+  return [
+    "$ErrorActionPreference = 'Continue'",
+    '$log = ' + q(logPath),
+    'function Diag([string]$m) { try { Add-Content -LiteralPath $log -Value ((Get-Date -Format o) + " " + $m) -Encoding utf8 } catch {} }',
+    'try {',
+    '  $r = Invoke-CimMethod -ClassName Win32_Process -MethodName Create -Arguments @{ CommandLine = ' + q(cmd) + ' }',
+    "  if ($r.ReturnValue -eq 0) { Diag ('puente: asistente creado fuera del arbol de la app (pid=' + $r.ProcessId + ')') }",
+    "  else { Diag ('puente: WMI devolvio el codigo ' + $r.ReturnValue + ' y no se pudo crear el asistente') }",
+    '} catch {',
+    "  Diag ('puente: no pude crear el asistente: ' + $_.Exception.Message)",
+    '  exit 1',
+    '}',
+  ].join('\r\n');
+}
+
+/**
+ * Lo que la app tiene que lanzar: el puente. `script` es el asistente (etapa 2), el
+ * que hace el trabajo de verdad y el único cuyo rastro confirma que estamos vivos.
+ */
 function afterExitCommand(opts = {}) {
   const script = installHelperScript(opts);
+  const encoded = Buffer.from(script, 'utf16le').toString('base64');
+  const bridge = puenteScript({ script, logPath: opts.logPath, nombre: opts.name });
   return {
+    // PowerShell y no `cmd /c start`: `start` sí funciona cuando el padre es un
+    // proceso normal, pero NO cuando es la app —Electron mata todo su árbol al
+    // cerrarse, incluido lo que `start` haya creado—. Lo que sí escapa es el puente.
     file: 'powershell.exe',
-    // SIN `detached`: en Windows un PowerShell separado no llega a ejecutar
-    // nada (sale con 0 y se queda en nada) y un hijo normal sobrevive a la
-    // muerte del padre. Con `windowsHide` no aparece ninguna ventana.
-    args: ['-NoProfile', '-NonInteractive', '-WindowStyle', 'Hidden', '-EncodedCommand', Buffer.from(script, 'utf16le').toString('base64')],
+    args: ['-NoProfile', '-NonInteractive', '-WindowStyle', 'Hidden', '-EncodedCommand', Buffer.from(bridge, 'utf16le').toString('base64')],
+    bridge,
     script,
+    encoded,
   };
 }
 
@@ -371,4 +426,4 @@ function hostKind({ isPackaged, env = process.env } = {}) {
   return env.PORTABLE_EXECUTABLE_DIR ? 'portable' : 'nsis';
 }
 
-module.exports = { REPO, API_LATEST, parseVersion, compareVersions, pickAssets, assetFor, parseLatestYml, sha512For, motivoSinFirma, sha512Of, checkForUpdate, downloadTarget, downloadTo, hostKind, signatureOf, installHelperScript, afterExitCommand, pendingFor };
+module.exports = { REPO, API_LATEST, parseVersion, compareVersions, pickAssets, assetFor, parseLatestYml, sha512For, motivoSinFirma, sha512Of, checkForUpdate, downloadTarget, downloadTo, hostKind, signatureOf, installHelperScript, puenteScript, afterExitCommand, pendingFor };

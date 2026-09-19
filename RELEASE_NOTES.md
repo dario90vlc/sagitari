@@ -1,3 +1,65 @@
+# SAGITARI 3.3.1
+
+**El actualizador instala de verdad.** «Cerrar e instalar» cerraba la app y no pasaba
+nada: aparecía una ventana de consola, se cerraba y la versión seguía siendo la misma. La
+causa no era un comando mal escrito, sino algo más de fondo: **Windows mata todo el árbol
+de procesos de la app cuando se cierra**, así que el asistente que debía esperar a que
+SAGITARI desapareciera moría con ella justo antes de poder instalar nada. Se ve en su
+propio diario: escribía su primera línea y ahí se acababa. Ahora la instalación la pide a
+Windows, que crea al asistente **fuera del árbol de la app** (y por eso sí la sobrevive),
+y SAGITARI ya no se cierra hasta tener la prueba de que ese asistente está vivo y
+trabajando. Si no lo consigue, no se cierra: te lo dice y te deja reintentarlo o
+instalarlo a mano. / **The updater actually installs.** “Close and install” closed the app
+and nothing happened: a console window appeared, closed, and the version was still the
+same. The cause was not a mistyped command but something deeper: **Windows kills the whole
+process tree of the app when it closes**, so the helper that was supposed to wait for
+SAGITARI to disappear died with it, right before it could install anything. It is visible
+in its own log: it wrote its first line and that was it. Now the installation is requested
+from Windows, which creates the helper **outside the app's process tree** (and that is why
+it does survive it), and SAGITARI no longer closes until it has proof that the helper is
+alive and working. If it can't, it does not close: it tells you and lets you retry or
+install by hand.
+
+**Si tienes la versión instalada anterior a esta, necesitas instalarla UNA vez a mano**
+(descarga el Setup y ejecútalo). El actualizador roto vivía dentro de las versiones
+anteriores y no puede repararse a sí mismo —ese es justo el fallo—; a partir de esta, las
+siguientes se instalarán solas. / **If your installed version is older than this one, you
+need to install it ONCE by hand** (download the Setup and run it). The broken updater
+lived inside the earlier versions and cannot repair itself —that is the very bug—; from
+this one on, later versions will install themselves.
+
+Además, el diario del asistente recoge ahora el **código de salida del instalador** y si la
+app seguía viva al lanzarlo, y la app vuelve a abrirse sola al terminar la actualización
+(antes se cerraba y el usuario creía que no había pasado nada… aunque hubiera pasado). /
+On top of that, the helper's log now records the **installer's exit code** and whether the
+app was still running when it launched it, and the app reopens by itself when the update
+finishes (it used to close and the user thought nothing had happened — even when it had).
+
+## Novedades / What's new
+
+- **La instalación sobrevive al cierre de la app.** El archivo que la app ejecuta ahora es
+  un puente que le pide a Windows (WMI) crear al asistente fuera de su árbol de procesos;
+  el asistente espera a que SAGITARI desaparezca y lanza el Setup en silencio. Está medido
+  con la app real: antes no se ejecutaba **3 de 3 veces**; ahora sí **3 de 3**, y el
+  asistente vive en unos 2,3 s. / **The installation survives the app closing.** What the
+  app runs now is a bridge that asks Windows (WMI) to create the helper outside its own
+  process tree; the helper waits for SAGITARI to disappear and launches the Setup silently.
+  Measured with the real app: it used to fail to run **3 out of 3 times**; now it succeeds
+  **3 out of 3**, with the helper alive in about 2.3 seconds.
+- **La app no se cierra sin pruebas.** Antes de cerrarte la ventana se espera a que el
+  asistente deje su rastro en el diario; si no lo consigue (sin PowerShell, WMI bloqueado,
+  política del equipo), la app NO se cierra y te lo dice, en vez de dejarte con la ventana
+  cerrada y nada instalado. / **The app does not close without proof.** Before your window
+  closes, it waits for the helper to leave its trace in the log; if it can't (no PowerShell,
+  WMI blocked, machine policy), the app does NOT close and tells you, instead of leaving you
+  with a closed window and nothing installed.
+- **El diario del asistente dice más.** Código de salida del instalador, si la app seguía
+  viva al lanzarlo y el rastro completo de cada intento, en
+  `%TEMP%\sagitari-update\instalar.log`. Si algo vuelve a fallar, ahí está el porqué. /
+  **The helper's log says more.** Installer exit code, whether the app was still running when
+  it launched it, and the full trace of every attempt, in `%TEMP%\sagitari-update\instalar.log`.
+  If something fails again, the reason is there.
+
 # SAGITARI 3.3.0
 
 **Los subagentes que escriben dejan de pisarse.** Cuando SAGITARI reparte un trabajo grande

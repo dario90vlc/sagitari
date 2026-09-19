@@ -3751,6 +3751,11 @@ if ($('#updInstallBtn')) $('#updInstallBtn').onclick = async () => {
   // con algo recién descargado se instala eso; si no, se reintenta lo pendiente
   const reintento = !updState.ready && !!updState.pending;
   try {
+    // Preparar la instalación ya no es instantáneo: antes de cerrar la app se espera
+    // a que el asistente esté vivo FUERA de ella (si no, moriría con la app y el
+    // usuario se quedaría con la ventana cerrada y nada instalado). Sin este aviso,
+    // el botón parecía colgado durante esos segundos.
+    updMsg('Preparando la instalación… no cierres la app todavía.');
     const r = reintento ? await window.sagitari.updateRetry() : await window.sagitari.updateInstall();
     if (r && 'pending' in r) {
       // el motor decidió qué queda pendiente (p. ej. descartó un instalador que ya
