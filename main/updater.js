@@ -306,11 +306,13 @@ function signatureOf(file, { spawnFn = spawn, env = process.env, timeoutMs = 200
  * de `cmd.exe` y el de Node—, que es justo lo que rompía el lanzamiento
  * anterior. Una ruta con espacios, `/`, `&` o `%` es simplemente texto.
  *
- * OJO: este es el ASISTENTE (etapa 2), el que espera y lanza el instalador. NO es
- * lo que la app ejecuta directamente: lo que la app ejecuta es el puente, porque
- * todo proceso que la app lance por sí misma muere con ella (ver `puenteScript`).
+ * Este guion es el ASISTENTE: el que espera a que la app desaparezca y luego instala.
+ * Se ejecuta DESLIGADO del árbol de la app (ver `afterExitCommand`), porque es lo
+ * único que le permite sobrevivir a su cierre.
  */
 function installHelperScript({ name, installer, args = '/S --updated', logPath, waitMs = 90000, graceMs = 1200 } = {}) {
+  // (el guion es agnóstico del lanzador: sirve igual bajo cmd que bajo PowerShell
+  //  directo, que es justo lo que permite comparar las dos formas en el arnés)
   const q = (s) => "'" + String(s == null ? '' : s).replace(/'/g, "''") + "'";   // literal de PowerShell
   const lista = String(args || '').split(/\s+/).filter(Boolean).map(q).join(',');
   const espera = Number.isFinite(waitMs) && waitMs > 0 ? Math.round(waitMs) : 90000;
@@ -352,55 +354,45 @@ function installHelperScript({ name, installer, args = '/S --updated', logPath, 
 }
 
 /**
- * PUENTE (etapa 1): lo que la app lanza de verdad, y que puede morir con ella.
+ * Lo que la app tiene que lanzar, y cómo.
  *
- * Su único trabajo es pedirle al SISTEMA que cree al asistente (etapa 2) FUERA del
- * árbol de procesos de la app. Todo lo que la app lanza por sí misma —hijo directo,
- * `detached`, `cmd /c start`— muere cuando ella se cierra: está medido con la app
- * real, no supuesto. Un proceso creado por WMI es hijo de WmiPrvSE.exe, no de
- * SAGITARI, así que sobrevive (medido también: la etapa 2 vive y termina su trabajo
- * con la app ya cerrada).
+ * El ayudante espera a que SAGITARI desaparezca y lanza el Setup: para que esa espera
+ * sirva de algo tiene que SOBREVIVIR a la app, y ahí estaba el fallo. Lo que sigue es
+ * una MATRIZ MEDIDA con un Electron real que se cierra —no una teoría—: el mismo
+ * guion, lanzado de cuatro formas distintas.
  *
- * El puente escribe en el mismo diario: si WMI no puede crear el proceso (política,
- * WMI roto), eso queda registrado y la app NO se cierra, en vez de dejar al usuario
- * con la ventana cerrada y nada instalado.
- */
-function puenteScript({ script, logPath, nombre = 'SAGITARI' } = {}) {
-  const q = (s) => "'" + String(s == null ? '' : s).replace(/'/g, "''") + "'";   // literal de PowerShell
-  const b64 = Buffer.from(script, 'utf16le').toString('base64');
-  // El CommandLine va como literal de PowerShell de comillas simples: la base64 no
-  // tiene comillas, espacios, `$` ni acentos, así que no hay nada que interpretar.
-  const cmd = 'powershell.exe -NoProfile -NonInteractive -WindowStyle Hidden -EncodedCommand ' + b64;
-  return [
-    "$ErrorActionPreference = 'Continue'",
-    '$log = ' + q(logPath),
-    'function Diag([string]$m) { try { Add-Content -LiteralPath $log -Value ((Get-Date -Format o) + " " + $m) -Encoding utf8 } catch {} }',
-    'try {',
-    '  $r = Invoke-CimMethod -ClassName Win32_Process -MethodName Create -Arguments @{ CommandLine = ' + q(cmd) + ' }',
-    "  if ($r.ReturnValue -eq 0) { Diag ('puente: asistente creado fuera del arbol de la app (pid=' + $r.ProcessId + ')') }",
-    "  else { Diag ('puente: WMI devolvio el codigo ' + $r.ReturnValue + ' y no se pudo crear el asistente') }",
-    '} catch {',
-    "  Diag ('puente: no pude crear el asistente: ' + $_.Exception.Message)",
-    '  exit 1',
-    '}',
-  ].join('\r\n');
-}
-
-/**
- * Lo que la app tiene que lanzar: el puente. `script` es el asistente (etapa 2), el
- * que hace el trabajo de verdad y el único cuyo rastro confirma que estamos vivos.
+ *   powershell.exe directo, hijo normal  → arranca (0,4 s) y MUERE con la app; el
+ *                                          diario se queda en «asistente iniciado»
+ *                                          para siempre            ← el fallo real
+ *   powershell.exe directo, DESLIGADO    → ni arranca (PowerShell suelto no llega a
+ *                                          ejecutar nada: sin consola que lo
+ *                                          sostenga, sale sin hacer nada)
+ *   cmd.exe → powershell, hijo normal    → arranca y sobrevive
+ *   cmd.exe → powershell, DESLIGADO      → arranca y sobrevive      ← lo que se envía
+ *
+ * De ahí salen las dos decisiones, y ninguna es cosmética:
+ *   · el proceso que se lanza es un `cmd.exe`, porque a un PowerShell suelto no hay
+ *     forma de sostenerlo: como hijo normal muere con la app, y desligado ni
+ *     arranca. El `cmd` es un proceso corriente y es él quien lo mantiene con vida.
+ *   · va DESLIGADO (`detached`, que en Windows es DETACHED_PROCESS más un grupo de
+ *     procesos propio): la forma estándar de pasar el relevo a otro proceso cuando
+ *     el que lanza se va a cerrar.
+ *
+ * Lo comprueba `scripts/verificar-actualizador.js`, que monta el escenario con un
+ * Electron de verdad y ejecuta además un CONTROL con PowerShell directo exigiendo
+ * que NO funcione. Si el control empezara a funcionar, el arnés ya no estaría
+ * midiendo el cierre real, y lo dice: este fallo sobrevivió a dos versiones justo por
+ * no tener ese control.
  */
 function afterExitCommand(opts = {}) {
   const script = installHelperScript(opts);
   const encoded = Buffer.from(script, 'utf16le').toString('base64');
-  const bridge = puenteScript({ script, logPath: opts.logPath, nombre: opts.name });
   return {
-    // PowerShell y no `cmd /c start`: `start` sí funciona cuando el padre es un
-    // proceso normal, pero NO cuando es la app —Electron mata todo su árbol al
-    // cerrarse, incluido lo que `start` haya creado—. Lo que sí escapa es el puente.
-    file: 'powershell.exe',
-    args: ['-NoProfile', '-NonInteractive', '-WindowStyle', 'Hidden', '-EncodedCommand', Buffer.from(bridge, 'utf16le').toString('base64')],
-    bridge,
+    file: 'cmd.exe',
+    args: ['/c', 'powershell.exe', '-NoProfile', '-NonInteractive', '-WindowStyle', 'Hidden', '-EncodedCommand', encoded],
+    /* Van con la orden porque son parte de ella: sin `detached` esto no funciona, y
+       el conocimiento de por qué tiene que vivir junto al código que lo lanza. */
+    spawnOpts: { stdio: 'ignore', windowsHide: true, detached: true },
     script,
     encoded,
   };
@@ -426,4 +418,4 @@ function hostKind({ isPackaged, env = process.env } = {}) {
   return env.PORTABLE_EXECUTABLE_DIR ? 'portable' : 'nsis';
 }
 
-module.exports = { REPO, API_LATEST, parseVersion, compareVersions, pickAssets, assetFor, parseLatestYml, sha512For, motivoSinFirma, sha512Of, checkForUpdate, downloadTarget, downloadTo, hostKind, signatureOf, installHelperScript, puenteScript, afterExitCommand, pendingFor };
+module.exports = { REPO, API_LATEST, parseVersion, compareVersions, pickAssets, assetFor, parseLatestYml, sha512For, motivoSinFirma, sha512Of, checkForUpdate, downloadTarget, downloadTo, hostKind, signatureOf, installHelperScript, afterExitCommand, pendingFor };

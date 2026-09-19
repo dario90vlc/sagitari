@@ -1,6 +1,6 @@
-# El actualizador y el árbol de procesos de la app (v3.3.1)
+# El actualizador y el árbol de procesos de la app (v3.3.2)
 
-Fecha: 2026-09-19 · Versión: 3.3.1
+Fecha: 2026-09-19 · Versión: 3.3.2
 
 Síntoma del usuario: «Nueva actualización disponible → Descargar → Cerrar e Instalar. La
 aplicación se cierra, aparece una ventana de terminal, se cierra y no pasa nada. Vuelves a
@@ -26,53 +26,63 @@ asistente iniciado (pid=16816, PowerShell 5.1.26100.9444)
 **Y nada más.** Ni «la app ya no está en ejecución», ni «instalador lanzado», ni el error
 de lanzamiento. El asistente escribía su primera línea y moría durante la espera.
 
-Con eso monté un arnés que replica el flujo real —un proceso con nombre único que lanza al
-asistente **y después sale**, como la app— y un señuelo que registra con qué argumentos le
-llaman. Resultado, 3 pasadas de 3 variantes:
+Con eso monté un arnés que replica el flujo real —un **Electron de verdad** con nombre único
+que lanza al asistente **y después sale**, como la app— y un señuelo que registra con qué
+argumentos le llaman. El mismo guion, lanzado de cuatro formas, con un padre Electron real:
 
-| Cómo se lanzaba el asistente | ¿Llegó a ejecutarse el instalador? |
+| Cómo se lanzaba el asistente | ¿Ejecutó el instalador? |
 |---|---|
-| hijo directo (lo que hacía la app) | **NO, 3 de 3** |
-| `detached: true` + `unref()` | NO, 3 de 3 (ni siquiera escribía la primera línea) |
-| `cmd /c start /b powershell …` | Sí, 3 de 3 — **cuando el padre es un proceso normal** |
+| `powershell.exe` directo, hijo normal (**lo que hacían la 3.2.3 y la 3.3.0**) | **NO** — escribe «asistente iniciado» (a los 0,4 s) y **muere con la app** |
+| `powershell.exe` directo, desligado | **NO** — ni arranca: 30 s sin dejar rastro |
+| `cmd.exe` → powershell, hijo normal | Sí |
+| `cmd.exe` → powershell, **desligado** (lo que se envía) | Sí |
 
-Ese último renglón es la trampa: con un padre Node normal `start` funciona. Y por eso
-parecía que el diseño estaba bien. **Con Electron no funciona**, y la app es Electron:
-repetido con un proceso Electron de verdad, `start` tampoco sobrevive. Un señuelo lento
-(que escribe 3 s después) tampoco: **la app mata todo su árbol de procesos al cerrarse.**
+Las dos primeras filas son el fallo, y la primera reproduce el diario del usuario **letra por
+letra**: el asistente arranca, escribe su línea y desaparece antes de poder hacer nada.
 
-Conclusión: el diseño entero —«un asistente que espera a que la app desaparezca»— era
-imposible mientras el asistente fuera un hijo de la app, con cualquier bandera. No era un
-comando mal escrito: era un supuesto equivocado.
+Dos lecciones de esta tabla, porque las dos nos costaron una versión:
+
+- **No basta con que el asistente arranque.** La 3.2.3 lanzaba un `powershell.exe` y *sí*
+arrancaba — de ahí la conclusión equivocada de que «un hijo normal sobrevive al padre». Sí
+sobrevive… a un padre normal. Al cerrarse **un Electron**, ese hijo muere.
+- **Y desligar un PowerShell suelto no arregla nada**, porque entonces no arranca (fila 2).
+  Eso ya estaba anotado en el código de la 3.2.3 como «un PowerShell separado no llega a
+  ejecutar nada», y era cierto; lo que se dedujo de ahí era lo falso.
 
 ---
 
-## 2. El arreglo: dos etapas y una prueba antes de cerrar
+## 2. El arreglo: envolverlo en `cmd.exe`, desligarlo, y una prueba antes de cerrar
 
 ```
- app ──spawn──▶ PUENTE (etapa 1, corto, puede morir con la app)
-                 │  Invoke-CimMethod Win32_Process Create
-                 ▼
-                ASISTENTE (etapa 2)  ← hijo de WmiPrvSE.exe, NO de la app
-                 │  espera a que SAGITARI desaparezca
-                 ▼
-                Setup /S --updated --force-run
+ app ──spawn(detached)──▶ cmd.exe  ──hijo──▶ ASISTENTE (PowerShell)
+                                               │ espera a que SAGITARI desaparezca
+                                               ▼
+                                              Setup /S --updated --force-run
 ```
 
-- **Etapa 1 (el puente)** es lo único que la app ejecuta. Su único trabajo es pedirle a
-  Windows (WMI) que cree la etapa 2. Un proceso creado por WMI es hijo de `WmiPrvSE.exe`,
-  así que **no está en el árbol de la app** y la sobrevive. Medido: la etapa 2 vive, ve la
-  app desaparecer y termina su trabajo con la app ya cerrada.
-- **Etapa 2 (el asistente)** es el guion que ya existía: espera a que no quede ninguna
-  instancia, lanza el Setup en silencio y lo anota todo.
-- **La app espera pruebas antes de cerrarse.** No espera a que «el proceso que lancé siga
-  vivo» —eso no prueba nada, y es exactamente lo que fallaba: el asistente estaba vivo,
-  escribía una línea, y moría—. Espera a que **la etapa 2 deje su rastro** en el diario
-  (`asistente iniciado`). Si no lo consigue (sin PowerShell, WMI bloqueado por política), la
-  app **no se cierra**: te lo dice, guarda el intento como pendiente y puedes reintentarlo o
-  instalarlo a mano. Un cierre sin instalación es el peor resultado posible y ya no ocurre.
-- Presupuesto: 30 s. El puente carga los módulos CIM de PowerShell en frío; medido, el
-  asistente está vivo en ~2,3 s.
+Son dos cosas, y ninguna es cosmética:
+
+- **El proceso que se lanza es un `cmd.exe`**, porque a un PowerShell suelto no hay forma de
+  arrancarlo y sostenerlo a la vez: como hijo normal muere con la app, y desligado ni
+  arranca. El `cmd` es un proceso corriente: arranca de las dos maneras y es él quien
+  mantiene vivo a PowerShell como hijo suyo.
+- **Va desligado** (`detached`, que en Windows es DETACHED_PROCESS más un grupo de procesos
+  propio): la forma estándar de pasar el relevo a otro proceso cuando el que lanza se va a
+  cerrar, y lo que hace `electron-updater`.
+
+Así el mecanismo no depende de nada externo: ni WMI, ni módulos CIM, ni tareas programadas.
+(Se probó y también funcionaba crear el ayudante con WMI —hijo de `WmiPrvSE.exe`, fuera del
+árbol—, y se descartó a propósito: más piezas y una dependencia —WMI puede estar bloqueado
+por política en equipos gestionados— para exactamente el mismo resultado. Menos es más.)
+
+**Y la app espera pruebas antes de cerrarse.** No espera a que «el proceso que lancé siga
+vivo» —eso no prueba nada, y es exactamente lo que fallaba: el ayudante estaba vivo,
+escribía una línea, y moría—. Espera a que el asistente **deje su rastro** en el diario
+(`asistente iniciado`). Si no lo consigue (sin PowerShell, bloqueado por política), la app
+**no se cierra**: te lo dice, guarda el intento como pendiente y puedes reintentarlo o
+instalarlo a mano. Un cierre sin instalación es el peor resultado posible y ya no ocurre.
+
+Presupuesto: 30 s. Medido, el asistente deja su rastro en ~1,5 s (PowerShell en frío).
 
 ### Lo que además se aprovechó para arreglar
 
@@ -106,17 +116,27 @@ eso es mejor que dejar que un instalador nos mate.
 
 ## 3. Cómo está verificado
 
-- **Punta a punta con Electron de verdad** (`3 de 3`): la app lanza el puente, WMI crea la
-  etapa 2 fuera del árbol, la app espera su rastro (~2,3 s) y sale; la etapa 2 ve la app
-  desaparecer y ejecuta el señuelo con `/S --updated`, dejando `instalador termino con
-  codigo 0` en el diario.
-- **Prueba de regresión en la suite** (367 tests): un proceso con nombre único lanza el
-  puente con la orden real y sale; la prueba exige que el señuelo se ejecute **después**.
-  Es la prueba que faltaba y por eso el fallo vivió tanto: todas las anteriores lanzaban el
-  asistente desde un proceso que seguía vivo, así que nunca se ejercitaba el único caso que
-  importa.
-- **La integración existente** ahora recorre la cadena completa (puente → WMI → asistente →
-  señuelo) y comprueba la orden que recibe el instalador.
+- **Punta a punta con un Electron de verdad**, con la orden de producción tal cual
+  (`plan.file` / `plan.args` / `plan.spawnOpts`): la app lanza el ayudante desligado, espera
+  su rastro (~1,5 s) y sale; el ayudante ve la app desaparecer y ejecuta el señuelo con
+  `/S --updated --force-run`, dejando `instalador termino con codigo 0` en el diario.
+  Repetible a mano: `npm run verificar:actualizador`.
+- **La prueba de regresión de la suite usa ese mismo escenario** (367 tests), y ahora **se
+  autovalida**: además de exigir que el instalador se ejecute después de que la app salga,
+  ejecuta un **CONTROL** con el diseño anterior (PowerShell directo) y exige que NO instale.
+  Ese control es lo que demuestra que el escenario mide el cierre de verdad.
+
+### La prueba que había antes no servía (y por eso el fallo duró dos versiones)
+
+La prueba anterior se llamaba «el ayudante SOBREVIVE al cierre de la app» y usaba un
+**`node.exe` renombrado** como padre. Medido: con un padre Node, el diseño roto **también
+pasa** —Windows no mata al hijo de un Node al cerrarse—, así que la prueba no podía fallar
+por el fallo que decía guardar. El doctorado de este fallo es exactamente eso: un test que
+pasa siempre es peor que no tenerlo, porque da por cubierto lo que no lo está.
+
+De ahí las dos reglas que quedan en el arnés: **el padre tiene que ser Electron** (lo único
+que se cierra como la app) y **tiene que existir un control que deba fallar**. Si algún día
+esas pruebas se relajaran, el propio test lo delataría.
 
 ### Lo que NO está verificado
 
@@ -124,6 +144,9 @@ eso es mejor que dejar que un instalador nos mate.
   los archivos → al reabrir eres la versión nueva). Cada pieza está probada por separado,
   incluido el propio instalador silencioso leído en sus plantillas, pero el encadenado real
   exige instalar dos versiones en una máquina. Es el paso que queda a mano, una vez.
-- WMI puede estar bloqueado por política en equipos gestionados. En ese caso el puente lo
-  deja escrito en el diario, la app no se cierra y el usuario tiene la ruta del instalador
-  para hacerlo a mano.
+- Si PowerShell estuviera bloqueado por política, el ayudante no arrancaría: la app lo
+detecta, no se cierra y ofrece instalar a mano.
+- El comportamiento de cierre (qué hijo sobrevive y cuál no) está medido en **Windows 10/11
+  con Electron 44**. Depende del sistema, no de nuestro código, así que un cambio futuro
+  podría alterarlo — pero ya no se descubre en producción: la prueba de regresión con
+  Electron y su control lo cazan antes de que salga una release.

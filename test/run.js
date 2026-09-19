@@ -36,7 +36,13 @@ function ok(v, msg) { if (!v) throw new Error(msg || 'esperado verdadero'); }
    proceso sin resumen y salía con código 0 (CI en verde con la suite colgada).
    El temporizador se deja "vivo" a propósito: mantiene el proceso en pie hasta
    dispararse, y se cancela justo antes de imprimir el resumen. */
-const SUITE_TIMEOUT_MS = 120000;
+/* El tope subió de 120 a 240 s cuando el test del actualizador pasó a ejecutar un
+   Electron de verdad (y su control): son ~20 s más, y con el tope anterior la suite
+   quedaba a menos de 20 s del límite — un runner de CI cargado habría hecho fallar la
+   release por reloj, no por un fallo. Sigue sirviendo para lo que existe: un test
+   colgado no espera cuatro minutos. Los dos escenarios del actualizador llevan además
+   su PROPIO tope (45 s cada uno), así que un cuelgue ahí se corta solo. */
+const SUITE_TIMEOUT_MS = 240000;
 const suiteTimer = setTimeout(() => {
   console.error(`\nLa suite no terminó en ${SUITE_TIMEOUT_MS / 1000}s: algún test se quedó colgado.`);
   process.exit(1);
@@ -2919,14 +2925,15 @@ test('updater: el ayudante que instala espera a la app y no juega con comillas',
   const installer = path.join('C:', 'Temp', "d'actualizacion & 100%", 'SAGITARI-Setup-3.2.1.exe');
   const logPath = path.join('C:', 'Temp', "d'actualizacion & 100%", 'instalar.log');
   const plan = updater.afterExitCommand({ name: 'SAGITARI', installer, logPath });
-  eq(plan.file, 'powershell.exe', 'la app lanza el puente');
+  /* `detached` NO es un detalle de estilo: es lo único que hace que el ayudante siga
+     vivo cuando la app se cierre. Sin él, la instalación no llega a ejecutarse. */
+  eq(plan.file, 'cmd.exe', 'el que se desliga es un cmd (PowerShell no arranca desligado)');
+  ok(plan.args.includes('powershell.exe'), 'y es él quien sostiene al ayudante de PowerShell');
   ok(plan.args.includes('-EncodedCommand'), 'el guion viaja codificado: no hay comillas que escapar');
   ok(plan.args.includes('Hidden'), 'nada de ventanas (era el «abre una terminal y se cierra»)');
-  eq(Buffer.from(plan.encoded, 'base64').toString('utf16le'), plan.script, 'la etapa 2 viaja tal cual');
-  ok(/Invoke-CimMethod/.test(plan.bridge) && /Win32_Process/.test(plan.bridge),
-    'el puente le pide a WMI que cree al asistente FUERA del árbol de la app');
-  ok(plan.bridge.includes(plan.encoded), 'el puente lleva dentro al asistente (etapa 2)');
-  ok(plan.bridge.includes('puente:'), 'y si no puede crearlo, lo deja en el diario en vez de callarse');
+  eq(plan.spawnOpts.detached, true, 'DESLIGADO del árbol de procesos de la app');
+  eq(plan.spawnOpts.windowsHide, true, 'y sin ventana');
+  eq(Buffer.from(plan.encoded, 'base64').toString('utf16le'), plan.script, 'lo que se ejecuta es el guion tal cual');
   ok(plan.script.includes('ExitCode'), 'y el diario recoge el código con el que salió el instalador');
   ok(plan.script.includes('la app seguia en ejecucion'), 'y si la app seguía viva al lanzarlo, para poder diagnosticarlo');
   ok(plan.script.includes("'" + installer.replace(/'/g, "''") + "'"), 'la ruta va como literal de PowerShell, con sus comillas simples dobladas');
@@ -2950,7 +2957,7 @@ test('updater: el ayudante lanza el instalador de verdad (integración)', async 
     name: 'SAGITARI-PROCESO-QUE-NO-EXISTE',
     installer: probe, args: '/S --updated', logPath: log, graceMs: 100,
   });
-  const hijo = spawn(plan.file, plan.args, { stdio: 'ignore', windowsHide: true });
+  const hijo = spawn(plan.file, plan.args, plan.spawnOpts);
   hijo.on('error', () => {});
   const esperar = async (f, ms) => {
     const t0 = Date.now();
@@ -2972,42 +2979,29 @@ test('updater: el ayudante lanza el instalador de verdad (integración)', async 
   eq(fs.existsSync(path.join(dir, 'instalar.log.part')), false, 'sin restos a medias');
 });
 
-test('updater: el ayudante SOBREVIVE al cierre de la app (regresión: «se cierra y no instala»)', async () => {
-  /* Esta es LA prueba que faltaba, y por eso el fallo vivió tanto: las demás
-     lanzaban al ayudante desde un proceso que seguía vivo, así que nunca se
-     ejercitaba el único caso que importa —la app se cierra y el ayudante tiene que
-     seguir ahí—. Windows mata el árbol de procesos del padre al cerrarse: un hijo
-     directo escribía su primera línea en el diario y ahí se quedaba, con la app
-     cerrada y sin instalar nada. Se reproduce de verdad: un proceso con nombre
-     ÚNICO (el equivalente a SAGITARI) lanza al ayudante con la orden real y sale. */
+test('updater: el ayudante SOBREVIVE al cierre de ELECTRON (regresión: «se cierra y no instala»)', async () => {
+  /* LA prueba que faltaba, y la razón de que el fallo viviera dos versiones: las
+     demás lanzaban al ayudante desde un proceso que seguía vivo, así que nunca se
+     ejercitaba el único caso que importa. Peor: la versión anterior de este test
+     usaba un Node renombrado como padre, y un PowerShell hijo de un Node sobrevive
+     igual que uno bien lanzado — medido, ese test pasaba con el diseño bueno y con el
+     roto. Un test que no puede fallar por el fallo que dice guardar no guarda nada.
+
+     Solo un ELECTRON REAL que se cierra lo reproduce: ahí el PowerShell directo
+     escribe su primera línea y muere con la app (es el diario de los usuarios, letra
+     por letra). Por eso el escenario vive en `scripts/verificar-actualizador.js`, que
+     ejecuta también un CONTROL con ese diseño anterior y exige que NO instale: así el
+     test se delata si algún día pierde los dientes. */
   if (process.platform !== 'win32') return;
-  const { spawnSync } = require('child_process');
-  const dir = tmpDir('sagi-supervivencia-');
-  const nombre = 'sagi-padre-de-prueba';
-  const exe = path.join(dir, nombre + '.exe');
-  fs.copyFileSync(process.execPath, exe);   // nombre único: Get-Process solo ve al padre
-  const padre = path.join(dir, 'padre.js');
-  fs.writeFileSync(padre, [
-    "'use strict';",
-    "const { spawn } = require('child_process');",
-    'const updater = require(' + JSON.stringify(path.join(__dirname, '..', 'main', 'updater.js')) + ');',
-    'const [nombre, senuelo, logPath] = process.argv.slice(2);',
-    "const plan = updater.afterExitCommand({ name: nombre, installer: senuelo, args: '/S --updated', logPath, waitMs: 10000, graceMs: 100 });",
-    "const h = spawn(plan.file, plan.args, { stdio: 'ignore', windowsHide: true });",
-    'h.on(\'error\', () => {});',
-    'setTimeout(() => process.exit(0), 600);',   // la app sale medio segundo después
-  ].join('\n'));
-  const senuelo = path.join(dir, 'senuelo.bat');
-  const salida = path.join(dir, 'senuelo.txt');
-  const log = path.join(dir, 'instalar.log');
-  fs.writeFileSync(senuelo, '@echo off\r\necho %* > "' + salida + '"\r\n');
-  spawnSync(exe, [padre, nombre, senuelo, log], { stdio: 'ignore', windowsHide: true });
-  const t0 = Date.now();
-  while (Date.now() - t0 < 30000 && !fs.existsSync(salida)) await new Promise((r) => setTimeout(r, 300));
-  const diario = fs.existsSync(log) ? fs.readFileSync(log, 'utf8') : '';
-  ok(fs.existsSync(salida), 'el instalador se ejecuta DESPUÉS de que la app haya salido (diario: ' + diario.replace(/\s+/g, ' ').slice(0, 200) + ')');
-  ok(/\/S --updated/.test(fs.readFileSync(salida, 'utf8')), 'y con la orden de silencio y de actualización');
-  ok(/asistente iniciado/.test(diario), 'el diario conserva el rastro de lo que hizo: ' + diario.replace(/\s+/g, ' ').slice(0, 200));
+  const { verificar } = require('../scripts/verificar-actualizador');
+  const r = await verificar({ dir: tmpDir('sagi-supervivencia-'), pasadas: 1, conControl: true });
+  if (r.estado === 'sin-electron') return;   // sin binario no hay escenario que montar
+  const p = r.pasadas[0];
+  ok(p.arranco, 'el ayudante arranca ANTES de que la app se cierre (padre: ' + p.padre + ')');
+  ok(p.ejecuto, 'y el instalador se ejecuta DESPUÉS de que la app haya salido (diario: ' + p.diario.slice(0, 220) + ')');
+  ok(p.orden, 'con la orden de silencio, actualización y reapertura');
+  ok(p.codigo0, 'y el diario recoge el código de salida del instalador');
+  ok(r.controlRoto, 'el CONTROL (PowerShell directo, el diseño que falló) NO debe instalar: si instala, este test no está midiendo el cierre real');
 });
 
 test('updater: una instalación a medias se recuerda solo mientras sirva', () => {
@@ -4934,12 +4928,16 @@ test('renderer: cada delegación cierra con su tarjeta (estado y evidencia)', ()
   const css = fs.readFileSync(path.join(__dirname, '..', 'renderer', 'styles.css'), 'utf8');
   ok(/case 'delegate_done':\s*\n\s*delegationCard\(ev\);/.test(app), 'el evento de cierre pinta su tarjeta');
   ok(/function delegationCard/.test(app), 'la tarjeta existe');
-  const fn = app.match(/function delegationCard[\s\S]*?\n\}/)[0];
+  /* El marcado vive en `buildDelegationCard` porque una conversación GUARDADA también
+     tiene que repintar la tarjeta: `delegationCard` solo la coloca en el turno vivo. */
+  const fn = app.match(/function buildDelegationCard[\s\S]*?\n\}/)[0];
   ok(/RESULTADO/.test(fn) && /DETALLES/.test(fn) && /EVIDENCIA/.test(fn), 'enseña resultado, detalles y evidencia');
   ok(/FAILED/.test(fn) && /PARCIAL/.test(fn), 'distingue el cierre completo del parcial y del fallo');
   ok(!/card\.dataset\.tool =/.test(fn), 'la tarjeta no se hace pasar por herramienta: no debe confundirse con una tool_card');
-  ok(/pendingTurn\.cards\.push/.test(fn), 'entra en la limpieza del turno');
-  ok(/if \(!pendingTurn\) return;/.test(fn), 'sin turno en curso no revienta (eventos de fuera del chat)');
+  const env = app.match(/function delegationCard[\s\S]*?\n\}/)[0];
+  ok(/buildDelegationCard/.test(env), 'la del turno vivo reutiliza ese mismo marcado');
+  ok(/pendingTurn\.cards\.push/.test(env), 'entra en la limpieza del turno');
+  ok(/if \(!pendingTurn\) return;/.test(env), 'sin turno en curso no revienta (eventos de fuera del chat)');
   ok(/\.dcard-status/.test(css) && /\.tcard\.part/.test(css), 'los estilos del cierre están definidos');
 });
 
@@ -5474,9 +5472,11 @@ test('renderer: el razonamiento va en su bloque, fuera de la respuesta y de la v
   ok(/function pintarRazonamiento[\s\S]*?innerHTML = fmt\(t\._texto/.test(app), 'la pintura directa es la misma que usa el frame');
   ok(/pintarRazonamiento\(pendingTurn && pendingTurn\.think\)/.test(app), 'y al cerrar el turno se asegura el texto en pantalla');
 
-  const bloque = app.match(/function ensureThinkBlock[\s\S]*?\n\}/)[0];
-  ok(/b\.insertBefore\(d, b\.firstChild\)/.test(bloque), 'el bloque va el PRIMERO de la burbuja: se piensa antes de actuar');
+  const bloque = app.match(/function buildThinkBlock[\s\S]*?\n\}/)[0];
   ok(/th-copy/.test(bloque) && /ic\('brain'\)/.test(bloque), 'con su icono y su botón de copiar');
+  const pone = app.match(/function ensureThinkBlock[\s\S]*?\n\}/)[0];
+  ok(/b\.insertBefore\(d, b\.firstChild\)/.test(pone), 'el bloque va el PRIMERO de la burbuja: se piensa antes de actuar');
+  ok(/buildThinkBlock/.test(pone), 'y el del turno vivo es ese mismo bloque');
   const cierre = app.match(/function cerrarRazonamiento[\s\S]*?\n\}/)[0];
   ok(/_tocado/.test(cierre), 'si el usuario lo abre a mano, no se le cierra');
   ok(/cerrarRazonamiento\(\);/.test(desde("case 'delta': {", "case 'thinking_delta':")), 'se pliega cuando empieza a responder');
@@ -5513,9 +5513,67 @@ test('renderer: el grupo de herramientas dice cuántas van y si algo falló', ()
   ok(/tg-fails|fails\.textContent/.test(refresh) && /has-fails/.test(refresh), 'y enseña los fallos aunque el grupo esté plegado');
   ok(/const fallos = pendingTurn\.fails \|\| 0;/.test(refresh), 'con el conteo real del turno');
   ok(/if \(!ok\) pendingTurn\.fails = \(pendingTurn\.fails \|\| 0\) \+ 1;/.test(app), 'cada herramienta fallida suma uno');
-  ok(/tg-fails/.test(app.match(/function ensureToolGroup[\s\S]*?\n\}/)[0]), 'la píldora existe desde el principio (oculta)');
+  ok(/tg-fails/.test(app.match(/function buildToolGroup[\s\S]*?\n\}/)[0]), 'la píldora existe desde el principio (oculta)');
   ok(/function cerrarHerramientas[\s\S]*?_tocado[\s\S]*?\n\}/.test(app), 'el cierre automático respeta que el usuario lo haya abierto');
   ok(/\.tg-fails/.test(css) && /\.tgroup\.has-fails/.test(css), 'con su estilo de aviso');
+});
+
+/* ---------- la conversación guardada conserva el TRABAJO, no solo el texto ----------
+   Queja del usuario, literal: «si cierro la app y la abro, las herramientas que usó ya no
+   se muestran». Se guardaba `{role, content}` y nada más: el hilo repintaba solo las
+   burbujas y todo el turno desaparecía de la vista. */
+
+test('conversación: el turno guarda su rastro (herramientas y razonamiento), no solo el texto', () => {
+  const main = fs.readFileSync(path.join(__dirname, '..', 'main', 'main.js'), 'utf8');
+  ok(/function trazaApunta/.test(main) && /trazaApunta\(e\)/.test(main), 'el rastro se acumula con los eventos del turno');
+  ok(/turnTrace\.tools\.push/.test(main) && /turnTrace\.think =/.test(main), 'guarda herramientas y razonamiento');
+  ok(/content: e\.text, ts: Date\.now\(\), \.\.\.\(conTraza \? \{ trace: conTraza \} : \{\}\)/.test(main),
+    'y viaja CON el mensaje del asistente al guardarlo');
+  ok(/trazaNueva\(\);/.test(main), 'cada turno estrena rastro (el anterior ya está guardado)');
+  ok(/function tool_result/.test(main) === false && /e\.type === 'tool_result'/.test(main), 'cierra cada herramienta con su resultado');
+  ok(/e\.type === 'delegate_done'/.test(main) && /e\.type === 'thinking_done'/.test(main), 'y guarda las delegaciones y el razonamiento');
+  // sin topes, conversations.json (que se lee ENTERO al arrancar) crecería sin freno
+  ok(/MAX_TRAZA/.test(main) && /const clipTraza =/.test(main) && /function argsTraza/.test(main), 'con topes explícitos');
+  ok(/imagen adjunta, no guardada/.test(main), 'y una imagen en base64 no se mete en el historial');
+});
+
+test('conversación: al reabrir la app se repinta el turno con sus tarjetas', () => {
+  const app = fs.readFileSync(path.join(__dirname, '..', 'renderer', 'app.js'), 'utf8');
+  ok(/function restaurarTraza/.test(app), 'existe el repintado del turno guardado');
+  ok(/if \(tieneTraza\) restaurarTraza\(b, m\.trace, html\);/.test(app), 'y el chat lo usa al restaurar la conversación');
+  const fn = app.match(/function restaurarTraza[\s\S]*?\n\}/)[0];
+  ok(/buildToolGroup\(\)/.test(fn) && /buildToolCard\(/.test(fn) && /pintarResultadoTarjeta\(/.test(fn) && /buildThinkBlock\(\)/.test(fn),
+    'reutiliza el MISMO marcado del turno en vivo: un arreglo vale para los dos');
+  ok(/K\.fmtDuration/.test(fn) && !/setInterval/.test(fn), 'con los tiempos que se guardaron, y sin arrancar ningún reloj');
+  ok(/t\.ok === undefined[\s\S]*?no llegó a devolver su resultado/.test(fn),
+    'una herramienta que no llegó a terminar se dice tal cual, no se pinta en verde');
+  ok(/grp\.el\.classList\.remove\('open'\)/.test(fn), 'y el bloque queda plegado, como al cerrar un turno');
+});
+
+test('agent: los cortes explican qué pasó en vez de dejar un telegrama', () => {
+  const src = fs.readFileSync(path.join(__dirname, '..', 'agent', 'agent.js'), 'utf8');
+  for (const viejo of ['(detenido: sin progreso)', '(detenido: bucle detectado)',
+    '(detenido por límite de seguridad)', '(detenido por límite de tokens)']) {
+    ok(!src.includes(viejo), 'ya no queda el marcador suelto ' + viejo);
+  }
+  ok(/Me he detenido porque llevaba varios pasos sin avanzar/.test(src), 'el corte por estancamiento cuenta qué pasó');
+  ok(/dime si lo retomo/.test(src), 'y qué puede hacer el usuario a partir de aquí');
+});
+
+test('prompt: la respuesta final no puede ser un telegrama', () => {
+  const { systemPrompt } = require('../agent/agent');
+  const sys = systemPrompt();
+  ok(/CÓMO ESCRIBES/.test(sys), 'el prompt dedica una sección al estilo de la respuesta');
+  ok(/Prohibido el telegrama/.test(sys), 'y prohíbe explícitamente el telegrama');
+  ok(/frase con sujeto y verbo/.test(sys) && /abreviaturas inventadas/.test(sys),
+    'con la regla concreta: nada de siglas inventadas para ahorrar caracteres');
+  ok(/alguien que no la ha visto/.test(sys), 'la respuesta se escribe para quien no ha visto las herramientas');
+  ok(!/Respuestas breves y claras; nada de relleno/.test(sys), 'fuera la instrucción que empujaba al telegrama');
+  ok(/nunca un telegrama/.test(sys), 'y el cierre del protocolo apunta a esa misma regla');
+  ok(!/minimiza explicaciones/.test(sys), 'el modo ACT ya no pide minimizar explicaciones');
+  // la revisión del cambio no vive en el prompt de sistema, sino en su propia instrucción
+  ok(/nunca respondas solo «sin hallazgos»/.test(fs.readFileSync(path.join(__dirname, '..', 'agent', 'agent.js'), 'utf8')),
+    'y el cierre de la revisión no puede ser un «sin hallazgos» a secas');
 });
 
 test('ajustes: el modelo por agente es opcional y viene apagado', () => {
@@ -6412,7 +6470,7 @@ test('agent: el cambio se revisa antes de cerrar, una vez por turno y solo si es
   ok(/revisa el CAMBIO|Revisa el CAMBIO/.test(alRevisor), 'con la instrucción de revisar, no de reescribir');
   const alOrquestador = conRevision.texto(3);
   ok(/ANTES DE CERRAR/.test(alOrquestador) && /RESULTADO DE Review Agent/.test(alOrquestador) && /revisado sin hallazgos/.test(alOrquestador), 'el informe vuelve al orquestador, que cierra el turno con él');
-  ok(/No repitas la respuesta que ya diste/.test(alOrquestador), 'sin obligarle a repetir lo que ya había dicho al usuario');
+  ok(/No repitas lo que ya dijiste/.test(alOrquestador), 'sin obligarle a repetir lo que ya había dicho al usuario');
   eq(conRevision.agent._reviewed, true, 'queda marcado: el mismo turno no se revisa dos veces');
   ok(conRevision.agent._delegations.some(d => d.agent === 'review'), 'y la revisión aparece en el tablero de delegaciones');
 

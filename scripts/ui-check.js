@@ -679,6 +679,38 @@ const AFTER = {
   if (dias1 >= 1) console.log('  ok   el hilo estampa su separador de día al empezar');
   else { failed++; console.log('  FALLO el hilo no tiene separador de día'); }
 
+  /* LA REGRESIÓN QUE REPORTÓ EL USUARIO, letra por letra: «si cierro la app y la abro, las
+     herramientas que usó ya no se muestran». Se reabre la MISMA conversación por el camino
+     real (el que usa la app al arrancar: `conv:open` + `resetChatView`) y se exige que el
+     turno vuelva ENTERO: su grupo de herramientas con las mismas tarjetas que se contaron,
+     su razonamiento con su texto, y la respuesta. Antes solo se guardaba el texto, así que
+     aquí no habría ni un `.tcard` que encontrar. */
+  await judge('al reabrir la conversación vuelven sus herramientas, y no solo el texto',
+    '(async function(){'
+    + ' const list = await window.sagitari.convList();'
+    + ' if (!list || !list.length) return { lista: false };'
+    + ' const r = await window.sagitari.convOpen(list[0].id);'
+    + ' if (!r || !r.ok) return { abrir: false };'
+    + ' const msgs = r.messages || [];'
+    + ' const idx = msgs.findIndex(m => m.trace && (m.trace.tools || []).length);'
+    + ' if (idx < 0) return { guardado: false, mensajes: msgs.length };'
+    + ' const guardadas = msgs[idx].trace.tools.length;'
+    + ' await openConversation(list[0].id);'
+    + ' await new Promise(res => setTimeout(res, 700));'
+    + ' const el = document.querySelectorAll("#messages .msg")[idx];'
+    + ' if (!el) return { dom: false, idx };'
+    + ' const grupo = el.querySelector(".tgroup:not(.team)");'
+    + ' const tarjetas = grupo ? grupo.querySelectorAll(".tcard").length : 0;'
+    + ' const titulo = grupo && grupo.querySelector(".tg-title") ? grupo.querySelector(".tg-title").textContent : "";'
+    + ' const razon = el.querySelector(".thinkblock");'
+    + ' const cuerpo = razon && razon.querySelector(".think-body") ? razon.querySelector(".think-body").textContent : "";'
+    + ' const salida = el.querySelector(".bubble").textContent || "";'
+    + ' const todo = { guardadas: guardadas, tarjetas: tarjetas, titulo: titulo, razon: !!razon,'
+    + '   marca: cuerpo.indexOf(' + JSON.stringify(MARCA_RAZON) + ') >= 0, plegado: !!grupo && !grupo.classList.contains("open"),'
+    + '   resp: salida.indexOf("no había tal archivo") >= 0, reloj: !!el.querySelector(".tcard-time").textContent.trim() };'
+    + ' return (todo.tarjetas === guardadas && todo.tarjetas > 0 && /herramienta/i.test(titulo) && todo.razon && todo.marca && todo.plegado && todo.resp && todo.reloj) ? true : todo;'
+    + ' })()');
+
   /* El interruptor de Ajustes manda de verdad: apagado, el siguiente turno no trae
      bloque (el agente ni lo pide), y al volver a encenderlo vuelve a aparecer. Se deja
      ENCENDIDO al terminar: el ajuste persiste en la configuración de la prueba. */

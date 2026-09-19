@@ -1,3 +1,67 @@
+# SAGITARI 3.3.2
+
+**El actualizador, esta vez con la causa medida.** La explicación que dio la 3.3.1 («Windows
+mata todo el árbol de procesos de la app») era **incorrecta**, y por eso el fallo seguía
+ahí. Medido con un Electron de verdad, lanzando el mismo asistente de cuatro formas:
+`powershell.exe` **directo** arranca y **muere con la app** (es el diario que veíais:
+«asistente iniciado» y nada más); `powershell.exe` **desligado ni arranca**; y en cambio un
+**`cmd.exe` que lo sostiene, desligado, sobrevive**. Eso es ahora el lanzamiento, y es la
+diferencia entre cerrar la app y que la versión nueva esté al abrirla. Además, la prueba de
+regresión anterior **no podía detectar este fallo** (usaba un Node como padre, y ahí el
+diseño roto también pasa): ahora usa un Electron real y ejecuta un control con el diseño
+que falló, exigiendo que NO instale — un test que no puede fallar por lo que dice guardar
+no guarda nada. / **The updater, this time with the cause measured.** The explanation given
+in 3.3.1 (“Windows kills the whole process tree of the app”) was **wrong**, which is why
+the bug was still there. Measured with a real Electron, launching the same helper in four
+ways: a **direct** `powershell.exe` starts and **dies with the app** (that is the log you
+saw: “asistente iniciado” and nothing else); a **detached** `powershell.exe` does not even
+start; while a **`cmd.exe` holding it, detached, survives**. That is the launch now, and it
+is the difference between the app closing and the new version being there when you open
+it. On top of that, the previous regression test **could not detect this bug** (it used a
+Node process as the parent, and the broken design passes there too): it now uses a real
+Electron and runs a control with the design that failed, requiring it to NOT install — a
+test that cannot fail for what it claims to guard guards nothing.
+
+**Si tienes instalada la 3.3.0 o anterior, necesitas instalarla UNA vez a mano** (descarga
+el Setup y ejecútalo): esas versiones lanzaban el asistente de la forma que fallaba y no
+pueden repararse a sí mismas —ese es justo el fallo—. A partir de ahí, las siguientes se
+instalan solas. / **If you have 3.3.0 or older installed, you need to install it ONCE by
+hand** (download the Setup and run it): those versions launched the helper the failing way
+and cannot repair themselves — that is the very bug. From then on, later versions install
+themselves.
+
+**El chat recuerda su trabajo.** Al cerrar la app y volver a abrirla, el hilo repintaba
+solo las burbujas de texto: las tarjetas de herramienta, el razonamiento y sus tiempos
+desaparecían de la vista, y una respuesta se quedaba sin saber cómo se había llegado a
+ella. Ahora el turno se guarda ENTERO —herramientas con sus argumentos, resultado y
+duración, el razonamiento y su resumen— y al reabrir la conversación se reconstruye el
+mismo bloque plegable, con su recuento y sus fallos. Lo que no llegó a terminar se dice
+tal cual, en vez de pintarle un check verde que nunca ocurrió. / **The chat remembers its
+work.** On closing and reopening the app, the thread only repainted the text bubbles: the
+tool cards, the reasoning and their timings vanished, leaving an answer with no trace of
+how it was reached. The turn is now stored WHOLE — tools with their arguments, result and
+duration, plus the reasoning and its summary — and reopening the conversation rebuilds the
+same collapsible block, with its count and its failures. Whatever did not finish is said
+as such, instead of being given a green check that never happened.
+
+**Respuestas que se entienden.** El agente tenía instrucciones que empujaban al telegrama
+(«respuestas breves», «minimiza explicaciones», «1-3 líneas»), y el resultado eran cosas
+como «divisor corregido de /2|9 a /7|9» o un «Revisado: sin hallazgos» a secas. Ahora el
+prompt le pide lo contrario: la respuesta final es lo único que lees de todo su trabajo,
+se escribe para quien no ha visto las herramientas, con frases enteras (nada de siglas
+inventadas para ahorrar caracteres) y en este orden: qué hizo, qué cambió con los datos
+concretos, cómo lo comprobó y qué queda pendiente. Y cuando el turno se corta —por
+estancamiento, por bucle, por límite— ya no deja un «(detenido: sin progreso)» sin
+explicación: dice qué pasó y qué puedes hacer. / **Answers you can actually read.** The
+agent had instructions pushing it towards telegraphic replies (“keep answers short”,
+“minimise explanations”, “1-3 lines”), which produced things like “divisor fixed from
+/2|9 to /7|9” or a bare “Reviewed: nothing found”. The prompt now asks for the opposite:
+the final answer is all you see of its work, it is written for someone who has not seen
+the tools, in whole sentences (no invented abbreviations to save characters), in this
+order: what it did, what changed with the concrete details, how it checked, and what is
+still pending. And when a turn cuts off — stall, loop, limit — it no longer leaves an
+unexplained “(stopped: no progress)”: it says what happened and what you can do.
+
 # SAGITARI 3.3.1
 
 **El actualizador instala de verdad.** «Cerrar e instalar» cerraba la app y no pasaba

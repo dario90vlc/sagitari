@@ -30,8 +30,21 @@ function systemPrompt() {
   return `Eres SAGITARI, un agente de IA con control total del PC con Windows del usuario. Estás integrado en un panel de control holográfico en la pantalla del usuario.
 
 IDENTIDAD
-- Personalidad: capaz, eficiente y con carisma sutil (como un mayordomo de élite). Respuestas breves y claras; nada de relleno.
+- Personalidad: capaz, eficiente y con carisma sutil (como un mayordomo de élite).
 - Idioma: responde SIEMPRE en el idioma del usuario (por defecto español).
+
+CÓMO ESCRIBES (importa tanto como lo que haces)
+- Tu respuesta final es lo ÚNICO que el usuario lee de todo tu trabajo: la lista de herramientas no cuenta la historia por ti. Escribe para alguien que no la ha visto.
+- Prohibido el telegrama y la taquigrafía. Nada de frases nominales encadenadas, ni de abreviaturas inventadas para ahorrar caracteres: «divisor corregido de /2|9 a /7|9» no informa a nadie; se escribe la cifra o el concepto COMPLETO, en una frase con sujeto y verbo. Igual con «T+28s», «px=l/7», «OK/FAIL» y demás jerga: si un dato necesita una explicación, se da.
+- Cuenta el trabajo así, sin recitar herramienta por herramienta:
+  1. Qué has hecho, en una o dos frases.
+  2. Qué encontraste o qué cambió, con los datos concretos que importan (archivos, cifras, nombres).
+  3. Cómo lo comprobaste (si lo comprobaste).
+  4. Qué queda pendiente y por qué, si queda algo.
+- Si era una pregunta, la primera frase es la respuesta; el detalle va después.
+- Si NO pudiste hacer algo, dilo en la primera frase y explica qué falta. Nunca cierres con un «sin hallazgos», un «revisado» o un OK a secas: eso no es una respuesta.
+- Un turno cortado a medias se cuenta como tal: qué alcanzaste, dónde quedó y qué harías después.
+- Longitud: la que haga falta para ser claro, y ni una más. Una tarea simple se cierra en dos frases; un trabajo con varios hallazgos, con apartados cortos y viñetas.
 
 CAPACIDADES
 - Controlas el PC: terminal, archivos, aplicaciones, navegador real (Chrome/Edge vía DevTools), portapapeles, multimedia, notificaciones y capturas de pantalla.
@@ -46,7 +59,7 @@ UNDERSTAND → PLAN → EXECUTE → OBSERVE → VERIFY → (RECOVER) → DONE
 - OBSERVE: tras cada herramienta, evalúa el resultado real antes del siguiente paso.
 - VERIFY: antes de dar la tarea por terminada, COMPRUEBA que el objetivo se consiguió de verdad (lee el archivo creado, verifica la salida del comando, revisa el estado de la página…). NO des por hecho el éxito solo porque una herramienta devolvió OK.
 - RECOVER: si la verificación falla, corrige el problema y reintenta con otro enfoque antes de rendirte; si no puedes completarlo, explica exactamente qué falta.
-- DONE: resume en 1-3 líneas qué hiciste, el resultado y cómo lo verificaste.
+- DONE: cierra con el resumen de CÓMO ESCRIBES (qué hiciste, qué cambió y cómo lo comprobaste). Corto si el trabajo fue corto, pero nunca un telegrama.
 
 REGLAS DE HERRAMIENTAS
 - Para navegar/controlar webs usa browser_control. REGLAS DE ORO:
@@ -66,13 +79,14 @@ ${skills.promptIndexSync('orchestrator')}
 
 FORMATO
 - Tus respuestas se muestran en un chat con soporte markdown ligero (negrita, listas, código). Sé claro y ordenado.
+- Con dos o más cosas que contar, usa viñetas o apartados con nombre corto; con una sola, prosa. Nada de listas de una palabra por línea.
 - NADA de emojis ni caritas en el texto (tampoco en títulos ni listas): tono profesional y sobrio. La interfaz ya pone sus propios iconos, así que el adorno sobra.`;
 }
 
 const MODE_PROFILES = {
   think: { temperature: 0.7, maxSteps: 20, planFirst: false, note: 'Piensas antes de actuar: razona paso a paso en tu respuesta final, explora alternativas, sé meticuloso.' },
   plan:  { temperature: 0.35, maxSteps: 20, planFirst: true,  note: 'PRIMERO presenta un PLAN numerado breve (3-6 pasos) y luego ejecútalo con herramientas, paso a paso.' },
-  act:   { temperature: 0.25, maxSteps: 12, planFirst: false, note: 'Actúa directo y eficiente: minimiza explicaciones, ejecuta y reporta el resultado.' }
+  act:   { temperature: 0.25, maxSteps: 12, planFirst: false, note: 'Actúa directo y eficiente: no anuncies cada paso, ejecuta y reporta. El informe final se escribe igual de completo (ver CÓMO ESCRIBES).' }
 };
 
 /* ---------- integridad del historial ---------- */
@@ -620,7 +634,7 @@ class Agent {
         if (p.account) {
           runlog.log({ agent: 'sagitari', task: taskId, event: 'guardrail_stop', reason: stepCheck.reason });
           if (task && !task.closed) { checkpoints.interrupt(task); task.closed = true; }
-          this._pushAssistant(assistantSaidSomething ? { role: 'assistant', content: '(detenido por límite de seguridad)' } : null);
+          this._pushAssistant(assistantSaidSomething ? { role: 'assistant', content: 'Me he detenido al llegar al límite de seguridad de este turno (' + stepCheck.reason + '). Lo que alcancé a hacer está en las herramientas de arriba; dime si lo retomo o si prefieres otro enfoque.' } : null);
           return;
         }
         break;   // subagente: corta y entrega lo que tenga
@@ -639,7 +653,7 @@ class Agent {
             // la ejecución abandona el run: ninguna vuelta posterior debe reutilizarlo
             task.closed = true;
           }
-          this._pushAssistant(assistantSaidSomething ? { role: 'assistant', content: '(detenido por el usuario)' } : null);
+          this._pushAssistant(assistantSaidSomething ? { role: 'assistant', content: 'Detenido a tu petición. Lo que ya estaba hecho queda en las herramientas de arriba.' } : null);
           this.emit({ type: 'stopped' });
           return;
         }
@@ -689,7 +703,7 @@ class Agent {
           this.emit({ type: 'guardrail', reason: tok.reason });
           if (p.account) {
             if (task && !task.closed) { checkpoints.interrupt(task); task.closed = true; }
-            this._pushAssistant(assistantSaidSomething ? { role: 'assistant', content: '(detenido por límite de tokens)' } : null);
+            this._pushAssistant(assistantSaidSomething ? { role: 'assistant', content: 'Me he detenido al agotar el límite de tokens del turno (' + tok.reason + '). Puedes subir el límite en Ajustes ▸ Guardarraíles, o pedirme que continúe desde aquí.' } : null);
             return;
           }
           break;
@@ -723,7 +737,7 @@ class Agent {
         if (p.account) {
           runlog.log({ agent: 'sagitari', task: taskId, event: 'stall_detected' });
           if (task && !task.closed) { checkpoints.interrupt(task); task.closed = true; }
-          this._pushAssistant(assistantSaidSomething ? { role: 'assistant', content: '(detenido: sin progreso)' } : null);
+          this._pushAssistant(assistantSaidSomething ? { role: 'assistant', content: 'Me he detenido porque llevaba varios pasos sin avanzar de verdad —repitiendo lo mismo sin que cambiara nada— y he preferido cortar antes de gastar el turno en el mismo bucle. Dime si lo retomo por otro camino y sigo desde aquí.' } : null);
           return;
         }
         break;
@@ -818,7 +832,7 @@ class Agent {
             if (p.account) {
               runlog.log({ agent: 'sagitari', task: taskId, event: 'loop_detected', tool: tc.function.name, pattern: r.pattern });
               if (task && !task.closed) { checkpoints.interrupt(task); task.closed = true; }
-              this._pushAssistant(assistantSaidSomething ? { role: 'assistant', content: '(detenido: bucle detectado)' } : null);
+              this._pushAssistant(assistantSaidSomething ? { role: 'assistant', content: 'Me he detenido porque he detectado que repetía la misma acción en bucle (' + (r.pattern || 'acción repetida') + ') sin avanzar. Lo hecho hasta aquí queda arriba; dime si lo retomo con otro enfoque.' } : null);
               return;
             }
             break;
@@ -1627,18 +1641,18 @@ const REVIEW_GATE_PROMPT = `ANTES DE CERRAR: has modificado archivos en este tur
 1. BLOQUEANTE: arréglalo con herramientas ahora y vuelve a comprobar. No lo dejes escrito y sin arreglar.
 2. RIESGO: decide — arréglalo, o explica en una línea por qué se queda así.
 3. SUGERENCIA: no obliga; ignóralas si no aportan.
-4. No repitas la respuesta que ya diste (el usuario ya la tiene). Añade solo lo que cambia: una línea por hallazgo atendido, o «Revisado: sin hallazgos» si venía OK.`;
+4. No repitas lo que ya dijiste; añade lo que cambia, con una frase por hallazgo: qué era, qué hiciste y cómo quedó. Si no había nada que arreglar, dilo con una frase entera («Lo he revisado y no hay nada que cambiar») — nunca respondas solo «sin hallazgos».`;
 
 /** Instrucción del ciclo automático: la comprobación del proyecto ha fallado de verdad. */
 const CIERRE_FALLO_PROMPT = (etiqueta) => `ANTES DE CERRAR: has modificado archivos y «${etiqueta}» del proyecto ha FALLADO con lo que hay ahora en disco. La salida real va abajo.
 1. Arréglalo con herramientas: el que no pasa es el código, no la comprobación. Nada de tocar la comprobación para que pase.
 2. Vuelve a ejecutarla y mira la salida; si ya no puedes (falta algo del entorno), dilo tal cual.
-3. NO repitas la respuesta que ya diste. Termina con una sola línea: «Verificado: <qué ejecutaste y qué salió>».`;
+3. NO repitas lo que ya dijiste. Cierra con una frase entera de cierre: «Lo he verificado: <qué ejecutaste y qué salió>».`;
 
 const VERIFY_GATE_PROMPT = `ANTES DE CERRAR: has modificado archivos o ejecutado cambios en este turno y no hay ninguna comprobación posterior al último cambio. No cierres a ciegas.
 1. Comprueba de verdad el resultado con herramientas: vuelve a leer lo escrito, ejecuta lo que creaste o modifica y mira la salida, o delega en verification con un criterio de éxito verificable (delegate con agent=verification y expect).
 2. Si algo no cuadra, arréglalo antes de cerrar.
-3. NO repitas la respuesta que ya diste (el usuario ya la tiene). Termina con una sola línea: «Verificado: <qué comprobaste y qué salió>». Si no pudiste comprobar algo, dilo en esa misma línea.`;
+3. NO repitas lo que ya dijiste. Cierra con una frase entera: «Lo he comprobado: <qué comprobaste y qué salió>». Si algo no pudiste comprobarlo, dilo también, en esa misma frase.`;
 
 function statusFor(name, args) {
   if (String(name).startsWith('mcp__')) return 'MCP · ' + (args._mcp ? args._mcp.toolName : name.slice(5));

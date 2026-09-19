@@ -444,6 +444,71 @@ function registrarFallo(kind, err) {
 process.on('uncaughtException', (err) => registrarFallo('uncaughtException', err));
 process.on('unhandledRejection', (reason) => registrarFallo('unhandledRejection', reason));
 
+/* ---- rastro del turno: lo que el usuario ve en las tarjetas ----
+   Las tarjetas de herramienta, el razonamiento y sus tiempos NO se guardaban en la
+   conversación: al cerrar la app y volver a abrirla, el hilo repintaba solo las burbujas
+   de texto y todo el trabajo del turno desaparecía de la vista (el usuario lo notó: «las
+   herramientas que usó ya no se muestran»). Aquí se acumula un rastro COMPACTO —nombre,
+   argumentos acotados, resultado acotado, duración y si falló— y se cuelga del mensaje del
+   asistente al cerrar el turno, que es justo lo que el chat necesita para repintarlo.
+
+   Se acota a propósito: `conversations.json` se lee ENTERO al arrancar la app, así que el
+   rastro no puede crecer sin freno (el argumento de un write_file es un archivo completo,
+   y un resultado de run_command puede traer miles de líneas). */
+const MAX_TRAZA = 80;              // herramientas por turno que se conservan
+const clipTraza = (s, n) => {
+  const t = String(s == null ? '' : s);
+  return t.length > n ? t.slice(0, n) + '\n… (recortado: ' + (t.length - n) + ' caracteres más)' : t;
+};
+function argsTraza(args) {
+  if (!args || typeof args !== 'object') return {};
+  const out = {};
+  for (const [k, v] of Object.entries(args)) {
+    if (typeof v !== 'string') { out[k] = v; continue; }
+    // una imagen en base64 o el contenido entero de un archivo no pintan nada en una
+    // tarjeta y multiplicarían el tamaño del historial guardado
+    out[k] = /^data:[\w/+.-]+;base64,/.test(v) ? '(imagen adjunta, no guardada)' : clipTraza(v, 1200);
+  }
+  return out;
+}
+let turnTrace = null;
+function trazaNueva() { turnTrace = { tools: [], think: null }; }
+function trazaApunta(e) {
+  if (!turnTrace) return;
+  if (e.type === 'tool') {
+    if (turnTrace.tools.length < MAX_TRAZA) {
+      turnTrace.tools.push({ name: e.name, args: argsTraza(e.args), subagent: e.subagent || null });
+    }
+    return;
+  }
+  if (e.type === 'tool_result') {
+    // cierra la ÚLTIMA llamada de ese nombre que siga abierta: dos llamadas a la misma
+    // herramienta en un turno tienen que cerrarse en orden, no todas a la vez
+    for (let i = turnTrace.tools.length - 1; i >= 0; i--) {
+      const t = turnTrace.tools[i];
+      if (t.name === e.name && t.ok === undefined) {
+        t.ok = (e.ok === undefined || e.ok === null) ? null : !!e.ok;
+        t.ms = Number(e.durationMs) || 0;
+        t.result = clipTraza(e.result, 1200);
+        return;
+      }
+    }
+    return;
+  }
+  if (e.type === 'delegate_done') {
+    if (turnTrace.tools.length < MAX_TRAZA) {
+      turnTrace.tools.push({
+        delegate: String(e.subagent || ''), status: String(e.status || 'OK'),
+        ms: Number(e.durationMs) || 0, result: clipTraza(e.result, 900),
+      });
+    }
+    return;
+  }
+  if (e.type === 'thinking_done') {
+    turnTrace.think = { text: clipTraza(e.text, 4000), ms: Number(e.durationMs) || 0 };
+  }
+}
+
 function agentEmit(e, isBackground) {
   // v1.3: los eventos de tareas en background se marcan para que el renderer NO
   // los mezcle con el chat interactivo (burbujas, estado busy, etc.).
@@ -451,13 +516,19 @@ function agentEmit(e, isBackground) {
   if (win && !win.isDestroyed()) win.webContents.send('agent:event', out);
   if (e.type === 'tool') glow('work', 'work');
   // solo el chat interactivo escribe en la conversación actual
-  if (!isBackground && e.type === 'assistant_done') {
-    glow('think');
-    const c = currentConv();
-    if (c && e.text) {
-      c.messages.push({ role: 'assistant', content: e.text, ts: Date.now() });
-      c.updatedAt = Date.now();
-      saveConvs();
+  if (!isBackground) {
+    trazaApunta(e);
+    if (e.type === 'assistant_done') {
+      glow('think');
+      const c = currentConv();
+      if (c && e.text) {
+        const conTraza = (turnTrace && (turnTrace.tools.length || (turnTrace.think && turnTrace.think.text))) ? turnTrace : null;
+        c.messages.push({ role: 'assistant', content: e.text, ts: Date.now(), ...(conTraza ? { trace: conTraza } : {}) });
+        c.updatedAt = Date.now();
+        saveConvs();
+      }
+      // el turno se cierra: el rastro siguiente es de otro turno
+      turnTrace = null;
     }
   }
 }
@@ -840,6 +911,7 @@ ipcMain.handle('chat:send', async (e, { text, imageDataUrl, attachments }) => {
       if (win && !win.isDestroyed()) win.webContents.send('agent:event', { type: 'status', text: `Skill ${s.name} aplicada` });
     }
   }
+  trazaNueva();   // el rastro del turno anterior ya está guardado con su mensaje
   if (c.messages.length === 0) c.title = body.slice(0, 48);
   // el modo queda grabado con la pregunta: en el chat se ve con qué modo se
   // pidió cada cosa (ACT ejecuta, PLAN planifica, THINK razona)
@@ -864,6 +936,7 @@ ipcMain.handle('chat:retry', async () => {
   if (!agent) return { ok: false, error: 'sin agente' };
   // regenerar durante un turno en curso lo pisaría: exigimos que esté libre
   if (agent.isBusy()) return { ok: false, error: 'hay un turno en curso; deténlo antes de regenerar' };
+  trazaNueva();   // regenerar es un turno nuevo: su rastro se guarda con su respuesta
   const c = currentConv();
   // quita la última respuesta del historial guardado (y solo esa). Se busca
   // DESPUÉS del último mensaje del usuario: un turno que falló no llega a
@@ -1921,31 +1994,30 @@ async function lanzarInstalador(d) {
   try { await fsp.rm(logPath, { force: true }); } catch {}
   let hijo;
   try {
-    hijo = spawn(plan.file, plan.args, { stdio: 'ignore', windowsHide: true });
+    hijo = spawn(plan.file, plan.args, plan.spawnOpts);
+    // desligado y sin referencia: el ayudante tiene que seguir ahí cuando la app ya
+    // no esté (es justo lo que fallaba), y a Node no le toca esperarlo
+    try { hijo.unref(); } catch {}
   } catch (e) {
     return { ok: false, error: 'no se pudo preparar el instalador: ' + e.message };
   }
   hijo.on('error', () => {});
   /* LA comprobación que importa, y ANTES de cerrar la app: se espera a que el
-     ASISTENTE (etapa 2, el que vive fuera del árbol de la app) escriba su primera
-     línea en el diario.
+     ASISTENTE escriba su primera línea en el diario.
 
      No se comprueba «¿sigue vivo el proceso que lancé?», y esa es justo la lección
-     de este fallo: todo lo que la app lanza muere con ella, así que un lanzador
-     «vivo» no prueba nada —el asistente anterior escribía su primera línea, moría
-     con la app y el diario se quedaba ahí para siempre, con el usuario mirando una
-     ventana cerrada y nada instalado—. Lo que prueba algo es el rastro de la etapa
-     que SÍ está fuera.
+     de este fallo: el ayudante estaba vivo, escribía su primera línea… y moría con la
+     app, dejando el diario cortado para siempre y al usuario con la ventana cerrada y
+     nada instalado. «Vivo» no prueba nada; lo que prueba algo es su rastro, y además
+     que ese rastro llegue con la app todavía en marcha y el proceso ya desligado.
 
-     El presupuesto es amplio a propósito: el puente carga los módulos CIM de
-     PowerShell en frío antes de poder crear nada. */
+     El presupuesto es amplio a propósito: PowerShell en frío tarda en arrancar. */
   const arrancado = await new Promise((resolve) => {
     const t0 = Date.now();
     const mirar = async () => {
       try {
         const t = await fsp.readFile(logPath, 'utf8');
         if (t.includes('asistente iniciado')) return resolve(true);
-        if (/puente: (WMI devolvio|no pude crear)/.test(t)) return resolve(false);
       } catch {}
       if (Date.now() - t0 >= 30000) return resolve(false);
       setTimeout(mirar, 200);
@@ -1953,10 +2025,7 @@ async function lanzarInstalador(d) {
     setTimeout(mirar, 150);
   });
   if (!arrancado) {
-    const diario = await fsp.readFile(logPath, 'utf8').catch(() => '');
-    const reason = diario.includes('puente:')
-      ? 'el sistema no dejó crear el asistente fuera de la app (' + diario.split('puente:').pop().trim().slice(0, 160) + ')'
-      : 'el asistente no llegó a arrancar (sin PowerShell o bloqueado por política)';
+    const reason = 'el asistente no llegó a arrancar (sin PowerShell o bloqueado por política)';
     runlog.log({ agent: 'sagitari', event: 'update_install_failed', version: d.version, reason });
     savePending({ version: d.version, path: d.path, expected: d.expected || null, at: new Date().toISOString() });
     const pendiente2 = pendingInfo();
