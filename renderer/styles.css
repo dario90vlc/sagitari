@@ -258,6 +258,10 @@ body.nofocus .glow, body.nofocus .glow::before, body.nofocus .glowRing { animati
 /* ============ Sidebar ============ */
 .side { display: flex; flex-direction: column; padding-top: 46px; border-right: 1px solid var(--line2); background: rgba(var(--field-rgb), 0.35); }
 .brand { display: flex; align-items: center; gap: 9px; padding: 2px 13px 12px; }
+/* Logo completo del rebranding (marca + SAGITARI en una sola imagen ancha):
+   se encoge antes que empujar al botón de compactar fuera del sidebar. */
+.brandlogo { display: flex; flex: 1 1 auto; min-width: 0; }
+.brandlogo img { width: 100%; max-width: 196px; height: auto; -webkit-user-drag: none; filter: drop-shadow(0 0 10px rgba(var(--acc2-rgb), 0.28)); }
 .brandmark { width: 38px; height: 38px; display: grid; place-items: center; flex-shrink: 0; }
 .brandmark img { width: 34px; height: 34px; object-fit: contain; -webkit-user-drag: none; filter: drop-shadow(0 0 9px rgba(var(--acc2-rgb), 0.5)); }
 @keyframes spin { to { transform: rotate(360deg); } }
@@ -421,6 +425,8 @@ body.nofocus .glow, body.nofocus .glow::before, body.nofocus .glowRing { animati
 .app.compact .nav { padding-left: 9px; padding-right: 9px; }
 .app.compact .brand { flex-direction: column; gap: 7px; padding: 2px 0 10px; }
 .app.compact .brandcol { display: none; }
+/* el logo completo no cabe en 78px: en compacto se oculta (antes se quedaba la marca) */
+.app.compact .brandlogo { display: none; }
 .app.compact .sidecollapse { margin: 0; }
 .app.compact .navgroup::before { display: none; }
 .app.compact .navgroup + .navgroup { padding-top: 9px; }

@@ -4676,7 +4676,7 @@ test('voz/fluidez: la respuesta se lee por frases MIENTRAS se escribe', () => {
   const main = fs.readFileSync(path.join(__dirname, '..', 'main', 'main.js'), 'utf8');
   const html = fs.readFileSync(path.join(__dirname, '..', 'renderer', 'index.html'), 'utf8');
   ok(/SagiFrases/.test(app) && /frases\.js/.test(html), 'el troceado probado es el que usa la página');
-  ok(/hablarEnFlujo\(b\._stream, false\)/.test(app), 'cada trozo del stream entra en la voz en cuanto tiene frase');
+  ok(/hablarEnFlujo\(\(b\._frozenText \|\| ''\) \+ \(b\._openText \|\| ''\), false\)/.test(app), 'cada trozo del stream entra en la voz en cuanto tiene frase (con los tramos ya congelados incluidos)');
   ok(/hablarEnFlujo\(leidoHastaAqui, true\)/.test(app), 'al cerrar el turno solo va la cola, no se repite lo ya leído');
   ok(/encolar: lecturaSuena/.test(app), 'la primera frase corta la lectura anterior y las siguientes se encolan');
   ok(/if \(!\(opts && opts\.encolar\)\) voz\.stopSpeaking\(\)/.test(main), 'el proceso principal encola sin cortar lo que suena');
@@ -5473,7 +5473,7 @@ test('renderer: el tablero del equipo pinta las delegaciones en vivo', () => {
     ok(m, 'existe ' + nombre + '()');
     return m[0];
   };
-  ok(/case 'delegate_start':\s*\r?\n\s*equipoChip\(ev\);/.test(app), 'el arranque de la delegación abre su fila');
+  ok(/case 'delegate_start':\s*\r?\n\s*freezeStream\(\);[^\r\n]*\r?\n\s*equipoChip\(ev\);/.test(app), 'el arranque de la delegación abre su fila (congelando antes la narración para intercalarla)');
   ok(/equipoCierra\(ev\);/.test(app), 'y el cierre la resuelve');
   const chip = fnDe('equipoChip');
   ok(/toolchip run/.test(chip) && /pulse-dot/.test(chip), 'la fila nace en marcha (punto pulsante)');
@@ -5484,6 +5484,16 @@ test('renderer: el tablero del equipo pinta las delegaciones en vivo', () => {
   ok(/pendingTurn\.team/.test(limpieza), 'un turno interrumpido no deja el tablero «en marcha» para siempre');
   ok(/etiquetaEquipo/.test(app) && /pasoVoz\(\{ name: 'delegate'/.test(app), 'y la franja del modo voz cuenta la delegación con su subtarea');
   ok(/\.tgroup\.team/.test(css), 'el tablero tiene su estilo');
+});
+
+test('renderer: la narración se intercala con las herramientas y sobrevive al cierre', () => {
+  const app = fs.readFileSync(path.join(__dirname, '..', 'renderer', 'app.js'), 'utf8');
+  ok(/function freezeStream\(\)/.test(app), 'existe la congelación de tramos de narración');
+  ok(/case 'tool':\s*\r?\n\s*freezeStream\(\);[^\r\n]*\r?\n\s*toolCard\(ev\);/.test(app), 'cada herramienta congela antes la narración: queda encima de su tarjeta');
+  ok(/className = 'stream-done'/.test(app), 'el tramo congelado es estático (sin caret de "sigue escribiendo")');
+  ok(/solo[\s\S]*?se añade el cierre si aporta algo nuevo/.test(app), 'al cerrar no se borra la narración para pintar solo el último párrafo');
+  ok(/pendingTurn\.mode === 'plan' && pendingTurn\.plan/.test(app), 'en modo PLAN con tarjeta no se congela (el plan ya vive ahí)');
+  ok(/con la ventana oculta Chromium no dispara/.test(app), 'y el tramo abierto se asegura en pantalla al cerrar (sin fiarse del frame)');
 });
 
 test('renderer: el razonamiento va en su bloque, fuera de la respuesta y de la voz', () => {
@@ -5563,7 +5573,9 @@ test('conversación: el turno guarda su rastro (herramientas y razonamiento), no
   const main = fs.readFileSync(path.join(__dirname, '..', 'main', 'main.js'), 'utf8');
   ok(/function trazaApunta/.test(main) && /trazaApunta\(e\)/.test(main), 'el rastro se acumula con los eventos del turno');
   ok(/turnTrace\.tools\.push/.test(main) && /turnTrace\.think =/.test(main), 'guarda herramientas y razonamiento');
-  ok(/content: e\.text, ts: Date\.now\(\), \.\.\.\(conTraza \? \{ trace: conTraza \} : \{\}\)/.test(main),
+  ok(/const completo = \(e\.transcript && e\.transcript\.length > e\.text\.length\) \? e\.transcript : e\.text;/.test(main),
+    'y se guarda la narración COMPLETA del turno, no solo el párrafo final');
+  ok(/content: completo, ts: Date\.now\(\), \.\.\.\(conTraza \? \{ trace: conTraza \} : \{\}\)/.test(main),
     'y viaja CON el mensaje del asistente al guardarlo');
   ok(/trazaNueva\(\);/.test(main), 'cada turno estrena rastro (el anterior ya está guardado)');
   ok(/function tool_result/.test(main) === false && /e\.type === 'tool_result'/.test(main), 'cierra cada herramienta con su resultado');
@@ -6690,6 +6702,18 @@ test('agent: las llamadas de un mismo mensaje se solapan hasta el tope', async (
   const out2 = await tope._runToolCalls(calls, { signal: noSignal(), settings: {} }, 1);
   eq(n, 1, 'con el tope agotado no se lanza ninguna más');
   ok(out2.slice(1).every((o) => o === null), 'las no lanzadas quedan como null para que el bucle las cierre');
+});
+
+test('agent: la transcripción del turno se recorta por el medio, nunca por el final', () => {
+  const { recortarTranscripcion, MAX_TRANSCRIPT } = require('../agent/agent');
+  eq(recortarTranscripcion('hola'), 'hola', 'lo corto pasa intacto');
+  eq(recortarTranscripcion(''), '');
+  const largo = 'A'.repeat(5000) + 'B'.repeat(5000) + 'C'.repeat(6000);
+  const r = recortarTranscripcion(largo);
+  ok(r.length < largo.length && r.length <= MAX_TRANSCRIPT + 200, 'cabe en el tope');
+  ok(r.startsWith('A'.repeat(100)), 'el principio se conserva (qué se pidió)');
+  ok(r.endsWith('C'.repeat(100)), 'el final se conserva (qué quedó)');
+  ok(r.includes('omite'), 'y dice que omitió el medio');
 });
 
 test('agent: Detener mata TODAS las herramientas en vuelo, no solo la última', async () => {

@@ -523,7 +523,10 @@ function agentEmit(e, isBackground) {
       const c = currentConv();
       if (c && e.text) {
         const conTraza = (turnTrace && (turnTrace.tools.length || (turnTrace.think && turnTrace.think.text))) ? turnTrace : null;
-        c.messages.push({ role: 'assistant', content: e.text, ts: Date.now(), ...(conTraza ? { trace: conTraza } : {}) });
+        // Se guarda la narración COMPLETA del turno, no solo el párrafo final:
+        // reabrir la conversación enseña lo mismo que se vio en vivo.
+        const completo = (e.transcript && e.transcript.length > e.text.length) ? e.transcript : e.text;
+        c.messages.push({ role: 'assistant', content: completo, ts: Date.now(), ...(conTraza ? { trace: conTraza } : {}) });
         c.updatedAt = Date.now();
         saveConvs();
       }

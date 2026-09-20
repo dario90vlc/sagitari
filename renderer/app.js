@@ -1227,11 +1227,43 @@ function finishAssistant(finalText, opts) {
     cerrarRazonamiento();
     cerrarHerramientas();
   }
-  const stream = holder.querySelector('.stream');
+  const stream = holder._openEl && holder._openEl.isConnected ? holder._openEl : holder.querySelector('.stream');
   // texto ya streameado: al Detener (o si la ejecución falla) NO se tira, se conserva
   const acc = holder._stream || '';
-  if (stream) stream.remove();
-  const keptText = finalText ? '' : (o.interrupted ? acc : '');
+  // Narración visible del turno: tramos congelados entre herramientas + tramo abierto.
+  // Antes aquí solo sobrevivía el párrafo final y la respuesta larga "se volvía corta".
+  const shown = ((holder._frozenText || '') + '\n\n' + (holder._openText || '')).trim();
+  const fin = String(finalText || '').trim();
+  const runMode0 = (pendingTurn && pendingTurn.mode) || mode;
+  const planConTarjeta = runMode0 === 'plan' && !!((pendingTurn && pendingTurn.plan));
+  // lo que se ofrece para copiar/leer: la historia completa, no solo el cierre
+  const narrativa = planConTarjeta ? finalText
+    : ((shown && fin && !shown.endsWith(fin)) ? shown + '\n\n' + finalText : (shown || finalText));
+  if (planConTarjeta) {
+    if (stream) stream.remove();
+  } else if (stream) {
+    // el tramo abierto se queda donde nació (intercalado con las herramientas);
+    // solo se retira si llegó vacío (congelado antes del primer frame)
+    if (holder._openText) {
+      stream.className = 'stream-done';
+      /* …y se asegura en pantalla: con la ventana oculta Chromium no dispara
+         requestAnimationFrame y el tramo abierto llegaría vacío (los congelados
+         sí están, que se pintan en el evento). Sin esto, en oculto la respuesta
+         quedaba sin su último tramo. */
+      if (!(stream.textContent || '').trim()) stream.innerHTML = fmt(holder._openText);
+    }
+    else stream.remove();
+  } else if (!planConTarjeta && holder._openText) {
+    // Sin elemento porque ningún frame llegó a crearlo (ventana oculta): el
+    // tramo abierto se pinta entero de una vez, en su sitio (al final).
+    const s = document.createElement('div');
+    s.className = 'stream-done';
+    s.innerHTML = fmt(holder._openText);
+    holder.appendChild(s);
+  }
+  holder._openEl = null;
+  const keptText = finalText ? '' : (o.interrupted ? (planConTarjeta ? acc : shown) : '');
+  if (finalText && planConTarjeta) {
   if (finalText) {
     const runMode = (pendingTurn && pendingTurn.mode) || mode;
     const parsed = K.parsePlan(finalText);
@@ -1255,6 +1287,16 @@ function finishAssistant(finalText, opts) {
     if (text) {
       const div = document.createElement('div');
       div.innerHTML = fmt(text);
+      holder.appendChild(div);
+    }
+  }
+  } else if (finalText) {
+    // La narración ya está en su sitio (tramos congelados + tramo abierto): solo
+    // se añade el cierre si aporta algo nuevo. Antes se borraba todo y se
+    // pintaba solo este párrafo, y la respuesta larga "se volvía corta".
+    if (fin && !(shown && shown.endsWith(fin))) {
+      const div = document.createElement('div');
+      div.innerHTML = fmt(finalText);
       holder.appendChild(div);
     }
   } else if (keptText) {
@@ -1287,7 +1329,7 @@ function finishAssistant(finalText, opts) {
     lastTurnSummary = 'respuesta entregada';
   }
   // el pie ofrece copiar/leer también lo que quedó a medias
-  const said = finalText || keptText;
+  const said = narrativa || keptText;
   if (said) msgActions(holder.closest('.msg-body') || holder, said, { speak: true });
   lastAssistantEl = holder;
   refreshMsgActions();
@@ -1553,14 +1595,42 @@ function scheduleStreamRender(holder) {
     const h = streamTarget;
     streamTarget = null;
     if (!h || !h.isConnected) return;
-    const old = h.querySelector('.stream');
-    if (old) old.remove();
-    const s = document.createElement('div');
-    s.className = 'stream';
-    s.innerHTML = fmt(h._stream);
-    h.appendChild(s);
+    if (!h._openText) return;   // se congeló antes del frame: no se repinta nada
+    /* El segmento abierto se repinta EN SU SITIO (no se borra y re-anexa al
+       final como antes): así cada tramo de narración queda donde nació, entre
+       las tarjetas de herramientas que lo rodean, en orden cronológico. */
+    let s = h._openEl && h._openEl.isConnected ? h._openEl : null;
+    if (!s) {
+      s = document.createElement('div');
+      s.className = 'stream';
+      h.appendChild(s);
+      h._openEl = s;
+    }
+    s.innerHTML = fmt(h._openText);
     scroll();
   });
+}
+
+/* Congela el tramo de narración en curso: pasa a bloque estático y el texto
+   siguiente nacerá en un bloque nuevo DESPUÉS de la tarjeta que llega ahora.
+   Es lo que intercala explicación y trabajo en orden cronológico. En modo PLAN
+   con tarjeta activa no se congela: el plan ya vive en su tarjeta y el texto
+   se repintaría duplicado. */
+function freezeStream() {
+  const h = pendingAssistant;
+  if (!h || !h._openText) return;
+  if (pendingTurn && pendingTurn.mode === 'plan' && pendingTurn.plan) return;
+  cancelStreamRender();
+  let s = h._openEl && h._openEl.isConnected ? h._openEl : null;
+  if (!s) {
+    s = document.createElement('div');
+    h.appendChild(s);
+  }
+  s.className = 'stream-done';
+  s.innerHTML = fmt(h._openText);
+  h._frozenText = (h._frozenText || '') + (h._frozenText ? '\n\n' : '') + h._openText;
+  h._openText = '';
+  h._openEl = null;
 }
 
 /* ---- pasos del turno, en la franja del panel de voz --------------------------------
@@ -1650,6 +1720,7 @@ window.sagitari.onAgentEvent((ev) => {
       if (ev.subagent) break;
       const b = ensureAssistantBubble();
       b._stream = (b._stream || '') + ev.text;
+      b._openText = (b._openText || '') + ev.text;
       // ya está contestando: el razonamiento se pliega (el bloque sigue ahí, para releerlo)
       cerrarRazonamiento();
       // modo PLAN: en cuanto el plan queda cerrado en el texto se pinta como
@@ -1661,12 +1732,15 @@ window.sagitari.onAgentEvent((ev) => {
           pendingTurn.plan = renderPlanCard(b, p.steps);
           pendingTurn.plan.next();
           b._stream = p.body;
+          b._openText = p.body;   // el segmento abierto enseña lo mismo que el stream
         }
       }
       scheduleStreamRender(b);
       /* Y en voz alta según se escribe (ver hablarEnFlujo): la respuesta empieza a sonar en
-         cuanto hay una frase, sin esperar a que el turno entero termine. */
-      hablarEnFlujo(b._stream, false);
+         cuanto hay una frase, sin esperar a que el turno entero termine. Se pasa la
+         narración completa (tramos congelados + abierto): los offsets de lectura son
+         absolutos y así no se repite nada al congelar. */
+      hablarEnFlujo((b._frozenText || '') + (b._openText || ''), false);
       break;
     }
     /* Razonamiento del modelo (solo llega si el usuario lo activó en Ajustes). Se pinta
@@ -1710,6 +1784,7 @@ window.sagitari.onAgentEvent((ev) => {
     }
     // cada llamada a herramienta abre su propia tarjeta con argumentos y estado
     case 'tool':
+      freezeStream();   // la narración hasta aquí queda encima de esta tarjeta
       toolCard(ev);
       setChatStatus(K.tool(ev.name).verb + (ev.subagent && K.subagent(ev.subagent) ? ' — ' + K.subagent(ev.subagent).label : '') + '…');
       feed(K.tool(ev.name).label + (ev.subagent ? ' · ' + K.subagent(ev.subagent).label : ''), 'pur');
@@ -1723,6 +1798,7 @@ window.sagitari.onAgentEvent((ev) => {
       break;
     // arranque de una delegación: se pinta en el tablero del equipo al instante
     case 'delegate_start':
+      freezeStream();   // igual que con herramientas: intercalado cronológico
       equipoChip(ev);
       pasoVoz({ name: 'delegate', subagent: ev.subagent }, undefined, etiquetaEquipo(ev));
       setChatStatus(etiquetaEquipo(ev) + ' — trabajando…');
@@ -1764,8 +1840,9 @@ window.sagitari.onAgentEvent((ev) => {
     case 'assistant_done': {
       /* El texto del STREAM es el que se ha estado leyendo por frases (y puede traer más
          que el markdown final): se guarda ANTES de cerrar la burbuja, porque
-         `finishAssistant` reemplaza el stream por el texto final y suelta la referencia. */
-      const leidoHastaAqui = (pendingAssistant && pendingAssistant._stream) || ev.text;
+         `finishAssistant` suelta la referencia. Se pasa la narración completa
+         (tramos congelados + abierto), no solo el tramo abierto. */
+      const leidoHastaAqui = ((pendingAssistant && pendingAssistant._frozenText) ? pendingAssistant._frozenText + '\n\n' : '') + ((pendingAssistant && pendingAssistant._stream) || ev.text);
       finishAssistant(ev.text);
       busy = false;
       setSendMode();

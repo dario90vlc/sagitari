@@ -140,6 +140,17 @@ function payloadMessages(history) {
   return out;
 }
 
+/* Tope de la narración guardada por turno (15k caracteres): un turno de 40
+   herramientas narra mucho y la conversación se relee entera en cada arranque.
+   Se recorta por el MEDIO (el principio dice qué se pidió, el final qué quedó),
+   nunca por el final, que es lo que el usuario relee. Lógica pura. */
+const MAX_TRANSCRIPT = 15000;
+function recortarTranscripcion(t) {
+  const s = String(t || '');
+  if (s.length <= MAX_TRANSCRIPT) return s;
+  return s.slice(0, 4000) + '\n\n[…se omite parte de la narración intermedia…]\n\n' + s.slice(-11000);
+}
+
 /* Id de confirmación irrepetible: dos tarjetas en el mismo milisegundo no deben
    poder confundirse al resolverlas desde la UI. */
 let confirmSeq = 0;
@@ -172,6 +183,7 @@ class Agent {
     this.subagents = new Set();          // subagentes en curso (varios, si van en paralelo)
     this._currentRequest = '';           // petición del usuario del turno (criterio de reserva)
     this._plegado = [];                  // intercambios antiguos plegados (resumen rodante)
+    this._transcript = [];               // narración del turno (los subagentes no pasan por el init de chat)
     this._resumen = '';
     this.toolsFired = new Map();         // name -> {count, lastAt}
     // v2.1: memoria del run para orquestar (se reinicia en cada _run)
@@ -470,6 +482,7 @@ class Agent {
     this._intentosArreglo = 0;           // v2.5: vueltas de «falló → arréglalo → repito»
     this._avisadoCtx = false;            // v2.5: aviso de contexto apretado, una vez por turno
     this._lastCmd = '';
+    this._transcript = [];               // narración del turno, ronda a ronda (va en assistant_done)
     this._skillsLoaded = new Set();
 
     // ---- checkpoint: persistir la tarea si es suficientemente larga ----
@@ -686,6 +699,11 @@ class Agent {
       const res = await this._streamWithFallback(chain, messages, signal, null, { thinking: p.showThinking });
       this.meta.llmCalls++;
       this.meta.lastLatencyMs = Date.now() - t0;
+      // Narración acumulada del turno: cada ronda del modelo cuenta su parte y
+      // la UI la enseña intercalada con las herramientas; al cerrar, el historial
+      // guarda la historia COMPLETA, no solo el párrafo final (que es lo que
+      // hacía que una respuesta larga se volviera corta al terminar el turno).
+      if (res.text && res.text.trim()) this._transcript.push(res.text);
       // cierre del bloque de razonamiento: con su texto completo y su duración (los
       // deltas ya se pintaron en vivo, esto solo lo sella)
       if (p.showThinking && res.reasoning) {
@@ -983,7 +1001,7 @@ class Agent {
           if (plan.length) this.emit({ type: 'can_undo', files: plan.slice(0, 24).map(x => x.ruta) });
         } catch {}
       }
-      this.emit({ type: 'assistant_done', text: res.text, runId: p.background ? (task && task.runId) : undefined });
+      this.emit({ type: 'assistant_done', text: res.text, transcript: this.transcriptFull(), runId: p.background ? (task && task.runId) : undefined });
       return;
     }
 
@@ -996,7 +1014,10 @@ class Agent {
     }
   }
 
-  _pushAssistant(msg) { if (msg) { this.history.push(msg); this.emit({ type: 'assistant_done', text: msg.content }); } }
+  _pushAssistant(msg) { if (msg) { this.history.push(msg); this.emit({ type: 'assistant_done', text: msg.content, transcript: this.transcriptFull() }); } }
+
+  /** Narración completa del turno para guardar y repintar (con tope). */
+  transcriptFull() { return recortarTranscripcion((this._transcript || []).join('\n\n')); }
 
   /* ============ v1.4: delegación en subagentes ============ */
 
@@ -1678,4 +1699,4 @@ function statusFor(name, args) {
   }
 }
 
-module.exports = { Agent, systemPrompt };
+module.exports = { Agent, systemPrompt, recortarTranscripcion, MAX_TRANSCRIPT };
