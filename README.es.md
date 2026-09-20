@@ -38,7 +38,7 @@ Descarga la última versión para Windows (instalador o portable, elige en la p�
 
 > **Windows SmartScreen:** los binarios no tienen firma digital actualmente, por lo que Windows puede mostrar un aviso la primera vez. Pulsa *Más información → Ejecutar de todas formas* si confías en la descarga. Comprueba el hash SHA-256 publicado en las notas de la release.
 
-> **Motores de voz:** la voz neuronal local (Piper) y el dictado local de alta precisión (Whisper) **no** van dentro del instalador —se descargan a petición desde Ajustes, en total unos 270 MB— así que la descarga sigue siendo ligera y el modo voz funciona igualmente con los motores de Windows mientras no los instales.
+> **Motores de voz:** la voz neuronal local (Piper) y el dictado local de alta precisión (Whisper) **no** van dentro del instalador —se descargan a petición desde Ajustes, en total unos 700 MB— así que la descarga sigue siendo ligera y el modo voz funciona igualmente con los motores de Windows mientras no los instales.
 
 ## Qué puede hacer
 

@@ -20,10 +20,33 @@ const path = require('path');
 const { spawn } = require('child_process');
 const { CAPACIDADES_BASE } = require('./contract');
 
-const VOZ_NOMBRE = 'Piper davefx (es-ES)';
-const VOZ_ARCHIVO = 'voz-davefx.onnx';
-const VOZ_CFG = 'voz-davefx.onnx.json';
+/* Voz oficial: sharvard-medium es-ES (femenina). La anterior (davefx-medium) se
+   retiró: su .onnx actual peta al cargarlo con nuestro binario (fail-fast
+   0xC0000409 medido, con cualquier flag), mientras sharvard sintetiza bien.
+   Misma raíz y mismo contrato que antes. */
+const VOZ_NOMBRE = 'Piper sharvard (es-ES)';
+const VOZ_ARCHIVO = 'voz-sharvard.onnx';
+const VOZ_CFG = 'voz-sharvard.onnx.json';
 const EXE_CANDIDATOS = ['piper.exe', path.join('piper', 'piper.exe')];
+
+const VOCES = [
+  { nombre: VOZ_NOMBRE, archivo: VOZ_ARCHIVO, cfg: VOZ_CFG },
+];
+
+/* Elige la voz pedida (por nombre o por id corto); por defecto, la primera
+   INSTALADA (no la primera de la tabla): pedir sharvard sin descargarla tiene
+   que sonar con davefx, no quedarse muda. */
+function elegirVoz(base, voice) {
+  const v = String(voice || '').trim().toLowerCase();
+  const inst = (e) => {
+    try { return fs.existsSync(path.join(base, e.archivo)) && fs.existsSync(path.join(base, e.cfg)); } catch { return false; }
+  };
+  if (v) {
+    const pedida = VOCES.find(e => e.nombre.toLowerCase() === v || e.nombre.toLowerCase().includes(v) || v.includes(e.archivo.replace('voz-', '').replace('.onnx', '')));
+    if (pedida && inst(pedida)) return pedida;
+  }
+  return VOCES.find(inst) || null;
+}
 
 function createTtsLocal({ spawnFn = spawn, dataDir = os.tmpdir(), rate = 0 } = {}) {
   const dir = path.join(dataDir, 'voice-engine', 'tts');
@@ -35,20 +58,17 @@ function createTtsLocal({ spawnFn = spawn, dataDir = os.tmpdir(), rate = 0 } = {
 
   /* Dónde están el binario y la voz. Se resuelve en CADA síntesis (no solo en
      start): la instalación por demanda llega a mitad de sesión y un `exe` fijado
-     al nacer quedaría null para siempre. */
-  function resolver() {
+     al nacer quedaría null para siempre. La voz la elige el ajuste (o la primera
+     instalada si la pedida no está descargada). */
+  function resolver(voice) {
     const base = carpeta();
     let exe = null;
     for (const c of EXE_CANDIDATOS) {
       const p = path.join(base, c);
       try { if (fs.existsSync(p)) { exe = p; break; } } catch {}
     }
-    let voz = null;
-    try {
-      const p = path.join(base, VOZ_ARCHIVO);
-      if (fs.existsSync(p) && fs.existsSync(path.join(base, VOZ_CFG))) voz = p;
-    } catch {}
-    return { exe, voz, dir: base };
+    const entrada = elegirVoz(base, voice);
+    return { exe, voz: entrada ? path.join(base, entrada.archivo) : null, entrada, dir: base };
   }
 
   function estado() {
@@ -59,7 +79,8 @@ function createTtsLocal({ spawnFn = spawn, dataDir = os.tmpdir(), rate = 0 } = {
   function sintetizar(texto, { voice = '', lang = 'es-ES', rate: r } = {}) {
     return new Promise((resolve) => {
       const t0 = Date.now();
-      const { exe, voz } = resolver();
+      const { exe, voz, entrada } = resolver(voice);
+      const nombreVoz = (entrada && entrada.nombre) || VOZ_NOMBRE;
       if (!exe || !voz) {
         resolve({ wav: null, voz: '', ms: 0, natural: true, error: 'voz local no instalada' });
         return;
@@ -70,22 +91,29 @@ function createTtsLocal({ spawnFn = spawn, dataDir = os.tmpdir(), rate = 0 } = {
       const tmpWav = path.join(base, 'sagi-piper-' + sello + '.wav');
       const limpio = () => { try { fs.unlinkSync(tmpIn); } catch {} };
       try { fs.writeFileSync(tmpIn, String(texto || ''), 'utf8'); } catch (e) {
-        resolve({ wav: null, voz: VOZ_NOMBRE, ms: 0, natural: true, error: e.message });
+        resolve({ wav: null, voz: nombreVoz, ms: 0, natural: true, error: e.message });
         return;
       }
       /* Piper lee la frase por stdin (UTF-8) y escribe el WAV a -f. El rate de la
          app (+40..-40) mapea a length_scale 0.7..1.4 (1.0 = natural): rate alto =
-         length bajo = más rápido. Sin stdin.end() el proceso no termina. */
+         length bajo = más rápido. Sin stdin.end() el proceso no termina.
+         Expresividad barata por puntuación final (Piper no tiene estilos): la
+         pregunta respira un poco más rápido y con más variación, la exclamación
+         empuja el ritmo; la afirmación queda en natural. Sutil a propósito. */
       const tasa = r ?? rate ?? 0;
-      const length = Math.max(0.5, Math.min(2.0, 1.0 - (Number(tasa) || 0) / 100));
+      const baseLength = Math.max(0.5, Math.min(2.0, 1.0 - (Number(tasa) || 0) / 100));
+      const final = String(texto || '').trim().slice(-1);
+      let length = baseLength, noise = 0.667;
+      if (final === '?' || final === '¿') { length = baseLength * 0.97; noise = 0.75; }
+      else if (final === '!' || final === '¡') { length = baseLength * 0.92; noise = 0.8; }
       let proc;
       try {
         proc = spawnFn(exe, ['-m', voz, '-f', tmpWav, '--length_scale', String(length),
-          '--sentence_silence', '0.15', '--espeak_data',
+          '--noise_scale', String(noise), '--sentence_silence', '0.15', '--espeak_data',
           path.join(path.dirname(exe), 'espeak-ng-data')], { windowsHide: true });
       } catch (e) {
         limpio();
-        resolve({ wav: null, voz: VOZ_NOMBRE, ms: 0, natural: true, error: e.message });
+        resolve({ wav: null, voz: nombreVoz, ms: 0, natural: true, error: e.message });
         return;
       }
       let errTxt = '';
@@ -96,7 +124,7 @@ function createTtsLocal({ spawnFn = spawn, dataDir = os.tmpdir(), rate = 0 } = {
       proc.on('error', (e) => {
         clearTimeout(killTimer);
         limpio();
-        resolve({ wav: null, voz: VOZ_NOMBRE, ms: 0, natural: true, error: e.message });
+        resolve({ wav: null, voz: nombreVoz, ms: 0, natural: true, error: e.message });
       });
       try {
         proc.stdin.write(fs.readFileSync(tmpIn));
@@ -107,24 +135,26 @@ function createTtsLocal({ spawnFn = spawn, dataDir = os.tmpdir(), rate = 0 } = {
         clearTimeout(killTimer);
         limpio();
         if (code !== 0 || !fs.existsSync(tmpWav)) {
-          resolve({ wav: null, voz: VOZ_NOMBRE, ms: Date.now() - t0, natural: true, error: errTxt || 'piper salió con código ' + code });
+          resolve({ wav: null, voz: nombreVoz, ms: Date.now() - t0, natural: true, error: errTxt || 'piper salió con código ' + code });
           return;
         }
         let wav;
         try { wav = fs.readFileSync(tmpWav); } catch (e) {
           try { fs.unlinkSync(tmpWav); } catch {}
-          resolve({ wav: null, voz: VOZ_NOMBRE, ms: Date.now() - t0, natural: true, error: e.message });
+          resolve({ wav: null, voz: nombreVoz, ms: Date.now() - t0, natural: true, error: e.message });
           return;
         }
         try { fs.unlinkSync(tmpWav); } catch {}
-        resolve({ wav, voz: VOZ_NOMBRE, ms: Date.now() - t0, natural: true, error: '' });
+        resolve({ wav, voz: nombreVoz, ms: Date.now() - t0, natural: true, error: '' });
       });
     });
   }
 
   async function listarVoces() {
-    const e = estado();
-    return e.disponible ? [{ nombre: VOZ_NOMBRE, idioma: 'es-ES', natural: true }] : [];
+    const base = carpeta();
+    return VOCES.filter((e) => {
+      try { return fs.existsSync(path.join(base, e.archivo)) && fs.existsSync(path.join(base, e.cfg)); } catch { return false; }
+    }).map((e) => ({ nombre: e.nombre, idioma: 'es-ES', natural: true }));
   }
 
   function dispose() {
@@ -155,4 +185,4 @@ function usarVozLocal({ disponible = false, voice = '', fijo = false } = {}) {
   return !fijo;
 }
 
-module.exports = { createTtsLocal, VOZ_NOMBRE, usarVozLocal };
+module.exports = { createTtsLocal, VOZ_NOMBRE, VOCES, elegirVoz, usarVozLocal };

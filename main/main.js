@@ -1629,15 +1629,13 @@ ipcMain.on('voice:pcm', (e, pcm) => {
    el botón de Ajustes pinta esa marcha mientras el invoke sigue abierto. */
 let instalandoVoz = null;
 const TAM_BINARIO = 8.6 * 1024 * 1024;        // referencias para el porcentaje del binario (medido: 8,2 MB)
-/* El modelo que se instala es el SMALL cuantizado q5_1 (181 MB): es el que se midió en el
-   diseño (RTF 0,14 con voz humana, más rápido que tiempo real) y el que de verdad acierta
-   con el español. El base (148 MB) se queda como respaldo si ya estaba instalado — el
-   motor lo prefiere a él sólo cuando no hay small — porque su precisión en nombres propios
-   y frases largas era justo la queja que este motor vino a resolver. */
-const MODELO_ARCHIVO = 'ggml-small-q5_1.bin';
+/* El modelo que se instala es large-v3-turbo cuantizado q5_0 (574 MB): muy por
+   delante del small en español y aún rápido en CPU. El small/base se quedan como
+   respaldo si ya estaban instalados — el motor los usa sólo cuando no hay turbo. */
+const MODELO_ARCHIVO = 'ggml-large-v3-turbo-q5_0.bin';
 const MODELO_URL = 'https://huggingface.co/ggerganov/whisper.cpp/resolve/main/' + MODELO_ARCHIVO;
-const TAM_MODELO = 181 * 1024 * 1024;         // referencia del proyecto para el porcentaje
-const MIN_MODELO = 120 * 1024 * 1024;         // por debajo de esto la descarga está cortada
+const TAM_MODELO = 574 * 1024 * 1024;         // referencia del proyecto para el porcentaje
+const MIN_MODELO = 500 * 1024 * 1024;         // por debajo de esto la descarga está cortada
 /* La release «latest» de whisper.cpp NO adjunta binarios: los publican en tags de build
    (b5130, b5127, …). Se pregunta a la API cuál de las últimas los trae y se toma su URL
    de descarga — inmutable a que muevan o renombren tags. */
@@ -1726,7 +1724,7 @@ ipcMain.handle('voice:install', async () => {
       try { tamModelo = fs.statSync(modeloPath).size; } catch {}
       if (tamModelo < MIN_MODELO) {
         await fsPromises.unlink(modeloPath).catch(() => {});
-        throw new Error('el modelo de dictado llegó incompleto (' + Math.round(tamModelo / 1024 / 1024) + ' MB de ~181 MB): vuelve a intentarlo');
+        throw new Error('el modelo de dictado llegó incompleto (' + Math.round(tamModelo / 1024 / 1024) + ' MB de ~574 MB): vuelve a intentarlo');
       }
       // Listo: si el modo voz está abierto, el motor local toma la escucha ya.
       try {
@@ -1740,13 +1738,13 @@ ipcMain.handle('voice:install', async () => {
     } finally { instalandoVoz = null; }
   })();
 });
-/* Voz local (Piper davefx es-ES): binario win-x64 (~21 MB) + voz (~60 MB). Misma
+/* Voz local (Piper sharvard es-ES): binario win-x64 (~21 MB) + voz (~77 MB). Misma
    raíz que el motor en tts-local.js: dos raíces harían una instalación que el motor
    nunca encontraría. El zip de Piper trae subcarpeta `piper/`: se aplana igual que
    el binario de Whisper para que piper.exe quede junto a sus DLL y espeak-ng-data. */
 let instalandoPiper = null;
 const TAM_PIPER_BIN = 22 * 1024 * 1024;
-const TAM_PIPER_VOZ = 61 * 1024 * 1024;
+const TAM_PIPER_VOZ = 78 * 1024 * 1024;
 ipcMain.handle('tts:install', async () => {
   if (instalandoPiper) return { ok: false, error: 'ya se está instalando' };
   const fsPromises = require('fs/promises');
@@ -1800,8 +1798,13 @@ ipcMain.handle('tts:install', async () => {
           break;
         }
       } catch {}
-      await bajar('https://huggingface.co/rhasspy/piper-voices/resolve/v1.0.0/es/es_ES/davefx/medium/es_ES-davefx-medium.onnx?download=true', path.join(raiz, 'voz-davefx.onnx'), TAM_PIPER_VOZ, 'voz');
-      await bajar('https://huggingface.co/rhasspy/piper-voices/resolve/v1.0.0/es/es_ES/davefx/medium/es_ES-davefx-medium.onnx.json', path.join(raiz, 'voz-davefx.onnx.json'), 8192, 'config');
+      await bajar('https://huggingface.co/rhasspy/piper-voices/resolve/v1.0.0/es/es_ES/sharvard/medium/es_ES-sharvard-medium.onnx?download=true', path.join(raiz, 'voz-sharvard.onnx'), TAM_PIPER_VOZ, 'voz');
+      await bajar('https://huggingface.co/rhasspy/piper-voices/resolve/v1.0.0/es/es_ES/sharvard/medium/es_ES-sharvard-medium.onnx.json', path.join(raiz, 'voz-sharvard.onnx.json'), 8192, 'config');
+      // Limpieza de la voz anterior (davefx): su .onnx actual es incompatible con
+      // el binario (peta al cargar) y sólo ocuparía 63 MB rotos en el disco.
+      for (const resto of ['voz-davefx.onnx', 'voz-davefx.onnx.json']) {
+        try { await fsPromises.unlink(path.join(raiz, resto)); } catch {}
+      }
       try { if (win && !win.isDestroyed()) win.webContents.send('tts:installProgress', { tipo: 'listo' }); } catch {}
       return { ok: true };
     } catch (err) {

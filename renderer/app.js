@@ -3044,7 +3044,7 @@ async function refrescarPiperUi() {
     const r = await window.sagitari.voiceInstallStatus();
     const instalado = !!(r && r.ok && r.piperDisponible);
     btn.textContent = instalado ? 'Reinstalar' : 'Instalar voz';
-    if (instalado) lbl.textContent = 'instalada (Piper davefx) — activa';
+    if (instalado) lbl.textContent = 'instalada (voz local Piper) — activa';
   } catch {}
 }
 if ($('#btnInstalarPiper')) {
@@ -3059,7 +3059,7 @@ if ($('#btnInstalarPiper')) {
       else if (p.tipo === 'voz') lbl.textContent = 'descargando modelo de voz… ' + Math.round((p.recibido / (p.total || 1)) * 100) + '%';
       else if (p.tipo === 'config') lbl.textContent = 'configurando voz…';
       else if (p.tipo === 'extrayendo') lbl.textContent = 'extrayendo motor…';
-      else if (p.tipo === 'listo') { lbl.textContent = 'instalada (Piper davefx) — activa'; btn.disabled = false; btn.textContent = 'Reinstalar'; __piperProgreso = false; showToast('Voz local instalada: SAGITARI ahora suena mucho más natural.'); refrescarVocesTts(); }
+      else if (p.tipo === 'listo') { lbl.textContent = 'instalada (voz local Piper) — activa'; btn.disabled = false; btn.textContent = 'Reinstalar'; __piperProgreso = false; showToast('Voz local instalada: SAGITARI ahora suena mucho más natural.'); refrescarVocesTts(); }
       else if (p.tipo === 'error') { lbl.textContent = 'error: ' + (p.error || 'descarga fallida'); btn.disabled = false; __piperProgreso = false; }
     });
     try { await window.sagitari.ttsInstall(); } catch (e) { lbl.textContent = 'error: ' + (e.message || 'instalación'); __piperProgreso = false; }

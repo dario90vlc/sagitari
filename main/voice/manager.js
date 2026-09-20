@@ -29,6 +29,11 @@ function createVoiceManager({ emit, stt, tts, onPhrase = () => {}, settings = ()
   let hablando = null;
   let seq = 0;
   let ultimoFin = 0;   // cuándo terminó de sonar la última frase (para la cola de eco)
+  /* Adelanto: síntesis de la frase SIGUIENTE mientras suena la actual. Sin esto,
+     cada frase cuesta su síntesis entera en silencio (un proceso nuevo por frase
+     en el motor de Windows, ~1 s). Con esto, al terminar una frase la siguiente
+     ya está lista y el hueco entre frases es solo el cambio de audio. */
+  let adelanto = null;   // { frase, promesa } o null
 
   const pon = (e) => { assertEvent(e); emit(e); };
   const setEstado = (s) => { if (estado !== s) { estado = s; pon({ type: 'state', state: s }); } };
@@ -106,9 +111,17 @@ function createVoiceManager({ emit, stt, tts, onPhrase = () => {}, settings = ()
     hablando = frase;
     setEstado('hablando');
     const aj = settings() || {};
+    const params = { lang: aj.voiceLang || 'es-ES', voice: aj.ttsVoice || '', rate: aj.ttsRate || 0 };
     let r;
-    try { r = await tts.sintetizar(frase, { lang: aj.voiceLang || 'es-ES', voice: aj.ttsVoice || '', rate: aj.ttsRate || 0 }); }
-    catch (e) { r = { wav: null, error: e.message }; }
+    if (adelanto && adelanto.frase === frase) {
+      // ya sintetizada mientras sonaba la anterior: sin espera
+      try { r = await adelanto.promesa; } catch (e) { r = { wav: null, error: e.message }; }
+      adelanto = null;
+    } else {
+      if (adelanto && adelanto.frase !== frase) adelanto = null;   // la cola cambió (interrupción): ese audio ya no vale
+      try { r = await tts.sintetizar(frase, params); }
+      catch (e) { r = { wav: null, error: e.message }; }
+    }
     if (hablando !== frase) return;                      // la interrumpieron mientras sintetizaba
     if (!r || !r.wav) {
       /* El motivo va en el aviso: «no he podido leer» sin más no dice si la voz falla
@@ -122,6 +135,19 @@ function createVoiceManager({ emit, stt, tts, onPhrase = () => {}, settings = ()
     /* La voz usada viaja con la frase: el renderer enseña qué voz está sonando (natural
        o de escritorio) sin preguntar de nuevo al motor. */
     onPhrase({ id: seq, bytes: r.wav, voz: r.voz, natural: !!r.natural });   // el renderer lo reproduce y avisa con spoken(id)
+    // Mientras suena esta frase se sintetiza la siguiente: al llegar su turno
+    // el audio ya está listo. Solo UNA por delante (más sería sintetizar frases
+    // que una interrupción tiraría) y con los ajustes del momento.
+    try {
+      const prox = cola[0];
+      if (prox && !adelanto) {
+        const aj2 = settings() || {};
+        adelanto = {
+          frase: prox,
+          promesa: tts.sintetizar(prox, { lang: aj2.voiceLang || 'es-ES', voice: aj2.ttsVoice || '', rate: aj2.ttsRate || 0 }),
+        };
+      }
+    } catch {}
   }
 
   function spoken(id) {
@@ -133,6 +159,7 @@ function createVoiceManager({ emit, stt, tts, onPhrase = () => {}, settings = ()
   function stopSpeaking() {
     cola = [];
     hablando = null;
+    adelanto = null;   // el audio adelantado ya no vale (nueva secuencia tras interrumpir)
     ultimoFin = 0;
     if (estado === 'hablando') setEstado('escuchando');
   }

@@ -46,6 +46,8 @@ const DISPARO = 3;              // marcos de voz seguidos para ABRIR frase (~90 
 const FACTOR_TI_BIO = 1.6;      // habla tenue: micros de poca ganancia no llegan a 3× suelo
 const DISPARO_TI_BIO = 12;      // …pero 12 marcos tenues seguidos (~360 ms) sí son habla
 const COLA_SILENCIO = 20;       // marcos de silencio para CERRAR frase (~600 ms)
+const COLA_SILENCIO_LARGA = 30;  // …y ~900 ms cuando ya se lleva hablando un rato (abajo)
+const VOZ_PARA_COLA_LARGA = 130; // marcos de voz en el trozo (~4 s) que alargan la cola
 const MAX_TROZO_MARCOS = 667;   // tope de frase: 667 * 30 ms = 20 s
 const PRE_RODADURA = 10;        // marcos previos al disparo que se conservan (~300 ms)
 
@@ -82,6 +84,7 @@ function createWhisper({ emit, lang = 'es-ES', spawnFn = spawn, dirRaiz = null, 
   let marcosSilencioSeguidos = 0;
   let grabando = false;
   let trozo = [];                     // marcos (Int16Array) de la frase en curso
+  let marcosVozTrozo = 0;             // voz acumulada en el trozo (para la cola adaptativa)
   let preRodadura = [];
   let abiertaEn = 0;
 
@@ -109,10 +112,11 @@ function createWhisper({ emit, lang = 'es-ES', spawnFn = spawn, dirRaiz = null, 
         const p = path.join(dirBin, nombre);
         if (fs.existsSync(p)) { cli = p; break; }
       }
-      /* En orden de precisión: el q5_1 (181 MB) es el que se instala y se midió; los otros
-         dos se aceptan porque una instalación anterior los dejó ahí y usar CUALQUIER modelo
-         es mejor que quedarse sin dictado local. */
-      for (const nombre of ['ggml-small-q5_1.bin', 'ggml-small.bin', 'ggml-base.bin']) {
+      /* En orden de precisión: large-v3-turbo-q5_0 (~574 MB, el que se instala ahora)
+         muy por delante en español; después los anteriores, que se aceptan
+         porque una instalación previa los dejó ahí y usar CUALQUIER modelo es mejor
+         que quedarse sin dictado local. */
+      for (const nombre of ['ggml-large-v3-turbo-q5_0.bin', 'ggml-large-v3-turbo.bin', 'ggml-small-q5_1.bin', 'ggml-small.bin', 'ggml-base.bin']) {
         const p = path.join(dirModelos, nombre);
         if (fs.existsSync(p)) { modelo = p; modeloNombre = path.basename(nombre, '.bin'); break; }
       }
@@ -290,6 +294,7 @@ function createWhisper({ emit, lang = 'es-ES', spawnFn = spawn, dirRaiz = null, 
           if (marcosVozSeguidos >= DISPARO || (tibio && marcosVozSeguidos >= DISPARO_TI_BIO)) {
             grabando = true;
             trozo = preRodadura.slice();
+            marcosVozTrozo = 0;
             preRodadura = [];
             marcosSilencioSeguidos = 0;
             abiertaEn = Date.now();
@@ -300,11 +305,15 @@ function createWhisper({ emit, lang = 'es-ES', spawnFn = spawn, dirRaiz = null, 
         }
       } else {
         trozo.push(marco);
-        if (esVoz || e > suelo * FACTOR_TI_BIO) { marcosSilencioSeguidos = 0; marcosVozSeguidos++; }
+        if (esVoz || e > suelo * FACTOR_TI_BIO) { marcosSilencioSeguidos = 0; marcosVozSeguidos++; marcosVozTrozo++; }
         else {
           marcosSilencioSeguidos++;
           marcosVozSeguidos = 0;
-          if (marcosSilencioSeguidos >= COLA_SILENCIO) cerrarFrase();
+          /* Cola adaptativa: quien habla seguido hace pausas para respirar y pensar;
+             con la cola fija de 600 ms esas pausas partían la frase (el entrecortado).
+             Tras ~4 s de voz se espera ~900 ms antes de cerrar; los trozos cortos
+             siguen cerrando rápido para no añadir latencia. */
+          if (marcosSilencioSeguidos >= (marcosVozTrozo > VOZ_PARA_COLA_LARGA ? COLA_SILENCIO_LARGA : COLA_SILENCIO)) cerrarFrase();
         }
         if (trozo.length >= MAX_TROZO_MARCOS) cerrarFrase();
         else intentarPrevia();

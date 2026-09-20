@@ -38,7 +38,7 @@ Get the latest version for Windows (installer or portable, pick yours on the rel
 
 > **Windows SmartScreen:** the binaries are currently unsigned, so Windows may show a warning on the first run. Choose *More info → Run anyway* if you trust the download. Verify the SHA-256 hash published in the release notes.
 
-> **Voice engines:** the local neural voice (Piper) and the high-accuracy local dictation (Whisper) are **not** bundled in the installer —they are downloaded on demand from Settings, about 270 MB in total— so the download stays light and voice mode still works with the Windows engines until you install them.
+> **Voice engines:** the local neural voice (Piper) and the high-accuracy local dictation (Whisper) are **not** bundled in the installer —they are downloaded on demand from Settings, about 700 MB in total— so the download stays light and voice mode still works with the Windows engines until you install them.
 
 ## What it does
 

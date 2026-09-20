@@ -4089,8 +4089,8 @@ test('voz/tts-local: sintetiza por stdin, mapea rate a length_scale y limpia', a
   const raiz = path.join(dir, 'voice-engine', 'tts');
   fs.mkdirSync(raiz, { recursive: true });
   fs.writeFileSync(path.join(raiz, 'piper.exe'), 'x');
-  fs.writeFileSync(path.join(raiz, 'voz-davefx.onnx'), 'x');
-  fs.writeFileSync(path.join(raiz, 'voz-davefx.onnx.json'), '{}');
+  fs.writeFileSync(path.join(raiz, 'voz-sharvard.onnx'), 'x');
+  fs.writeFileSync(path.join(raiz, 'voz-sharvard.onnx.json'), '{}');
   let vistos = null;
   let entrada = '';
   const spawnFn = (cmd, args) => {
@@ -4108,7 +4108,7 @@ test('voz/tts-local: sintetiza por stdin, mapea rate a length_scale y limpia', a
   ok(tts.estado().disponible, 'binario + voz + config: disponible');
   const r = await tts.sintetizar('Hola, prueba.', { rate: 20 });
   ok(r.wav && r.wav.length > 8, 'devuelve bytes de WAV');
-  eq(r.voz, 'Piper davefx (es-ES)', 'dice qué voz usó');
+  eq(r.voz, 'Piper sharvard (es-ES)', 'dice qué voz usó');
   ok(r.natural, 'marcada como natural (neuronal, no SAPI)');
   ok(entrada.includes('Hola, prueba.'), 'la frase entra por stdin');
   const iL = vistos.args.indexOf('--length_scale');
@@ -4130,6 +4130,51 @@ test('voz/manager: un final limpio pasa, la basura se avisa y no se envía', asy
   eq(fines[0].text, 'Recuérdame llamar a Álvaro', 'y es la buena');
   ok(eventos.some((e) => e.type === 'notice' && /basura|no te he entendido/i.test(e.text)), 'la basura se avisa');
   eq(m.estado(), 'oyendo', 'con una frase cerrada el estado pasa a oyendo');
+});
+
+test('voz/tts-local: elige la voz pedida y cae a la instalada', async () => {
+  const path = require('path');
+  const { createTtsLocal, elegirVoz } = require('../main/voice/tts-local');
+  const dir = tmpDir('sagi-piper-voces-');
+  const raiz = path.join(dir, 'voice-engine', 'tts');
+  fs.mkdirSync(raiz, { recursive: true });
+  fs.writeFileSync(path.join(raiz, 'piper.exe'), 'x');
+  fs.writeFileSync(path.join(raiz, 'voz-sharvard.onnx'), 'x');
+  fs.writeFileSync(path.join(raiz, 'voz-sharvard.onnx.json'), '{}');
+  eq(elegirVoz(raiz, '').archivo, 'voz-sharvard.onnx', 'sin pedir, la instalada');
+  eq(elegirVoz(raiz, 'Piper sharvard (es-ES)').archivo, 'voz-sharvard.onnx', 'la pedida manda');
+  eq(elegirVoz(raiz, 'sharvard').archivo, 'voz-sharvard.onnx', 'vale el id corto');
+  eq(elegirVoz(raiz, 'otra-voz').archivo, 'voz-sharvard.onnx', 'la desconocida cae a la instalada, no al silencio');
+  const tts = createTtsLocal({ dataDir: dir });
+  eq((await tts.listarVoces()).map((v) => v.nombre).join(','), 'Piper sharvard (es-ES)', 'se lista lo descargado');
+});
+
+test('voz/tts-local: la puntuación final mueve ritmo y variación', async () => {
+  const path = require('path');
+  const { createTtsLocal } = require('../main/voice/tts-local');
+  const dir = tmpDir('sagi-piper-pros-');
+  const raiz = path.join(dir, 'voice-engine', 'tts');
+  fs.mkdirSync(raiz, { recursive: true });
+  fs.writeFileSync(path.join(raiz, 'piper.exe'), 'x');
+  fs.writeFileSync(path.join(raiz, 'voz-sharvard.onnx'), 'x');
+  fs.writeFileSync(path.join(raiz, 'voz-sharvard.onnx.json'), '{}');
+  const vistos = [];
+  const spawnFn = (cmd, args) => {
+    vistos.push({ cmd, args });
+    const l = {};
+    const proc = { stdin: { write: () => {}, end: () => {} }, stderr: { on: () => {} }, on: (k, f) => { l[k] = f; }, kill() {} };
+    setTimeout(() => { fs.writeFileSync(args[args.indexOf('-f') + 1], Buffer.from('RIFF....WAVEfmt ')); l['exit'](0); }, 5);
+    return proc;
+  };
+  const tts = createTtsLocal({ spawnFn, dataDir: dir });
+  const val = (args, flag) => args[args.indexOf(flag) + 1];
+  await tts.sintetizar('Todo listo.');
+  await tts.sintetizar('¿Vienes mañana?');
+  await tts.sintetizar('¡Increíble!');
+  eq(val(vistos[0].args, '--noise_scale'), '0.667', 'la afirmación queda en natural');
+  ok(Number(val(vistos[1].args, '--length_scale')) < Number(val(vistos[0].args, '--length_scale')), 'la pregunta respira más rápida: ' + val(vistos[1].args, '--length_scale'));
+  ok(Number(val(vistos[1].args, '--noise_scale')) > 0.667, 'y con más variación');
+  ok(Number(val(vistos[2].args, '--length_scale')) < Number(val(vistos[1].args, '--length_scale')), 'la exclamación empuja más: ' + val(vistos[2].args, '--length_scale'));
 });
 
 test('voz/manager: trocea la respuesta en frases y las sintetiza en orden', async () => {
@@ -4158,6 +4203,35 @@ test('voz/manager: trocea la respuesta en frases y las sintetiza en orden', asyn
   eq(lista[1], 'Lista dos sin punto', 'y la segunda, sin punto final, es su propia frase');
   ok(eventos.some((e) => e.type === 'state' && e.state === 'hablando'), 'el estado pasa a hablando');
   ok(eventos.some((e) => e.type === 'state' && e.state === 'escuchando'), 'y vuelve a escuchando al terminar');
+});
+
+test('voz/manager: sintetiza la frase siguiente mientras suena la actual', async () => {
+  const { createVoiceManager } = require('../main/voice/manager');
+  const orden = [];
+  const inicios = [];
+  let sintesis = 0;
+  const t0 = Date.now();
+  const ahora = () => Date.now() - t0;
+  // sonar (50 ms) tarda más que sintetizar (30 ms): la gracia del adelanto es que
+  // la síntesis n+1 corre DURANTE la reproducción n, no después
+  const tts = { nombre: 'tts', capacidades: { partials: false, confidence: false, level: false },
+    sintetizar: async (t) => { sintesis++; inicios.push([t, ahora()]); await new Promise((r) => setTimeout(r, 30)); orden.push(t); return { wav: Buffer.from('RIFF'), voz: 'x', ms: 30 }; },
+    listarVoces: async () => [] };
+  const stt = { nombre: 'stt', capacidades: { partials: true, confidence: false, level: false }, start: async () => {}, push: () => {}, stop: async () => {} };
+  const habladas = [];
+  const m = createVoiceManager({ emit: () => {}, stt, tts, onPhrase: (p) => { habladas.push([p.id, ahora()]); setTimeout(() => m.spoken(p.id), 50); } });
+  await m.open();
+  m.say('Uno. Dos. Tres.');
+  await new Promise((r) => {
+    const t = setInterval(() => { if (habladas.length >= 3) { clearInterval(t); r(); } }, 5);
+    setTimeout(() => { clearInterval(t); r(); }, 2000);
+  });
+  eq(orden.join('|'), 'Uno.|Dos.|Tres.', 'el orden no cambia: ' + orden.join('|'));
+  eq(sintesis, 3, 'tres frases, tres síntesis (el adelanto no duplica)');
+  eq(habladas.map((h) => h[0]).join(','), '1,2,3', 'y suenan en orden');
+  const ini2 = inicios.find((i) => i[0] === 'Dos.')[1];
+  const fin1 = habladas.find((h) => h[0] === 1)[1] + 50;
+  ok(ini2 < fin1, 'la síntesis de la 2ª empezó (' + ini2 + ' ms) antes de terminar la 1ª (' + fin1 + ' ms)');
 });
 
 test('voz/manager: un parcial mientras el asistente habla es eco, no una orden', async () => {
@@ -4247,8 +4321,12 @@ test('voz/manager: interrumpir corta la cola y no sintetiza lo que queda', async
   m.say('Primera frase. Segunda frase. Tercera frase.');
   await new Promise((r) => setTimeout(r, 40));
   m.stopSpeaking();
+  const alCortar = frases.length;
+  // Con el adelanto (una frase sintetizada mientras suena la anterior) puede haber
+  // DOS en marcha: la que sonaba y la adelantada. Lo que no puede haber es una tercera.
+  ok(alCortar <= 2, 'como mucho la en marcha + una adelantada: ' + JSON.stringify(frases));
   await new Promise((r) => setTimeout(r, 40));
-  eq(frases.length, 1, 'sólo se sintetizó la que ya estaba en marcha');
+  eq(frases.length, alCortar, 'tras cortar no se sintetiza nada más');
   eq(m.estado(), 'escuchando', 'y vuelve a escuchar');
 });
 
@@ -4621,10 +4699,49 @@ test('voz/whisper: el motor elige el modelo de más precisión que haya instalad
   fs.writeFileSync(path.join(dir, 'models', 'ggml-base.bin'), '');
   eq(createWhisper({ emit: () => {}, dirRaiz: dir }).estado().modeloNombre, 'ggml-base', 'con sólo el base instalado usa el base');
   fs.writeFileSync(path.join(dir, 'models', 'ggml-small-q5_1.bin'), '');
-  eq(createWhisper({ emit: () => {}, dirRaiz: dir }).estado().modeloNombre, 'ggml-small-q5_1', 'y en cuanto está el q5_1 prefiere el que se midió para conversar');
+  eq(createWhisper({ emit: () => {}, dirRaiz: dir }).estado().modeloNombre, 'ggml-small-q5_1', 'y en cuanto está el small prefiere al base');
+  fs.writeFileSync(path.join(dir, 'models', 'ggml-large-v3-turbo-q5_0.bin'), '');
+  eq(createWhisper({ emit: () => {}, dirRaiz: dir }).estado().modeloNombre, 'ggml-large-v3-turbo-q5_0', 'y el turbo manda sobre todos');
   const main = fs.readFileSync(path.join(__dirname, '..', 'main', 'main.js'), 'utf8');
-  ok(/ggml-small-q5_1\.bin/.test(main), 'el instalador baja ese mismo modelo (el que el motor va a usar)');
+  ok(/ggml-large-v3-turbo-q5_0\.bin/.test(main), 'el instalador baja ese mismo modelo (el que el motor va a usar)');
   ok(/MIN_MODELO/.test(main) && /llegó incompleto/.test(main), 'y no da por bueno un modelo truncado');
+});
+
+test('voz/whisper: la cola de silencio se alarga cuando se lleva hablando un rato', async () => {
+  const { createWhisper } = require('../main/voice/whisper');
+  const finales = [];
+  const spawnFn = (cmd, args) => {
+    const l = {};
+    const proc = { stdout: { on: (k, f) => { l['o' + k] = f; } }, stderr: { on: () => {} }, on: (k, f) => { l[k] = f; }, kill() {} };
+    setTimeout(() => { l['odata'](Buffer.from('texto de mentira\n')); l['exit'](0); }, 5);
+    return proc;
+  };
+  const dir = tmpDir('sagi-wh-cola-');
+  const tmp = path.join(dir, 'tmp');
+  fs.mkdirSync(path.join(dir, 'bin'), { recursive: true });
+  fs.mkdirSync(path.join(dir, 'models'), { recursive: true });
+  fs.mkdirSync(tmp, { recursive: true });
+  fs.writeFileSync(path.join(dir, 'bin', 'whisper-cli.exe'), '');
+  fs.writeFileSync(path.join(dir, 'models', 'ggml-base.bin'), '');
+  const engine = createWhisper({ emit: (e) => { if (e.type === 'final') finales.push(e.text); }, lang: 'es-ES', spawnFn, dirRaiz: dir, tmpDir: tmp });
+  await engine.start();
+  const sr = 16000;
+  const marcoVoz = () => { const m = Buffer.alloc(480 * 2); for (let i = 0; i < 480; i++) m.writeInt16LE(Math.round(Math.sin(2 * Math.PI * 220 * i / sr) * 12000), i * 2); return m; };
+  const marcoSil = () => Buffer.alloc(480 * 2);
+  const empuja = (n, voz) => { for (let i = 0; i < n; i++) engine.push(voz ? marcoVoz() : marcoSil()); };
+  const espera = (ms) => new Promise((r) => setTimeout(r, ms));
+  // ráfaga corta (1 s) + 700 ms de silencio: cierra con la cola corta
+  empuja(33, true); empuja(23, false);
+  await espera(80);
+  eq(finales.length, 1, 'lo corto cierra rápido');
+  // habla larga (5 s) + 700 ms de silencio: SIGUE abierta (cola alargada a ~900 ms)
+  empuja(167, true); empuja(23, false);
+  await espera(80);
+  eq(finales.length, 1, 'la pausa de pensar no parte la frase larga');
+  // +500 ms más de silencio (total ~1,2 s): ahora sí cierra
+  empuja(17, false);
+  await espera(80);
+  eq(finales.length, 2, 'y con silencio de verdad cierra');
 });
 
 test('voz/whisper: la vista previa enseña el texto mientras se habla y no pisa al final', async () => {
