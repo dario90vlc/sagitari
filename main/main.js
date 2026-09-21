@@ -82,7 +82,7 @@ const CONFIG_FILE = path.join(CONFIG_DIR, 'config.json');
 let config = {
   providers: [],                 // [{id, name, baseUrl, apiKey, models:[], activeModel}]
   active: null,                  // {providerId, name, baseUrl, apiKey, model, temperature, vision}
-  settings: { theme: 'violet', uiColor: 'violet', glowColor: 'match', glowStrength: 1, ttsEnabled: true, voiceLang: 'es-ES', glowEnabled: true, userName: 'Darío', mode: 'act', maxConcurrentTasks: 1, autoResumeTasks: true, llmTimeoutMs: 120000, showThinking: false, reviewGate: true, parallelTools: 3, diagnosticosEscritura: true, verificacionCierre: true, intentosArreglo: 2, promptCache: true,
+  settings: { theme: 'violet', uiColor: 'violet', glowColor: 'match', glowStrength: 1, glassTint: 1, ttsEnabled: true, voiceLang: 'es-ES', glowEnabled: true, userName: 'Darío', mode: 'act', maxConcurrentTasks: 1, autoResumeTasks: true, llmTimeoutMs: 120000, showThinking: false, reviewGate: true, parallelTools: 3, diagnosticosEscritura: true, verificacionCierre: true, intentosArreglo: 2, promptCache: true,
     hookEditar: '', hookCerrar: '' },
   mcp: { enabled: true, servers: [] },   // servidores MCP del usuario (ver main/mcp-config.js)
 };
@@ -723,8 +723,8 @@ ipcMain.handle('settings:set', (e, patch) => {
   if ('glowEnabled' in clean && !clean.glowEnabled) glow('off');
   // si cambió la apariencia, el renderer repinta el tema; si el glow está
   // activo, relanzamos el estado actual para que el nuevo color se vea al momento
-  if ('uiColor' in clean || 'glowColor' in clean || 'glowStrength' in clean) {
-    try { if (win && !win.isDestroyed()) win.webContents.send('theme:changed', { uiColor: config.settings.uiColor, glowColor: config.settings.glowColor, glowStrength: config.settings.glowStrength }); } catch {}
+  if ('uiColor' in clean || 'glowColor' in clean || 'glowStrength' in clean || 'glassTint' in clean) {
+    try { if (win && !win.isDestroyed()) win.webContents.send('theme:changed', { uiColor: config.settings.uiColor, glowColor: config.settings.glowColor, glowStrength: config.settings.glowStrength, glassTint: config.settings.glassTint }); } catch {}
     if (config.settings.glowEnabled && !HIDDEN) glow('pulse');
   }
   // el renderer sigue recibiendo los ajustes; si el disco falló, se lo decimos

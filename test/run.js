@@ -2632,7 +2632,7 @@ test('apariencia: el alias glow de la muestra de color no hereda el lienzo del h
 
 test('apariencia: Ajustes expone color de UI, color de glow e intensidad', () => {
   const html = fs.readFileSync(path.join(__dirname, '..', 'renderer', 'index.html'), 'utf8');
-  for (const id of ['uiColor', 'glowColor', 'glowStrength', 'dotUiColor', 'dotGlowColor', 'glowStrengthLabel'])
+  for (const id of ['uiColor', 'glowColor', 'glowStrength', 'dotUiColor', 'dotGlowColor', 'glowStrengthLabel', 'glassTint', 'glassTintLabel'])
     ok(html.includes('id="' + id + '"'), 'falta #' + id);
   ok(html.includes('<b>Apariencia</b>'), 'debe existir la tarjeta Apariencia');
   const app = fs.readFileSync(path.join(__dirname, '..', 'renderer', 'app.js'), 'utf8');
@@ -3300,6 +3300,39 @@ test('holo con momentos: puertas numeradas, reloj del monitor y scope en vivo', 
   ok(html.includes('id="scopeCanvas"') && html.includes('<script src="scope.js">'), 'el estado vacío lleva su scope en vivo');
   ok(/function tickBoardClock\(\)/.test(app) && /setInterval\(tickBoardClock, 1000\)/.test(app), 'el reloj late cada segundo');
   ok(/\.chat-empty \.scope\s*\{[^}]*mask-image/.test(css), 'el scope se apaga hacia los bordes');
+  /* HIG Liquid Glass: el vidrio vive SOLO en la capa funcional (sidebar,
+     compositor, menús, sheets). El contenido (burbujas, tarjetas) son fills
+     opacos: nada de backdrop-filter ni vidrio sobre vidrio. */
+  const regla = (sel) => (css.match(new RegExp(sel + '\\s*\\{[^}]*\\}')) || [''])[0];
+  for (const sel of ['\\.side', '\\.composer', '\\.modelmenu', '\\.csel-menu', '\\.skillmenu', '#voiceMode'])
+    ok(/backdrop-filter/.test(regla(sel)), sel + ' es capa funcional y lleva vidrio');
+  for (const sel of ['\\.bubble', '\\.tcard', '\\.fitem', '\\.ragent', '\\.modeseg'])
+    ok(!/backdrop-filter/.test(regla(sel)), sel + ' es contenido y NO lleva vidrio');
+  // la navegación flota con inset y los controles son cápsulas
+  ok(/\.side\s*\{[^}]*margin:\s*12px/.test(css), 'el sidebar flota con inset');
+  ok(/\.btn\s*\{[^}]*border-radius:\s*999px/.test(css), 'los botones son cápsulas');
+  ok(/@keyframes pop-in/.test(css), 'los sheets nacen con muelle');
+});
+
+test('glass27: aura Apple Intelligence, cáusticas y slider ultra claro ↔ tintado', () => {
+  const css = fs.readFileSync(path.join(__dirname, '..', 'renderer', 'styles.css'), 'utf8');
+  const html = fs.readFileSync(path.join(__dirname, '..', 'renderer', 'index.html'), 'utf8');
+  const app = fs.readFileSync(path.join(__dirname, '..', 'renderer', 'app.js'), 'utf8');
+  // el aura fluye: cónico con los tonos del glow + núcleo blanco, rotando por ángulo
+  ok(/@property --giro/.test(css) && /@keyframes giro/.test(css), 'el giro del aura es un ángulo animable');
+  const flow = (css.match(/\.glowFlow\s*\{[^}]*\}/) || [''])[0];
+  ok(/conic-gradient\(from var\(--giro/.test(flow) && /255,255,255/.test(flow), 'vetas del glow + núcleo blanco');
+  ok(/animation:\s*giro/.test(flow), 'la luz fluye sola');
+  ok(!/offset-path/.test(css), 'el glow no recorre el marco (sigue prohibido)');
+  // iOS 27: borde oscurecido + highlight (cáustica) en el vidrio héroe
+  const comp = (css.match(/\.composer\s*\{[^}]*\}/) || [''])[0];
+  ok(/inset 2px 3px/.test(comp) && /inset -3px -5px/.test(comp), 'luz arriba-izquierda, sombra abajo-derecha');
+  // slider de vidrio cableado de punta a punta
+  ok(html.includes('id="glassTint"'), 'el slider existe en Ajustes');
+  ok(/--glass/.test(css), 'el token --glass existe');
+  ok(/\$\('#glassTint'\)\.oninput/.test(app) && /function glassTintLabel/.test(app), 'el slider está cableado');
+  ok(/setProperty\('--glass'/.test(app), 'applyTheme vuelca --glass');
+  ok(/glassTint: 1/.test(MAIN_SRC), 'default del vidrio en main');
 });
 
 test('integración: cada canal push del preload tiene remitente en main', () => {

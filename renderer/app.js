@@ -2861,6 +2861,7 @@ function refrescarVocesTts() {
   $('#glowColor').value = (!CFG.settings.glowColor || CFG.settings.glowColor === 'match') ? 'match'
     : (PALETTES[CFG.settings.glowColor] ? CFG.settings.glowColor : 'match');
   $('#glowStrength').value = String(Math.min(1.4, Math.max(0.4, Number(CFG.settings.glowStrength) || 1)));
+  $('#glassTint').value = String(Math.min(1.3, Math.max(0.4, Number(CFG.settings.glassTint) || 1)));
   refreshGlowLabels();
   refreshColorDots();
   window.sagitari.workspaceGet().then(w => { $('#wsPath').value = w; });
@@ -3091,6 +3092,11 @@ function refreshGlowLabels() {
   $('#lblSuave').classList.toggle('on', v < 0.8);
   $('#lblEq').classList.toggle('on', v >= 0.8 && v <= 1.15);
   $('#lblInt').classList.toggle('on', v > 1.15);
+  const g = Number($('#glassTint').value) || 1;
+  $('#glassTintLabel').textContent = glassTintLabel(g);
+  $('#lblGlassClaro').classList.toggle('on', g < 0.7);
+  $('#lblGlassEq').classList.toggle('on', g >= 0.7 && g <= 1.1);
+  $('#lblGlassTint').classList.toggle('on', g > 1.1);
 }
 function refreshColorDots() {
   const ui = (PALETTES[$('#uiColor').value] || PALETTES.violet).acc2;
@@ -3117,6 +3123,13 @@ $('#glowStrength').oninput = (e) => {
   applyTheme(); refreshGlowLabels();          // previsualización instantánea
   clearTimeout(glowSaveTimer);
   glowSaveTimer = setTimeout(() => window.sagitari.setSettings({ glowStrength: Number(e.target.value) }), 250);
+};
+let glassSaveTimer = null;
+$('#glassTint').oninput = (e) => {
+  CFG.settings.glassTint = Number(e.target.value);
+  applyTheme(); refreshGlowLabels();          // previsualización instantánea
+  clearTimeout(glassSaveTimer);
+  glassSaveTimer = setTimeout(() => window.sagitari.setSettings({ glassTint: Number(e.target.value) }), 250);
 };
 $('#setUserName').onchange = async (e) => {
   CFG.settings.userName = e.target.value;
@@ -5165,12 +5178,14 @@ function applyTheme() {
   r.setProperty('--glow-b-rgb', _rgb(gh, gs, gl).join(', '));
   r.setProperty('--glow-c-rgb', _rgb(gh - 12, Math.min(1, gs * 1.04), Math.min(.78, gl * 1.01)).join(', '));
   r.setProperty('--glow-str', String(Math.min(1.4, Math.max(0.4, Number(s.glowStrength) || 1))));
+  r.setProperty('--glass', String(Math.min(1.3, Math.max(0.4, Number(s.glassTint) || 1))));
   // los fondos también son del tema: si no, el color cambia solo en los acentos
   for (const [token, valor] of Object.entries(rampaDeSuperficies(pal.acc))) r.setProperty(token, valor);
   // refresca las muestras de color de Ajustes si están pintadas
   document.querySelectorAll('.colordot').forEach(d => { d.style.background = ''; });
 }
 function glowStrengthLabel(v) { return v < 0.8 ? 'Suave' : v <= 1.15 ? 'Equilibrado' : 'Intenso'; }
+function glassTintLabel(v) { return v < 0.7 ? 'Ultra claro' : v <= 1.1 ? 'Equilibrado' : 'Tintado'; }
 // cambios hechos desde Ajustes se aplican al vuelo (y desde main, p.ej. relanzar glow)
 window.sagitari.onThemeChanged && window.sagitari.onThemeChanged(() => applyTheme());
 
