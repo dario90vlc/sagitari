@@ -37,69 +37,21 @@
   src: url('assets/fonts/spacegrotesk-latin-ext.woff2') format('woff2');
   unicode-range: U+0100-02BA, U+02BD-02C5, U+02C7-02CC, U+02CE-02D7, U+02DD-02FF, U+0304, U+0308, U+0329, U+1D00-1DBF, U+1E00-1E9F, U+1EF2-1EFF, U+2020, U+20A0-20AB, U+20AD-20C0, U+2113, U+2C60-2C7F, U+A720-A7FF;
 }
-@font-face {
-  font-family: 'Chakra Petch';
-  font-style: normal;
-  font-weight: 500;
-  font-display: swap;
-  src: url('assets/fonts/chakra-petch-500-latin.woff2') format('woff2');
-  unicode-range: U+0000-00FF, U+0131, U+0152-0153, U+02BB-02BC, U+02C6, U+02DA, U+02DC, U+0304, U+0308, U+0329, U+2000-206F, U+20AC, U+2122, U+2191, U+2193, U+2212, U+2215, U+FEFF, U+FFFD;
-}
-@font-face {
-  font-family: 'Chakra Petch';
-  font-style: normal;
-  font-weight: 500;
-  font-display: swap;
-  src: url('assets/fonts/chakra-petch-500-latin-ext.woff2') format('woff2');
-  unicode-range: U+0100-02BA, U+02BD-02C5, U+02C7-02CC, U+02CE-02D7, U+02DD-02FF, U+0304, U+0308, U+0329, U+1D00-1DBF, U+1E00-1E9F, U+1EF2-1EFF, U+2020, U+20A0-20AB, U+20AD-20C0, U+2113, U+2C60-2C7F, U+A720-A7FF;
-}
-@font-face {
-  font-family: 'Chakra Petch';
-  font-style: normal;
-  font-weight: 600;
-  font-display: swap;
-  src: url('assets/fonts/chakra-petch-600-latin.woff2') format('woff2');
-  unicode-range: U+0000-00FF, U+0131, U+0152-0153, U+02BB-02BC, U+02C6, U+02DA, U+02DC, U+0304, U+0308, U+0329, U+2000-206F, U+20AC, U+2122, U+2191, U+2193, U+2212, U+2215, U+FEFF, U+FFFD;
-}
-@font-face {
-  font-family: 'Chakra Petch';
-  font-style: normal;
-  font-weight: 600;
-  font-display: swap;
-  src: url('assets/fonts/chakra-petch-600-latin-ext.woff2') format('woff2');
-  unicode-range: U+0100-02BA, U+02BD-02C5, U+02C7-02CC, U+02CE-02D7, U+02DD-02FF, U+0304, U+0308, U+0329, U+1D00-1DBF, U+1E00-1E9F, U+1EF2-1EFF, U+2020, U+20A0-20AB, U+20AD-20C0, U+2113, U+2C60-2C7F, U+A720-A7FF;
-}
-@font-face {
-  font-family: 'Chakra Petch';
-  font-style: normal;
-  font-weight: 700;
-  font-display: swap;
-  src: url('assets/fonts/chakra-petch-700-latin.woff2') format('woff2');
-  unicode-range: U+0000-00FF, U+0131, U+0152-0153, U+02BB-02BC, U+02C6, U+02DA, U+02DC, U+0304, U+0308, U+0329, U+2000-206F, U+20AC, U+2122, U+2191, U+2193, U+2212, U+2215, U+FEFF, U+FFFD;
-}
-@font-face {
-  font-family: 'Chakra Petch';
-  font-style: normal;
-  font-weight: 700;
-  font-display: swap;
-  src: url('assets/fonts/chakra-petch-700-latin-ext.woff2') format('woff2');
-  unicode-range: U+0100-02BA, U+02BD-02C5, U+02C7-02CC, U+02CE-02D7, U+02DD-02FF, U+0304, U+0308, U+0329, U+1D00-1DBF, U+1E00-1E9F, U+1EF2-1EFF, U+2020, U+20A0-20AB, U+20AD-20C0, U+2113, U+2C60-2C7F, U+A720-A7FF;
-}
 
-/* ============ SAGITARI design system ============ */
+/* ============ SAGITARI design system ============
    El acento de la UI y el color del glow son personalizables: todo tinte
    decorativo se construye sobre TRIPLETS RGB (--acc-rgb, --acc2-rgb, --acc3-rgb)
    vía rgba(var(--acc-rgb), alfa). Los colores SEMÁNTICOS no se tocan:
    ok/warn/danger y el color de cada modo (ACT/PLAN/THINK) siguen fijos. */
 :root {
   color-scheme: dark;   /* nunca controles nativos blancos: selects, inputs, scrollbars */
-  --acc-rgb: 156, 138, 253;     /* acento principal: líneas, bordes, iconos */
-  --acc2-rgb: 118, 95, 245;      /* acento rico: botones activos, halos */
-  --acc3-rgb: 62, 118, 248;      /* acento frío: segunda parada de degradados */
-  --glow-rgb: 118, 95, 245;      /* color del resplandor del marco */
-  --glow-a-rgb: 146, 88, 245;    /* tono vecino cálido del aura */
-  --glow-b-rgb: 118, 95, 245;    /* el elegido */
-  --glow-c-rgb: 95, 102, 248;    /* tono vecino frío del aura */
+  --acc-rgb: 148, 118, 255;     /* acento principal: líneas, bordes, iconos */
+  --acc2-rgb: 139, 92, 246;     /* acento rico: botones activos, halos */
+  --acc3-rgb: 59, 130, 246;     /* acento frío: segunda parada de degradados */
+  --glow-rgb: 139, 92, 246;     /* color del resplandor del marco */
+  --glow-a-rgb: 168, 132, 255;  /* tono vecino cálido del aura */
+  --glow-b-rgb: 139, 92, 246;   /* el elegido */
+  --glow-c-rgb: 120, 96, 240;   /* tono vecino frío del aura */
   --glow-str: 1;                /* intensidad del glow: 0.4–1.4 */
   /* superficies: cada paleta trae su rampa (mismo brillo, su tono). Estos son los
 
@@ -138,11 +90,8 @@
      que el navegador use la fuente por defecto del sistema —Times New Roman en
      Windows— y la interfaz entera cambia a una serif clásica: pasó en el menú. La
      reserva es una sans humanista del sistema, nunca una serif. */
-  /* DECK: la voz del frontal es Chakra Petch (técnica, condensada, autoalojada);
-     Sora queda para el logotipo y Space Grotesk para el texto corrido. */
   --font-ui: 'Space Grotesk', 'Segoe UI Variable Text', 'Segoe UI', system-ui, sans-serif;
   --font-display: 'Sora', 'Segoe UI Variable Display', 'Segoe UI', system-ui, sans-serif;
-  --font-deck: 'Chakra Petch', 'Space Grotesk', 'Segoe UI', system-ui, sans-serif;
   --font-mono: 'Cascadia Mono', Consolas, monospace;
   --txt: #e8e4ff;
   --dim: #9a90c8;
@@ -170,14 +119,16 @@ button, input, select, textarea { font-family: inherit; font-size: inherit; }
 html, body { height: 100%; background: transparent; overflow: hidden; }
 body { font-family: var(--font-ui), 'Segoe UI', sans-serif; font-size: 13px; color: var(--txt); }
 .shell {
-  /* DECK: chasis mate, plano y oscuro, con materia: cepillado horizontal de 1px y
-     viñeta que asienta el frontal. La única luz vive en el aura y los LEDs;
-     el lienzo no lleva color propio. */
-  position: fixed; inset: 0; border-radius: 8px; overflow: hidden;
-  background:
-    radial-gradient(120% 100% at 50% 38%, transparent 58%, rgba(0,0,0,0.40) 100%),
-    repeating-linear-gradient(0deg, rgba(255,255,255,0.016) 0 1px, transparent 1px 3px),
-    rgb(var(--bg0-rgb));
+  /* SIN margen transparente: el borde visible de la app ES el borde de la ventana,
+     así se puede redimensionar agarrando el borde directamente.
+     Las tres manchas de color siguen el acento elegido (degradado integrado). */
+  position: fixed; inset: 0; border-radius: 10px; overflow: hidden;
+  /* Atmósfera del estado, UNIFORME alrededor del marco. Ni radiales (tienen centro y radio:
+     su caída dibuja un disco y la esquina se leía como una esfera) ni degradados anclados a
+     una esquina (su valor varía a lo largo del borde, así que la luz se apila en ese lado).
+     La atmósfera va aquí como sombra interior centrada —igual por los cuatro lados— y la luz
+     la pone encima el aura, que también es uniforme a lo largo del borde. */
+  background: linear-gradient(155deg, rgb(var(--deep-rgb)) 0%, rgb(var(--bg1-rgb)) 40%, rgb(var(--bg2-rgb)) 100%);
   box-shadow: inset 0 0 170px rgba(var(--acc3-rgb), calc(0.10 * var(--ambient)));
 }
 /* ===== glow INTERIOR — suave, degradado, integrado =====
@@ -302,7 +253,7 @@ body.nofocus .glow, body.nofocus .glow::before, body.nofocus .glowRing { animati
 /* la fila elástica DEBE estar acotada (minmax(0,1fr)): con la fila implícita el
    grid la dimensiona por contenido y a 620px de alto el compositor del chat se
    sale de la ventana en lugar de que #messages scrollee por dentro. */
-.app { display: grid; grid-template-columns: 232px 1fr 300px; grid-template-rows: minmax(0, 1fr); height: 100%; border-radius: 8px; overflow: hidden; position: relative; }
+.app { display: grid; grid-template-columns: 232px 1fr 300px; grid-template-rows: minmax(0, 1fr); height: 100%; border-radius: 10px; overflow: hidden; position: relative; }
 
 /* ============ Sidebar ============ */
 .side { display: flex; flex-direction: column; padding-top: 46px; border-right: 1px solid var(--line2); background: rgba(var(--field-rgb), 0.35); }
@@ -311,7 +262,18 @@ body.nofocus .glow, body.nofocus .glow::before, body.nofocus .glowRing { animati
    se encoge antes que empujar al botón de compactar fuera del sidebar. */
 .brandlogo { display: flex; flex: 1 1 auto; min-width: 0; }
 .brandlogo img { width: 100%; max-width: 196px; height: auto; -webkit-user-drag: none; filter: drop-shadow(0 0 10px rgba(var(--acc2-rgb), 0.28)); }
+.brandmark { width: 38px; height: 38px; display: grid; place-items: center; flex-shrink: 0; }
+.brandmark img { width: 34px; height: 34px; object-fit: contain; -webkit-user-drag: none; filter: drop-shadow(0 0 9px rgba(var(--acc2-rgb), 0.5)); }
 @keyframes spin { to { transform: rotate(360deg); } }
+.brandcol { display: flex; flex-direction: column; gap: 4px; flex: 1 1 auto; min-width: 0; overflow: hidden; }
+.brandwm { display: flex; min-width: 0; }
+/* el wordmark es una imagen ancha: se encoge antes que empujar al botón de
+   compactar fuera del sidebar (si no, se monta encima del logo) */
+.brandwm img { width: 100%; max-width: 142px; height: auto; -webkit-user-drag: none; filter: drop-shadow(0 0 10px rgba(var(--acc2-rgb), 0.28)); }
+/* El lema es una línea larga en un sidebar de 232px: al subir el suelo
+   tipográfico a 11px dejó de caber y se cortaba a media palabra. Se permite que
+   envuelva (dos líneas) en vez de recortarse. */
+.brandsub { font-size: 11px; letter-spacing: .08em; line-height: 1.3; color: var(--dim); }
 /* window controls — fixed to top-right of the shell, above everything, clickable */
 /* ===== titlebar: arrastre nativo en toda la franja superior ===== */
 .titlebar {
@@ -355,34 +317,24 @@ body.nofocus .glow, body.nofocus .glow::before, body.nofocus .glowRing { animati
   content: attr(data-label); padding: 0 7px 4px; font-size: 11px; letter-spacing: .08em;
   text-transform: uppercase; color: var(--dim); opacity: .68;
 }
-/* DECK: la voz del frontal es Chakra Petch en titulares, puertas, contadores y
-   teclas; Space Grotesk queda para el texto corrido y Sora para el logotipo. */
-.viewhead h2, .sc-head b, .tt-head, .toolsgroup, .navgroup::before,
-.navitem .nl, .btn, .board-clock, .ch-mode, .msg-mode, .dcard-status,
-.kbd, .badge, .ac-badge, .field label, .sub2, .ce-title { font-family: var(--font-deck); }
-/* DECK: etiquetas grabadas en la chapa — luz cenital: sombra oscura debajo. */
-.navgroup::before, .tt-head, .sc-head b, .toolsgroup, .field label, .sub2,
-.live2, .tgroup-head b, .skillmenu .sm-head, .modelmenu .sm-head,
-.codeblock-head, .dcard-status, .board-clock { text-shadow: 0 1px 0 rgba(0,0,0,0.85); }
 .navitem {
   position: relative;
   display: flex; align-items: center; gap: 11px; padding: 9px 12px;
-  background: transparent; border: 1px solid transparent; border-radius: 7px;
+  background: transparent; border: 1px solid transparent; border-radius: 11px;
   color: var(--dim); font: 500 15px var(--font-ui); cursor: pointer; transition: all .16s;
 }
 .navitem:hover { color: var(--txt); background: rgba(var(--acc2-rgb), 0.10); }
-/* DECK: la puerta activa es una tecla encendida — relleno plano retroiluminado,
-   filo de luz arriba, texto grabado en blanco. */
-.navitem.on { color: #fff; background: rgba(var(--acc2-rgb), 0.55); border-color: rgba(var(--acc2-rgb), 0.95); box-shadow: inset 0 1px 0 rgba(255,255,255,0.22), inset 0 -2px 0 rgba(0,0,0,0.4); }
+/* El relleno por sí solo no llega a 3:1 contra la barra (medía 2,6:1): quien identifica
+   el estado es el borde, que a 0,95 supera 3,8:1, junto con el texto en blanco. */
+.navitem.on { color: #fff; background: linear-gradient(135deg, rgba(var(--acc2-rgb), 0.66), rgba(var(--acc3-rgb), 0.42)); border-color: rgba(var(--acc2-rgb), 0.95); box-shadow: 0 0 18px rgba(var(--acc2-rgb), 0.3); }
 .ni { font-size: 15px; width: 18px; text-align: center; flex-shrink: 0; }
-.nl { white-space: nowrap; overflow: hidden; text-overflow: ellipsis; font-size: 13px; font-weight: 600; letter-spacing: .05em; text-transform: uppercase; }
-/* TABLERO: cada sección es una PUERTA numerada como su atajo (Alt+1…9). El número
-   va delante en tabular y tono de acento (7,1:1 sobre la barra): se lee la puerta
-   antes que el nombre, como en el panel de salidas. MCP no tiene atajo y enseña –. */
+.nl { white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+/* Puertas: cada sección enseña el número de su atajo (Alt+1…9) en pequeño delante
+   del nombre. MCP no tiene atajo y enseña –. Discreto: el nombre manda. */
 .navitem .nl::before {
-  content: '–'; display: inline-block; min-width: 21px; margin-right: 2px;
-  font-size: 10px; font-weight: 700; letter-spacing: .1em; color: rgb(var(--acc-rgb));
-  font-variant-numeric: tabular-nums; opacity: .85;
+  content: '–'; display: inline-block; min-width: 20px; margin-right: 1px;
+  font-size: 10px; font-weight: 700; letter-spacing: .08em; color: var(--dim);
+  font-variant-numeric: tabular-nums; opacity: .8;
 }
 .navitem[data-view="chat"] .nl::before { content: '01'; }
 .navitem[data-view="tasks"] .nl::before { content: '02'; }
@@ -400,7 +352,7 @@ body.nofocus .glow, body.nofocus .glow::before, body.nofocus .glowRing { animati
   border-radius: 9px; border: 1px solid var(--line); background: rgba(var(--acc2-rgb), 0.20);
   color: var(--txt); font: 600 11px var(--font-ui);
 }
-.nb.hot { background: rgb(var(--acc2-rgb)); border-color: transparent; color: #fff; box-shadow: inset 0 1px 0 rgba(255,255,255,0.3); }
+.nb.hot { background: linear-gradient(135deg, var(--vio), var(--blu)); border-color: transparent; color: #fff; }
 .nb.live {
   min-width: 8px; width: 8px; height: 8px; padding: 0;
   background: var(--ok); border: none; box-shadow: 0 0 8px var(--ok);
@@ -433,7 +385,7 @@ body.nofocus .glow, body.nofocus .glow::before, body.nofocus .glowRing { animati
 .ssel, .modelmenu, .modelmenu * { -webkit-app-region: no-drag; }
 .side-status {
   flex: 1; min-width: 0; display: flex; align-items: center; gap: 7px;
-  padding: 9px 9px; border: 1px solid var(--line2); border-radius: 7px;
+  padding: 9px 9px; border: 1px solid var(--line2); border-radius: 12px;
   background: var(--panel2); color: var(--txt); cursor: pointer; text-align: left; transition: all .16s;
 }
 .side-status:hover, .side-status[aria-expanded="true"] { border-color: var(--line); background: rgba(var(--acc2-rgb), 0.12); }
@@ -448,9 +400,9 @@ body.nofocus .glow, body.nofocus .glow::before, body.nofocus .glowRing { animati
 /* lista de modelos que ofrece la API activa (mismo lenguaje que el menú de skills) */
 .modelmenu {
   position: absolute; left: -10px; bottom: calc(100% + 8px); width: 236px;
-  background: rgba(var(--deep-rgb), 0.98);
-  border: 1px solid var(--line); border-radius: 8px;
-  box-shadow: 0 14px 44px rgba(0,0,0,0.6);
+  background: linear-gradient(165deg, rgba(var(--bg2-rgb), 0.98), rgba(var(--deep-rgb), 0.98));
+  border: 1px solid var(--line); border-radius: 14px;
+  box-shadow: 0 14px 44px rgba(0,0,0,0.5), 0 0 26px rgba(var(--acc2-rgb), 0.18);
   max-height: 46vh; overflow-y: auto; z-index: 130;
 }
 .modelmenu::-webkit-scrollbar { width: 6px; }
@@ -479,7 +431,7 @@ body.nofocus .glow, body.nofocus .glow::before, body.nofocus .glowRing { animati
 .side-mode {
   flex-shrink: 0; width: 58px; display: flex; flex-direction: column;
   align-items: center; justify-content: center; gap: 4px;
-  border: 1px solid var(--line2); border-radius: 7px; background: var(--panel2);
+  border: 1px solid var(--line2); border-radius: 12px; background: var(--panel2);
   color: var(--txt); font: 600 11px var(--font-ui); letter-spacing: .6px; cursor: pointer; transition: all .16s;
 }
 .side-mode:hover { border-color: var(--line); background: rgba(var(--acc2-rgb), 0.14); }
@@ -489,6 +441,7 @@ body.nofocus .glow, body.nofocus .glow::before, body.nofocus .glowRing { animati
 .app.compact { grid-template-columns: 78px 1fr 300px; }
 .app.compact .nav { padding-left: 9px; padding-right: 9px; }
 .app.compact .brand { flex-direction: column; gap: 7px; padding: 2px 0 10px; }
+.app.compact .brandcol { display: none; }
 /* el logo completo no cabe en 78px: en compacto se oculta (antes se quedaba la marca) */
 .app.compact .brandlogo { display: none; }
 .app.compact .sidecollapse { margin: 0; }
@@ -530,8 +483,8 @@ body.nofocus .glow, body.nofocus .glow::before, body.nofocus .glowRing { animati
 .view.on { display: block; }
 @keyframes fadein { from { opacity: 0; } }  /* sin translate: el desplazamiento desbordaba .main y mostraba scrollbar al cambiar de vista */
 
-.viewhead { display: flex; align-items: center; justify-content: space-between; margin-bottom: 18px; padding-bottom: 12px; border-bottom: 1px solid var(--line2); }
-.viewhead h2 { font-family: var(--font-display); font-weight: 600; font-size: 16px; letter-spacing: .06em; text-transform: uppercase; }
+.viewhead { display: flex; align-items: center; justify-content: space-between; margin-bottom: 18px; }
+.viewhead h2 { font-family: var(--font-display); font-weight: 600; font-size: 18px; }
 /* Cada vista lleva un h1 (raíz del documento) que NO se pinta: la cabecera visible
    sigue siendo el h2 y su regla de arriba no se toca. Convertir el h2 en h1
    cambiaría el aspecto (esa regla depende del selector), así que el h1 se oculta
@@ -547,15 +500,17 @@ body.nofocus .glow, body.nofocus .glow::before, body.nofocus .glowRing { animati
 
 .composer {
   display: flex; align-items: center; gap: 10px; flex-wrap: wrap; position: relative;
-  /* DECK: franja de mandos mate. El borde de modo sigue identificando (≥3:1) pero
-     sin halo exterior: la luz del modo va dentro, no alrededor. */
-  background: rgba(var(--panel-rgb), 0.85);
-  border: 1px solid rgba(var(--acc-rgb), 0.7); border-radius: 8px; padding: 12px 14px;
-  box-shadow: inset 0 1px 0 rgba(255,255,255,0.07), inset 0 -2px 0 rgba(0,0,0,0.5), inset 0 0 22px rgba(var(--acc2-rgb), 0.10);
+  background: linear-gradient(160deg, rgba(var(--face-rgb), 0.85), rgba(var(--panel-rgb), 0.9));
+  /* el borde define el compositor: a 0,22 de alfa medía 1,46:1 contra el lienzo,
+     indistinguible en pantallas flojas (indicador de estado, norma: 3:1) */
+  /* el relleno apenas se separa del lienzo (1,1:1), así que quien define el compositor
+     es su borde: a 0,7 de alfa mide ≥3:1 contra el fondo contiguo */
+  border: 1px solid rgba(var(--acc-rgb), 0.7); border-radius: 18px; padding: 12px 14px;
+  box-shadow: 0 0 30px rgba(var(--acc2-rgb), 0.18), inset 0 0 24px rgba(var(--acc2-rgb), 0.14);
   transition: box-shadow .2s, border-color .2s;
 }
-.composer:focus-within { border-color: rgba(var(--acc-rgb), 0.85); box-shadow: inset 0 1px 0 rgba(255,255,255,0.07), inset 0 -2px 0 rgba(0,0,0,0.5), inset 0 0 28px rgba(var(--acc2-rgb), 0.16); }
-.composer.slim { padding: 8px; border-radius: 8px; }
+.composer:focus-within { border-color: rgba(var(--acc-rgb), 0.85); box-shadow: 0 0 42px rgba(var(--acc2-rgb), 0.35), inset 0 0 30px rgba(var(--acc2-rgb), 0.2); }
+.composer.slim { padding: 8px; border-radius: 14px; }
 /* el textarea del chat es TRANSPARENTE: sin caja propia, el marco lo dibuja
    el compositor. La regla global de textarea (abajo) le pone borde y fondo, y
    al cargar después se veía una caja dentro de otra caja, desalineada. */
@@ -573,13 +528,13 @@ body.nofocus .glow, body.nofocus .glow::before, body.nofocus .glowRing { animati
   display: grid; place-items: center; padding: 0; flex-shrink: 0;
 }
 .compline .cbtn { margin-top: 0; }
-.cbtn:hover { color: #fff; border-color: var(--line); background: rgba(var(--acc2-rgb), 0.16); }
+.cbtn:hover { color: #fff; border-color: var(--line); box-shadow: 0 0 12px rgba(var(--acc2-rgb), 0.35); }
 .cbtn.send {
-  background: var(--mode-c); border: 1px solid rgba(255,255,255,0.25); color: #061020;
-  box-shadow: inset 0 1px 0 rgba(255,255,255,0.4), inset 0 -2px 0 rgba(0,0,0,0.3); font-size: 15px;
+  background: linear-gradient(135deg, rgb(var(--acc3-rgb)), rgb(var(--acc2-rgb))); border: none; color: #061020;
+  box-shadow: 0 0 16px rgba(34,211,238,0.4); font-size: 15px;
 }
-.cbtn.send:hover { transform: scale(1.06); background: var(--mode-c); }
-.cbtn.send.stop { background: #fb7185; color: #fff; }
+.cbtn.send:hover { transform: scale(1.06); }
+.cbtn.send.stop { background: linear-gradient(135deg, #fb7185, #d946ef); color: #fff; }
 
 /* chat view — perfectly framed: only #messages scrolls */
 #view-chat { display: none; height: 100%; padding-bottom: 0; }
@@ -606,14 +561,14 @@ body.nofocus .glow, body.nofocus .glow::before, body.nofocus .glowRing { animati
 .avatar .avimg { width: 21px; height: 21px; object-fit: contain; filter: drop-shadow(0 0 6px rgba(var(--acc2-rgb), 0.6)); }
 .msg.me .avatar { background: rgb(var(--face2-rgb)); color: #cfc2ff; border: 1px solid var(--line); }
 .bubble {
-  padding: 11px 14px; border-radius: 8px; font-size: 15px; line-height: 1.5; white-space: pre-wrap; word-break: break-word;
-  /* DECK: chapa mate. La del agente, panel plano; la tuya, tinte plano de acento. */
-  background: rgba(var(--panel2-rgb), 0.85);
+  padding: 11px 14px; border-radius: 15px; font-size: 15px; line-height: 1.5; white-space: pre-wrap; word-break: break-word;
+  /* el mensaje del agente es el contenido a leer: su superficie no puede ser la
+     que menos se separa del lienzo (medía 1,07:1) */
+  background: linear-gradient(160deg, rgba(var(--face2-rgb), 0.88), rgba(var(--panel2-rgb), 0.9));
   border: 1px solid rgba(var(--acc-rgb), 0.20);
-  box-shadow: inset 0 1px 0 rgba(255,255,255,0.05);
 }
-.msg.me .bubble { background: rgba(var(--acc2-rgb), 0.22); border-color: var(--line); }
-.msg.ai .bubble { box-shadow: inset 0 1px 0 rgba(255,255,255,0.05); }
+.msg.me .bubble { background: linear-gradient(135deg, rgba(var(--acc3-rgb), 0.28), rgba(var(--acc2-rgb), 0.25)); border-color: var(--line); }
+.msg.ai .bubble { box-shadow: 0 0 22px rgba(var(--acc2-rgb), 0.10); }
 /* ===== markdown renderizado (marked) ===== */
 /* el wrapper anula el pre-wrap del bubble: los bloques ya llevan su propio margen */
 .md { white-space: normal; line-height: 1.45; }
@@ -678,8 +633,8 @@ body.nofocus .glow, body.nofocus .glow::before, body.nofocus .glowRing { animati
 /* paleta de skills con "/": aparece sobre el compositor del chat */
 .skillmenu {
   position: absolute; left: 10px; right: 10px; bottom: 100%; margin-bottom: 6px;
-  background: rgba(var(--deep-rgb), 0.98);
-  border: 1px solid var(--line); border-radius: 8px; box-shadow: 0 14px 44px rgba(0,0,0,0.6);
+  background: linear-gradient(165deg, rgba(var(--bg2-rgb), 0.98), rgba(var(--deep-rgb), 0.98));
+  border: 1px solid var(--line); border-radius: 14px; box-shadow: 0 14px 44px rgba(0,0,0,0.5), 0 0 26px rgba(var(--acc2-rgb), 0.18);
   max-height: 250px; overflow-y: auto; z-index: 120;
 }
 .skillmenu::-webkit-scrollbar { width: 6px; }
@@ -714,9 +669,8 @@ body.nofocus .glow, body.nofocus .glow::before, body.nofocus .glowRing { animati
 .agents-grid { display: grid; grid-template-columns: repeat(3, 1fr); gap: 14px; }
 .acard {
   display: flex; gap: 12px; align-items: center; padding: 15px 16px; position: relative;
-  background: rgba(var(--panel-rgb), 0.6);
-  border: 1px solid var(--line2); border-radius: 8px;
-  box-shadow: inset 0 1px 0 rgba(255,255,255,0.05), inset 0 -2px 0 rgba(0,0,0,0.4);
+  background: linear-gradient(165deg, rgba(var(--face-rgb), 0.55), rgba(var(--panel-rgb), 0.65));
+  border: 1px solid var(--line2); border-radius: 15px;
 }
 .aic { width: 40px; height: 40px; border-radius: 12px; display: grid; place-items: center; font-size: 18px; }
 .a-b { background: rgba(var(--acc3-rgb), 0.16); } .a-p { background: rgba(var(--acc2-rgb), 0.18); }
@@ -727,8 +681,8 @@ body.nofocus .glow, body.nofocus .glow::before, body.nofocus .glowRing { animati
 .adot { position: absolute; top: 12px; right: 14px; width: 9px; height: 9px; border-radius: 50%; background: rgba(148,163,184,0.25); }
 .acard.on .adot { background: var(--ok); box-shadow: 0 0 10px var(--ok); animation: blink 1.2s infinite; }
 .acard.on { border-color: rgba(52,211,153,0.35); box-shadow: 0 0 20px rgba(52,211,153,0.15); }
-.tooltray { margin-top: 20px; border: 1px solid var(--line2); border-radius: 8px; padding: 14px 16px; background: rgba(var(--panel-rgb), 0.5); box-shadow: inset 0 1px 0 rgba(255,255,255,0.05), inset 0 -2px 0 rgba(0,0,0,0.4); }
-.tt-head { font-size: 11px; letter-spacing: .14em; text-transform: uppercase; color: var(--txt); opacity: .72; margin-bottom: 10px; padding-bottom: 8px; border-bottom: 1px solid var(--line2); }
+.tooltray { margin-top: 20px; border: 1px solid var(--line2); border-radius: 15px; padding: 14px 16px; }
+.tt-head { font-size: 12px; letter-spacing: .08em; color: var(--dim); margin-bottom: 10px; }
 .tt-list { display: flex; flex-wrap: wrap; gap: 8px; }
 .tt-list .toolchip { margin: 0; }
 
@@ -739,7 +693,7 @@ input[type="text"], input[type="password"], input[type="number"], input[type="se
 input[type="url"], input[type="email"], textarea, select {
   background: rgba(var(--field-rgb), 0.6);
   border: 1px solid var(--line2);
-  border-radius: 7px;
+  border-radius: 11px;
   color: var(--txt);
   font: 500 13px var(--font-ui);
   padding: 9px 12px;
@@ -753,7 +707,7 @@ input[type="url"], input[type="email"], textarea, select {
 input[type="date"], input[type="datetime-local"], input[type="time"], input[type="month"] {
   background: rgba(var(--field-rgb), 0.6);
   border: 1px solid var(--line2);
-  border-radius: 7px;
+  border-radius: 11px;
   color: var(--txt);
   font: 500 13px var(--font-ui);
   padding: 9px 12px;
@@ -786,7 +740,7 @@ input[type="date"]:focus, input[type="datetime-local"]:focus, input[type="time"]
 .csel { position: relative; display: block; width: 100%; min-width: 0; }
 .csel-btn {
   width: 100%; display: flex; align-items: center; gap: 8px;
-  background: rgba(var(--field-rgb), 0.6); border: 1px solid var(--line2); border-radius: 7px;
+  background: rgba(var(--field-rgb), 0.6); border: 1px solid var(--line2); border-radius: 11px;
   color: var(--txt); font: 500 15px var(--font-ui); padding: 10px 12px; cursor: pointer; text-align: left;
   transition: border-color .15s, box-shadow .15s;
 }
@@ -800,9 +754,9 @@ input[type="date"]:focus, input[type="datetime-local"]:focus, input[type="time"]
    calcula el JS desde el botón. */
 .csel-menu {
   position: fixed; left: 0; top: 0; z-index: 140;
-  background: rgba(var(--deep-rgb), 0.99);
-  border: 1px solid var(--line); border-radius: 8px;
-  box-shadow: 0 14px 44px rgba(0,0,0,0.6);
+  background: linear-gradient(165deg, rgba(var(--bg2-rgb), 0.99), rgba(var(--deep-rgb), 0.99));
+  border: 1px solid var(--line); border-radius: 12px;
+  box-shadow: 0 14px 44px rgba(0,0,0,0.5), 0 0 26px rgba(var(--acc2-rgb), 0.18);
   max-height: 300px; overflow-y: auto;
 }
 .csel-menu::-webkit-scrollbar { width: 6px; }
@@ -824,20 +778,18 @@ input::placeholder, textarea::placeholder { color: var(--dim); }
 .field { margin-bottom: 12px; }
 .field label { display: block; font-size: 11px; letter-spacing: .08em; color: var(--dim); margin-bottom: 5px; font-family: var(--font-display); }
 .field input, .field select {
-  width: 100%; background: rgba(var(--field-rgb), 0.6); border: 1px solid var(--line2); border-radius: 7px;
+  width: 100%; background: rgba(var(--field-rgb), 0.6); border: 1px solid var(--line2); border-radius: 11px;
   color: var(--txt); padding: 10px 12px; font: 500 15px var(--font-ui); outline: none;
 }
 .field input:focus, .field select:focus { border-color: rgba(var(--acc-rgb), 0.55); box-shadow: 0 0 14px rgba(var(--acc2-rgb), 0.25); }
 .btnrow { display: flex; gap: 8px; margin: 6px 0 12px; flex-wrap: wrap; }
 .btn {
-  padding: 9px 16px; border-radius: 9px; border: 1px solid var(--line); cursor: pointer;
-  background: rgba(var(--acc2-rgb), 0.14); color: var(--txt);
-  font: 700 12px var(--font-ui); letter-spacing: .07em; text-transform: uppercase;
-  transition: all .15s;
+  padding: 9px 16px; border-radius: 11px; border: 1px solid var(--line); cursor: pointer;
+  background: rgba(var(--acc2-rgb), 0.14); color: var(--txt); font: 600 13px var(--font-ui); transition: all .15s;
   appearance: none;
 }
-.btn:hover { border-color: rgba(var(--acc-rgb), 0.6); box-shadow: inset 0 1px 0 rgba(255,255,255,0.12); }
-.btn.primary { background: rgb(var(--acc2-rgb)); border: 1px solid rgba(255,255,255,0.22); color: #061020; box-shadow: inset 0 1px 0 rgba(255,255,255,0.35), inset 0 -2px 0 rgba(0,0,0,0.3); }
+.btn:hover { box-shadow: 0 0 16px rgba(var(--acc2-rgb), 0.35); }
+.btn.primary { background: linear-gradient(135deg, rgb(var(--acc3-rgb)), rgb(var(--acc2-rgb))); border: none; color: #061020; }
 .btn.ghost { background: transparent; }
 .btn:disabled { opacity: .5; }
 .saving { font-size: 12px; color: var(--cyan); min-height: 18px; margin-bottom: 8px; }
@@ -847,7 +799,7 @@ input::placeholder, textarea::placeholder { color: var(--dim); }
 .updprog { display: none; }
 .updprog.on { display: block; }
 .updbar { height: 8px; border-radius: 999px; background: rgba(255,255,255,0.07); border: 1px solid var(--line2); overflow: hidden; }
-.updbar > span { display: block; height: 100%; width: 100%; border-radius: 999px; background: rgb(var(--acc2-rgb)); transform: scaleX(0); transform-origin: left center; transition: transform .2s cubic-bezier(0.16, 1, 0.3, 1); }
+.updbar > span { display: block; height: 100%; width: 100%; border-radius: 999px; background: linear-gradient(90deg, rgb(var(--acc3-rgb)), rgb(var(--acc2-rgb))); transform: scaleX(0); transform-origin: left center; transition: transform .2s cubic-bezier(0.16, 1, 0.3, 1); }
 .provlist { border-top: 1px dashed var(--line); margin-top: 10px; padding-top: 12px; }
 .sub2 { font-size: 11px; letter-spacing: .08em; color: var(--dim); margin-bottom: 8px; font-family: var(--font-display); }
 .subnote { color: var(--dim); font-size: 12px; margin-top: 10px; line-height: 1.5; max-width: 68ch; }
@@ -862,19 +814,18 @@ input::placeholder, textarea::placeholder { color: var(--dim); }
 /* durante una búsqueda se muestran todos los paneles y se filtran las filas */
 .setwrap.searching .setpanel { display: flex; flex-direction: column; gap: 16px; }
 .setcard {
-  border: 1px solid var(--line2); border-radius: 8px; padding: 16px 18px;
-  background: rgba(var(--panel-rgb), 0.72);
-  box-shadow: inset 0 1px 0 rgba(255,255,255,0.06), inset 0 -2px 0 rgba(0,0,0,0.45), 0 3px 10px rgba(0,0,0,0.35);
+  border: 1px solid var(--line2); border-radius: 16px; padding: 16px 18px;
+  background: linear-gradient(170deg, rgba(var(--face-rgb), 0.42), rgba(var(--deep-rgb), 0.52));
 }
 /* MCP vive en su propia vista, sin el `.setpanel` que separaba las tarjetas (gap 16px) */
 #view-mcp { max-width: 900px; }
 #view-mcp .setcard + .setcard { margin-top: 16px; }
 .sc-head { display: flex; align-items: baseline; gap: 10px; flex-wrap: wrap; margin-bottom: 14px; }
-.sc-head b { font: 600 13px var(--font-display); letter-spacing: .1em; text-transform: uppercase; color: #fff; }
+.sc-head b { font: 600 15px var(--font-display); color: #fff; }
 .sc-hint { color: var(--dim); font-size: 12px; }
 .srow { margin-bottom: 10px; }
 .srow:last-child { margin-bottom: 0; }
-.setempty { max-width: 900px; padding: 26px 4px; text-align: center; border: 1px dashed var(--line); border-radius: 8px; color: var(--dim); font-size: 13px; }
+.setempty { max-width: 900px; padding: 26px 4px; text-align: center; border: 1px dashed var(--line); border-radius: 16px; color: var(--dim); font-size: 13px; }
 
 .settabs { display: flex; gap: 6px; flex-wrap: wrap; margin: 16px 0 18px; padding-bottom: 12px; border-bottom: 1px solid var(--line2); max-width: 900px; }
 .settab {
@@ -883,15 +834,14 @@ input::placeholder, textarea::placeholder { color: var(--dim); }
   font: 600 13px var(--font-ui); cursor: pointer; transition: all .15s; white-space: nowrap;
 }
 .settab:hover { color: var(--txt); background: rgba(var(--acc2-rgb), 0.10); }
-.settab.on { color: #fff; background: rgba(var(--acc2-rgb), 0.32); border-color: var(--line); box-shadow: inset 0 1px 0 rgba(255,255,255,0.14), inset 0 -2px 0 rgba(0,0,0,0.4); }
+.settab.on { color: #fff; background: linear-gradient(135deg, rgba(var(--acc2-rgb), 0.28), rgba(var(--acc3-rgb), 0.18)); border-color: var(--line); box-shadow: 0 0 16px rgba(var(--acc2-rgb), 0.22); }
 .settab .ic { width: 15px; height: 15px; }
 
 /* tarjeta de estado del modelo activo */
 .activecard {
   display: flex; align-items: center; gap: 14px; padding: 14px 16px; max-width: 900px;
-  border: 1px solid var(--line); border-radius: 8px;
-  background: rgba(var(--panel-rgb), 0.72);
-  box-shadow: inset 0 1px 0 rgba(255,255,255,0.06), inset 0 -2px 0 rgba(0,0,0,0.45);
+  border: 1px solid var(--line); border-radius: 16px;
+  background: linear-gradient(135deg, rgba(34,211,238,0.09), rgba(var(--acc2-rgb), 0.14));
 }
 .activecard .ac-ic { width: 42px; height: 42px; border-radius: 13px; display: grid; place-items: center; background: rgba(var(--acc2-rgb), 0.18); color: var(--vio2); flex-shrink: 0; }
 .activecard .ac-ic .ic { width: 20px; height: 20px; }
@@ -923,13 +873,10 @@ input::placeholder, textarea::placeholder { color: var(--dim); }
 .hdim { color: var(--dim); font-size: 12px; }
 .togglerow { display: flex; align-items: center; justify-content: space-between; padding: 9px 2px; font-size: 15px; gap: 10px; }
 .togglerow input { background: rgba(var(--field-rgb), 0.6); border: 1px solid var(--line2); border-radius: 9px; color: var(--txt); padding: 7px 10px; font: 500 13px var(--font-ui); outline: none; }
-/* DECK: el interruptor es una palanca cromada sobre ranura fresada.
-   Apagado: ranura oscura, palanca gris. Encendido: la ranura toma acento y la
-   palanca enciende su filo (sigue siendo el .on que mueve el JS). */
-.sw { width: 44px; height: 22px; border-radius: 5px; background: rgba(0,0,0,0.55); position: relative; cursor: pointer; border: 1px solid rgba(0,0,0,0.7); box-shadow: inset 0 2px 4px rgba(0,0,0,0.7), inset 0 -1px 0 rgba(255,255,255,0.08); flex-shrink: 0; }
-.sw::after { content: ''; position: absolute; width: 18px; height: 16px; border-radius: 4px; background: linear-gradient(180deg, #b9b3c9 0%, #6f6a80 55%, #4a4657 100%); top: 2px; left: 2px; transition: left .16s ease; box-shadow: 0 1px 2px rgba(0,0,0,0.6), inset 0 1px 0 rgba(255,255,255,0.5); }
+.sw { width: 40px; height: 21px; border-radius: 999px; background: rgba(255,255,255,0.10); position: relative; cursor: pointer; border: 1px solid rgba(255,255,255,0.12); flex-shrink: 0; }
+.sw::after { content: ''; position: absolute; width: 15px; height: 15px; border-radius: 50%; background: #8f86b8; top: 2px; left: 2px; transition: all .2s; }
 .sw.on { background: rgba(var(--acc2-rgb), 0.4); border-color: var(--vio2); }
-.sw.on::after { left: 22px; background: linear-gradient(180deg, #ffffff 0%, #cfc9e6 60%, #9a93b8 100%); box-shadow: 0 0 8px var(--vio2), inset 0 1px 0 rgba(255,255,255,0.7); }
+.sw.on::after { left: 21px; background: #fff; box-shadow: 0 0 8px var(--vio2); }
 .memlist { display: flex; flex-direction: column; gap: 8px; max-width: 760px; }
 .skillitem .mt b { font-size: 15px; }
 .skillitem .tc-mark { color: var(--vio2); }
@@ -937,12 +884,12 @@ input::placeholder, textarea::placeholder { color: var(--dim); }
 .skillitem .sw { transform: scale(.92); }
 #skillNewBody { width: 100%; resize: vertical; line-height: 1.5; }
 .vh-actions input { width: 280px; }
-.memitem { display: flex; align-items: center; gap: 10px; padding: 11px 14px; border: 1px solid var(--line2); border-radius: 6px; background: rgba(var(--panel-rgb), 0.5); box-shadow: inset 0 1px 0 rgba(255,255,255,0.05), inset 0 -2px 0 rgba(0,0,0,0.4); }
+.memitem { display: flex; align-items: center; gap: 10px; padding: 11px 14px; border: 1px solid var(--line2); border-radius: 12px; background: rgba(var(--panel-rgb), 0.5); }
 .memitem .mt { flex: 1; font-size: 15px; }
 .memitem .md { color: var(--dim); font-size: 11px; }
 .toolsgrid { display: grid; grid-template-columns: repeat(2, 1fr); gap: 12px; max-width: 860px; }
 .toolsgroup { grid-column: 1 / -1; font: 600 11px var(--font-display); letter-spacing: .08em; text-transform: uppercase; color: var(--dim); margin-top: 8px; }
-.toolcard { display: flex; gap: 12px; align-items: center; padding: 13px 15px; border: 1px solid var(--line2); border-radius: 6px; background: rgba(var(--panel-rgb), 0.5); box-shadow: inset 0 1px 0 rgba(255,255,255,0.05), inset 0 -2px 0 rgba(0,0,0,0.4); }
+.toolcard { display: flex; gap: 12px; align-items: center; padding: 13px 15px; border: 1px solid var(--line2); border-radius: 13px; background: rgba(var(--panel-rgb), 0.5); }
 .toolcard .tic { width: 34px; height: 34px; border-radius: 10px; display: grid; place-items: center; background: rgba(var(--acc2-rgb), 0.14); font-size: 15px; }
 .toolcard b { display: block; font-size: 15px; } .toolcard small { color: var(--dim); font-size: 12px; }
 
@@ -954,7 +901,7 @@ input::placeholder, textarea::placeholder { color: var(--dim); }
 #mcpFormCard:not(.on) { display: none; }
 .mcplist { display: flex; flex-direction: column; gap: 10px; padding: 4px 0 10px; }
 .mcpempty { color: var(--dim); font-size: 12px; padding: 8px 0; }
-.mcprow { border: 1px solid var(--line); border-radius: 6px; padding: 10px 12px; background: rgba(var(--panel-rgb), 0.5); box-shadow: inset 0 1px 0 rgba(255,255,255,0.05), inset 0 -2px 0 rgba(0,0,0,0.4); }
+.mcprow { border: 1px solid var(--line); border-radius: 12px; padding: 10px 12px; }
 .mcphead { display: flex; align-items: center; gap: 8px; font-size: 13px; }
 .mcpdot { width: 8px; height: 8px; border-radius: 50%; background: var(--dim); flex-shrink: 0; }
 .mcpdot.ok { background: #37f5a8; }
@@ -975,26 +922,21 @@ input::placeholder, textarea::placeholder { color: var(--dim); }
 /* ============ Right rail ============ */
 .rail { display: flex; flex-direction: column; gap: 14px; padding: 50px 18px 18px 4px; overflow-y: auto; position: relative; z-index: 1; }
 .rail::-webkit-scrollbar { width: 0; }
-/* DECK: borde mecanizado — filo de luz arriba, sombra abajo, peso abajo.
-   Un solo sitio para el filo de los paneles planos. */
 .rcard {
-  border: 1px solid var(--line2); border-radius: 8px; padding: 15px 16px;
-  background: rgba(var(--panel-rgb), 0.72);
-  box-shadow: inset 0 1px 0 rgba(255,255,255,0.06), inset 0 -2px 0 rgba(0,0,0,0.45), 0 3px 10px rgba(0,0,0,0.35);
+  border: 1px solid var(--line2); border-radius: 16px; padding: 15px 16px;
+  background: linear-gradient(170deg, rgba(var(--face-rgb), 0.45), rgba(var(--deep-rgb), 0.55));
 }
 .rc-top { display: flex; align-items: center; justify-content: space-between; }
 .live { font-size: 12px; color: var(--ok); display: flex; align-items: center; gap: 6px; }
 .live .dot { margin: 0; }
 .live2 { font-size: 12px; letter-spacing: 1px; color: var(--dim); }
-/* DECK: el anillo es una corona de segmentos LED (el equipo respira por lámparas,
-   no por neón): ámbar del acento sobre fondo apagado. */
 .bigring {
   width: 58px; height: 58px; border-radius: 50%;
   border: 5px solid transparent;
-  background: repeating-conic-gradient(from 210deg, rgb(var(--acc2-rgb)) 0deg 9deg, rgba(var(--acc2-rgb), 0.14) 9deg 18deg) border-box;
+  background: conic-gradient(from 210deg, rgb(var(--acc3-rgb)), rgb(var(--acc2-rgb)), rgb(var(--acc-rgb)), rgb(var(--acc3-rgb))) border-box;
   -webkit-mask: linear-gradient(#fff 0 0) padding-box, linear-gradient(#fff 0 0);
   -webkit-mask-composite: xor; mask-composite: exclude;
-  filter: drop-shadow(0 0 6px rgba(var(--acc2-rgb), 0.5));
+  filter: drop-shadow(0 0 10px rgba(var(--acc2-rgb), 0.55));
   transition: opacity .4s;
 }
 .rcard.idle .bigring { opacity: .3; }
@@ -1004,48 +946,25 @@ input::placeholder, textarea::placeholder { color: var(--dim); }
 .mini-dots { display: inline-flex; gap: 4px; margin-top: 10px; }
 .mini-dots .dot { width: 7px; height: 7px; margin: 0; }
 .rail-agents { display: flex; flex-direction: column; gap: 9px; }
+.ragent { display: flex; align-items: center; gap: 10px; }
 .ragent .aic { width: 32px; height: 32px; border-radius: 10px; font-size: 15px; }
 .ragent b { display: block; font-size: 13px; } .ragent small { color: var(--dim); font-size: 11px; }
 .ragent .adot { position: static; margin-left: auto; }
 .feed { display: flex; flex-direction: column; gap: 9px; margin-top: 10px; min-height: 120px; }
-/* DECK: las filas del monitor son chapa plana con filo de luz (el bitono con corte
-   era del tablero split-flap) y entran con parpadeo de lámpara, no volteando. */
-.fitem {
-  display: flex; align-items: center; gap: 9px; padding: 7px 10px;
-  font-size: 12px; color: var(--txt); opacity: .88;
-  border: 1px solid var(--line2); border-radius: 6px;
-  background: rgba(var(--panel-rgb), 0.55);
-  box-shadow: inset 0 1px 0 rgba(255,255,255,0.05);
-  animation: flap-in .3s steps(2, start);
-}
-@keyframes flap-in {
-  0% { opacity: 0; } 50% { opacity: 1; } 75% { opacity: .35; } 100% { opacity: .88; }
-}
-.ragent {
-  display: flex; align-items: center; gap: 10px; padding: 7px 10px;
-  border: 1px solid var(--line2); border-radius: 6px;
-  background: rgba(var(--panel-rgb), 0.55);
-  box-shadow: inset 0 1px 0 rgba(255,255,255,0.05);
-  animation: flap-in .3s steps(2, start);
-}
+.fitem { display: flex; align-items: center; gap: 9px; font-size: 12px; color: var(--dim); animation: fadein .25s ease; }
 .fitem .dot { margin: 0; flex-shrink: 0; }
-.fitem .ft { margin-left: auto; color: var(--txt); opacity: .75; font-size: 11px; flex-shrink: 0; font-variant-numeric: tabular-nums; }
+.fitem .ft { margin-left: auto; color: var(--dim); font-size: 11px; flex-shrink: 0; }
 .fitem .ft-txt { white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
-/* DECK: contador de estación en ámbar LED (fijo, como los pilotos del frontal) */
-.board-clock { font: 700 12px var(--font-ui); letter-spacing: .1em; color: #ffc857; font-variant-numeric: tabular-nums; text-shadow: 0 0 8px rgba(255,200,87,0.45); }
+/* Reloj del monitor: hora local tabular junto a «Actividad en vivo». */
+.board-clock { font: 700 12px var(--font-ui); letter-spacing: .08em; color: var(--txt); opacity: .85; font-variant-numeric: tabular-nums; }
 
 /* history view */
 .histlist { display: flex; flex-direction: column; gap: 8px; max-width: 860px; }
-/* DECK: las filas de todas las listas son chapa plana con filo mecanizado:
-   historial, memoria, herramientas y MCP. */
 .hitem {
   display: flex; align-items: center; gap: 12px; padding: 13px 16px; cursor: pointer;
-  border: 1px solid var(--line2); border-radius: 6px;
-  background: rgba(var(--panel-rgb), 0.5);
-  box-shadow: inset 0 1px 0 rgba(255,255,255,0.05), inset 0 -2px 0 rgba(0,0,0,0.4);
-  transition: all .15s;
+  border: 1px solid var(--line2); border-radius: 13px; background: rgba(var(--panel-rgb), 0.5); transition: all .15s;
 }
-.hitem:hover { border-color: var(--line); transform: translateY(-1px); }
+.hitem:hover { border-color: var(--line); box-shadow: 0 0 18px rgba(var(--acc2-rgb), 0.18); transform: translateY(-1px); }
 .hitem .hic { width: 34px; height: 34px; border-radius: 10px; display: grid; place-items: center; background: rgba(var(--acc2-rgb), 0.12); color: var(--vio2); flex-shrink: 0; }
 .hitem .hic .ic { width: 16px; height: 16px; }
 .hitem .hmain { flex: 1; min-width: 0; }
@@ -1109,9 +1028,9 @@ i[data-i] { display: inline-flex; line-height: 0; }
 .toast {
   position: fixed; top: 52px; left: 50%; transform: translateX(-50%); z-index: 90;
   display: flex; align-items: center; gap: 9px;
-  background: rgba(var(--bg1-rgb), 0.98); border: 1px solid var(--line); border-radius: 8px;
+  background: rgba(var(--bg1-rgb), 0.95); border: 1px solid var(--line); border-radius: 12px;
   padding: 10px 16px; font-size: 13px; color: var(--txt);
-  box-shadow: 0 10px 40px rgba(0,0,0,0.6), inset 0 1px 0 rgba(255,255,255,0.07);
+  box-shadow: 0 10px 40px rgba(0,0,0,0.55), 0 0 24px rgba(var(--acc2-rgb), 0.2);
   animation: fadein .22s ease;
 }
 .toast .dot { margin: 0; }
@@ -1140,10 +1059,9 @@ depender del color de acento elegido. */
 .confirmbar {
   display: flex; align-items: center; gap: 12px;
   margin: 0 18px 8px; padding: 10px 14px;
-  background: rgba(255,180,60,0.08);
+  background: linear-gradient(135deg, rgba(255,180,60,0.12), rgba(255,120,80,0.10));
   border: 1px solid rgba(255,180,60,0.38);
-  border-radius: 8px;
-  box-shadow: inset 0 1px 0 rgba(255,255,255,0.06), inset 0 -2px 0 rgba(0,0,0,0.4);
+  border-radius: 14px;
   animation: cbIn .25s ease;
 }
 .confirmbar .cb-dot {
@@ -1175,7 +1093,7 @@ depender del color de acento elegido. */
 .permrow {
   display: flex; align-items: center; justify-content: space-between; gap: 10px;
   padding: 7px 10px; margin: 4px 0;
-  background: var(--bg2); border: 1px solid var(--line); border-radius: 6px;
+  background: var(--bg2); border: 1px solid var(--line); border-radius: 10px;
 }
 .permrow .mt { min-width: 0; }
 .permrow .mt b { font-size: 12px; }
@@ -1209,16 +1127,10 @@ depender del color de acento elegido. */
 #chatTitle { white-space: nowrap; overflow: hidden; text-overflow: ellipsis; max-width: 100%; }
 .chathead .vh-actions { flex-shrink: 0; }
 .ch-status {
-  display: inline-flex; align-items: center; gap: 8px; align-self: flex-start;
-  padding: 4px 11px 4px 9px; border-radius: 7px; max-width: 100%; overflow: hidden;
+  display: inline-flex; align-items: center; gap: 7px; align-self: flex-start;
+  padding: 3px 10px; border-radius: 999px; max-width: 100%; overflow: hidden;
   white-space: nowrap;
   background: rgba(var(--mode-rgb), 0.10); border: 1px solid rgba(var(--mode-rgb), 0.32);
-}
-/* TABLERO: la tira de estado es la ficha del vuelo: rombo de modo + palabra + detalle */
-.ch-status::before {
-  content: ''; width: 6px; height: 6px; flex-shrink: 0;
-  background: var(--mode-c); transform: rotate(45deg);
-  box-shadow: 0 0 7px var(--mode-c);
 }
 .ch-status .dot { margin: 0; background: var(--mode-c); box-shadow: 0 0 8px var(--mode-c); animation: blink 1.5s infinite; }
 .ch-status.done .dot { animation: none; }
@@ -1227,16 +1139,17 @@ depender del color de acento elegido. */
 
 /* ---- compositor teñido por el modo (siempre visible, sin ocupar espacio) ---- */
 #view-chat .composer {
-  /* DECK: también aquí, luz dentro. El borde de modo identifica sin halo. */
+  /* el borde toma el color del modo, y es lo que identifica el compositor contra el
+     lienzo: a 0,30 medía 1,71:1. A 0,60 supera 3:1 en los tres modos (el peor, THINK). */
   border-color: rgba(var(--mode-rgb), 0.60);
-  box-shadow: inset 0 1px 0 rgba(255,255,255,0.07), inset 0 -2px 0 rgba(0,0,0,0.5), inset 0 0 22px rgba(var(--mode-rgb), 0.12);
+  box-shadow: 0 0 26px rgba(var(--mode-rgb), 0.14), inset 0 0 22px rgba(var(--acc2-rgb), 0.14);
   transition: border-color .25s ease, box-shadow .25s ease;
 }
 #view-chat .composer:focus-within {
   border-color: rgba(var(--mode-rgb), 0.9);
-  box-shadow: inset 0 1px 0 rgba(255,255,255,0.07), inset 0 -2px 0 rgba(0,0,0,0.5), inset 0 0 28px rgba(var(--mode-rgb), 0.22);
+  box-shadow: 0 0 40px rgba(var(--mode-rgb), 0.30), inset 0 0 28px rgba(var(--acc2-rgb), 0.2);
 }
-#view-chat .cbtn.send { background: var(--mode-c); }
+#view-chat .cbtn.send { background: linear-gradient(135deg, var(--mode-c), #8b5cf6); }
 
 /* ---- selector de modo: icono + color propio de cada uno ---- */
 .modeseg button { display: inline-flex; align-items: center; gap: 5px; }
@@ -1248,23 +1161,22 @@ depender del color de acento elegido. */
    con innerHTML y se llevaría por delante el bloque. */
 .msgs-area { position: relative; flex: 1; min-height: 0; display: flex; }
 .chat-empty {
-  position: absolute; inset: 0; z-index: 5; overflow: hidden;
+  position: absolute; inset: 0; z-index: 5; overflow-y: auto;
   display: grid; place-items: center; padding: 16px 12px;
 }
-/* DECK: el scope vive detrás del contenido y se apaga hacia los bordes para que
-   el texto mande en el centro. */
+/* El scope vive detrás del contenido del estado vacío y se apaga hacia los bordes
+   para que el texto mande en el centro. Sigue el acento del tema. */
 .chat-empty .scope {
   position: absolute; inset: 0; width: 100%; height: 100%;
-  opacity: .55; pointer-events: none;
+  opacity: .5; pointer-events: none;
   -webkit-mask-image: radial-gradient(72% 72% at 50% 46%, #000 25%, transparent 100%);
   mask-image: radial-gradient(72% 72% at 50% 46%, #000 25%, transparent 100%);
 }
-.ce-inner { width: 100%; max-width: 620px; max-height: 100%; overflow-y: auto; text-align: center; position: relative; z-index: 1; }
+.ce-inner { width: 100%; max-width: 620px; text-align: center; position: relative; z-index: 1; }
 .ce-mark {
-  width: 52px; height: 52px; margin: 0 auto 12px; border-radius: 8px; display: grid; place-items: center;
-  background: rgba(var(--acc2-rgb), 0.16);
-  border: 1px solid var(--line); color: var(--vio2);
-  box-shadow: inset 0 1px 0 rgba(255,255,255,0.1), inset 0 -2px 0 rgba(0,0,0,0.4);
+  width: 52px; height: 52px; margin: 0 auto 12px; border-radius: 16px; display: grid; place-items: center;
+  background: linear-gradient(140deg, rgba(34,211,238,0.18), rgba(var(--acc2-rgb), 0.24));
+  border: 1px solid var(--line); color: var(--vio2); box-shadow: 0 0 26px rgba(var(--acc2-rgb), 0.28);
 }
 .ce-mark .ic { width: 24px; height: 24px; }
 .ce-title { font-family: var(--font-display); font-size: 18px; display: block; }
@@ -1279,13 +1191,12 @@ depender del color de acento elegido. */
 /* rejilla adaptativa real: 3 columnas si caben, 2 en ventanas medianas, 1 si no */
 .ce-modes { display: grid; grid-template-columns: repeat(auto-fit, minmax(180px, 1fr)); gap: 10px; margin-top: 22px; }
 .ce-mode {
-  text-align: left; cursor: pointer; padding: 12px 13px; border-radius: 8px;
-  background: rgba(var(--panel-rgb), 0.55);
+  text-align: left; cursor: pointer; padding: 12px 13px; border-radius: 14px;
+  background: linear-gradient(165deg, rgba(var(--face-rgb), 0.5), rgba(var(--panel-rgb), 0.6));
   border: 1px solid var(--line2); transition: all .18s;
-  box-shadow: inset 0 1px 0 rgba(255,255,255,0.05), inset 0 -2px 0 rgba(0,0,0,0.4);
 }
-.ce-mode:hover { transform: translateY(-2px); border-color: rgba(var(--mr), 0.5); }
-.ce-mode.on { border-color: rgba(var(--mr), 0.6); background: rgba(var(--mr), 0.12); }
+.ce-mode:hover { transform: translateY(-2px); border-color: rgba(var(--mr), 0.5); box-shadow: 0 6px 22px rgba(var(--mr), 0.16); }
+.ce-mode.on { border-color: rgba(var(--mr), 0.6); background: linear-gradient(165deg, rgba(var(--mr), 0.16), rgba(var(--panel-rgb), 0.7)); box-shadow: 0 0 22px rgba(var(--mr), 0.18); }
 .ce-mode .cm-top { display: flex; align-items: center; gap: 7px; margin-bottom: 5px; }
 .ce-mode .cm-top .ic { width: 15px; height: 15px; color: rgb(var(--mr)); }
 .ce-mode .cm-top b { font: 700 12px var(--font-ui); letter-spacing: .08em; color: rgb(var(--mr)); }
@@ -1348,7 +1259,7 @@ depender del color de acento elegido. */
    texto pequeño y atenuado, con la marca del color del modo, para que se distinga de
    lo que el agente AFIRMA. Se pliega solo cuando empieza a contestar. */
 .thinkblock {
-  border: 1px dashed rgba(var(--mode-rgb), 0.34); border-radius: 6px;
+  border: 1px dashed rgba(var(--mode-rgb), 0.34); border-radius: 11px;
   margin: 2px 0 7px; background: rgba(var(--mode-rgb), 0.05); overflow: hidden;
 }
 .thinkblock .think-head {
@@ -1392,7 +1303,7 @@ depender del color de acento elegido. */
 
 /* ---- tarjeta de herramienta: cabecera + detalle expandible ---- */
 .tcard {
-  border: 1px solid var(--line2); border-radius: 7px; margin: 4px 0;
+  border: 1px solid var(--line2); border-radius: 12px; margin: 4px 0;
   background: rgba(var(--deep-rgb), 0.5); overflow: hidden; transition: border-color .16s;
 }
 .tcard.run { border-color: rgba(var(--mode-rgb), 0.36); }
@@ -1458,11 +1369,12 @@ depender del color de acento elegido. */
 .tcard-copy .ic { width: 12px; height: 12px; }
 
 /* ---- grupo de herramientas: una sola cabecera, colapsable ---- */
-.tgroup { border: 1px solid var(--line2); border-radius: 7px; margin: 3px 0 8px; background: rgba(var(--field-rgb), 0.4); overflow: hidden; }
+.tgroup { border: 1px solid var(--line2); border-radius: 13px; margin: 3px 0 8px; background: rgba(var(--field-rgb), 0.4); overflow: hidden; }
 .tgroup-head {
   display: flex; align-items: center; gap: 8px; padding: 8px 11px; cursor: pointer; user-select: none;
-  background: rgba(var(--panel-rgb), 0.4);
+  background: linear-gradient(90deg, rgba(var(--mode-rgb), 0.09), transparent);
 }
+.tgroup-head:hover { background: linear-gradient(90deg, rgba(var(--mode-rgb), 0.15), rgba(255,255,255,0.02)); }
 .tgroup-head .tg-ic { color: var(--mode-c); display: grid; place-items: center; }
 .tgroup-head .tg-ic .ic { width: 14px; height: 14px; }
 .tgroup-head b { font: 600 12px var(--font-ui); color: var(--txt); }
@@ -1473,6 +1385,7 @@ depender del color de acento elegido. */
   padding: 1px 7px; border-radius: 999px; background: rgba(251,113,133,0.14);
 }
 .tgroup.has-fails { border-color: rgba(251,113,133,0.34); }
+.tgroup.has-fails .tgroup-head { background: linear-gradient(90deg, rgba(251,113,133,0.10), transparent); }
 .tgroup-head .tg-chev { color: var(--dim); display: grid; place-items: center; transition: transform .18s; }
 .tgroup-head .tg-chev .ic { width: 14px; height: 14px; }
 .tgroup.closed .tg-chev { transform: rotate(0deg); }
@@ -1483,9 +1396,8 @@ depender del color de acento elegido. */
 
 /* ---- plan del modo PLAN: checklist que se marca sola ---- */
 .plancard {
-  border: 1px solid rgba(var(--acc-rgb), 0.34); border-radius: 8px; margin: 3px 0 9px;
-  background: rgba(var(--panel-rgb), 0.6); overflow: hidden;
-  box-shadow: inset 0 1px 0 rgba(255,255,255,0.05), inset 0 -2px 0 rgba(0,0,0,0.4);
+  border: 1px solid rgba(var(--acc-rgb), 0.34); border-radius: 14px; margin: 3px 0 9px;
+  background: linear-gradient(165deg, rgba(var(--acc2-rgb), 0.10), rgba(var(--panel-rgb), 0.5)); overflow: hidden;
 }
 .plancard-head {
   display: flex; align-items: center; gap: 8px; padding: 8px 12px;
@@ -1508,7 +1420,7 @@ depender del color de acento elegido. */
 .plancard li.done { color: var(--dim); }
 
 /* ---- bloques de código: cabecera con lenguaje y botón de copiar ---- */
-.codeblock { margin: 7px 0; border: 1px solid var(--line2); border-radius: 6px; overflow: hidden; background: rgba(0,0,0,0.42); }
+.codeblock { margin: 7px 0; border: 1px solid var(--line2); border-radius: 11px; overflow: hidden; background: rgba(0,0,0,0.42); }
 .codeblock-head {
   display: flex; align-items: center; gap: 8px; padding: 5px 11px;
   background: rgba(var(--acc2-rgb), 0.09); border-bottom: 1px solid var(--line2);
@@ -1525,7 +1437,7 @@ depender del color de acento elegido. */
   width: 34px; height: 34px; border-radius: 50%; cursor: pointer;
   display: grid; place-items: center;
   background: rgba(var(--bg2-rgb), 0.95); border: 1px solid var(--line); color: var(--txt);
-  box-shadow: 0 8px 26px rgba(0,0,0,0.5), inset 0 1px 0 rgba(255,255,255,0.08);
+  box-shadow: 0 8px 26px rgba(0,0,0,0.45), 0 0 18px rgba(var(--acc2-rgb), 0.22);
   animation: fadein .2s ease;
 }
 .jumpdown:hover { border-color: var(--mode-c); color: var(--mode-c); }
@@ -1541,12 +1453,11 @@ depender del color de acento elegido. */
 /* muestra del color elegido: la bolita pinta exactamente el valor guardado */
 .colordot { width: 26px; height: 26px; border-radius: 50%; flex-shrink: 0; background: rgb(var(--acc2-rgb)); box-shadow: 0 0 12px rgba(var(--acc2-rgb), 0.55), inset 0 0 0 1px rgba(255,255,255,0.18); transition: background .3s ease, box-shadow .3s ease; }
 .colordot.glow { background: rgb(var(--glow-rgb)); box-shadow: 0 0 12px rgba(var(--glow-rgb), 0.55), inset 0 0 0 1px rgba(255,255,255,0.18); }
-/* DECK: pista fresada (ranura oscura) y mando moleteado cromado. Se conserva el
-   selector input[type="range"].glowslider que pide el suite. */
-input[type="range"].glowslider { -webkit-appearance: none; appearance: none; width: 170px; height: 8px; border-radius: 4px; outline: none; cursor: pointer;
-  background: rgba(0,0,0,0.55); border: 1px solid rgba(0,0,0,0.7); box-shadow: inset 0 2px 4px rgba(0,0,0,0.7), inset 0 -1px 0 rgba(255,255,255,0.08); }
-input[type="range"].glowslider::-webkit-slider-thumb { -webkit-appearance: none; appearance: none; width: 16px; height: 20px; border-radius: 4px;
-  background: linear-gradient(90deg, #6f6a80 0%, #cfc9e6 30%, #ffffff 50%, #cfc9e6 70%, #6f6a80 100%); box-shadow: 0 1px 3px rgba(0,0,0,0.6), 0 0 8px rgba(var(--glow-rgb), 0.5); border: 1px solid rgba(0,0,0,0.6); transition: transform .15s ease; }
+/* slider de intensidad: pista degradada del apagado al encendido real */
+input[type="range"].glowslider { -webkit-appearance: none; appearance: none; width: 170px; height: 5px; border-radius: 999px; outline: none; cursor: pointer;
+  background: linear-gradient(90deg, rgba(var(--glow-rgb), 0.10), rgba(var(--glow-rgb), 0.85)); border: 1px solid var(--line2); }
+input[type="range"].glowslider::-webkit-slider-thumb { -webkit-appearance: none; appearance: none; width: 15px; height: 15px; border-radius: 50%;
+  background: #fff; box-shadow: 0 0 10px rgba(var(--glow-rgb), 0.8), 0 1px 3px rgba(0,0,0,0.5); border: none; transition: transform .15s ease; }
 input[type="range"].glowslider::-webkit-slider-thumb:hover { transform: scale(1.2); }
 input[type="range"].glowslider::-webkit-slider-thumb:active { transform: scale(1.35); }
 /* etiquetas Suave / Equilibrado / Intenso bajo el slider */
@@ -1555,7 +1466,7 @@ input[type="range"].glowslider::-webkit-slider-thumb:active { transform: scale(1
 
 /* ============ adjuntos del chat: chips, drag&drop, pegado ============ */
 .attachstrip { display: flex; flex-wrap: wrap; gap: 8px; padding: 10px 14px 0; }
-.atchip { display: inline-flex; align-items: center; gap: 7px; padding: 5px 8px; border-radius: 6px;
+.atchip { display: inline-flex; align-items: center; gap: 7px; padding: 5px 8px; border-radius: 10px;
   background: rgba(var(--acc2-rgb), 0.10); border: 1px solid rgba(var(--acc2-rgb), 0.28); max-width: 220px; }
 .atchip .ic { width: 14px; height: 14px; display: inline-flex; color: var(--vio2); flex-shrink: 0; }
 .atchip .ic svg { width: 14px; height: 14px; }
@@ -1586,7 +1497,7 @@ input[type="range"].glowslider::-webkit-slider-thumb:active { transform: scale(1
 /* adjuntos dentro de la burbuja del usuario */
 .msg-atts { display: flex; flex-wrap: wrap; gap: 8px; margin-top: 8px; }
 .msg-att-img { max-width: 220px; max-height: 160px; border-radius: 10px; border: 1px solid rgba(255,255,255,0.14); cursor: zoom-in; box-shadow: 0 3px 14px rgba(0,0,0,0.35); }
-.msg-att-file { display: inline-flex; align-items: center; gap: 7px; padding: 7px 11px; border-radius: 6px;
+.msg-att-file { display: inline-flex; align-items: center; gap: 7px; padding: 7px 11px; border-radius: 10px;
   background: rgba(255,255,255,0.06); border: 1px solid rgba(255,255,255,0.14); font-size: 12px; }
 .msg-att-file svg { width: 14px; height: 14px; color: var(--vio2); flex-shrink: 0; }
 .msg-att-file b { font-weight: 500; color: var(--txt); max-width: 180px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
@@ -1611,7 +1522,6 @@ input[type="range"].glowslider::-webkit-slider-thumb:active { transform: scale(1
   .shell::before,
   .nb.live, .pulse-dot, .acard.on .adot, .ch-status .dot,
   .plancard li.now .pl-n, .stream::after,
-  .fitem, .ragent,
   .confirmbar .cb-dot { animation: none !important; }
 }
 
@@ -1674,7 +1584,7 @@ input[type="range"].glowslider::-webkit-slider-thumb:active { transform: scale(1
 /* La paleta del proyecto no tiene `--accent` (el acento rico es `--vio`, que además
    sigue el tema elegido): se define aquí, dentro del panel, para que la cabecera y el
    nombre de quien habla pinten de acento en vez de heredar el color del texto. */
-#voiceMode { --accent: var(--vio); position: absolute; inset: 0; z-index: 40; display: flex; flex-direction: column; align-items: center; justify-content: center; gap: 10px; background: rgb(var(--bg0-rgb)); }
+#voiceMode { --accent: var(--vio); position: absolute; inset: 0; z-index: 40; display: flex; flex-direction: column; align-items: center; justify-content: center; gap: 10px; background: radial-gradient(120% 120% at 50% 30%, #14121f 0%, #0b0a12 70%); }
 #voiceMode[hidden] { display: none; }
 #vmOrbe { width: 190px; height: 190px; }              /* el lienzo va sin fondo: se ve el panel */
 .vm-cabecera { letter-spacing: .06em; text-transform: uppercase; font-size: 11px; color: var(--accent); }
@@ -1683,13 +1593,13 @@ input[type="range"].glowslider::-webkit-slider-thumb:active { transform: scale(1
 .vm-fila { display: flex; gap: 8px; margin: 4px 0; }
 .vm-quien { min-width: 62px; font-weight: 600; color: var(--accent); }
 .vm-pasos { font-size: 12px; opacity: .85; min-height: 18px; }
-.vm-confirm { border: 1px solid rgba(251,191,36,.5); background: rgba(251,191,36,.08); border-radius: 6px; padding: 10px; width: min(560px, 84%); }
+.vm-confirm { border: 1px solid rgba(251,191,36,.5); background: rgba(251,191,36,.08); border-radius: 10px; padding: 10px; width: min(560px, 84%); }
 .vm-botones { display: flex; gap: 8px; margin-top: 6px; }
 /* Los botones de la confirmación llevan TEXTO («Sí, hazlo»), y `.cbtn` es el cuadro
    redondo de 34×34 de los iconos del compositor: sin esta regla la etiqueta se partía en
    dos líneas dentro de un cuadrado de 34px. */
 #voiceMode .vm-botones .cbtn { width: auto; height: auto; border-radius: 9px; padding: 7px 14px; white-space: nowrap; }
-.vm-error { border: 1px solid rgba(248,113,113,.5); border-radius: 6px; padding: 10px; width: min(560px, 84%); }
+.vm-error { border: 1px solid rgba(248,113,113,.5); border-radius: 10px; padding: 10px; width: min(560px, 84%); }
 .vm-pie { font-size: 11px; opacity: .6; display: flex; gap: 18px; }
 /* Aparte del pie (y no dentro): `.vm-pie` lleva `opacity: .6` y un hijo no puede subir la
    opacidad de su padre, así que el botón de parar quedaría casi invisible — y este botón
