@@ -362,7 +362,7 @@ body.nofocus .glow, body.nofocus .glow::before, body.nofocus .glowRing, body.nof
 /* Puertas: cada sección enseña el número de su atajo (Alt+1…9) en pequeño delante
    del nombre. MCP no tiene atajo y enseña –. Discreto: el nombre manda. */
 .navitem .nl::before {
-  content: '–'; display: inline-block; min-width: 20px; margin-right: 1px;
+  content: '–'; display: inline-block; min-width: 18px; margin-right: 1px;
   font-size: 10px; font-weight: 700; letter-spacing: .08em; color: var(--dim);
   font-variant-numeric: tabular-nums; opacity: .8;
 }
@@ -1505,14 +1505,19 @@ depender del color de acento elegido. */
 .colordot { width: 26px; height: 26px; border-radius: 50%; flex-shrink: 0; background: rgb(var(--acc2-rgb)); box-shadow: 0 0 12px rgba(var(--acc2-rgb), 0.55), inset 0 0 0 1px rgba(255,255,255,0.18); transition: background .3s ease, box-shadow .3s ease; }
 .colordot.glow { background: rgb(var(--glow-rgb)); box-shadow: 0 0 12px rgba(var(--glow-rgb), 0.55), inset 0 0 0 1px rgba(255,255,255,0.18); }
 /* slider de intensidad: pista degradada del apagado al encendido real */
-input[type="range"].glowslider { -webkit-appearance: none; appearance: none; width: 170px; height: 5px; border-radius: 999px; outline: none; cursor: pointer;
+input[type="range"].glowslider { -webkit-appearance: none; appearance: none; width: 190px; height: 5px; border-radius: 999px; outline: none; cursor: pointer;
   background: linear-gradient(90deg, rgba(var(--glow-rgb), 0.10), rgba(var(--glow-rgb), 0.85)); border: 1px solid var(--line2); }
 input[type="range"].glowslider::-webkit-slider-thumb { -webkit-appearance: none; appearance: none; width: 15px; height: 15px; border-radius: 50%;
   background: #fff; box-shadow: 0 0 10px rgba(var(--glow-rgb), 0.8), 0 1px 3px rgba(0,0,0,0.5); border: none; transition: transform .15s ease; }
 input[type="range"].glowslider::-webkit-slider-thumb:hover { transform: scale(1.2); }
+/* el slider del vidrio no tiñe su pista de glow: pista neutra de cristal */
+input#glassTint.glowslider { background: linear-gradient(90deg, rgba(255,255,255,0.06), rgba(255,255,255,0.32)); }
+input#glassTint.glowslider::-webkit-slider-thumb { box-shadow: 0 0 10px rgba(255,255,255,0.5), 0 1px 3px rgba(0,0,0,0.5); }
 input[type="range"].glowslider::-webkit-slider-thumb:active { transform: scale(1.35); }
-/* etiquetas Suave / Equilibrado / Intenso bajo el slider */
-.glowlabels { display: flex; justify-content: space-between; width: 170px; font: 500 11px var(--font-ui); letter-spacing: 0.6px; color: var(--dim); margin-top: 5px; }
+/* etiquetas Suave / Equilibrado / Intenso bajo el slider (y Ultra claro / Equilibrado
+   / Tintado bajo el del vidrio: textos más largos que necesitan respirar) */
+.glowlabels { display: flex; justify-content: space-between; gap: 8px; width: 190px; font: 500 11px var(--font-ui); letter-spacing: 0.6px; color: var(--dim); margin-top: 5px; }
+.glowlabels span { white-space: nowrap; }
 .glowlabels span.on { color: rgb(var(--glow-rgb)); }
 
 /* ============ adjuntos del chat: chips, drag&drop, pegado ============ */
