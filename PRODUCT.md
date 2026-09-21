@@ -111,9 +111,11 @@ justificación (ver *Brand Commitments*).
   `docs/header.png`). El icono se mantiene coherente en la barra de tareas de Windows.
 - **Voz**: español primero, con paridad bilingüe en README y notas de versión —un
   compromiso de larga duración, no una traducción suelta.
-- **Identidad visual fijada**: interfaz holográfica hecha a mano, con glow reactivo
-  que ilumina el marco según lo que hace el agente (color e intensidad configurables).
-  El brillo y el acento son la identidad, no decoración prescindible.
+- **Identidad visual fijada**: frontal de equipo nocturno (deck mate, etiquetas
+  grabadas, interruptores cromados, contadores y LEDs), con glow reactivo que
+  ilumina el marco según lo que hace el agente (color e intensidad configurables).
+  El glow es la identidad que queda del holo anterior; el cristal, los degradados
+  de neón y la niebla violeta se fueron con él.
 - **Licencia**: **MIT y gratis, sin monetización. Es lo único blindado**: no se diseña
   nada que dependa de un plan de pago ni se cierra nada para sostener uno.
 - Windows-only, UI sin frameworks, claves/datos solo locales y el modelo de

@@ -1339,6 +1339,14 @@ function finishAssistant(finalText, opts) {
 
 // ============ activity feed + live agents ============
 const FEED_MAX = 6;
+/* TABLERO: reloj de estación del rail (hora local tabular, late 1 vez por segundo
+   y solo si el rail existe; el intervalo vive mientras la ventana viva). */
+function tickBoardClock() {
+  const el = document.getElementById('boardClock');
+  if (el) el.textContent = new Date().toLocaleTimeString('es-ES', { hour: '2-digit', minute: '2-digit', second: '2-digit', hour12: false });
+}
+tickBoardClock();
+setInterval(tickBoardClock, 1000);
 function feed(text, color) {
   const f = $('#activityFeed');
   const it = document.createElement('div');
@@ -5076,12 +5084,12 @@ window.sagitari.onGlow(({ mode }) => {
    PALETTES define los triplets RGB; applyTheme los vuelca en el :root y todo el
    CSS (80+ tintes) se reconstruye solo, sin recargar nada. */
 const PALETTES = {
-  violet:  { label: 'Violeta',   acc: [148, 118, 255], acc2: [139, 92, 246],  acc3: [59, 130, 246] },
-  magenta: { label: 'Magenta',   acc: [240, 130, 220], acc2: [217, 70, 239],  acc3: [139, 92, 246] },
-  cyan:    { label: 'Cian',      acc: [103, 232, 249], acc2: [34, 211, 238],  acc3: [45, 212, 191] },
-  emerald: { label: 'Esmeralda', acc: [110, 231, 183], acc2: [52, 211, 153],  acc3: [45, 212, 191] },
-  amber:   { label: 'Ámbar',     acc: [252, 211, 77],  acc2: [245, 158, 11],  acc3: [251, 146, 60] },
-  ice:     { label: 'Hielo',     acc: [147, 197, 253], acc2: [59, 130, 246],  acc3: [125, 180, 255] }
+  violet:  { label: 'Violeta',   acc: [156, 138, 253], acc2: [118, 95, 245],  acc3: [62, 118, 248] },
+  magenta: { label: 'Magenta',   acc: [240, 130, 220], acc2: [195, 60, 218],  acc3: [139, 92, 246] },
+  cyan:    { label: 'Cian',      acc: [70, 195, 215],  acc2: [8, 148, 178],   acc3: [20, 160, 175] },
+  emerald: { label: 'Esmeralda', acc: [85, 205, 155],  acc2: [14, 165, 110],  acc3: [34, 197, 94] },
+  amber:   { label: 'Ámbar',     acc: [250, 195, 70],  acc2: [210, 115, 8],   acc3: [225, 115, 35] },
+  ice:     { label: 'Hielo',     acc: [147, 197, 253], acc2: [59, 130, 246],  acc3: [37, 99, 235] }
 };
 /* Escalones de superficie de la rampa violeta: son los fondos que la app tenía
    escritos a mano. Cada paleta deriva los suyos con la MISMA luminancia relativa
@@ -5129,7 +5137,7 @@ function rampaDeSuperficies(acento) {
   // SOLO la paleta de referencia se fija con sus literales, para que el tema por
   // defecto quede idéntico. Aplicarlo siempre devolvía la rampa violeta a todas las
   // paletas: el color de la interfaz cambiaba en los acentos y no en los fondos.
-  if (clave === '148,118,255') {
+  if (clave === '156,138,253') {
     out['--bg0-rgb'] = '6, 4, 15'; out['--bg1-rgb'] = '16, 10, 38'; out['--bg2-rgb'] = '22, 14, 48';
     out['--deep-rgb'] = '12, 8, 30'; out['--field-rgb'] = '8, 5, 24'; out['--panel-rgb'] = '18, 12, 42';
     out['--panel2-rgb'] = '26, 18, 56'; out['--face-rgb'] = '30, 20, 64'; out['--face2-rgb'] = '38, 26, 76';

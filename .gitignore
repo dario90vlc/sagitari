@@ -35,3 +35,6 @@ _*.ps1
 
 # Compañero visual de brainstorming (maquetas locales, no se versionan)
 .superpowers/
+
+# Mesa de diseño (briefs y capturas locales, no se publican)
+.impeccable/

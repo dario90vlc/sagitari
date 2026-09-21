@@ -438,7 +438,8 @@ const AFTER = {
     filas: [...document.querySelectorAll('.csel[data-csel-de="taskMode"] .sm-item .sm-name')].map(f => f.textContent),
     opciones: [...(document.querySelector('#taskMode') || { options: [] }).options].map(o => o.textContent.trim()),
     clases: (document.querySelector('.csel[data-csel-de="taskMode"] .sm-item') || {}).className || '',
-    fondo: document.querySelector('.csel[data-csel-de="taskMode"] .csel-menu') ? getComputedStyle(document.querySelector('.csel[data-csel-de="taskMode"] .csel-menu')).backgroundImage.slice(0, 21) : ''
+    fondo: document.querySelector('.csel[data-csel-de="taskMode"] .csel-menu') ? getComputedStyle(document.querySelector('.csel[data-csel-de="taskMode"] .csel-menu')).backgroundImage.slice(0, 21) : '',
+    alfa: document.querySelector('.csel[data-csel-de="taskMode"] .csel-menu') ? parseFloat(getComputedStyle(document.querySelector('.csel[data-csel-de="taskMode"] .csel-menu')).backgroundColor.split(',').pop()) : 0
   })`)) || {};
   await pulsarConRaton('.csel[data-csel-de="taskMode"] .sm-item:nth-child(2)');
   const elegido = jsonDe(await evaluate(`JSON.stringify({
@@ -451,7 +452,7 @@ const AFTER = {
   await new Promise(r => setTimeout(r, 300));
   const selectsOk = selects.total > 0 && selects.total === selects.mejorados
     && listaModo.abierto === true && (listaModo.filas || []).join(',') === (listaModo.opciones || []).join(',') && listaModo.filas.length > 0
-    && /sm-item/.test(listaModo.clases) && /linear-gradient/.test(listaModo.fondo)
+    && /sm-item/.test(listaModo.clases) && (/linear-gradient/.test(listaModo.fondo) || (listaModo.fondo === 'none' && listaModo.alfa >= 0.9))
     && elegido.valor === 'plan' && elegido.etiqueta === 'Plan' && elegido.cerrado === true && fechaOscura;
   if (selectsOk) console.log('  ok   los desplegables son de la app (lista propia, elegir propaga change, fecha en oscuro)');
   else { failed++; console.log('  FALLO los desplegables nativos siguen a la vista  ->  ' + JSON.stringify({ selects, listaModo, elegido, fechaOscura })); }
