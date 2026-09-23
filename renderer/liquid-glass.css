@@ -1,0 +1,107 @@
+/* ============ Liquid Glass — capa visual aditiva (iOS 27) ============
+   Hoja ENCIMA de styles.css: solo luz, refracción y relieve. NO toca layout
+   (nada de margin/padding/display): si se retira, la app queda igual.
+   Técnicas: especular superior (luz que entra por arriba), borde-luz interior
+   de 1px, irisado sutil y muelles físicos en las transiciones.
+   Todo escala con --glass y --glow-str.
+   RESTRICCIÓN (medida con ui-check): no se añade `position` ni pseudo-elementos
+   a menús ni botones — el posicionamiento del JS de desplegables es sensible
+   a nuevos contextos de apilamiento. La lente vive solo en .side y .composer. */
+
+/* --- luz ambiente global: la ventana respira un poco más ---
+   (no-drag: este velo cubre toda la ventana y no debe robar ni un clic) */
+.shell::before {
+  content: ""; position: absolute; inset: 0; border-radius: inherit; pointer-events: none;
+  -webkit-app-region: no-drag;
+  background:
+    radial-gradient(60% 45% at 50% -10%, rgba(255,255,255,0.06) 0%, transparent 60%),
+    radial-gradient(35% 30% at 100% 110%, rgba(var(--acc-rgb), 0.06) 0%, transparent 70%);
+}
+
+/* --- lente héroe: especular superior + borde-luz en sidebar y compositor ---
+   (tenue: la luz sugiere el vidrio, no lo grita)
+   no-drag: el ::after cubre el panel entero; dentro de una zona de arrastre
+   el contenido NO recibe el clic físico salvo que se excluya (como ya hacen
+   .side button/input/textarea en styles.css). Sin esto la lente se come los
+   clics del sidebar aunque lleve pointer-events:none. */
+.side, .composer { position: relative; }
+.side::after, .composer::after {
+  content: ""; position: absolute; inset: 0; border-radius: inherit; pointer-events: none;
+  -webkit-app-region: no-drag;
+  /* especular: la luz entra por arriba-izquierda y cae en diagonal */
+  background: linear-gradient(165deg, rgba(255,255,255,0.055) 0%, rgba(255,255,255,0.015) 22%, transparent 42%);
+  /* borde-luz: filo claro arriba, sombra abajo (lente convexa) */
+  box-shadow: inset 0 1px 0 rgba(255,255,255,0.09), inset 0 -1px 0 rgba(0,0,0,0.18);
+}
+
+/* --- navegación: la puerta activa es una lente encendida --- */
+.navitem {
+  transition: background .22s cubic-bezier(0.16,1,0.3,1), box-shadow .22s cubic-bezier(0.16,1,0.3,1);
+}
+.navitem:hover {
+  background: rgba(var(--acc2-rgb), 0.13);
+  box-shadow: inset 0 1px 0 rgba(255,255,255,0.10);
+}
+.navitem.on {
+  background:
+    linear-gradient(180deg, rgba(255,255,255,0.14), rgba(255,255,255,0.04) 55%),
+    rgba(var(--acc2-rgb), 0.22);
+  box-shadow:
+    inset 0 1px 0 rgba(255,255,255,0.20),
+    inset 0 -1px 0 rgba(0,0,0,0.22),
+    0 0 12px rgba(var(--acc2-rgb), calc(0.25 * var(--glow-str)));
+}
+
+/* --- botones: relieve de gota (solo sombras, sin position ni pseudos) --- */
+.btn, .cbtn, .wb {
+  transition: box-shadow .2s cubic-bezier(0.16,1,0.3,1), transform .2s cubic-bezier(0.16,1,0.3,1), border-color .2s;
+}
+.btn:hover, .cbtn:hover {
+  box-shadow:
+    inset 0 1px 0 rgba(255,255,255,0.16),
+    0 3px 12px rgba(var(--acc2-rgb), calc(0.22 * var(--glow-str)));
+}
+.btn:active, .cbtn:active { transform: scale(0.96); }
+.btn.primary {
+  /* irisado: el acento se desplaza del frío al cálido en diagonal */
+  background:
+    linear-gradient(180deg, rgba(255,255,255,0.26), rgba(255,255,255,0.05) 50%),
+    linear-gradient(120deg, rgba(var(--acc3-rgb), 0.9), rgba(var(--acc2-rgb), 0.9) 55%, rgba(var(--glow-a-rgb), 0.9));
+  box-shadow:
+    inset 0 1px 0 rgba(255,255,255,0.28),
+    inset 0 -2px 4px rgba(0,0,0,0.22),
+    0 4px 16px rgba(var(--acc2-rgb), calc(0.32 * var(--glow-str)));
+}
+.cbtn.send {
+  box-shadow:
+    inset 0 1px 0 rgba(255,255,255,0.28),
+    0 3px 12px rgba(34,211,238,0.35);
+}
+
+/* --- compositor: halo de foco con luz, no solo borde --- */
+.composer:focus-within {
+  box-shadow:
+    inset 2px 3px 8px rgba(255,255,255,0.16),
+    inset -3px -5px 12px rgba(0,0,0,0.38),
+    inset 0 0 30px rgba(var(--acc2-rgb), 0.2),
+    0 0 0 1px rgba(var(--acc-rgb), 0.30),
+    0 6px 28px rgba(var(--acc2-rgb), calc(0.22 * var(--glow-str)));
+}
+
+/* --- burbujas y tarjetas: contenido opaco con filo de luz superior ---
+   (siguen opacas por HIG: el vidrio vive en la capa funcional) */
+.bubble, .tcard, .fitem, .ragent {
+  box-shadow: inset 0 1px 0 rgba(255,255,255,0.07), 0 8px 24px rgba(0,0,0,0.30);
+}
+
+/* --- iconos: relieve luminoso --- */
+.ic { filter: drop-shadow(0 1px 1px rgba(0,0,0,0.4)); }
+.navitem.on .ic, .btn.primary .ic, .cbtn.send .ic {
+  filter: drop-shadow(0 0 6px rgba(255,255,255,0.45));
+}
+
+/* --- scrollbars: hilos de luz --- */
+::-webkit-scrollbar-thumb {
+  background: linear-gradient(180deg, rgba(255,255,255,0.22), rgba(var(--acc2-rgb), 0.35));
+  border-radius: 4px;
+}

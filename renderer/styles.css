@@ -38,6 +38,16 @@
   unicode-range: U+0100-02BA, U+02BD-02C5, U+02C7-02CC, U+02CE-02D7, U+02DD-02FF, U+0304, U+0308, U+0329, U+1D00-1DBF, U+1E00-1E9F, U+1EF2-1EFF, U+2020, U+20A0-20AB, U+20AD-20C0, U+2113, U+2C60-2C7F, U+A720-A7FF;
 }
 
+/* Ángulo de rotación de las vetas del aura. Registrada con @property para que
+   interpole: así la luz gira alrededor del marco (DESIGN.md: 16s). Gira la
+   PROPIEDAD, no la capa, así que la banda enmascarada queda clavada al borde y
+   solo rota la luz por debajo de la máscara. */
+@property --giro { syntax: '<angle>'; inherits: false; initial-value: 0deg; }
+/* Alcance de la banda del aura (desde el filo hacia dentro). Registrada para
+   interpolar: al respirar (reachLife) la luz FLUYE borde→centro de forma
+   orgánica, en vez de pulsar la opacidad. */
+@property --reach { syntax: '<length>'; inherits: false; initial-value: 42px; }
+
 /* ============ SAGITARI design system ============
    El acento de la UI y el color del glow son personalizables: todo tinte
    decorativo se construye sobre TRIPLETS RGB (--acc-rgb, --acc2-rgb, --acc3-rgb)
@@ -151,22 +161,22 @@ body { font-family: var(--font-ui), 'Segoe UI', sans-serif; font-size: 13px; col
 /* ===== glow: un aura que respira =====
    Un halo ancho y suave en el borde (nada de recorridos ni líneas duras). Son TRES
    capas de luz superpuestas, cada una con su propio tono —vecinos del color elegido, no
-   un arcoíris— y su propio periodo, deliberadamente no múltiplos entre sí: la
-   interferencia de las tres produce un latido que nunca se repite igual, que es lo que
-   hace que se lea como luz viva y no como una animación en bucle.
-   La ENERGÍA (amplitud y ritmo) es lo que cambia por estado; el color es del usuario. */
+   un arcoíris— y su propia fase sobre los MISMOS dos ritmos (el color gira cada22s y el
+   alcance respira cada8s — el filo y el anillo no animan salvo el pulso), así la
+   mezcla rueda de forma orgánica sin que ningún tono domine. La ENERGÍA (nivel de
+   luz) es lo que cambia por estado; el color es del usuario. */
 .shell { --energy: 1; --ambient: .26; }
 .shell.glow-think  { --energy: .85; --ambient: .9; }
 .shell.glow-work   { --energy: 1.15; --ambient: 1; }
 .shell.glow-listen { --energy: .6;  --ambient: .7; }
 .shell.glow-speak  { --energy: .95; --ambient: .95; }
-/* El aura: tres luces superpuestas que respiran. Cada capa tiene su tono —vecinos del color
-   elegido, no un arcoíris— y su propio ritmo, sin múltiplos comunes, así que la suma nunca se
-   repite igual y se lee como luz viva en vez de bucle.
-   La luz la dibujan SOMBRAS INTERIORES: ya son degradados suaves, así que no hay bordes duros.
-   (La primera versión usaba una banda con máscara y desenfoque y salía un corte recto: en CSS
-   la máscara se aplica después del filtro, de modo que recortaba la luz en seco.)
-   El único sitio con máscara es el filo de 1px, donde el corte limpio es lo que se busca. */
+/* El aura: tres luces superpuestas que ruedan. Cada capa (halo-a/b/c) tiene su tono —vecinos
+   del color elegido, no un arcoíris— y su propia fase (núcleo blanco, +120°) sobre los mismos
+   dos ritmos: así la suma se mueve de forma orgánica y se lee como luz viva.
+   Cada primitiva hace lo suyo: las SOMBRAS INTERIORES del anillo dibujan el cuerpo del halo
+   sin bordes duros; la banda de .glowFlow lleva el desenfoque y la máscara que atenúan hacia
+   dentro (la máscara se aplica después del filtro, por eso la caída es suave y no un corte);
+   y el filo de 1px es el único sitio con corte limpio, que es lo que se busca allí. */
 /* El aura, en dos capas: .glowRing lleva el cuerpo del halo (cuatro degradados que salen del
    borde y se apagan hacia dentro) y .glow::before el filo que respira. Ninguna usa spread,
    máscara ni filtro de capa: sólo sombras interiores centradas y difuminadas, que es lo que
@@ -201,34 +211,82 @@ body { font-family: var(--font-ui), 'Segoe UI', sans-serif; font-size: 13px; col
 }
 .glow::before {
   content: ''; position: absolute; inset: 0; border-radius: inherit;
+  /* Filo TRICOLOR: el borde de 1px reparte los 3 tonos por el perímetro (como
+     el filo aurora de abajo, pero con las variables del tema). Un filo de un
+     solo tono mandaba sobre los halos difusos y todo se veía de un color. */
+  border: 1px solid transparent;
+  background: conic-gradient(from 210deg,
+    rgb(var(--glow-a-rgb)), rgb(var(--glow-b-rgb)), rgb(var(--glow-c-rgb)), rgb(var(--glow-a-rgb)))
+    border-box;
+  -webkit-mask: linear-gradient(#000 0 0) padding-box, linear-gradient(#000 0 0);
+  -webkit-mask-composite: xor; mask-composite: exclude;
   /* El filo brillante y su latido: es la capa que respira con el estado. */
   box-shadow:
     inset 0 0 4px rgba(var(--glow-a-rgb), calc(0.48 * var(--glow-str) * var(--energy))),
-    inset 0 0 16px rgba(var(--glow-a-rgb), calc(0.28 * var(--glow-str) * var(--energy))),
+    inset 0 0 16px rgba(var(--glow-c-rgb), calc(0.28 * var(--glow-str) * var(--energy))),
     inset 0 0 42px rgba(var(--glow-b-rgb), calc(0.14 * var(--glow-str) * var(--energy)));
-  border: 1px solid rgba(var(--glow-a-rgb), calc(0.72 * var(--glow-str) * var(--energy)));
+  opacity: calc(0.95 * var(--glow-str) * var(--energy, 1));
 }
-/* Apple Intelligence: vetas de luz que fluyen alrededor del marco — cónico con los
-   tres tonos del glow más un núcleo blanco (como Siri), desenfocado y recortado a
-   una banda de 70px junto al borde. Rota con --giro; la energía del estado la pone
-   el padre (.glow). Es rotación de ángulo, nunca un recorrido del marco. */
+/* Apple Intelligence: TRES vetas de color que ROTAN alrededor del marco (16s),
+   desenfocadas y recortadas a una banda INTERIOR ESTRECHA junto al borde (caída
+   de 30px, más estrecha y luminosa que los 70px de DESIGN.md: a esa anchura la
+   luz se diluía y tapaba el contenido). Cada capa lleva un tono con distinto
+   desfase y una lleva el núcleo blanco: al girar a la vez, los colores se
+   cruzan por el borde y se MEZCLAN. La banda vive DENTRO del marco (inset:0):
+   antes era inset:-30 y .shell{overflow:hidden} la recortaba entera — por eso
+   el aura no se veía. La energía del estado la pone el padre (.glow). */
 .glowFlow {
-  position: absolute; inset: -70px; border-radius: inherit; pointer-events: none;
-  background: conic-gradient(from var(--giro, 0deg),
-    transparent 0deg,
-    rgba(var(--glow-a-rgb), calc(0.55 * var(--glow-str))) 45deg,
-    rgba(255,255,255, calc(0.5 * var(--glow-str))) 80deg,
-    rgba(var(--glow-b-rgb), calc(0.6 * var(--glow-str))) 130deg,
-    transparent 185deg,
-    rgba(var(--glow-c-rgb), calc(0.55 * var(--glow-str))) 235deg,
-    rgba(255,255,255, calc(0.4 * var(--glow-str))) 270deg,
-    rgba(var(--glow-b-rgb), calc(0.6 * var(--glow-str))) 315deg,
-    transparent 360deg);
-  filter: blur(42px);
-  -webkit-mask: linear-gradient(#000 0 0) content-box, linear-gradient(#000 0 0);
-  -webkit-mask-composite: xor; mask-composite: exclude;
-  padding: 70px;
-  animation: giro 16s linear infinite;
+  position: absolute; inset: 0; border-radius: inherit; pointer-events: none;
+  /* Aura SUTIL estilo Apple Watch: luz suave que emana del filo hacia dentro,
+     pastel y de baja intensidad. El ALCANCE (--reach) es el que respira
+     (borde↔centro): la luz fluye orgánica, no pulsa la opacidad. Suavidad con
+     `blur(26)`; caída ease-out sin cortes. */
+  -webkit-mask:
+    linear-gradient(to bottom, #000 0, rgba(0,0,0,.8) calc(var(--reach)*0.167), rgba(0,0,0,.5) calc(var(--reach)*0.381), rgba(0,0,0,.26) calc(var(--reach)*0.619), rgba(0,0,0,.09) calc(var(--reach)*0.81), rgba(0,0,0,0) var(--reach)),
+    linear-gradient(to top,    #000 0, rgba(0,0,0,.8) calc(var(--reach)*0.167), rgba(0,0,0,.5) calc(var(--reach)*0.381), rgba(0,0,0,.26) calc(var(--reach)*0.619), rgba(0,0,0,.09) calc(var(--reach)*0.81), rgba(0,0,0,0) var(--reach)),
+    linear-gradient(to right,  #000 0, rgba(0,0,0,.8) calc(var(--reach)*0.167), rgba(0,0,0,.5) calc(var(--reach)*0.381), rgba(0,0,0,.26) calc(var(--reach)*0.619), rgba(0,0,0,.09) calc(var(--reach)*0.81), rgba(0,0,0,0) var(--reach)),
+    linear-gradient(to left,   #000 0, rgba(0,0,0,.8) calc(var(--reach)*0.167), rgba(0,0,0,.5) calc(var(--reach)*0.381), rgba(0,0,0,.26) calc(var(--reach)*0.619), rgba(0,0,0,.09) calc(var(--reach)*0.81), rgba(0,0,0,0) var(--reach));
+  -webkit-mask-composite: source-over;
+  mask-composite: add;
+  filter: blur(32px) saturate(1.8) brightness(1);
+  opacity: calc(0.46 * var(--glow-str, 1));   /* suave: aún más atenuado */
+}
+/* Halo A — las tres vetas del glow girando con la paleta del tema. Si el tema
+   es aurora, applyTheme ya volcó AURORA_GLOW (azul/rosa/naranja) en
+   --glow-a/b/c-rgb, así que este mismo cono pinta el espectro aurora. */
+.glowFlow.halo-a {
+  background: conic-gradient(from var(--giro),
+    rgba(var(--glow-a-rgb), 1), rgba(var(--glow-b-rgb), 1),
+    rgba(var(--glow-c-rgb), 1), rgba(var(--glow-a-rgb), 1));
+  animation: giro 22s linear infinite, reachLife 8s ease-in-out infinite;
+}
+/* Halo B — núcleo blanco (Siri): vetas blancas que giran al mismo compás que
+   las de color, de modo que el blanco entra y sale del cruce de los tonos. */
+.glowFlow.halo-b {
+  background: conic-gradient(from var(--giro),
+    rgba(255,255,255,0) 0deg, rgba(255,255,255,0.5) 35deg, rgba(255,255,255,0) 85deg,
+    rgba(255,255,255,0) 205deg, rgba(255,255,255,0.45) 245deg, rgba(255,255,255,0) 300deg);
+  animation: giro 22s linear infinite, reachLife 8s ease-in-out infinite;
+}
+/* Halo C — la misma paleta con 120° de desfase y a media opacidad: una segunda
+   capa que se monta sobre la primera y espesa la mezcla de colores. */
+.glowFlow.halo-c {
+  background: conic-gradient(from calc(var(--giro) + 120deg),
+    rgba(var(--glow-c-rgb), 1), rgba(var(--glow-b-rgb), 1),
+    rgba(var(--glow-a-rgb), 1), rgba(var(--glow-c-rgb), 1));
+  animation: giro 22s linear infinite, reachLife 8s ease-in-out infinite;
+  opacity: .5;
+}
+/* Rotación del aura: gira la PROPIEDAD --giro (no la capa), así que la banda
+   enmascarada queda clavada al borde y solo rota la luz bajo la máscara.
+   22s lineal: giro lento y constante, sin rebotes, que nunca deja el marco sin color. */
+@keyframes giro { to { --giro: 360deg; } }
+/* Flujo orgánico del alcance: la banda respira borde↔centro — la luz fluye
+   hacia dentro y regresa (8s, lento y calmado). Es el movimiento del aura, no
+   opacidad. */
+@keyframes reachLife {
+  0%, 100% { --reach: 36px; }
+  50%      { --reach: 46px; }
 }
 
 /* `.glow` también se usa como etiqueta semántica en el selector de color. Sin este
@@ -239,29 +297,15 @@ body { font-family: var(--font-ui), 'Segoe UI', sans-serif; font-size: 13px; col
   transition: none; isolation: auto;
 }
 
-/* Latido asimétrico: entra algo más rápido de lo que sale, como una respiración. */
-@keyframes frame-breathe { 0%, 100% { opacity: .68; } 38% { opacity: 1; } }
-@keyframes frame-drift   { 0%, 100% { opacity: .78; } 58% { opacity: 1; } }
+/* La luz del marco por estado: el NIVEL lo da la opacidad de .glow (fijo por
+   estado). El MOVIMIENTO deja de ser un latido por opacidad (se retiraron
+   frame-breathe/frame-drift a petición) y lo lleva el aura (.glowFlow): flujo
+   de alcance borde→centro (reachLife) + rotación de color (giro). */
 @keyframes frame-bloom   { 0% { opacity: .1; } 20% { opacity: 1; } 100% { opacity: .8; } }
-/* Apple Intelligence: la luz fluye alrededor del marco. --giro registrado como
-   ángulo animable (Chromium): el cónico de .glowFlow rota sin repintar layout,
-   sin recorrer el marco. */
-@property --giro { syntax: '<angle>'; inherits: true; initial-value: 0deg; }
-@keyframes giro { to { --giro: 360deg; } }
-/* Un periodo por capa y por estado, sin múltiplos comunes: la suma nunca se repite igual. */
-/* El nivel de luz por estado es la opacidad de la capa, y encima va el latido de cada banda. */
 .shell.glow-think  .glow { opacity: .82; }
-.shell.glow-think  .glow::before { animation: frame-breathe 4.6s cubic-bezier(.45, 0, .55, 1) infinite; }
-.shell.glow-think  .glowRing  { animation: frame-drift   6.4s cubic-bezier(.45, 0, .55, 1) infinite; }
 .shell.glow-work   .glow { opacity: 1; }
-.shell.glow-work   .glow::before { animation: frame-breathe 2.6s cubic-bezier(.45, 0, .55, 1) infinite; }
-.shell.glow-work   .glowRing  { animation: frame-drift   3.7s cubic-bezier(.45, 0, .55, 1) infinite; }
 .shell.glow-listen .glow { opacity: .62; }
-.shell.glow-listen .glow::before { animation: frame-breathe 5.4s cubic-bezier(.45, 0, .55, 1) infinite; }
-.shell.glow-listen .glowRing  { animation: frame-drift   7.3s cubic-bezier(.45, 0, .55, 1) infinite; }
 .shell.glow-speak  .glow { opacity: .9; }
-.shell.glow-speak  .glow::before { animation: frame-breathe 2.2s cubic-bezier(.45, 0, .55, 1) infinite; }
-.shell.glow-speak  .glowRing  { animation: frame-drift   3.1s cubic-bezier(.45, 0, .55, 1) infinite; }
 /* acusar recibo: un destello del aura, no un estado sostenido */
 .shell.glow-pulse  .glow { opacity: 1; }
 .shell.glow-pulse  .glow::before { animation: frame-bloom 1.1s ease-out 1; }
@@ -269,10 +313,41 @@ body { font-family: var(--font-ui), 'Segoe UI', sans-serif; font-size: 13px; col
 /* Menos movimiento, no menos información: sin viaje ni latido, pero cada estado se
    sigue distinguiendo por cuánta luz tiene el marco. */
 /* ventana en segundo plano: el glow no se ve, pero su animación seguiría
-   repintando el marco. app.js pone/quita .nofocus en <body> al perder/recuperar
+   repintando el marco. 20-voz.js pone/quita .nofocus en <body> al perder/recuperar
    el foco de la ventana. Las capas del aura son .glow, .glowRing y .glow::before:
    .shell::before es sólo el filo en reposo y no anima. */
 body.nofocus .glow, body.nofocus .glow::before, body.nofocus .glowRing, body.nofocus .glowFlow { animation: none !important; }
+/* Aurora (tema iOS 27 / Apple Intelligence): los 3 tonos del espectro
+   (azul→rosa→naranja) + el núcleo blanco ya NO llevan reglas propias:
+   applyTheme vuelca AURORA_GLOW en --glow-a/b/c-rgb cuando el tema es aurora,
+   así que las vetas giratorias de arriba (por tono + la blanca) pintan el
+   espectro directamente. El filo nítido multicolor (.glow::before) y el
+   anillo (.glowRing) con aurora siguen debajo. */
+/* El anillo interior con aurora reparte los 3 tonos a partes iguales: si uno
+   domina las sombras pegadas al borde, todo el marco se tiñe de ese color. */
+.shell.glow-aurora .glowRing {
+  box-shadow:
+    inset 0 0 5px rgba(var(--glow-b-rgb), calc(0.48 * var(--glow-str) * var(--energy))),
+    inset 0 0 14px rgba(var(--glow-a-rgb), calc(0.34 * var(--glow-str) * var(--energy))),
+    inset 0 0 26px rgba(var(--glow-c-rgb), calc(0.24 * var(--glow-str) * var(--energy))),
+    inset 0 0 38px rgba(var(--glow-b-rgb), calc(0.14 * var(--glow-str) * var(--energy))),
+    inset 0 0 50px rgba(var(--glow-a-rgb), calc(0.07 * var(--glow-str) * var(--energy)));
+  /* Sin borde propio de un solo tono: el filo tricolor de .glow::before manda.
+     Un borde nítido monocromo aquí tapaba los halos y todo se veía naranja. */
+  border: 1px solid transparent;
+}
+/* filo nítido multicolor: el borde de 1px lleva el espectro a plena fuerza —
+   fijo como el flow (el tono no cambia; respira la intensidad del padre) */
+.shell.glow-aurora .glow::before {
+  border: 1px solid transparent;
+  background: conic-gradient(from 210deg,
+    #f5b9ea, #ffba71, #ff6778, #c686ff, #8d9fff, #bc82f3, #f5b9ea)
+    border-box;
+  -webkit-mask: linear-gradient(#000 0 0) padding-box, linear-gradient(#000 0 0);
+  -webkit-mask-composite: xor; mask-composite: exclude;
+  box-shadow: none;
+  opacity: calc(0.95 * var(--glow-str) * var(--energy, 1));
+}
 /* (los ritmos viven junto a la capa del glow, más arriba) */
 
 /* sin padding en el grid: cada columna llega hasta la esquina superior (fondo
@@ -359,23 +434,9 @@ body.nofocus .glow, body.nofocus .glow::before, body.nofocus .glowRing, body.nof
 .navitem.on { color: #fff; background: linear-gradient(180deg, rgba(255,255,255,0.16), rgba(255,255,255,0.03) 45%), rgba(var(--acc2-rgb), 0.38); border-color: rgba(var(--acc2-rgb), 0.95); box-shadow: inset 0 1px 0 rgba(255,255,255,0.22), 0 0 18px rgba(var(--acc2-rgb), 0.3); backdrop-filter: blur(12px); -webkit-backdrop-filter: blur(12px); }
 .ni { font-size: 15px; width: 18px; text-align: center; flex-shrink: 0; }
 .nl { white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
-/* Puertas: cada sección enseña el número de su atajo (Alt+1…9) en pequeño delante
-   del nombre. MCP no tiene atajo y enseña –. Discreto: el nombre manda. */
-.navitem .nl::before {
-  content: '–'; display: inline-block; min-width: 18px; margin-right: 1px;
-  font-size: 10px; font-weight: 700; letter-spacing: .08em; color: var(--dim);
-  font-variant-numeric: tabular-nums; opacity: .8;
-}
-.navitem[data-view="chat"] .nl::before { content: '01'; }
-.navitem[data-view="tasks"] .nl::before { content: '02'; }
-.navitem[data-view="projects"] .nl::before { content: '03'; }
-.navitem[data-view="agents"] .nl::before { content: '04'; }
-.navitem[data-view="memory"] .nl::before { content: '05'; }
-.navitem[data-view="skills"] .nl::before { content: '06'; }
-.navitem[data-view="tools"] .nl::before { content: '07'; }
-.navitem[data-view="history"] .nl::before { content: '08'; }
-.navitem[data-view="settings"] .nl::before { content: '09'; }
-.navitem.on .nl::before { color: #fff; opacity: 1; }
+/* Puertas: sin números de atajo (Alt+1…9 siguen funcionando, pero no se
+   enseñan: molestan en el sidebar). El nombre manda. */
+.navitem .nl::before { content: none; }
 .nb {
   margin-left: auto; min-width: 20px; height: 18px; padding: 0 6px; flex-shrink: 0;
   display: inline-flex; align-items: center; justify-content: center;
@@ -471,6 +532,10 @@ body.nofocus .glow, body.nofocus .glow::before, body.nofocus .glowRing, body.nof
 /* ---- barra compacta (solo iconos) ---- */
 .app { transition: grid-template-columns .18s ease; }
 .app.compact { grid-template-columns: 78px 1fr 300px; }
+/* compacto manda sobre el recorte del rail (0,3,0 por los dos :not): sin esta
+   regla, en las vistas sin rail las columnas quedaban clavadas en 232px y el
+   panel no se estrechaba aunque los iconos sí se centraban. */
+.app.compact:not([data-view="chat"]):not([data-view="agents"]) { grid-template-columns: 78px 1fr; }
 .app.compact .nav { padding-left: 9px; padding-right: 9px; }
 .app.compact .brand { flex-direction: column; gap: 7px; padding: 2px 0 10px; }
 .app.compact .brandcol { display: none; }
@@ -1630,6 +1695,7 @@ input[type="range"].glowslider::-webkit-slider-thumb:active { transform: scale(1
    queda apretada. La actividad en vivo sigue en Agentes. */
 @media (max-width: 1040px) {
   .app { grid-template-columns: 232px 1fr; }
+  .app.compact { grid-template-columns: 78px 1fr; }
   .rail { display: none; }
   .composer { padding: 10px 10px; }
   .compline { gap: 6px; }
