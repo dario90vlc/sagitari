@@ -10,6 +10,44 @@
 
 **La obra pasa a licencia propia.** Desde la 4.0.0, SAGITARI se publica bajo la Licencia de Uso Personal: uso individual gratis para siempre y sin cargos, código fuente visible para revisión, pero sin distribución por terceros, sin compilación externa, sin uso en empresas y con la marca SAGITARI reservada a su autor. / **The work moves to its own license.** From 4.0.0, SAGITARI ships under its Personal Use License: free individual use forever with no fees, source code open for review, but no redistribution, no building by third parties, no organizational use, and the SAGITARI mark is reserved to its author.
 
+### Cambios completos desde la 3.3.5
+
+**Visual y tema:**
+
+- Aura rediseñada: filo de 1px con 6 tonos, tres halos que ruedan (`giro` 22s + `reachLife` 8s con `@property` registrados) y estados distinguidos por el nivel de luz. / Redesigned aura: 1px edge with 6 hues, three rolling halos (`giro` 22s + `reachLife` 8s with registered `@property`) and states told apart by light level.
+- Cáustica en el compositor (luz arriba-izquierda, sombra abajo-derecha). / Composer caustic (light top-left, shadow bottom-right).
+- Slider de vidrio ultra claro ↔ tintado con sus etiquetas sin pisarse. / Ultra-light ↔ tinted glass slider with labels that no longer collide.
+- Deck: reloj, puertas numeradas y holo con momentos. / Deck: clock, numbered gates and holo moments.
+- Estado vacío limpio: fuera el scope/radar del fondo. / Clean empty state: the scope/radar is gone.
+- Sliders de cristal en Ajustes y en Memoria: relleno real hasta el pulgar, pulgar con anillo oscuro y foco visible al teclado. / Glass sliders in Settings and Memory: real fill up to the thumb, dark-ringed thumb, keyboard-visible focus.
+- Aurora pasa a ser el tema por defecto. / Aurora becomes the default theme.
+- El logotipo muerto del rebranding sale del instalador (−1,4 MB). / The dead rebranding logo leaves the installer (−1.4 MB).
+- El README estrena en su galería las capturas de Ajustes y Skills. / The README gallery gains the Settings and Skills shots.
+- La marca queda sin referencias a sistemas ajenos. / The brand carries no third-party OS references.
+- Corregido: mover el tinte de vidrio ya no destellaba el glow. / Fixed: adjusting the glass tint no longer flashes the glow.
+
+**Seguridad:**
+
+- El agente queda confinado a los datos de la app y al espacio de trabajo (leer, escribir, editar y `cwd`). / The agent is confined to app data and the workspace (read, write, edit and `cwd`).
+- Los hooks pasan la misma barrera de comandos destructivos que la terminal. / Hooks pass the same destructive-command barrier as the terminal.
+- El navegador solo abre `http(s)` (`file:`, `chrome:` y `about:` se rechazan). / The browser only opens `http(s)` (`file:`, `chrome:` and `about:` are rejected).
+- El ayudante que instala la nueva versión se sella con SHA-256 y se recomprueba antes de disparar la tarea. / The install helper is SHA-256-sealed and re-verified before the task fires.
+- Las skills de repos ajenos se entregan como contenido de terceros delimitado, no como órdenes. / Third-party skills arrive as delimited third-party content, not orders.
+- El JavaScript del navegador gana su propia fila en Seguridad ▸ Permisos. / Browser JavaScript gets its own row in Security ▸ Permissions.
+
+**Voz local:**
+
+- Síntesis y reproducción solapadas; sharvard por defecto; modelo `turbo-q5_0`; cola de habla adaptativa. / Synthesis and playback overlap; sharvard by default; `turbo-q5_0` model; adaptive speech queue.
+
+**Por dentro (fase 4):**
+
+- `main.js` se trocea en doce routers `ipc-*`; el renderer en cuatro scripts; la suite en cuatro bloques; mapa y búsqueda comparten un único recorrido del árbol. / `main.js` splits into twelve `ipc-*` routers; the renderer into four scripts; the suite into four blocks; map and search share a single tree walk.
+
+**Proceso de release:**
+
+- El workflow gatea tag contra versión y sección de notas, firma todos los binarios y publica SHA-256; `npm audit` corre en la CI. / The workflow gates tag vs version and the notes section, signs every binary and publishes SHA-256; `npm audit` runs in CI.
+- La Licencia de Uso Personal entra en vigor (detalle en el párrafo de arriba y en `LICENSE`). / The Personal Use License takes effect (see the paragraph above and `LICENSE`).
+
 # SAGITARI 3.3.5
 
 **La respuesta ya no se vuelve corta al terminar.** Antes toda la narración del turno se acumulaba en un bloque que al cerrar se tiraba y se sustituía por el último párrafo —una respuesta larga se convertía en tres líneas—. Ahora cada tramo de explicación queda congelado encima de la herramienta que viene después, en orden cronológico como en las grandes herramientas agénticas, y el historial guarda la historia completa (con tope): reabrir la conversación enseña lo mismo que se vio en vivo. La lectura por voz y el modo Plan no cambian. / **Answers no longer shrink when the turn ends.** All of the turn's narration used to pile into one block that was thrown away at close and replaced with the last paragraph —a long answer turned into three lines—. Now each explanation sits frozen above the tool that follows it, in chronological order like the big agentic tools, and the history keeps the whole story (capped): reopening the conversation shows what you saw live. Voice reading and Plan mode are unchanged.
