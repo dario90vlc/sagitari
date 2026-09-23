@@ -1,4 +1,4 @@
-/* ============ Liquid Glass — capa visual aditiva (iOS 27) ============
+/* ============ Liquid Glass — capa visual aditiva ============
    Hoja ENCIMA de styles.css: solo luz, refracción y relieve. NO toca layout
    (nada de margin/padding/display): si se retira, la app queda igual.
    Técnicas: especular superior (luz que entra por arriba), borde-luz interior

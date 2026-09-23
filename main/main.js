@@ -102,7 +102,7 @@ const CONFIG_FILE = path.join(CONFIG_DIR, 'config.json');
 let config = {
   providers: [],                 // [{id, name, baseUrl, apiKey, models:[], activeModel}]
   active: null,                  // {providerId, name, baseUrl, apiKey, model, temperature, vision}
-  settings: { theme: 'violet', uiColor: 'violet', glowColor: 'match', glowStrength: 1, glassTint: 1, ttsEnabled: true, voiceLang: 'es-ES', glowEnabled: true, userName: 'Darío', mode: 'act', maxConcurrentTasks: 1, autoResumeTasks: true, llmTimeoutMs: 120000, showThinking: false, reviewGate: true, parallelTools: 3, diagnosticosEscritura: true, verificacionCierre: true, intentosArreglo: 2, promptCache: true,
+  settings: { theme: 'violet', uiColor: 'aurora', glowColor: 'match', glowStrength: 1, glassTint: 1, ttsEnabled: true, voiceLang: 'es-ES', glowEnabled: true, userName: 'Darío', mode: 'act', maxConcurrentTasks: 1, autoResumeTasks: true, llmTimeoutMs: 120000, showThinking: false, reviewGate: true, parallelTools: 3, diagnosticosEscritura: true, verificacionCierre: true, intentosArreglo: 2, promptCache: true,
     hookEditar: '', hookCerrar: '' },
   mcp: { enabled: true, servers: [] },   // servidores MCP del usuario (ver main/mcp-config.js)
 };

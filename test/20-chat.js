@@ -559,13 +559,12 @@ test('apariencia: Ajustes expone color de UI, color de glow e intensidad', () =>
   ok(/const PALETTES = \{[\s\S]{0,1400}\};/.test(app), 'debe existir la tabla PALETTES');
   ok(/function applyTheme\(\)/.test(app), 'debe existir applyTheme');
   ok(/\$\('#glowStrength'\)\.oninput/.test(app) && /\$\('#uiColor'\)\.onchange/.test(app), 'los controles deben estar cableados');
-  // tema Aurora (iOS 27 / Apple Intelligence): interfaz sobria + espectro en el borde
+  // tema Aurora: interfaz sobria + espectro en el borde
   ok(/aurora:\s*\{ label: 'Aurora'/.test(app), 'PALETTES debe traer aurora');
   ok(/AURORA_GLOW/.test(app), 'el espectro del glow aurora debe estar definido');
   ok(html.includes('value="aurora"'), 'los selects deben ofrecer aurora');
   ok(/glow-aurora/.test(app) && /\.shell\.glow-aurora \.glow::before\s*\{/.test(fs.readFileSync(path.join(__dirname, '..', 'renderer', 'styles.css'), 'utf8')), 'aurora debe encender el espectro del borde');
-  // receta del experimento AppleIntelligenceGlowEffect (jacobamobin, SwiftUI sin
-  // shaders): 6 colores fijos + filo nítido + copias desenfocadas, todos a la
+  // receta del experimento de jacobamobin (sin shaders):6 colores fijos + filo nítido + copias desenfocadas, todos a la
   // vez como halos que ondulan (el filo lleva el espectro fijo; la luz del
   // aura rueda por debajo con giro, sin recorrer el marco)
   const css = fs.readFileSync(path.join(__dirname, '..', 'renderer', 'styles.css'), 'utf8');
@@ -598,7 +597,7 @@ test('apariencia: Ajustes expone color de UI, color de glow e intensidad', () =>
 });
 
 test('apariencia: main guarda preferencias y emite tts:done + theme:changed', () => {
-  ok(/uiColor: 'violet'/.test(MAIN_SRC) && /glowStrength: 1/.test(MAIN_SRC), 'defaults de apariencia en settings');
+  ok(/uiColor: 'aurora'/.test(MAIN_SRC) && /glowStrength: 1/.test(MAIN_SRC), 'defaults de apariencia en settings');
   ok(/glowColor: 'match'/.test(MAIN_SRC), 'el glow sigue al tema por defecto');
   ok(/tts:done/.test(MAIN_ALL), 'el fin del TTS debe notificarse al renderer'); // Fase 4: vive en ipc-voz.js
   ok(/theme:changed/.test(MAIN_ALL), 'los cambios de apariencia deben broadcastearse');

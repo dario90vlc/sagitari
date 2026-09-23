@@ -111,7 +111,7 @@ function refrescarVocesTts() {
   if ($('#swSttClasico')) $('#swSttClasico').classList.toggle('on', !!CFG.settings.sttClasico);
   $('#setUserName').value = CFG.settings.userName || '';
   // apariencia: color de interfaz, color del glow e intensidad
-  $('#uiColor').value = PALETTES[CFG.settings.uiColor] ? CFG.settings.uiColor : 'violet';
+  $('#uiColor').value = PALETTES[CFG.settings.uiColor] ? CFG.settings.uiColor : 'aurora';
   $('#glowColor').value = (!CFG.settings.glowColor || CFG.settings.glowColor === 'match') ? 'match'
     : (PALETTES[CFG.settings.glowColor] ? CFG.settings.glowColor : 'match');
   $('#glowStrength').value = String(Math.min(1.4, Math.max(0.4, Number(CFG.settings.glowStrength) || 1)));

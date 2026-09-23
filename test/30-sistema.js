@@ -494,7 +494,7 @@ test('holo con momentos: puertas numeradas, reloj del monitor y scope en vivo', 
   ok(/@keyframes pop-in/.test(css), 'los sheets nacen con muelle');
 });
 
-test('glass27: aura Apple Intelligence, cáusticas y slider ultra claro ↔ tintado', () => {
+test('glass27: aura multicolor, cáusticas y slider ultra claro ↔ tintado', () => {
   const css = fs.readFileSync(path.join(__dirname, '..', 'renderer', 'styles.css'), 'utf8');
   const html = fs.readFileSync(path.join(__dirname, '..', 'renderer', 'index.html'), 'utf8');
   const app = readRenderer();
@@ -507,7 +507,7 @@ test('glass27: aura Apple Intelligence, cáusticas y slider ultra claro ↔ tint
   ok(/\.glowFlow\.halo-b/.test(css) && /255,255,255/.test(css), 'el halo B lleva su tono + núcleo blanco');
   ok(/\.glowFlow\.halo-c/.test(css) && /--glow-c-rgb/.test(css), 'el halo C lleva su tono');
   ok(!/offset-path/.test(css), 'el glow no recorre el marco (sigue prohibido)');
-  // iOS 27: borde oscurecido + highlight (cáustica) en el vidrio héroe
+  // cáustica: borde oscurecido + highlight en el vidrio héroe
   const comp = (css.match(/\.composer\s*\{[^}]*\}/) || [''])[0];
   ok(/inset 2px 3px/.test(comp) && /inset -3px -5px/.test(comp), 'luz arriba-izquierda, sombra abajo-derecha');
   // slider de vidrio cableado de punta a punta

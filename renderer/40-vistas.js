@@ -1017,8 +1017,8 @@ window.sagitari.onGlow(({ mode }) => {
    PALETTES define los triplets RGB; applyTheme los vuelca en el :root y todo el
    CSS (80+ tintes) se reconstruye solo, sin recargar nada.
    REEQUILIBRIO: acentos calmados (~20-25% menos de saturación que la era
-   chillona) para que tiñan sin invadir. 'aurora' es el tema iOS 27 / Apple
-   Intelligence: interfaz sobria azul-grisácea + glow multicolor en el borde
+   chillona) para que tiñan sin invadir. 'aurora' es un tema apagado: interfaz
+   sobria azul-grisácea + glow multicolor en el borde
    (su aura no sale de acc2: ver applyTheme). */
 const PALETTES = {
   violet:  { label: 'Violeta',   acc: [158, 146, 228], acc2: [128, 110, 214],  acc3: [84, 124, 214] },
@@ -1092,7 +1092,7 @@ function gh(pal, giro) {
 }
 function applyTheme() {
   const s = CFG.settings || {};
-  const pal = PALETTES[s.uiColor] || PALETTES.violet;
+  const pal = PALETTES[s.uiColor] || PALETTES.aurora;
   const gpal = (s.glowColor && s.glowColor !== 'match' && PALETTES[s.glowColor]) ? PALETTES[s.glowColor] : pal;
   const r = document.documentElement.style;
   r.setProperty('--acc-rgb', pal.acc.join(','));
@@ -1100,8 +1100,8 @@ function applyTheme() {
   r.setProperty('--acc3-rgb', pal.acc3.join(','));
   r.setProperty('--glow-rgb', gpal.acc2.join(','));
   // Aura tricolor: tres tonos DISTINTOS a ±42º del elegido (no vecinos), para
-  // que se vean los 3 colores a la vez, mezclándose entre sí como el brillo
-  // de Apple Intelligence sin dejar de ser tu color.
+  // que se vean los3 colores a la vez, mezclándose entre sí
+  // sin dejar de ser tu color.
   // Excepción: el tema aurora trae su propio espectro (azul→rosa→naranja).
   const auroraGlow = (s.glowColor === 'aurora') || (s.glowColor === 'match' && s.uiColor === 'aurora');
   const [gh, gs, gl] = _hsl(gpal.acc2);
@@ -1116,7 +1116,7 @@ function applyTheme() {
   r.setProperty('--glass', String(Math.min(1.3, Math.max(0.4, Number(s.glassTint) || 1))));
   // los fondos también son del tema: si no, el color cambia solo en los acentos
   for (const [token, valor] of Object.entries(rampaDeSuperficies(pal.acc))) r.setProperty(token, valor);
-  // el espectro Apple Intelligence fluye por el borde solo con aurora
+  // el espectro fluye por el borde solo con aurora
   document.getElementById('shell').classList.toggle('glow-aurora', auroraGlow);
   // refresca las muestras de color de Ajustes si están pintadas
   document.querySelectorAll('.colordot').forEach(d => { d.style.background = ''; });

@@ -63,7 +63,7 @@
   --glow-b-rgb: 139, 92, 246;   /* el elegido */
   --glow-c-rgb: 120, 96, 240;   /* tono vecino frío del aura */
   --glow-str: 1;                /* intensidad del glow: 0.4–1.4 */
-  --glass: 1;                   /* tinte del vidrio iOS 27: 0.4 ultra claro – 1.3 tintado */
+  --glass: 1;                   /* tinte del vidrio: 0.4 ultra claro – 1.3 tintado */
   /* superficies: cada paleta trae su rampa (mismo brillo, su tono). Estos son los
 
      valores de la paleta violeta; applyTheme los reescribe al cambiar de tema. */
@@ -227,7 +227,7 @@ body { font-family: var(--font-ui), 'Segoe UI', sans-serif; font-size: 13px; col
     inset 0 0 42px rgba(var(--glow-b-rgb), calc(0.14 * var(--glow-str) * var(--energy)));
   opacity: calc(0.95 * var(--glow-str) * var(--energy, 1));
 }
-/* Apple Intelligence: TRES vetas de color que ROTAN alrededor del marco (16s),
+/* TRES vetas de color que ROTAN alrededor del marco (16s),
    desenfocadas y recortadas a una banda INTERIOR ESTRECHA junto al borde (caída
    de 30px, más estrecha y luminosa que los 70px de DESIGN.md: a esa anchura la
    luz se diluía y tapaba el contenido). Cada capa lleva un tono con distinto
@@ -237,7 +237,7 @@ body { font-family: var(--font-ui), 'Segoe UI', sans-serif; font-size: 13px; col
    el aura no se veía. La energía del estado la pone el padre (.glow). */
 .glowFlow {
   position: absolute; inset: 0; border-radius: inherit; pointer-events: none;
-  /* Aura SUTIL estilo Apple Watch: luz suave que emana del filo hacia dentro,
+  /* Aura SUTIL: luz suave que emana del filo hacia dentro,
      pastel y de baja intensidad. El ALCANCE (--reach) es el que respira
      (borde↔centro): la luz fluye orgánica, no pulsa la opacidad. Suavidad con
      `blur(26)`; caída ease-out sin cortes. */
@@ -317,7 +317,7 @@ body { font-family: var(--font-ui), 'Segoe UI', sans-serif; font-size: 13px; col
    el foco de la ventana. Las capas del aura son .glow, .glowRing y .glow::before:
    .shell::before es sólo el filo en reposo y no anima. */
 body.nofocus .glow, body.nofocus .glow::before, body.nofocus .glowRing, body.nofocus .glowFlow { animation: none !important; }
-/* Aurora (tema iOS 27 / Apple Intelligence): los 3 tonos del espectro
+/* Aurora: los 3 tonos del espectro
    (azul→rosa→naranja) + el núcleo blanco ya NO llevan reglas propias:
    applyTheme vuelca AURORA_GLOW en --glow-a/b/c-rgb cuando el tema es aurora,
    así que las vetas giratorias de arriba (por tono + la blanca) pintan el
@@ -595,8 +595,8 @@ body.nofocus .glow, body.nofocus .glow::before, body.nofocus .glowRing, body.nof
 
 /* home */
 
-/* GLASS héroe + cáustica iOS 27: la lente concentra la luz arriba-izquierda y la
-   sombra cae abajo-derecha (borde oscurecido + highlight, como pide Apple).
+/* GLASS héroe + cáustica: la lente concentra la luz arriba-izquierda y la
+   sombra cae abajo-derecha (borde oscurecido + highlight).
    El tinte del vidrio lo manda --glass (slider ultra claro ↔ tintado). */
 .composer {
   display: flex; align-items: center; gap: 10px; flex-wrap: wrap; position: relative;
