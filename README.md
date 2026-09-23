@@ -121,6 +121,14 @@ Useful shortcuts:
     <td align="center"><sub><b>Agents</b> — follow every run</sub></td>
     <td align="center"><sub><b>Tools</b> — understand what the agent can do</sub></td>
   </tr>
+  <tr>
+    <td width="50%"><img src="docs/shot-settings.png" alt="SAGITARI settings view"></td>
+    <td width="50%"><img src="docs/shot-skills.png" alt="SAGITARI skills view"></td>
+  </tr>
+  <tr>
+    <td align="center"><sub><b>Settings</b> — models, voice, and appearance</sub></td>
+    <td align="center"><sub><b>Skills</b> — teach the agent new tricks</sub></td>
+  </tr>
 </table>
 
 ## Build from source

@@ -122,6 +122,14 @@ Atajos útiles:
     <td align="center"><sub><b>Agentes</b> — sigue cada ejecución</sub></td>
     <td align="center"><sub><b>Herramientas</b> — entiende qué puede hacer el agente</sub></td>
   </tr>
+  <tr>
+    <td width="50%"><img src="docs/shot-settings.png" alt="Vista de ajustes de SAGITARI"></td>
+    <td width="50%"><img src="docs/shot-skills.png" alt="Vista de skills de SAGITARI"></td>
+  </tr>
+  <tr>
+    <td align="center"><sub><b>Ajustes</b> — modelos, voz y apariencia</sub></td>
+    <td align="center"><sub><b>Skills</b> — enseña trucos nuevos al agente</sub></td>
+  </tr>
 </table>
 
 ## Compilar desde el código
