@@ -605,6 +605,35 @@ test('apariencia: main guarda preferencias y emite tts:done + theme:changed', ()
   ok(/onTtsDone/.test(preload) && /onThemeChanged/.test(preload), 'preload debe exponer onTtsDone y onThemeChanged');
 });
 
+test('apariencia: el tinte de vidrio repinta sin encender el glow', () => {
+  // El acuse del marco (glow('pulse')) solo tiene sentido cuando cambia LA LUZ.
+  // Mover el slider del vidrio tiñe los paneles (theme:changed lo repinta), pero
+  // antes destellaba el aura en cada guardado: ajustar el tinte «encendía» el glow.
+  const cfgmod = require(path.join(__dirname, '..', 'main', 'ipc-config'));
+  const handlers = {};
+  const fakeIpc = { handle: (name, fn) => { handlers[name] = fn; } };
+  const cfgObj = { settings: { uiColor: 'aurora', glowColor: 'match', glowStrength: 1, glassTint: 1, glowEnabled: true }, providers: [], active: null };
+  const pulsos = [];
+  cfgmod.registerConfigIpc(fakeIpc, {
+    config: () => cfgObj,
+    persistConfig: () => ({ ok: true }),
+    glow: (mode) => pulsos.push(mode),
+    getWin: () => null,
+    isHidden: () => false,
+    PRESETS: [],
+    listModels: async () => [],
+  });
+  handlers['settings:set'](null, { glassTint: 0.9 });
+  ok(pulsos.filter(m => m === 'pulse').length === 0, 'mover el tinte de vidrio no debe destellar el glow');
+  handlers['settings:set'](null, { glassTint: 1.1 });
+  ok(pulsos.filter(m => m === 'pulse').length === 0, 'ningún tinte, ninguna Excusa: el marco no cambia');
+  handlers['settings:set'](null, { glowStrength: 0.7 });
+  ok(pulsos.filter(m => m === 'pulse').length === 1, 'cambiar la intensidad de la luz sí debe acusar con un pulso');
+  handlers['settings:set'](null, { uiColor: 'ice' });
+  ok(pulsos.filter(m => m === 'pulse').length === 2, 'cambiar el color de interfaz también acusa');
+  ok(cfgObj.settings.glassTint === 1.1, 'el tinte se guarda igual (solo cambia el acuse)');
+});
+
 /* ---------- adjuntos del chat: archivos, documentos e imágenes ---------- */
 
 test('adjuntos: main delega en el módulo de adjuntos y conserva los metadatos', () => {

@@ -202,7 +202,11 @@ function registerConfigIpc(ipcMain, ctx) {
         const win = getWin();
         if (win && !win.isDestroyed()) win.webContents.send('theme:changed', { uiColor: config.settings.uiColor, glowColor: config.settings.glowColor, glowStrength: config.settings.glowStrength, glassTint: config.settings.glassTint });
       } catch {}
-      if (config.settings.glowEnabled && !isHidden()) glow('pulse');
+      /* El pulso es acuse de la LUZ del marco: solo si cambia algo de la luz.
+         glassTint tiñe los paneles — se repinta con theme:changed (arriba), pero
+         el marco no debe destellar en cada movimiento del slider del vidrio. */
+      if (('uiColor' in clean || 'glowColor' in clean || 'glowStrength' in clean)
+        && config.settings.glowEnabled && !isHidden()) glow('pulse');
     }
     // el renderer sigue recibiendo los ajustes; si el disco falló, se lo decimos
     // además por el mismo canal (y ya ha recibido el toast de persistConfig)
