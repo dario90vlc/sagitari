@@ -1569,19 +1569,29 @@ depender del color de acento elegido. */
 /* muestra del color elegido: la bolita pinta exactamente el valor guardado */
 .colordot { width: 26px; height: 26px; border-radius: 50%; flex-shrink: 0; background: rgb(var(--acc2-rgb)); box-shadow: 0 0 12px rgba(var(--acc2-rgb), 0.55), inset 0 0 0 1px rgba(255,255,255,0.18); transition: background .3s ease, box-shadow .3s ease; }
 .colordot.glow { background: rgb(var(--glow-rgb)); box-shadow: 0 0 12px rgba(var(--glow-rgb), 0.55), inset 0 0 0 1px rgba(255,255,255,0.18); }
-/* slider de intensidad: pista degradada del apagado al encendido real */
-input[type="range"].glowslider { -webkit-appearance: none; appearance: none; width: 190px; height: 5px; border-radius: 999px; outline: none; cursor: pointer;
-  background: linear-gradient(90deg, rgba(var(--glow-rgb), 0.10), rgba(var(--glow-rgb), 0.85)); border: 1px solid var(--line2); }
-input[type="range"].glowslider::-webkit-slider-thumb { -webkit-appearance: none; appearance: none; width: 15px; height: 15px; border-radius: 50%;
-  background: #fff; box-shadow: 0 0 10px rgba(var(--glow-rgb), 0.8), 0 1px 3px rgba(0,0,0,0.5); border: none; transition: transform .15s ease; }
-input[type="range"].glowslider::-webkit-slider-thumb:hover { transform: scale(1.2); }
-/* el slider del vidrio no tiñe su pista de glow: pista neutra de cristal */
-input#glassTint.glowslider { background: linear-gradient(90deg, rgba(255,255,255,0.06), rgba(255,255,255,0.32)); }
-input#glassTint.glowslider::-webkit-slider-thumb { box-shadow: 0 0 10px rgba(255,255,255,0.5), 0 1px 3px rgba(0,0,0,0.5); }
-input[type="range"].glowslider::-webkit-slider-thumb:active { transform: scale(1.35); }
+/* ===== componente slider (velocidad de voz, intensidad del glow, vidrio) =====
+   Canal de vidrio con relleno REAL hasta el pulgar: --fill lo pinta el JS en
+   cada input, así que el valor se lee de un vistazo en vez de adivinarse en un
+   degradado fijo de punta a punta. El color del relleno es --slider-rgb (glow
+   por defecto; el slider del vidrio lo neutraliza abajo). Pulgar de cristal:
+   núcleo claro, filo superior de luz y bloom en su color de relleno. */
+input[type="range"].glowslider { -webkit-appearance: none; appearance: none; width: 200px; height: 6px; border-radius: 999px; outline: none; cursor: pointer;
+  --slider-rgb: var(--glow-rgb);
+  --fill: 50%;
+  background: linear-gradient(90deg, rgba(var(--slider-rgb), 0.85) 0 var(--fill), rgba(255,255,255,0.06) var(--fill) 100%);
+  border: 1px solid var(--line2); box-shadow: inset 0 1px 3px rgba(0,0,0,0.45); }
+input[type="range"].glowslider::-webkit-slider-thumb { -webkit-appearance: none; appearance: none; width: 17px; height: 17px; border-radius: 50%;
+  background: linear-gradient(180deg, #ffffff 0%, #eef1f8 48%, #ccd3e2 100%);
+  box-shadow: 0 0 10px rgba(var(--slider-rgb), 0.75), 0 1px 3px rgba(0,0,0,0.5), inset 0 1px 0 rgba(255,255,255,0.95);
+  border: none; transition: transform .15s ease; }
+input[type="range"].glowslider::-webkit-slider-thumb:hover { transform: scale(1.15); }
+input[type="range"].glowslider::-webkit-slider-thumb:active { transform: scale(1.3); }
+input[type="range"].glowslider:focus-visible { outline: 2px solid rgba(var(--slider-rgb), 0.75); outline-offset: 3px; }
+/* el slider del vidrio no se tiñe de glow: relleno y bloom blancos */
+input#glassTint.glowslider { --slider-rgb: 255,255,255; }
 /* etiquetas Suave / Equilibrado / Intenso bajo el slider (y Ultra claro / Equilibrado
    / Tintado bajo el del vidrio: textos más largos que necesitan respirar) */
-.glowlabels { display: flex; justify-content: space-between; gap: 8px; width: 190px; font: 500 11px var(--font-ui); letter-spacing: 0.6px; color: var(--dim); margin-top: 5px; }
+.glowlabels { display: flex; justify-content: space-between; gap: 8px; width: 200px; font: 500 11px var(--font-ui); letter-spacing: 0.6px; color: var(--dim); margin-top: 5px; }
 .glowlabels span { white-space: nowrap; }
 .glowlabels span.on { color: rgb(var(--glow-rgb)); }
 
@@ -1637,6 +1647,7 @@ input[type="range"].glowslider::-webkit-slider-thumb:active { transform: scale(1
 @media (prefers-reduced-motion: reduce) {
   .glow::before, .glowRing { animation: none !important; }
   .modelmenu, .csel-menu, .skillmenu, .toast { animation: none !important; }
+  input[type="range"].glowslider, input[type="range"].glowslider::-webkit-slider-thumb { transition: none; }
   .shell.glow-think  .glow::before { opacity: .42; }
   .shell.glow-work   .glow::before { opacity: .58; }
   .shell.glow-listen .glow::before { opacity: .32; }

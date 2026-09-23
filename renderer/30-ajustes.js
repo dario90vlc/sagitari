@@ -116,6 +116,7 @@ function refrescarVocesTts() {
     : (PALETTES[CFG.settings.glowColor] ? CFG.settings.glowColor : 'match');
   $('#glowStrength').value = String(Math.min(1.4, Math.max(0.4, Number(CFG.settings.glowStrength) || 1)));
   $('#glassTint').value = String(Math.min(1.3, Math.max(0.4, Number(CFG.settings.glassTint) || 1)));
+  pintarFill($('#glowStrength')); pintarFill($('#glassTint'));
   refreshGlowLabels();
   refreshColorDots();
   window.sagitari.workspaceGet().then(w => { $('#wsPath').value = w; });
@@ -239,7 +240,17 @@ if ($('#ttsVoice')) $('#ttsVoice').onchange = async (e) => {
   CFG.settings.ttsVoiceFijo = true;
   await window.sagitari.setSettings({ ttsVoice: e.target.value, ttsVoiceFijo: true });
 };
-if ($('#ttsRate')) $('#ttsRate').oninput = async (e) => { await window.sagitari.setSettings({ ttsRate: Number(e.target.value) }); };
+/* Relleno real del slider: --fill marca hasta dónde llega el valor y el CSS
+   corta el canal ahí (sin esto el degradado fijo mintía sobre la posición). */
+function pintarFill(el) {
+  if (!el) return;
+  const pct = ((Number(el.value) - Number(el.min)) / (Number(el.max) - Number(el.min))) * 100;
+  el.style.setProperty('--fill', Math.max(0, Math.min(100, pct)) + '%');
+}
+if ($('#ttsRate')) {
+  $('#ttsRate').oninput = async (e) => { pintarFill(e.target); await window.sagitari.setSettings({ ttsRate: Number(e.target.value) }); };
+  pintarFill($('#ttsRate'));
+}
 if ($('#swAvisos')) {
   $('#swAvisos').classList.toggle('on', !!CFG.settings.ttsNotices);
   $('#swAvisos').onclick = async (e) => { const on = !e.currentTarget.classList.contains('on'); e.currentTarget.classList.toggle('on', on); await window.sagitari.setSettings({ ttsNotices: on }); };
@@ -373,6 +384,7 @@ $('#glowColor').onchange = async (e) => {
 };
 let glowSaveTimer = null;
 $('#glowStrength').oninput = (e) => {
+  pintarFill(e.target);
   CFG.settings.glowStrength = Number(e.target.value);
   applyTheme(); refreshGlowLabels();          // previsualización instantánea
   clearTimeout(glowSaveTimer);
@@ -380,6 +392,7 @@ $('#glowStrength').oninput = (e) => {
 };
 let glassSaveTimer = null;
 $('#glassTint').oninput = (e) => {
+  pintarFill(e.target);
   CFG.settings.glassTint = Number(e.target.value);
   applyTheme(); refreshGlowLabels();          // previsualización instantánea
   clearTimeout(glassSaveTimer);
