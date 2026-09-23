@@ -29,6 +29,7 @@ Thumbs.db
 _*.js
 _*.png
 _*.html
+test-out.txt
 # Sondas temporales de PowerShell: mismo criterio que las de arriba (una sonda de un
 # rato no entra en el historial; si sirve de verdad, se sube sin el guion bajo).
 _*.ps1
@@ -38,3 +39,6 @@ _*.ps1
 
 # Mesa de diseño (briefs y capturas locales, no se publican)
 .impeccable/
+
+# Id del companion local (regla versionada; antes solo vivía en .git/info/exclude)
+.freebuff/

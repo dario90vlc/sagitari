@@ -58,6 +58,12 @@ jobs:
           set -o pipefail
           npm test 2>&1 | tee test-output.log
 
+      - name: npm audit (alta y crítica, sin fix automático)
+        # Solo informa: un fallo aquí no bloquea la release, pero queda el rastro
+        # en el log para decidir si actualizar dependencias.
+        shell: bash
+        run: npm audit --audit-level=high || true
+
       - name: Unit tests (shell por defecto, como el release)
         # El release ejecuta los tests sin `shell:` —en Windows, pwsh— y aquí con
         # bash, así que el entorno del proceso no es el mismo. Esa diferencia
