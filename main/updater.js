@@ -445,7 +445,11 @@ function writeHelperPs(psPath, opts = {}) {
   const script = installHelperScript(opts);
   fs.mkdirSync(path.dirname(psPath), { recursive: true });
   fs.writeFileSync(psPath, '﻿' + script, 'utf8');
-  return { psPath, script };
+  // Huella del guion que acabamos de escribir: programarInstalacion la comprueba
+  // justo antes de disparar la tarea (un proceso del usuario podría haberlo
+  // modificado entre la escritura y el /run: el .ps1 vive en %TEMP%).
+  const sha256 = crypto.createHash('sha256').update('﻿' + script, 'utf8').digest('hex');
+  return { psPath, script, sha256 };
 }
 
 /** "HH:mm" local dentro de `minutes` minutos (para /st, que lo exige). */
@@ -477,10 +481,27 @@ async function programarInstalacion({ dir, name, installer, args, logPath, waitM
     return { code: r.status, stdout: String(r.stdout || ''), stderr: String(r.stderr || '') };
   });
   const psPath = helperPsPath(dir);
-  const { script } = writeHelperPs(psPath, { name, installer, args, logPath, waitMs, graceMs, taskName });
+  const { script, sha256 } = writeHelperPs(psPath, { name, installer, args, logPath, waitMs, graceMs, taskName });
   const creada = await exec('schtasks', scheduleCreateArgs({ taskName, psPath, startTime: taskTimePlus(5) }));
   if (creada.code !== 0) {
     throw new Error('no se pudo programar la instalación (' + String((creada.stderr || creada.stdout || '').trim()).slice(0, 160) + ')');
+  }
+  // El .ps1 vive en %TEMP% y lo ejecuta el servicio del Programador: entre
+  // escribirlo y disparar la tarea, otro proceso del usuario podría haberlo
+  // tocado. Se relee y se compara con la huella de lo que acabamos de escribir;
+  // si cambió, se borra la tarea y no se dispara nada.
+  try {
+    const enDisco = fs.readFileSync(psPath, 'utf8');
+    const huella = crypto.createHash('sha256').update(enDisco, 'utf8').digest('hex');
+    if (huella !== sha256) {
+      try { await exec('schtasks', ['/delete', '/tn', taskName, '/f']); } catch {}
+      throw new Error('el guion de instalación cambió en disco antes de dispararse; abortado por seguridad');
+    }
+  } catch (e) {
+    if (/cambió en disco/.test(e.message)) throw e;
+    // Si ni siquiera se puede releer, tampoco se dispara a ciegas.
+    try { await exec('schtasks', ['/delete', '/tn', taskName, '/f']); } catch {}
+    throw new Error('no se pudo verificar el guion de instalación (' + e.message + ')');
   }
   const disparo = await exec('schtasks', ['/run', '/tn', taskName]);
   if (disparo.code !== 0) {

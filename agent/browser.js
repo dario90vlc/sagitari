@@ -811,7 +811,13 @@ class Browser {
   async navigate(url) {
     let u = String(url || '').trim();
     if (!u) return 'Error: falta la url.';
-    if (!/^https?:\/\//i.test(u) && !/^(about|file|chrome):/i.test(u)) u = 'https://' + u;
+    // Solo http(s): file:// leería el disco desde el navegador (fuera del
+    // confinamiento de read_file) y chrome:/about: tocan internals del navegador.
+    // Antes se aceptaban explícitamente; ahora se rechazan con el motivo.
+    if (/^(file|chrome|about|chrome-extension|edge|view-source):/i.test(u)) {
+      return 'Error: solo se puede navegar a direcciones http(s). Para leer un archivo local usa read_file.';
+    }
+    if (!/^https?:\/\//i.test(u)) u = 'https://' + u;
     const { sessionId } = await this.currentSession();
     try { await this.send('Page.navigate', { url: u }, sessionId); } catch (e) {
       return 'Error al navegar: ' + e.message;

@@ -59,6 +59,12 @@ Lo sostienen tres cosas que el producto ya hace:
 - **Entorno**: Windows 10/11 de escritorio. La app se distribuye como instalador
   NSIS y como portable de un solo ejecutable, sin firma digital (el aviso de
   SmartScreen en la primera ejecución es un paso conocido y documentado).
+  Decisión consciente, no descuido: un certificado Authenticode cuesta cientos de
+  euros al año y este proyecto es MIT, gratis y sin monetización. Mientras no haya
+  firma, cada binario se verifica por SHA-512 contra el `latest.yml` del CI antes
+  de ejecutarse, la instalación exige consentimiento activo en dos pasos, y el
+  firmante de la primera release firmada que se vea quedará fijado (TOFU: un cambio
+  de firmante posterior exige confirmación explícita del cambio).
 - **Proveedor**: se elige un preset (OpenCode Go, OpenRouter, Groq, OpenAI,
   Anthropic, Ollama, LM Studio o endpoint propio), se pega la clave si hace falta y
   los modelos se detectan automáticamente.
@@ -123,10 +129,9 @@ justificación (ver *Brand Commitments*).
 
 ## Evidence on Hand
 
-- **Releases públicas reales** en GitHub: seis versiones publicadas (la última,
-  2.2.2), cada una con instalador, portable, `Source code` y SHA-256 en el cuerpo.
-  La release **3.0.0 está preparada en este checkout** con sus instaladores y notas,
-  pendiente de publicar mediante el tag correspondiente.
+- **Releases públicas reales** en GitHub, cada una con instalador, portable,
+  `Source code` y SHA-256 en el cuerpo. El historial completo está en
+  `RELEASE_NOTES.md` y en la página de releases del repositorio.
 - **Descargas medidas el 2026-09-14**: 25 en la 2.2.2, y entre 3 y 7 en las
   anteriores (≈49 en total). Es un proyecto **en fase temprana, con audiencia
   pequeña**: el trabajo futuro no debe insinuar tracción que no existe.
