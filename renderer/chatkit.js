@@ -3,16 +3,16 @@
 /* ============================================================================
    chatkit.js — la "inteligencia" del chat de SAGITARI, en funciones puras.
 
-   Vive aquí (y no dentro de app.js) por dos razones:
+   Vive aquí (y no dentro de los scripts 1x) por dos razones:
      · el renderer no tiene estado ni DOM en estas funciones → testeables
      · se carga como <script> normal en la ventana y como require() en Node,
        así los tests cubren de verdad la lógica en vez de mirar si el HTML
        contiene una cadena.
 
    IMPORTANTE: todo va dentro de un IIFE. Estos scripts son clásicos y comparten
-   un único ámbito global, así que un `const MODE_ORDER` aquí y otro en app.js
-   son un SyntaxError que deja la app entera sin arrancar (sin iconos, sin
-   botones, sin nada). Lo único que sale de este fichero es window.ChatKit.
+   un único ámbito global, así que un `const MODE_ORDER` en top-level aquí y otro
+   en 40-vistas.js son un SyntaxError que deja la app entera sin arrancar (sin
+   iconos, sin botones, sin nada). Lo único que sale de este fichero es window.ChatKit.
 
    Cubre: identidad de los modos ACT/PLAN/THINK, el catálogo de herramientas
    (etiqueta humana + icono), el resumen de sus argumentos, el formato de

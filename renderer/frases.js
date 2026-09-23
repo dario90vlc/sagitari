@@ -5,11 +5,11 @@
  * Por qué un fichero propio: partir el texto por frases parece trivial hasta que se parte
  * por donde no toca. Ya pasó una vez en el proceso principal (`main/voice/protocolo.js`):
  * el punto de un decimal acabó siendo un final de frase y «versión 3.5» se leía «versión
- * tres» y «cinco». Aquí vive la misma regla, y separado del resto de app.js porque es la
- * única pieza de la lectura en flujo que se puede probar sin navegador (`test/run.js` la
- * carga con `require`, igual que el resto de la lógica pura).
+ * tres» y «cinco». Aquí vive la misma regla, y separado del resto de los scripts del
+ * renderer porque es la única pieza de la lectura en flujo que se puede probar sin
+ * navegador (`test/run.js` la carga con `require`, igual que el resto de la lógica pura).
  *
- * Se carga ANTES que app.js (como icons.js o orb.js) y deja su API en `window.SagiFrases`.
+ * Se carga ANTES que los scripts 1x (como icons.js o orb.js) y deja su API en `window.SagiFrases`.
  */
 (function (raiz) {
   /* Cuántos caracteres de `cola` forman ya la siguiente frase COMPLETA. 0 = todavía no hay

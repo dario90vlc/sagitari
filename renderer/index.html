@@ -4,12 +4,13 @@
 <meta charset="UTF-8" />
 <meta http-equiv="Content-Security-Policy" content="default-src 'self' data: blob:; style-src 'self' 'unsafe-inline'; font-src 'self'; script-src 'self' blob:" />
 <link rel="stylesheet" href="styles.css" />
+<link rel="stylesheet" href="liquid-glass.css" />
 <title>SAGITARI</title>
 </head>
 <body>
 <div class="shell" id="shell">
   <!-- capa del aura: dentro va el anillo que respira; el desenfoque lo lleva la capa de fuera -->
-  <span class="glow" aria-hidden="true"><span class="glowRing"></span><span class="glowFlow"></span></span>
+  <span class="glow" aria-hidden="true"><span class="glowRing"></span><span class="glowFlow halo-a"></span><span class="glowFlow halo-b"></span><span class="glowFlow halo-c"></span></span>
 
   <!-- Titlebar: franja de arrastre a todo el ancho. Los botones son DESCENDIENTES
        del área drag, por lo que su no-drag sí anula la región (regla Electron). -->
@@ -469,6 +470,7 @@
                 <option value="emerald">Esmeralda</option>
                 <option value="amber">Ámbar</option>
                 <option value="ice">Hielo</option>
+                <option value="aurora">Aurora (iOS 27)</option>
               </select></div>
             <div class="themerow" data-keys="color glow resplandor luz"><span class="st"><b>Color del glow</b><small>El tono de la luz del marco, puede diferir del tema.</small></span>
               <span class="colordot glow" id="dotGlowColor"></span>
@@ -480,6 +482,7 @@
                 <option value="emerald">Esmeralda</option>
                 <option value="amber">Ámbar</option>
                 <option value="ice">Hielo</option>
+                <option value="aurora">Aurora (Apple Intelligence)</option>
               </select></div>
             <div class="themerow" data-keys="intensidad glow resplandor fuerza brillo"><span class="st"><b>Intensidad del glow</b><small id="glowStrengthLabel">Equilibrado</small></span>
               <div style="text-align:right">
@@ -747,6 +750,9 @@
 <script src="orb.js"></script>
 <script src="voice-mode.js"></script>
 <script src="scope.js"></script>
-<script src="app.js"></script>
+<script src="10-chat.js"></script>
+<script src="20-voz.js"></script>
+<script src="30-ajustes.js"></script>
+<script src="40-vistas.js"></script>
 </body>
 </html>
