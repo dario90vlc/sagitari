@@ -120,7 +120,7 @@ justificación (ver *Brand Commitments*).
 - **Identidad visual fijada**: interfaz holográfica hecha a mano, con glow reactivo
   que ilumina el marco según lo que hace el agente (color e intensidad configurables).
   El brillo y el acento son la identidad, no decoración prescindible. El estado vacío
-  del chat lleva un scope de torre en vivo (canvas propio) como momento firma.
+  del chat queda limpio: sin adornos, manda el texto sobre el aura del marco.
 - **Licencia**: **MIT y gratis, sin monetización. Es lo único blindado**: no se diseña
   nada que dependa de un plan de pago ni se cierra nada para sostener uno.
 - Windows-only, UI sin frameworks, claves/datos solo locales y el modelo de

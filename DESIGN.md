@@ -17,10 +17,6 @@ mate plano dejaba la UI muerta y la Chakra Petch envejecía.
 
 ## Momentos
 
-- **Scope** (`scope.js` + `#scopeCanvas`): radar en vivo tras el estado vacío —
-  anillos, barrido con estela cónica, ecos que se apagan, acento del tema en
-  caliente. Se pausa solo (conversación abierta, vista oculta, sin foco) y queda
-  quieto con movimiento reducido. Máscara radial: el texto manda en el centro.
 - **Aura multicolor** (`.glowFlow`): vetas de los tres tonos del glow +
   núcleo blanco rotando (`@property --giro`, 16s) en banda de 70px junto al
   marco. La energía por estado la pone el padre; se apaga sin foco y con
@@ -36,8 +32,8 @@ mate plano dejaba la UI muerta y la Chakra Petch envejecía.
 
 ## Movimiento
 
-Un momento autoral (scope + respiración del aura por estado); transiciones
-cortas en el resto. `prefers-reduced-motion` apaga latidos y scope.
+Un momento autoral (la respiración del aura por estado); transiciones
+cortas en el resto. `prefers-reduced-motion` apaga los latidos.
 
 ## Accesibilidad
 

@@ -469,7 +469,7 @@ test('apariencia: cada clase de punto que usa el JS existe en el CSS', () => {
   for (const c of usadas) ok(css.includes('.dot.' + c), `falta la regla .dot.${c} en styles.css`);
 });
 
-test('holo con momentos: puertas numeradas, reloj del monitor y scope en vivo', () => {
+test('holo con momentos: puertas numeradas y reloj del monitor', () => {
   const css = fs.readFileSync(path.join(__dirname, '..', 'renderer', 'styles.css'), 'utf8');
   const html = fs.readFileSync(path.join(__dirname, '..', 'renderer', 'index.html'), 'utf8');
   const app = readRenderer();
@@ -477,9 +477,7 @@ test('holo con momentos: puertas numeradas, reloj del monitor y scope en vivo', 
   ok(!/\.navitem\[data-view="\w+"\] \.nl::before/.test(css), 'las puertas no deben llevar números');
   ok(/\.navitem \.nl::before \{ content: none/.test(css), 'el ::before de puerta debe estar anulado');
   ok(html.includes('id="boardClock"'), 'el rail lleva su reloj de estación');
-  ok(html.includes('id="scopeCanvas"') && html.includes('<script src="scope.js">'), 'el estado vacío lleva su scope en vivo');
   ok(/function tickBoardClock\(\)/.test(app) && /setInterval\(tickBoardClock, 1000\)/.test(app), 'el reloj late cada segundo');
-  ok(/\.chat-empty \.scope\s*\{[^}]*mask-image/.test(css), 'el scope se apaga hacia los bordes');
   /* HIG Liquid Glass: el vidrio vive SOLO en la capa funcional (sidebar,
      compositor, menús, sheets). El contenido (burbujas, tarjetas) son fills
      opacos: nada de backdrop-filter ni vidrio sobre vidrio. */
