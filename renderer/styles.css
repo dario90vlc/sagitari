@@ -1563,18 +1563,22 @@ depender del color de acento elegido. */
 .colordot.glow { background: rgb(var(--glow-rgb)); box-shadow: 0 0 12px rgba(var(--glow-rgb), 0.55), inset 0 0 0 1px rgba(255,255,255,0.18); }
 /* ===== componente slider (velocidad de voz, intensidad del glow, vidrio) =====
    Canal de vidrio con relleno REAL hasta el pulgar: --fill lo pinta el JS en
-   cada input, así que el valor se lee de un vistazo en vez de adivinarse en un
-   degradado fijo de punta a punta. El color del relleno es --slider-rgb (glow
-   por defecto; el slider del vidrio lo neutraliza abajo). Pulgar de cristal:
-   núcleo claro, filo superior de luz y bloom en su color de relleno. */
-input[type="range"].glowslider { -webkit-appearance: none; appearance: none; width: 200px; height: 6px; border-radius: 999px; outline: none; cursor: pointer;
+   cada input, así que el valor se lee de un vistazo. El relleno se «carga»
+   (alpha .55 → 1) hacia el pulgar y la canal vacía va hundida en negro, para
+   que el pulgar de cristal con su anillo oscuro se despegue a cualquier valor.
+   --slider-rgb manda el color (glow por defecto; el vidrio lo neutraliza). */
+input[type="range"].glowslider { -webkit-appearance: none; appearance: none; width: 200px; height: 7px; border-radius: 999px; outline: none; cursor: pointer;
   --slider-rgb: var(--glow-rgb);
   --fill: 50%;
-  background: linear-gradient(90deg, rgba(var(--slider-rgb), 0.85) 0 var(--fill), rgba(255,255,255,0.06) var(--fill) 100%);
-  border: 1px solid var(--line2); box-shadow: inset 0 1px 3px rgba(0,0,0,0.45); }
-input[type="range"].glowslider::-webkit-slider-thumb { -webkit-appearance: none; appearance: none; width: 17px; height: 17px; border-radius: 50%;
+  background: linear-gradient(90deg,
+    rgba(var(--slider-rgb), 0.55) 0,
+    rgba(var(--slider-rgb), 1) var(--fill),
+    rgba(0, 0, 0, 0.4) var(--fill));
+  border: 1px solid var(--line2);
+  box-shadow: inset 0 1px 3px rgba(0,0,0,0.5), inset 0 1px 0 rgba(255,255,255,0.07), 0 0 10px -4px rgba(var(--slider-rgb), 0.55); }
+input[type="range"].glowslider::-webkit-slider-thumb { -webkit-appearance: none; appearance: none; width: 19px; height: 19px; border-radius: 50%;
   background: linear-gradient(180deg, #ffffff 0%, #eef1f8 48%, #ccd3e2 100%);
-  box-shadow: 0 0 10px rgba(var(--slider-rgb), 0.75), 0 1px 3px rgba(0,0,0,0.5), inset 0 1px 0 rgba(255,255,255,0.95);
+  box-shadow: 0 0 0 2px rgba(10,12,18,0.92), 0 0 12px rgba(var(--slider-rgb), 0.7), 0 1px 3px rgba(0,0,0,0.5), inset 0 1px 0 rgba(255,255,255,0.95);
   border: none; transition: transform .15s ease; }
 input[type="range"].glowslider::-webkit-slider-thumb:hover { transform: scale(1.15); }
 input[type="range"].glowslider::-webkit-slider-thumb:active { transform: scale(1.3); }
