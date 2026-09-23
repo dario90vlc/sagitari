@@ -6,16 +6,51 @@
 
 ### Tu agente de IA para escritorio — con manos.
 
-**Pide algo en lenguaje natural. SAGITARI planifica, actúa y te informa en tu PC Windows.**
+**Pide en lenguaje natural. SAGITARI planea, ejecuta y te reporta en tu PC Windows.**
 
 [![Versión](https://img.shields.io/github/v/release/dario90vlc/sagitari?style=for-the-badge&color=00E5FF&label=última)](https://github.com/dario90vlc/sagitari/releases)
 [![Descargas](https://img.shields.io/github/downloads/dario90vlc/sagitari/total?style=for-the-badge&color=37F5A8&label=descargas)](https://github.com/dario90vlc/sagitari/releases)
 [![Plataforma](https://img.shields.io/badge/Windows-10%20%2F%2011-0078D6?style=for-the-badge&logo=windows11&logoColor=white)](https://github.com/dario90vlc/sagitari/releases)
 [![Licencia](https://img.shields.io/badge/licencia-Uso%20Personal-7C3AED?style=for-the-badge)](LICENSE)
 
+[![Descargar](https://img.shields.io/badge/%E2%AC%87%20Descargar-Windows-00E5FF?style=for-the-badge)](https://github.com/dario90vlc/sagitari/releases/latest)
+
 [Descarga](#descarga) · [Características](#qué-puede-hacer) · [Seguridad](#seguridad-primero) · [English](./README.md)
 
+**Lenguaje natural dentro. Trabajo real fuera.** — SAGITARI usa tu terminal, tus archivos y tu navegador para terminar el trabajo, mientras todo permanece en tu equipo.
+
 </div>
+
+---
+
+## Se ve en marcha
+
+<table>
+  <tr>
+    <td width="50%"><img src="docs/shot-chat.png" alt="Chat de SAGITARI con una tarea real"></td>
+    <td width="50%"><img src="docs/shot-empty.png" alt="SAGITARI, estado limpio"></td>
+  </tr>
+  <tr>
+    <td align="center"><sub><b>Chat</b> — planea, ejecuta y reporta</sub></td>
+    <td align="center"><sub><b>Estado limpio</b> — un lienzo nuevo, tu acento</sub></td>
+  </tr>
+  <tr>
+    <td width="50%"><img src="docs/shot-voice.png" alt="Modo voz de SAGITARI"></td>
+    <td width="50%"><img src="docs/shot-settings.png" alt="Apariencia de SAGITARI"></td>
+  </tr>
+  <tr>
+    <td align="center"><sub><b>Modo voz</b> — habla; trabaja y contesta en voz alta</sub></td>
+    <td align="center"><sub><b>Apariencia</b> — aura, vidrio, a tu medida</sub></td>
+  </tr>
+  <tr>
+    <td width="50%"><img src="docs/shot-agents.png" alt="Vista de agentes de SAGITARI"></td>
+    <td width="50%"><img src="docs/shot-security.png" alt="Niveles de permiso de SAGITARI"></td>
+  </tr>
+  <tr>
+    <td align="center"><sub><b>Agentes</b> — cada ejecución, en vivo</sub></td>
+    <td align="center"><sub><b>Permisos</b> — nada sensible sin tu permiso</sub></td>
+  </tr>
+</table>
 
 ---
 
@@ -25,24 +60,14 @@ La mayoría de asistentes de IA de escritorio se quedan en el chat. SAGITARI est
 
 Es local-first por diseño. Tú eliges el modelo y el proveedor —en la nube o local— mientras la configuración, las API keys, las conversaciones, los logs, la memoria y los perfiles del navegador permanecen en tu equipo.
 
-> **Lenguaje natural dentro. Trabajo real fuera.**
-
-## Descarga
-
-Descarga la última versión para Windows (instalador o portable, elige en la página de la release):
-
-| Paquete | Descripción |
-|---|---|
-| [**⬇ Descargar SAGITARI para Windows**](https://github.com/dario90vlc/sagitari/releases/latest) | Instalador (accesos directos + desinstalador) y portable en un solo `.exe` |
-| [**Notas de la versión**](https://github.com/dario90vlc/sagitari/releases) | Cambios, correcciones de seguridad y hashes SHA-256 |
-
-> **Windows SmartScreen:** los binarios no tienen firma digital actualmente, por lo que Windows puede mostrar un aviso la primera vez. Pulsa *Más información → Ejecutar de todas formas* si confías en la descarga. Comprueba el hash SHA-256 publicado en las notas de la release.
-
-> **Motores de voz:** la voz neuronal local (Piper) y el dictado local de alta precisión (Whisper) **no** van dentro del instalador —se descargan a petición desde Ajustes, en total unos 700 MB— así que la descarga sigue siendo ligera y el modo voz funciona igualmente con los motores de Windows mientras no los instales.
-
 ## Qué puede hacer
 
-### Un agente que ejecuta
+### Ejecuta.
+
+Terminal, archivos, aplicaciones, ventanas y un navegador de verdad — una instrucción y el trabajo está hecho en tu PC.
+
+<details>
+<summary><b>Desglose completo</b></summary>
 
 - **Terminal y archivos** — inspecciona, crea, edita y organiza tu espacio de trabajo.
 - **Acciones de escritorio** — abre aplicaciones y URLs, gestiona ventanas, portapapeles, notificaciones y multimedia.
@@ -50,9 +75,16 @@ Descarga la última versión para Windows (instalador o portable, elige en la p�
 - **Trabajo en paralelo** — las órdenes de un mismo mensaje se ejecutan a la vez con **bloqueo por recurso**: el navegador es uno solo, la escritura en disco va en cola y Detener mata todo lo que esté en vuelo.
 - **Visión y adjuntos** — adjunta imágenes, código, documentos y ficheros de texto; las imágenes pueden enviarse a modelos con visión.
 - **Código con red** — sabe cómo se comprueban **tu** proyecto (tests, compilación, lint) y comprueba la **sintaxis** de cada archivo al escribirlo: el error vuelve al instante, no tres pasos después. `apply_patch` hace varias ediciones en varios archivos de una vez (o entran todas o no entra ninguna) y, antes de darte algo por hecho, un **agente de revisión** lee el cambio del turno y busca lo que está mal (contratos rotos, casos límite, restos del nombre viejo). Se apaga en Ajustes ▸ Delegación y verificación.
-- **Mapa del proyecto** — en proyectos grandes indexa archivos y símbolos (`repo_map`, `find_symbol`) en vez de leerlos uno a uno, así no se pierde en 100.000 líneas ni se queda en cuatro ediciones locales.
+- **Mapa del proyecto** — en proyectos grandes indexa archivos y símbolos (`repo_map`, `find_symbol`) en vez de leerlos uno a uno, así no se pierde en100.000 líneas ni se queda en cuatro ediciones locales.
 
-### Inteligencia flexible
+</details>
+
+### Piensa a tu manera.
+
+Razona en profundidad, planifica antes de actuar o ve directo — con el modelo que tú elijas, en la nube o en local.
+
+<details>
+<summary><b>Desglose completo</b></summary>
 
 - **Tu modelo, tus reglas** — OpenCode Go, OpenRouter, OpenAI, Groq, Anthropic, Ollama, LM Studio o cualquier endpoint compatible.
 - **Think / Plan / Act** — razona en profundidad, prepara un plan antes de actuar o ejecuta directamente.
@@ -61,7 +93,14 @@ Descarga la última versión para Windows (instalador o portable, elige en la p�
 - **Memoria y hábitos** — conserva contexto útil entre conversaciones, siempre en local.
 - **Fallback y recuperación** — cambio automático de modelo, tareas en segundo plano, checkpoints, pausa/reanudación y recuperación tras interrupciones. Si el proveedor acepta la conexión pero deja de enviar datos, el turno se corta solo (límite configurable en Ajustes › Seguridad) y el error se explica en el chat. El modelo elegido en Ajustes manda: el router no lo cambia por otro en silencio.
 
-### Una interfaz que muestra el trabajo
+</details>
+
+### Muestra el trabajo.
+
+Cada paso, herramienta y segundo en pantalla — y puede leer la respuesta en voz alta.
+
+<details>
+<summary><b>Desglose completo</b></summary>
 
 - Interfaz holográfica creada con HTML, CSS y JavaScript vanilla.
 - Glow reactivo en el marco mientras el agente piensa, trabaja, escucha o habla.
@@ -70,6 +109,8 @@ Descarga la última versión para Windows (instalador o portable, elige en la p�
 - Entrada por voz mediante el reconocimiento de Windows y salida por texto a voz.
 - **Razonamiento visible (opcional)**: los modelos que razonan (Claude, la serie o y GPT-5, DeepSeek R1…) enseñan su proceso en un bloque plegable sobre la respuesta; se lee en vivo mientras piensa, se pliega solo al empezar a contestar y nunca se lee en voz alta. Se activa en Ajustes ▸ Agente.
 - **Modo voz**: pulsa el micrófono y habla; el asistente te oye, hace el trabajo y te contesta en voz alta. Manos libres: al callar, se envía; te enseña el texto mientras hablas y empieza a responder en voz alta en cuanto tiene la primera frase, sin esperar a terminar. Si hablas mientras responde, se calla y te escucha; y puedes detenerlo diciendo «para» o con el botón **Parar** del panel. Todo en tu equipo, con voz neuronal local (Piper) y dictado local de alta precisión (Whisper) instalables desde Ajustes. `Alt`+clic en el micrófono mantiene el dictado clásico al cuadro de texto.
+
+</details>
 
 ## Seguridad primero
 
@@ -87,7 +128,7 @@ SAGITARI tiene acceso real a tu ordenador, por eso la seguridad forma parte del 
 
 ## Inicio rápido
 
-1. Instala SAGITARI o descarga la versión portable.
+1. [Descarga SAGITARI](https://github.com/dario90vlc/sagitari/releases/latest) — instalador o portable en un solo `.exe`.
 2. Abre **Ajustes** y elige un proveedor.
 3. Introduce tu API key si es necesaria, detecta los modelos y activa uno.
 4. Vuelve a **Chat** y pide algo real.
@@ -103,36 +144,26 @@ Atajos útiles:
 | `Alt+M` | Ciclar ACT → PLAN → THINK |
 | `/` en el chat | Abrir la paleta de skills |
 
-## Capturas
+## Descarga
 
-<table>
-  <tr>
-    <td width="50%"><img src="docs/shot-chat.png" alt="Chat de SAGITARI"></td>
-    <td width="50%"><img src="docs/shot-empty.png" alt="Chat vacío de SAGITARI"></td>
-  </tr>
-  <tr>
-    <td align="center"><sub><b>Chat</b> — pide, adjunta y ejecuta</sub></td>
-    <td align="center"><sub><b>Modos</b> — elige Act, Plan o Think</sub></td>
-  </tr>
-  <tr>
-    <td width="50%"><img src="docs/shot-agents.png" alt="Vista de agentes de SAGITARI"></td>
-    <td width="50%"><img src="docs/shot-tools.png" alt="Vista de herramientas de SAGITARI"></td>
-  </tr>
-  <tr>
-    <td align="center"><sub><b>Agentes</b> — sigue cada ejecución</sub></td>
-    <td align="center"><sub><b>Herramientas</b> — entiende qué puede hacer el agente</sub></td>
-  </tr>
-  <tr>
-    <td width="50%"><img src="docs/shot-settings.png" alt="Vista de ajustes de SAGITARI"></td>
-    <td width="50%"><img src="docs/shot-skills.png" alt="Vista de skills de SAGITARI"></td>
-  </tr>
-  <tr>
-    <td align="center"><sub><b>Ajustes</b> — modelos, voz y apariencia</sub></td>
-    <td align="center"><sub><b>Skills</b> — enseña trucos nuevos al agente</sub></td>
-  </tr>
-</table>
+| Paquete | Descripción |
+|---|---|
+| [**⬇ Descargar SAGITARI para Windows**](https://github.com/dario90vlc/sagitari/releases/latest) | Instalador (accesos directos + desinstalador) y portable en un solo `.exe` |
+| [**Notas de la versión**](https://github.com/dario90vlc/sagitari/releases) | Cambios, correcciones de seguridad y hashes SHA-256 |
 
-## Estructura del proyecto
+> **Windows SmartScreen:** los binarios no tienen firma digital actualmente, por lo que Windows puede mostrar un aviso la primera vez. Pulsa *Más información → Ejecutar de todas formas* si confías en la descarga. Comprueba el hash SHA-256 publicado en las notas de la release.
+
+> **Motores de voz:** la voz neuronal local (Piper) y el dictado local de alta precisión (Whisper) **no** van dentro del instalador —se descargan a petición desde Ajustes, en total unos 700 MB— así que la descarga sigue siendo ligera y el modo voz funciona igualmente con los motores de Windows mientras no los instales.
+
+## Privacidad
+
+- La configuración, las API keys, conversaciones, logs, memoria y perfiles del navegador se guardan en `%APPDATA%\SagitariAI\`.
+- Las claves van directamente desde la aplicación local al proveedor elegido.
+- Con proveedores locales como Ollama puedes trabajar sin enviar datos a la nube.
+- El renderer usa `contextIsolation`, desactiva la integración Node y se ejecuta en sandbox.
+
+<details>
+<summary><b>Estructura del proyecto</b></summary>
 
 ```text
 sagitari/
@@ -144,12 +175,7 @@ sagitari/
 └── docs/           Capturas y recursos gráficos
 ```
 
-## Privacidad
-
-- La configuración, las API keys, conversaciones, logs, memoria y perfiles del navegador se guardan en `%APPDATA%\SagitariAI\`.
-- Las claves van directamente desde la aplicación local al proveedor elegido.
-- Con proveedores locales como Ollama puedes trabajar sin enviar datos a la nube.
-- El renderer usa `contextIsolation`, desactiva la integración Node y se ejecuta en sandbox.
+</details>
 
 ## Licencia
 
@@ -160,7 +186,7 @@ Términos completos en la [Licencia de Uso Personal de SAGITARI](LICENSE).
 
 <div align="center">
 
-**Para quienes quieren un asistente que haga más que hablar.**
+**Para quien quiere un asistente que haga algo más que hablar.**
 
 [⬆ Volver arriba](#sagitari)
 

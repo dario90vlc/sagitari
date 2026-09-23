@@ -13,9 +13,44 @@
 [![Platform](https://img.shields.io/badge/Windows-10%20%2F%2011-0078D6?style=for-the-badge&logo=windows11&logoColor=white)](https://github.com/dario90vlc/sagitari/releases)
 [![License](https://img.shields.io/badge/license-SAGITARI%20Personal%20Use-7C3AED?style=for-the-badge)](LICENSE)
 
+[![Download](https://img.shields.io/badge/%E2%AC%87%20Download-Windows-00E5FF?style=for-the-badge)](https://github.com/dario90vlc/sagitari/releases/latest)
+
 [Download](#download) · [Features](#what-it-does) · [Security](#safety-first) · [Español](./README.es.md)
 
+**Natural language in. Real work out.** — SAGITARI uses your terminal, your files, and your browser to finish the job, while everything stays on your machine.
+
 </div>
+
+---
+
+## See it work
+
+<table>
+  <tr>
+    <td width="50%"><img src="docs/shot-chat.png" alt="SAGITARI chat with a real task"></td>
+    <td width="50%"><img src="docs/shot-empty.png" alt="SAGITARI fresh start"></td>
+  </tr>
+  <tr>
+    <td align="center"><sub><b>Chat</b> — plans, runs, and reports back</sub></td>
+    <td align="center"><sub><b>Fresh start</b> — a clean canvas, your accent</sub></td>
+  </tr>
+  <tr>
+    <td width="50%"><img src="docs/shot-voice.png" alt="SAGITARI voice mode"></td>
+    <td width="50%"><img src="docs/shot-settings.png" alt="SAGITARI appearance settings"></td>
+  </tr>
+  <tr>
+    <td align="center"><sub><b>Voice mode</b> — talk; it works and answers aloud</sub></td>
+    <td align="center"><sub><b>Appearance</b> — aura, glass, yours to tune</sub></td>
+  </tr>
+  <tr>
+    <td width="50%"><img src="docs/shot-agents.png" alt="SAGITARI agents view"></td>
+    <td width="50%"><img src="docs/shot-security.png" alt="SAGITARI permission levels"></td>
+  </tr>
+  <tr>
+    <td align="center"><sub><b>Agents</b> — every run, live</sub></td>
+    <td align="center"><sub><b>Permissions</b> — nothing sensitive without your OK</sub></td>
+  </tr>
+</table>
 
 ---
 
@@ -25,24 +60,14 @@ Most desktop AI assistants stop at the chat box. SAGITARI is built to **finish t
 
 It is local-first by design. You choose the model and provider — cloud or local — while configuration, API keys, conversations, logs, memory, and browser profiles stay on your machine.
 
-> **Natural language in. Real work out.**
-
-## Download
-
-Get the latest version for Windows (installer or portable, pick yours on the release page):
-
-| Package | Description |
-|---|---|
-| [**⬇ Download SAGITARI for Windows**](https://github.com/dario90vlc/sagitari/releases/latest) | Installer (shortcuts + uninstaller) and portable single `.exe` |
-| [**Release notes**](https://github.com/dario90vlc/sagitari/releases) | Changes, security fixes, and SHA-256 hashes |
-
-> **Windows SmartScreen:** the binaries are currently unsigned, so Windows may show a warning on the first run. Choose *More info → Run anyway* if you trust the download. Verify the SHA-256 hash published in the release notes.
-
-> **Voice engines:** the local neural voice (Piper) and the high-accuracy local dictation (Whisper) are **not** bundled in the installer —they are downloaded on demand from Settings, about 700 MB in total— so the download stays light and voice mode still works with the Windows engines until you install them.
-
 ## What it does
 
-### An agent that executes
+### It executes.
+
+Terminal, files, apps, windows, and a real browser — one instruction, and the work is done on your PC.
+
+<details>
+<summary><b>Full breakdown</b></summary>
 
 - **Terminal and files** — inspect, create, edit, and organize work in your filesystem.
 - **Desktop actions** — open applications and URLs, manage windows, clipboard, notifications, and multimedia.
@@ -51,7 +76,14 @@ Get the latest version for Windows (installer or portable, pick yours on the rel
 - **Code with a safety net** — it knows how **your** project is verified (tests, build, lint) and syntax-checks every file as it writes it, so the error comes back right away instead of three steps later. `apply_patch` makes several edits across several files at once (all of them or none) and, before handing you anything as done, a **review agent** reads the turn's diff looking for what's wrong (broken contracts, missed edge cases, leftovers of the old name). Turn it off in Settings ▸ Delegation and verification.
 - **Project map** — on large projects it indexes files and symbols (`repo_map`, `find_symbol`) instead of reading them one by one, so it doesn't get lost in 100,000 lines or settle for four local edits.
 
-### Flexible intelligence
+</details>
+
+### It thinks your way.
+
+Reason deeply, plan before acting, or go direct — with the model of your choice, cloud or local.
+
+<details>
+<summary><b>Full breakdown</b></summary>
 
 - **Bring your own model** — OpenCode Go, OpenRouter, OpenAI, Groq, Anthropic, Ollama, LM Studio, or any compatible endpoint.
 - **Think / Plan / Act** — reason deeply, prepare a plan before acting, or execute directly.
@@ -60,7 +92,14 @@ Get the latest version for Windows (installer or portable, pick yours on the rel
 - **Memory and habits** — keep useful context across conversations, locally.
 - **Fallbacks and recovery** — model fallback, background tasks, checkpoints, pause/resume, and recovery after interruptions. If a provider accepts the connection but stops sending data, the turn cuts itself off (configurable limit in Settings › Security) and the error is explained in the chat. The model chosen in Settings wins: the router no longer swaps it silently.
 
-### A UI that shows the work
+</details>
+
+### It shows the work.
+
+Every step, tool, and second on screen — and it can read the answer out loud.
+
+<details>
+<summary><b>Full breakdown</b></summary>
 
 - Holographic interface built with vanilla HTML, CSS, and JavaScript.
 - Reactive frame glow while the agent thinks, works, listens, or speaks.
@@ -69,6 +108,8 @@ Get the latest version for Windows (installer or portable, pick yours on the rel
 - Voice input through Windows speech recognition and text-to-speech output.
 - **Visible reasoning (optional)**: reasoning models (Claude, the o-series and GPT-5, DeepSeek R1…) show their thinking in a collapsible block above the answer; it streams live while they think, folds itself as soon as they start answering, and is never read out loud. Turn it on in Settings ▸ Agent.
 - **Voice mode**: press the mic and talk; the assistant hears you, does the work and answers out loud. Hands-free: it sends when you stop talking, it shows you the text while you speak and starts answering out loud as soon as it has the first sentence instead of waiting for the whole reply. If you speak while it talks, it shuts up and listens; and you can stop it by saying “para” or with the panel's **Parar** button. Everything stays on your machine, with a local neural voice (Piper) and high-accuracy local dictation (Whisper) installable from Settings. `Alt`+click on the mic keeps the classic dictation into the text box.
+
+</details>
 
 ## Safety first
 
@@ -86,7 +127,7 @@ SAGITARI gives an agent real access to your computer, so safety is part of the p
 
 ## Quick start
 
-1. Install SAGITARI or download the portable build.
+1. [Download SAGITARI](https://github.com/dario90vlc/sagitari/releases/latest) — installer or portable single `.exe`.
 2. Open **Settings** and choose a provider preset.
 3. Enter your API key if that provider needs one, detect models, and activate a model.
 4. Return to **Chat** and ask for something real.
@@ -102,36 +143,26 @@ Useful shortcuts:
 | `Alt+M` | Cycle ACT → PLAN → THINK |
 | `/` in chat | Open the skills palette |
 
-## Screenshots
+## Download
 
-<table>
-  <tr>
-    <td width="50%"><img src="docs/shot-chat.png" alt="SAGITARI chat"></td>
-    <td width="50%"><img src="docs/shot-empty.png" alt="SAGITARI empty chat"></td>
-  </tr>
-  <tr>
-    <td align="center"><sub><b>Chat</b> — ask, attach, and execute</sub></td>
-    <td align="center"><sub><b>Modes</b> — choose Act, Plan, or Think</sub></td>
-  </tr>
-  <tr>
-    <td width="50%"><img src="docs/shot-agents.png" alt="SAGITARI agents view"></td>
-    <td width="50%"><img src="docs/shot-tools.png" alt="SAGITARI tools view"></td>
-  </tr>
-  <tr>
-    <td align="center"><sub><b>Agents</b> — follow every run</sub></td>
-    <td align="center"><sub><b>Tools</b> — understand what the agent can do</sub></td>
-  </tr>
-  <tr>
-    <td width="50%"><img src="docs/shot-settings.png" alt="SAGITARI settings view"></td>
-    <td width="50%"><img src="docs/shot-skills.png" alt="SAGITARI skills view"></td>
-  </tr>
-  <tr>
-    <td align="center"><sub><b>Settings</b> — models, voice, and appearance</sub></td>
-    <td align="center"><sub><b>Skills</b> — teach the agent new tricks</sub></td>
-  </tr>
-</table>
+| Package | Description |
+|---|---|
+| [**⬇ Download SAGITARI for Windows**](https://github.com/dario90vlc/sagitari/releases/latest) | Installer (shortcuts + uninstaller) and portable single `.exe` |
+| [**Release notes**](https://github.com/dario90vlc/sagitari/releases) | Changes, security fixes, and SHA-256 hashes |
 
-## Project structure
+> **Windows SmartScreen:** the binaries are currently unsigned, so Windows may show a warning on the first run. Choose *More info → Run anyway* if you trust the download. Verify the SHA-256 hash published in the release notes.
+
+> **Voice engines:** the local neural voice (Piper) and the high-accuracy local dictation (Whisper) are **not** bundled in the installer —they are downloaded on demand from Settings, about 700 MB in total— so the download stays light and voice mode still works with the Windows engines until you install them.
+
+## Privacy
+
+- Configuration, API keys, conversations, logs, memory, and browser profiles live under `%APPDATA%\SagitariAI\`.
+- Provider keys go directly from your local app to your selected provider.
+- Local providers such as Ollama can run without sending data to a cloud service.
+- The renderer uses `contextIsolation`, disables Node integration, and runs sandboxed.
+
+<details>
+<summary><b>Project structure</b></summary>
 
 ```text
 sagitari/
@@ -143,12 +174,7 @@ sagitari/
 └── docs/           Screenshots and project artwork
 ```
 
-## Privacy
-
-- Configuration, API keys, conversations, logs, memory, and browser profiles live under `%APPDATA%\SagitariAI\`.
-- Provider keys go directly from your local app to your selected provider.
-- Local providers such as Ollama can run without sending data to a cloud service.
-- The renderer uses `contextIsolation`, disables Node integration, and runs sandboxed.
+</details>
 
 ## License
 
