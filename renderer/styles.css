@@ -1585,6 +1585,9 @@ input[type="range"].glowslider::-webkit-slider-thumb:active { transform: scale(1
 input[type="range"].glowslider:focus-visible { outline: 2px solid rgba(var(--slider-rgb), 0.75); outline-offset: 3px; }
 /* el slider del vidrio no se tiñe de glow: relleno y bloom blancos */
 input#glassTint.glowslider { --slider-rgb: 255,255,255; }
+/* variante compacta: la importancia de Memoria, a90px junto al papelera */
+input.glowslider.compact { width: 90px; height: 6px; }
+input.glowslider.compact::-webkit-slider-thumb { width: 15px; height: 15px; }
 /* etiquetas Suave / Equilibrado / Intenso bajo el slider (y Ultra claro / Equilibrado
    / Tintado bajo el del vidrio: textos más largos que necesitan respirar) */
 .glowlabels { display: flex; justify-content: space-between; gap: 8px; width: 200px; font: 500 11px var(--font-ui); letter-spacing: 0.6px; color: var(--dim); margin-top: 5px; }

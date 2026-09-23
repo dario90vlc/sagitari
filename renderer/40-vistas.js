@@ -219,9 +219,13 @@ async function renderMemory() {
     it.className = 'memitem';
     const imp = Math.round((m.importance ?? 0.5) * 100);
     it.innerHTML = `<span class="mt">${esc(m.text)}<br><small class="md">importancia ${imp}% · confianza ${Math.round((m.confidence ?? 0.8) * 100)}% · usos ${m.uses || 0} · ${new Date(m.date).toLocaleDateString('es')}</small></span>
-      <input type="range" min="0" max="100" value="${imp}" data-imp title="Importancia" style="width:90px" />
+      <input type="range" min="0" max="100" value="${imp}" data-imp class="glowslider compact" title="Importancia" aria-label="Importancia" />
       <button class="btn ghost sq danger" data-del title="Eliminar">${ic('trash')}</button>`;
-    it.querySelector('[data-imp]').onchange = async (e) => {
+    const rangoImp = it.querySelector('[data-imp]');
+    pintarFill(rangoImp);
+    rangoImp.oninput = (e) => pintarFill(e.target);          // el relleno sigue el arrastre
+    rangoImp.onchange = async (e) => {
+      pintarFill(e.target);
       await window.sagitari.memoryUpdate(m.id, { importance: Number(e.target.value) / 100 });
       showToast('Importancia actualizada');
     };
