@@ -22,13 +22,10 @@
 
 const fs = require('fs');
 const path = require('path');
-
-const IGNORADOS = new Set([
-  'node_modules', '.git', '.hg', '.svn', 'dist', 'build', 'out', 'target', 'bin', 'obj',
-  '.venv', 'venv', 'env', '__pycache__', '.pytest_cache', '.mypy_cache', '.ruff_cache',
-  '.next', '.nuxt', '.svelte-kit', '.cache', '.parcel-cache', 'coverage', '.nyc_output',
-  'vendor', '.idea', '.vscode', '.gradle', '.terraform', 'tmp', 'temp', 'logs', 'release',
-]);
+const indiceCompartido = require('./indice');
+// Reexportados del recorrido único (este módulo los mantuvo en su API pública
+// y `busqueda.js` los usaba desde aquí).
+const IGNORADOS = indiceCompartido.IGNORADOS;
 const MAX_FICHERO = 200 * 1024;      // por encima de esto no es código que se lea entero
 const MAX_FICHEROS = 6000;           // tope duro del recorrido
 const MAX_SIMBOLOS_POR_FICHERO = 80;
@@ -82,33 +79,13 @@ const EXT_A_LENGUAJE = {
 };
 
 /* --------------------------------------------------------------------------- *
- *  Recorrido
+ *  Recorrido: el árbol lo recorre el módulo compartido `indice.js` (el mismo
+ *  que usa la búsqueda). Aquí solo quedan los alias de la API pública.
  * --------------------------------------------------------------------------- */
 
-/** Patrones simples del .gitignore (nombres, `*.ext` y `carpeta/`). */
-function reglasIgnoradas(workspace) {
-  const out = [];
-  for (const nombre of ['.gitignore', '.sagi-ignore']) {
-    try {
-      const txt = fs.readFileSync(path.join(workspace, nombre), 'utf8');
-      for (const linea of txt.split(/\r?\n/)) {
-        const l = linea.trim();
-        if (!l || l.startsWith('#') || l.startsWith('!')) continue;
-        out.push(l.replace(/\/$/, ''));
-      }
-    } catch {}
-  }
-  return out;
-}
-function ignoradoPorRegla(rel, reglas) {
-  for (const r of reglas) {
-    if (!r) continue;
-    if (r.startsWith('*.')) { if (rel.endsWith(r.slice(1))) return true; continue; }
-    if (r.includes('/')) { if (rel === r || rel.startsWith(r + '/')) return true; continue; }
-    if (rel === r || path.basename(rel) === r) return true;
-  }
-  return false;
-}
+// Alias del recorrido único (firmas idénticas a las que había aquí).
+function reglasIgnoradas(workspace) { return indiceCompartido.reglasIgnoradas(workspace); }
+function ignoradoPorRegla(rel, reglas) { return indiceCompartido.ignoradoPorRegla(rel, reglas); }
 
 function simbolosDe(texto, ext) {
   const lenguaje = EXT_A_LENGUAJE[ext];
@@ -142,44 +119,27 @@ function extDe(nombre) {
   return e;
 }
 
-/** Recorre el espacio de trabajo y construye el índice. */
+/** Recorre el espacio de trabajo y construye el indice. */
 function construir(workspace, opts = {}) {
   const raiz = workspace;
+  const recorrido = indiceCompartido.recorrer(raiz, {
+    extensiones: new Set(Object.keys(EXT_A_LENGUAJE)),
+    maxFichero: MAX_FICHERO,
+    maxFicheros: MAX_FICHEROS,
+    maxProfundidad: MAX_PROFUNDIDAD,
+    incluirGithub: true,
+  });
   const archivos = [];
-  const reglas = reglasIgnoradas(raiz);
-  let truncado = false;
-  const pila = [{ dir: raiz, rel: '', prof: 0 }];
-  while (pila.length) {
-    const { dir, rel, prof } = pila.pop();
-    let entradas;
-    try { entradas = fs.readdirSync(dir, { withFileTypes: true }); } catch { continue; }
-    for (const e of entradas) {
-      const relHijo = rel ? rel + '/' + e.name : e.name;
-      if (e.isDirectory()) {
-        if (IGNORADOS.has(e.name) || e.name.startsWith('.') && e.name !== '.github') continue;
-        // un directorio que el usuario ignora no es un recorte: no se avisa de él
-        if (ignoradoPorRegla(relHijo, reglas)) continue;
-        if (prof >= MAX_PROFUNDIDAD) { truncado = true; continue; }
-        pila.push({ dir: path.join(dir, e.name), rel: relHijo, prof: prof + 1 });
-        continue;
-      }
-      if (!e.isFile()) continue;
-      const ext = extDe(e.name);
-      if (!EXT_A_LENGUAJE[ext]) continue;
-      if (ignoradoPorRegla(relHijo, reglas)) continue;
-      if (archivos.length >= MAX_FICHEROS) { truncado = true; break; }
-      let st, texto;
-      try {
-        st = fs.statSync(path.join(dir, e.name));
-        if (st.size > MAX_FICHERO) { archivos.push({ ruta: relHijo, ext, bytes: st.size, simbolos: [], grande: true }); continue; }
-        texto = fs.readFileSync(path.join(dir, e.name), 'utf8');
-      } catch { continue; }
-      archivos.push({ ruta: relHijo, ext, bytes: st.size, simbolos: simbolosDe(texto, ext) });
-    }
+  for (const f of recorrido.archivos) {
+    const ext = extDe(f.ruta);
+    if (f.grande) { archivos.push({ ruta: f.ruta, ext, bytes: f.bytes, simbolos: [], grande: true }); continue; }
+    let texto;
+    try { texto = fs.readFileSync(f.abs, 'utf8'); } catch { continue; }
+    archivos.push({ ruta: f.ruta, ext, bytes: f.bytes, simbolos: simbolosDe(texto, ext) });
   }
   archivos.sort((a, b) => a.ruta.localeCompare(b.ruta));
   const simbolos = archivos.reduce((n, a) => n + a.simbolos.length, 0);
-  return { raiz, archivos, totales: { ficheros: archivos.length, simbolos }, truncado };
+  return { raiz, archivos, totales: { ficheros: archivos.length, simbolos }, truncado: recorrido.truncado };
 }
 
 /* --------------------------------------------------------------------------- *

@@ -27,7 +27,7 @@ const fs = require('fs');
 const os = require('os');
 const path = require('path');
 const { spawnSync } = require('child_process');
-const repomap = require('./repomap');   // los mismos ignorados que el mapa del proyecto
+const indiceCompartido = require('./indice');   // recorrido unico del arbol (compartido con repomap)
 
 const MAX_FICHERO = 300 * 1024;
 const MAX_FICHEROS = 4000;
@@ -159,42 +159,18 @@ function coincidencias(workspace, consulta, { limit = 30 } = {}) {
  *  Índice BM25 (recuperación por relevancia, sin dependencias)
  * --------------------------------------------------------------------------- */
 
-/** Lista de archivos de texto/código del proyecto (con los mismos ignorados que el mapa). */
+/** Lista de archivos de texto/código del proyecto (mismos ignorados que el mapa). */
 function listar(workspace) {
   if (!workspace) return [];
-  const out = [];
-  // mismas reglas que el mapa del proyecto: lo que el usuario ignora en .gitignore no
-  // aparece ni en el mapa ni aquí (si no, buscaría dentro de dist/ y de los logs)
-  const reglas = repomap.reglasIgnoradas(workspace);
-  const pila = [workspace];
-  const prof = new Map([[workspace, 0]]);
-  while (pila.length && out.length < MAX_FICHEROS) {
-    const dir = pila.pop();
-    let entradas;
-    try { entradas = fs.readdirSync(dir, { withFileTypes: true }); } catch { continue; }
-    for (const e of entradas) {
-      const abs = path.join(dir, e.name);
-      const rel = path.relative(workspace, abs).replace(/\\/g, '/');
-      if (e.isDirectory()) {
-        if (e.name.startsWith('.') || repomap.IGNORADOS.has(e.name)) continue;
-        const p = (prof.get(dir) || 0) + 1;
-        if (p > 8) continue;
-        if (repomap.ignoradoPorRegla(rel, reglas)) continue;
-        prof.set(abs, p);
-        pila.push(abs);
-        continue;
-      }
-      if (!e.isFile()) continue;
-      const ext = path.extname(e.name).toLowerCase();
-      if (!EXTENSIONES.has(ext)) continue;
-      if (repomap.ignoradoPorRegla(rel, reglas)) continue;
-      let st;
-      try { st = fs.statSync(abs); } catch { continue; }
-      if (st.size > MAX_FICHERO) continue;
-      out.push({ ruta: rel, abs, bytes: st.size });
-    }
-  }
-  return out;
+  // Lo que el usuario ignora en .gitignore no aparece ni en el mapa ni aquí
+  const recorrido = indiceCompartido.recorrer(workspace, {
+    extensiones: EXTENSIONES,
+    maxFichero: MAX_FICHERO,
+    maxFicheros: MAX_FICHEROS,
+    maxProfundidad: 8,
+  });
+  // los grandes se saltan aqui (el mapa los marca; la busqueda los ignora)
+  return recorrido.archivos.filter(f => !f.grande);
 }
 
 /** Trocea un archivo en bloques de líneas: un bloque es la unidad que se puntúa. */
