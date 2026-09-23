@@ -410,6 +410,7 @@ const PERM_TOOLS = [
   { n: 'write_file', d: 'Crear o sobrescribir archivos' },
   { n: 'edit_file', d: 'Editar archivos existentes' },
   { n: 'browser_control', d: 'Controlar el navegador' },
+  { n: 'browser_eval', d: 'Ejecutar JavaScript dentro de la página (acción eval)', label: 'Ejecutar JavaScript' },
   { n: 'open_app', d: 'Abrir aplicaciones' },
   { n: 'window_manage', d: 'Gestionar ventanas' },
   { n: 'clipboard', d: 'Portapapeles' },
@@ -447,8 +448,8 @@ async function _renderSecurity() {
     const rec = RISK_LABEL[cfg.riskDefaults[t.n]] || 'confirmar';
     const row = document.createElement('div');
     row.className = 'permrow';
-    row.innerHTML = `<span class="mt"><b>${esc(K.tool(t.n).label)}</b> <small class="md">${esc(t.n)}</small><br><small class="md">${esc(t.d)}</small><br><small class="pd">recomendado: ${rec}</small></span>
-      <select data-tool="${t.n}" aria-label="Permiso para ${esc(K.tool(t.n).label)} (${esc(t.n)})">
+    row.innerHTML = `<span class="mt"><b>${esc(t.label || K.tool(t.n).label)}</b> <small class="md">${esc(t.n)}</small><br><small class="md">${esc(t.d)}</small><br><small class="pd">recomendado: ${rec}</small></span>
+      <select data-tool="${t.n}" aria-label="Permiso para ${esc(t.label || K.tool(t.n).label)} (${esc(t.n)})">
         <option value="default"${lvl === 'default' ? ' selected' : ''}>Por defecto (${rec})</option>
         <option value="safe"${lvl === 'safe' ? ' selected' : ''}>Permitir siempre</option>
         <option value="confirm"${lvl === 'confirm' ? ' selected' : ''}>Preguntar antes</option>

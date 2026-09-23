@@ -450,8 +450,31 @@ class Guardrails {
         return { action: 'deny', reason: `Comando prohibido: ${c.motivo}. No se ejecuta ni con permiso: hazlo tú si de verdad lo necesitas.` };
       }
     }
+    /* Permiso propio del JavaScript del navegador (Ajustes ▸ Seguridad ▸ fila
+       «Ejecutar JavaScript»): la clave browser_eval gobierna SOLO action:'eval'.
+       Es el override explícito del usuario y manda sobre el forzado sensible
+       (aquí el override del usuario siempre gana). Si browser_control está en
+       restricted, en cambio, manda el bloqueo del navegador entero: se salta el
+       forzado y se deja llegar al chequeo de nivel de abajo, que deniega.
+       Sin la clave, el eval sigue forzando la confirmación sensible de siempre. */
+    let jsEvalRegulado = false;
+    if (name === 'browser_control' && args && args.action === 'eval'
+        && this.policy.permissions.browser_eval) {
+      if (this.levelFor(name) === 'restricted') {
+        jsEvalRegulado = true;
+      } else {
+        const lvlJs = this.policy.permissions.browser_eval;
+        if (lvlJs === 'safe') return { action: 'allow' };
+        if (lvlJs === 'restricted') return { action: 'deny', reason: 'La ejecución de JavaScript en el navegador está bloqueada por la configuración de seguridad del usuario.' };
+        if (lvlJs === 'confirm') {
+          const sigJs = this.signature(name, args);
+          if (this.approvals.get(sigJs) > Date.now()) return { action: 'allow' };
+          return { action: 'confirm', tool: name, description: describeAction(name, args), summary: summarizeArgs(name, args), signature: sigJs };
+        }
+      }
+    }
     const forced = forcedConfirmReason(name, args);
-    if (forced) {
+    if (forced && !jsEvalRegulado) {
       const sig = this.signature(name, args);
       const memo = this.approvals.get(sig);
       if (!(memo && memo > Date.now())) {

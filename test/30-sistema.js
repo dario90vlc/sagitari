@@ -357,6 +357,27 @@ test('permisos: leer el portapapeles y evaluar JS piden confirmación aunque el 
   eq(g.decide('clipboard', { action: 'write', text: 'hola' }).action, 'allow', 'escribir en el portapapeles es inocuo');
 });
 
+test('permisos: el permiso propio de JavaScript gobierna al eval', () => {
+  const expr = { action: 'eval', expression: '1+1' };
+  // con la clave browser_eval fijada a mano, su nivel manda para action:'eval'
+  eq(new Guardrails({ permissions: { browser_eval: 'safe' } }).decide('browser_control', expr).action, 'allow',
+    'permitir siempre de JavaScript deja pasar el eval');
+  eq(new Guardrails({ permissions: { browser_eval: 'confirm' } }).decide('browser_control', expr).action, 'confirm',
+    'preguntar antes sigue preguntando');
+  eq(new Guardrails({ permissions: { browser_eval: 'restricted' } }).decide('browser_control', expr).action, 'deny',
+    'bloqueado de JavaScript bloquea el eval');
+  // bloquear el navegador entero gana al permiso suelto de su JavaScript
+  eq(new Guardrails({ permissions: { browser_control: 'restricted', browser_eval: 'safe' } }).decide('browser_control', expr).action, 'deny',
+    'bloquear el navegador bloquea también su JavaScript');
+  // sin la clave propia, el forzado de siempre no se mueve (test de arriba)
+  const d = new Guardrails({ permissions: { browser_control: 'safe' } }).decide('browser_control', expr);
+  eq(d.action, 'confirm');
+  ok(d.sensitive, 'sin fijar, el eval sigue sensible');
+  // el permiso propio es SOLO del eval: el resto de acciones siguen como estaban
+  eq(new Guardrails({ permissions: { browser_eval: 'safe' } }).decide('browser_control', { action: 'profile', profile: 'work' }).action, 'confirm',
+    'cambiar de perfil no se aprovecha del permiso del JavaScript');
+});
+
 test('permisos: un clic por índice se juzga con la etiqueta del inventario', () => {
   const g = new Guardrails({ permissions: { browser_control: 'safe' } });
   // el navegador resuelve la etiqueta y viaja como `_label` (agent.js)
