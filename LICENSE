@@ -1,21 +1,144 @@
-MIT License
+SAGITARI Personal Use License v1.0
 
 Copyright (c) 2026 Dario
 
-Permission is hereby granted, free of charge, to any person obtaining a copy
-of this software and associated documentation files (the "Software"), to deal
-in the Software without restriction, including without limitation the rights
-to use, copy, modify, merge, publish, distribute, sublicense, and/or sell
-copies of the Software, and to permit persons to whom the Software is
-furnished to do so, subject to the following conditions:
+PREAMBLE
+SAGITARI is published so that individuals can use it free of charge, forever,
+and so that anyone may review its source code. Everything that is not
+expressly granted below is reserved. This license applies to SAGITARI
+version 4.0.0 and any later version. Versions up to 3.3.5 were released
+under the MIT License (that past grant is irrevocable). Bundled third-party
+components keep their own licenses (see their file headers and the bundled
+license texts, e.g. the SIL OFL files for the fonts).
 
-The above copyright notice and this permission notice shall be included in all
-copies or substantial portions of the Software.
+1. DEFINITIONS
+   (a) "Software" means SAGITARI, including its binaries and its source code.
+   (b) "You" means a natural person acting in your own name, not on behalf
+       of any organization.
+   (c) "Your company" means any legal entity, sole proprietorship, or other
+       kind of organization that you work for or consult for, plus all
+       organizations that have control over, are under the control of, or
+       are under common control with that organization. "Control" means
+       ownership of substantially all of the assets of an entity, or the
+       power to direct its management and policies by vote, contract, or
+       otherwise.
 
-THE SOFTWARE IS PROVIDED "AS IS", WITHOUT WARRANTY OF ANY KIND, EXPRESS OR
-IMPLIED, INCLUDING BUT NOT LIMITED TO THE WARRANTIES OF MERCHANTABILITY,
-FITNESS FOR A PARTICULAR PURPOSE AND NONINFRINGEMENT. IN NO EVENT SHALL THE
-AUTHORS OR COPYRIGHT HOLDERS BE LIABLE FOR ANY CLAIM, DAMAGES OR OTHER
-LIABILITY, WHETHER IN AN ACTION OF CONTRACT, TORT OR OTHERWISE, ARISING FROM,
-OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE
-SOFTWARE.
+2. PERSONAL USE GRANT
+   Subject to the terms below, the copyright holder grants You a free,
+   royalty-free, non-exclusive, non-transferable license, for personal,
+   private and non-commercial purposes only, to install, run and use the
+   Software for Yourself. This grant is free of charge and no fee will ever
+   be added to it. This grant is limited to natural persons acting
+   individually: any use by or for a company or any other organization
+   requires a separate written license from the copyright holder.
+
+3. SOURCE CODE — INSPECTION ONLY
+   The source code may be viewed and reviewed for the sole purpose of
+   studying, auditing or learning from it. Viewing grants no other right:
+   You may not copy the source, compile it, build or prepare any derivative
+   work from it, use it to replicate the Software, or incorporate any part
+   of it into any other work.
+
+4. NO REDISTRIBUTION
+   You may not sell, license, rent, lend, share, publish, transmit,
+   transmit by any means, or otherwise make available the Software — in
+   whole or in part, modified or unmodified, in source or binary form —
+   to any third party. Only the copyright holder may distribute the
+   Software.
+
+5. TRADEMARKS
+   The names "SAGITARI", its logos, icons and visual identity are
+   trademarks not included in this grant. No right to use them is granted
+   except to refer, truthfully, to the Software itself.
+
+6. ALL RIGHTS RESERVED
+   Any right not expressly granted above is reserved by the copyright
+   holder. These terms do not allow You to sublicense or transfer any
+   right to anyone else.
+
+7. TERMINATION
+   If You breach this license, the rights granted to You end automatically.
+   Upon written notice of a violation You may have 32 days to come into
+   full compliance and take practical steps to correct past violations;
+   otherwise all rights end immediately.
+
+8. NO WARRANTY AND LIABILITY
+   THE SOFTWARE IS PROVIDED "AS IS", WITHOUT WARRANTY OF ANY KIND, EXPRESS
+   OR IMPLIED, INCLUDING BUT NOT LIMITED TO THE WARRANTIES OF
+   MERCHANTABILITY, FITNESS FOR A PARTICULAR PURPOSE AND NONINFRINGEMENT.
+   IN NO EVENT SHALL THE COPYRIGHT HOLDER BE LIABLE FOR ANY CLAIM, DAMAGES
+   OR OTHER LIABILITY ARISING FROM THE SOFTWARE OR ITS USE.
+
+========================================================================
+
+SAGITARI — Licencia de Uso Personal v1.0
+[Traducción al español. En caso de conflicto, rige la versión en inglés.]
+
+Copyright (c) 2026 Dario
+
+PREÁMBULO
+SAGITARI se publica para que las personas puedan usarlo de forma gratuita,
+para siempre, y para que cualquiera pueda revisar su código fuente. Todo lo
+que no se concede expresamente más abajo queda reservado. Esta licencia se
+aplica a SAGITARI 4.0.0 y versiones posteriores. Las versiones hasta la 3.3.5
+se publicaron bajo licencia MIT (esa concesión pasada es irrevocable). Los
+componentes de terceros incluidos conservan sus propias licencias (ver sus
+cabezeros y los textos de licencia incluidos, p. ej. los archivos SIL OFL
+de las tipografías).
+
+1. DEFINICIONES
+   a) «Software»: SAGITARI, incluidos sus binarios y su código fuente.
+   b) «Tú»: una persona física que actúa en su propio nombre, no en nombre
+      de ninguna organización.
+   c) «Tu empresa»: cualquier entidad legal, empresario individual u otra
+      clase de organización para la que trabajes o preste servicios, más
+      todas las organizaciones que tengan control sobre ti, estén bajo tu
+      control o compartan control contigo. «Control» = posesión de
+      prácticamente todos los activos de una entidad, o el poder de dirigir
+      su gestión y políticas por voto, contrato u otro medio.
+
+2. CONCESIÓN DE USO PERSONAL
+   Sujeto a lo más abajo, el titular de los derechos te concede una
+   licencia gratuita, sin regalías, no exclusiva y no transferible, SOLO
+   para fines personales, privados y no comerciales, para instalar, ejecutar
+   y usar el Software por ti mismo. Esta concesión es gratuita y NUNCA se le
+   añadirá ningún cargo. Limitada a personas físicas que actúen de modo
+   individual: cualquier uso por o para una empresa u otra organización
+   requiere una licencia escrita aparte del titular de los derechos.
+
+3. CÓDIGO FUENTE — SOLO INSPECCIÓN
+   El código fuente puede verse y revisarse con el único propósito de
+   estudiarlo, auditarlo o aprender de él. Verlo no otorga ningún otro
+   derecho: no puedes copiarlo, compilarlo, crear obras derivadas a partir
+   de él, usarlo para replicar el Software, ni incorporar ninguna parte del
+   mismo en ningún otro trabajo.
+
+4. PROHIBIDA SU DISTRIBUCIÓN
+   No puedes vender, licenciar, alquilar, prestar, compartir, publicar,
+   transmitir ni poner a disposición de ningún tercero el Software — ni íntegro
+   ni en parte, modificado o sin modificar, en fuente o binario —. Solo el
+   titular de los derechos puede distribuir el Software.
+
+5. MARCAS
+   Los nombres «SAGITARI», sus logotipos, iconos e identidad visual son
+   marcas no incluidas en esta concesión. No se concede derecho a usarlos,
+   salvo para referirse de forma veraz al propio Software.
+
+6. TODOS LOS DERECHOS RESERVADOS
+   Cualquier derecho no concedido expresamente arriba queda reservado al
+   titular de los derechos. Estos términos no te permiten sublicendar ni
+   transferir ningún derecho a nadie.
+
+7. TERMINACIÓN
+   Si incumples esta licencia, los derechos concedidos terminan
+   automáticamente. Sobre aviso escrito de la infracción, dispones de 32 días
+   para entrar en cumplimiento total y tomar medidas prácticas para corregir
+   las infracciones pasadas; en caso contrario, todos los derechos terminan
+   de inmediato.
+
+8. SIN GARANTÍA Y EXENCIÓN DE RESPONSABILIDAD
+   EL SOFTWARE SE PROPORCIONA «TAL CUAL», SIN GARANTÍA DE NINGÚN TIPO,
+   EXPRESA O IMPLÍCITA, INCLUIDAS LAS GARANTÍAS DE COMERCIABILIDAD, IDONEIDAD
+   PARA UN FIN DETERMINADO Y NO INFRACCIÓN. EN NINGÚN CASO EL TITULAR DE LOS
+   DERECHOS SERÁ RESPONSABLE DE RECLAMACIONES, DAÑOS U OTRAS RESPONSABILIDADES
+   DERIVADAS DEL SOFTWARE O SU USO.

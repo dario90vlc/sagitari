@@ -60,7 +60,7 @@ Lo sostienen tres cosas que el producto ya hace:
   NSIS y como portable de un solo ejecutable, sin firma digital (el aviso de
   SmartScreen en la primera ejecución es un paso conocido y documentado).
   Decisión consciente, no descuido: un certificado Authenticode cuesta cientos de
-  euros al año y este proyecto es MIT, gratis y sin monetización. Mientras no haya
+  euros al año y este proyecto es gratuito para uso individual, sin monetización. Mientras no haya
   firma, cada binario se verifica por SHA-512 contra el `latest.yml` del CI antes
   de ejecutarse, la instalación exige consentimiento activo en dos pasos, y el
   firmante de la primera release firmada que se vea quedará fijado (TOFU: un cambio
@@ -121,7 +121,9 @@ justificación (ver *Brand Commitments*).
   que ilumina el marco según lo que hace el agente (color e intensidad configurables).
   El brillo y el acento son la identidad, no decoración prescindible. El estado vacío
   del chat queda limpio: sin adornos, manda el texto sobre el aura del marco.
-- **Licencia**: **MIT y gratis, sin monetización. Es lo único blindado**: no se diseña
+- **Licencia**: **uso personal gratis para siempre y sin cargos; sin distribución,
+  sin empresas y sin compilación por terceros; la marca SAGITARI es de su autor
+  (Licencia de Uso Personal, desde la4.0.0). Es lo único blindado**: no se diseña
   nada que dependa de un plan de pago ni se cierra nada para sostener uno.
 - Windows-only, UI sin frameworks, claves/datos solo locales y el modelo de
   permisos+guardarraíles son **hechos actuales**, no dogmas: pueden cambiar si un

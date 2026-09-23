@@ -11,9 +11,9 @@
 [![Release](https://img.shields.io/github/v/release/dario90vlc/sagitari?style=for-the-badge&color=00E5FF&label=latest)](https://github.com/dario90vlc/sagitari/releases)
 [![Downloads](https://img.shields.io/github/downloads/dario90vlc/sagitari/total?style=for-the-badge&color=37F5A8&label=downloads)](https://github.com/dario90vlc/sagitari/releases)
 [![Platform](https://img.shields.io/badge/Windows-10%20%2F%2011-0078D6?style=for-the-badge&logo=windows11&logoColor=white)](https://github.com/dario90vlc/sagitari/releases)
-[![License](https://img.shields.io/badge/license-MIT-7C3AED?style=for-the-badge)](LICENSE)
+[![License](https://img.shields.io/badge/license-SAGITARI%20Personal%20Use-7C3AED?style=for-the-badge)](LICENSE)
 
-[Download](#download) · [Features](#what-it-does) · [Security](#safety-first) · [Build](#build-from-source) · [Español](./README.es.md)
+[Download](#download) · [Features](#what-it-does) · [Security](#safety-first) · [Español](./README.es.md)
 
 </div>
 
@@ -131,24 +131,6 @@ Useful shortcuts:
   </tr>
 </table>
 
-## Build from source
-
-Requirements: **Windows 10/11** and **Node.js 20+**.
-
-```bash
-git clone https://github.com/dario90vlc/sagitari.git
-cd sagitari
-npm ci
-
-npm start                 # run the app
-npm test                  # unit and integration tests
-npm run smoke             # verify that Electron starts
-npm run uicheck           # exercise the live renderer
-npm run dist              # build NSIS installer + portable executable
-```
-
-The release workflow runs syntax checks, tests, smoke, UI checks, builds both Windows artifacts, verifies the output, generates release notes, and publishes SHA-256 hashes. The release tag must match the version in `package.json`.
-
 ## Project structure
 
 ```text
@@ -170,7 +152,11 @@ sagitari/
 
 ## License
 
-SAGITARI is free software released under the [MIT License](LICENSE).
+SAGITARI is free for personal use —100% free, forever, with no fees ever.
+Its source code may be reviewed, but it may not be compiled, redistributed,
+replicated or used by companies, and the SAGITARI name and logo are
+trademarks of its author. Full terms in the
+[SAGITARI Personal Use License](LICENSE).
 
 <div align="center">
 

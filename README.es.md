@@ -11,9 +11,9 @@
 [![Versión](https://img.shields.io/github/v/release/dario90vlc/sagitari?style=for-the-badge&color=00E5FF&label=última)](https://github.com/dario90vlc/sagitari/releases)
 [![Descargas](https://img.shields.io/github/downloads/dario90vlc/sagitari/total?style=for-the-badge&color=37F5A8&label=descargas)](https://github.com/dario90vlc/sagitari/releases)
 [![Plataforma](https://img.shields.io/badge/Windows-10%20%2F%2011-0078D6?style=for-the-badge&logo=windows11&logoColor=white)](https://github.com/dario90vlc/sagitari/releases)
-[![Licencia](https://img.shields.io/badge/licencia-MIT-7C3AED?style=for-the-badge)](LICENSE)
+[![Licencia](https://img.shields.io/badge/licencia-Uso%20Personal-7C3AED?style=for-the-badge)](LICENSE)
 
-[Descarga](#descarga) · [Características](#qué-puede-hacer) · [Seguridad](#seguridad-primero) · [Compilar](#compilar-desde-el-código) · [English](./README.md)
+[Descarga](#descarga) · [Características](#qué-puede-hacer) · [Seguridad](#seguridad-primero) · [English](./README.md)
 
 </div>
 
@@ -132,24 +132,6 @@ Atajos útiles:
   </tr>
 </table>
 
-## Compilar desde el código
-
-Requisitos: **Windows 10/11** y **Node.js 20+**.
-
-```bash
-git clone https://github.com/dario90vlc/sagitari.git
-cd sagitari
-npm ci
-
-npm start                 # ejecutar la app
-npm test                  # tests unitarios y de integración
-npm run smoke             # comprobar que Electron arranca
-npm run uicheck           # probar el renderer en vivo
-npm run dist              # crear instalador NSIS + portable
-```
-
-El workflow de release ejecuta la comprobación de sintaxis, tests, smoke, UI, compilación de los dos artefactos de Windows, verificación de archivos y generación de hashes SHA-256. El tag debe coincidir con la versión de `package.json`.
-
 ## Estructura del proyecto
 
 ```text
@@ -171,7 +153,10 @@ sagitari/
 
 ## Licencia
 
-SAGITARI es software libre distribuido bajo la [licencia MIT](LICENSE).
+SAGITARI es gratuito para uso personal — gratis para siempre, sin cargos.
+Su código fuente se puede revisar, pero no compilar, distribuir, replicar ni
+usar desde empresas; el nombre y el logotipo SAGITARI son marca de su autor.
+Términos completos en la [Licencia de Uso Personal de SAGITARI](LICENSE).
 
 <div align="center">
 

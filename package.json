@@ -18,7 +18,7 @@
     "dist:portable": "electron-builder --win portable"
   },
   "author": "Dario",
-  "license": "MIT",
+  "license": "SEE LICENSE IN LICENSE",
   "engines": {
     "node": ">=20"
   },
