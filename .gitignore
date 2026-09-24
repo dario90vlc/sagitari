@@ -25,6 +25,9 @@ Thumbs.db
 .vscode/
 .idea/
 
+# Git worktrees aislados del harness
+.worktrees/
+
 # Local test debris
 _*.js
 _*.png
