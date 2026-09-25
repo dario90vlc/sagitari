@@ -951,6 +951,9 @@ function restaurarTraza(bubbleEl, trace, html) {
     metaRazonamiento(d);
     bubbleEl.appendChild(d);
   }
+  /* v2.6: la última lista de tareas del turno, en su sitio (tras el razonamiento y
+     antes de las herramientas): al reabrir la conversación se ve en qué quedó el plan. */
+  if (trace.todos && trace.todos.length) bubbleEl.appendChild(buildTodoCard(trace.todos));
   if (tools.length) {
     const grp = buildToolGroup();
     let fallos = 0;
@@ -1173,6 +1176,58 @@ function renderPlanCard(container, steps, before, prev) {
 }
 function advancePlan() {
   if (pendingTurn && pendingTurn.plan) pendingTurn.plan.advance();
+}
+
+/* ---- v2.6: lista de tareas VIVA (todo_write) ----
+   A diferencia del plan del modo PLAN (que se parsea del TEXTO de la respuesta), esta
+   lista la posee el modelo: la crea y la actualiza con la herramienta todo_write y aquí
+   se pinta el estado REAL que guardó el agente. Cada actualización repinta la tarjeta
+   en su sitio, conservando la posición que ya tenía en el turno. */
+function todoStatusMeta(status) {
+  return status === 'completed' ? { cls: 'done', icn: 'check' }
+    : status === 'in_progress' ? { cls: 'now', icn: 'play' }
+    : { cls: '', icn: '' };
+}
+function todoCount(todos) {
+  const done = todos.filter(t => t && t.status === 'completed').length;
+  return done ? done + '/' + todos.length + ' pasos' : todos.length + ' pasos';
+}
+function buildTodoCard(todos) {
+  const card = document.createElement('div');
+  card.className = 'plancard todocard';
+  card.innerHTML = `<div class="plancard-head">${ic('list')}<b>TAREAS</b><span class="pl-count">${esc(todoCount(todos))}</span></div>`
+    + '<ol>' + todos.map(t => {
+      const m = todoStatusMeta(t && t.status);
+      // mientras se hace, se enseña en presente (activeForm) si el modelo lo dio
+      const txt = (t && t.status === 'in_progress' && t.activeForm) ? t.activeForm : (t && t.content) || '';
+      return `<li class="${m.cls}"><span class="pl-n">${m.icn ? ic(m.icn) : ''}</span><span>${esc(txt)}</span></li>`;
+    }).join('') + '</ol>';
+  return card;
+}
+function todosCard(ev) {
+  const todos = Array.isArray(ev.todos) ? ev.todos : [];
+  // lista vacía: el modelo la borró — la tarjeta anterior desaparece (no se queda
+  // colgada enseñando un plan que ya no existe)
+  if (!todos.length) {
+    if (pendingTurn && pendingTurn.todocard && pendingTurn.todocard.isConnected) {
+      pendingTurn.todocard.remove();
+      pendingTurn.todocard = null;
+    }
+    return;
+  }
+  ensureAssistantBubble();
+  if (pendingTurn.todocard && pendingTurn.todocard.isConnected) {
+    const fresh = buildTodoCard(todos);
+    pendingTurn.todocard.replaceWith(fresh);
+    pendingTurn.todocard = fresh;
+  } else {
+    const card = buildTodoCard(todos);
+    const stream = pendingAssistant.querySelector('.stream');
+    if (stream) pendingAssistant.insertBefore(card, stream);
+    else pendingAssistant.appendChild(card);
+    pendingTurn.todocard = card;
+  }
+  scroll();
 }
 
 /** Cierra las tarjetas que quedaron «en curso…» cuando el turno muere a medias. */

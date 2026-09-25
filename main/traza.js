@@ -34,7 +34,7 @@ function argsTraza(args) {
   return out;
 }
 let turnTrace = null;
-function trazaNueva() { turnTrace = { tools: [], think: null }; }
+function trazaNueva() { turnTrace = { tools: [], think: null, todos: null }; }
 function trazaApunta(e) {
   if (!turnTrace) return;
   if (e.type === 'tool') {
@@ -68,6 +68,15 @@ function trazaApunta(e) {
   }
   if (e.type === 'thinking_done') {
     turnTrace.think = { text: clipTraza(e.text, 4000), ms: Number(e.durationMs) || 0 };
+    return;
+  }
+  /* v2.6: la ÚLTIMA lista de tareas del turno se guarda con el mensaje: al reabrir la
+     conversación, el usuario vuelve a ver en qué quedó el trabajo (no solo el texto).
+     Se acota cada tarea como todo lo demás del rastro. */
+  if (e.type === 'todos') {
+    turnTrace.todos = Array.isArray(e.todos)
+      ? e.todos.map(t => ({ content: clipTraza(t && t.content, 240), status: String((t && t.status) || 'pending'), activeForm: clipTraza(t && t.activeForm, 240) }))
+      : [];
   }
 }
 function trazaActual() { return turnTrace; }

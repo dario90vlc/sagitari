@@ -1526,6 +1526,13 @@ depender del color de acento elegido. */
 .plancard li.now .pl-n { color: #061020; background: var(--mode-c); border-color: transparent; animation: blink 1.2s infinite; }
 .plancard li.done { color: var(--dim); }
 
+/* ---- v2.6: lista de tareas viva (todo_write). Comparte familia con .plancard; solo
+   cambia el símbolo del paso: check/play en lugar de número. ---- */
+.todocard li .pl-n .ic { width: 11px; height: 11px; }
+.todocard li .pl-n:empty { border-style: dashed; }
+.todocard li.now { color: var(--txt); }
+.todocard li.done span:last-child { text-decoration: line-through; text-decoration-color: rgba(255,255,255,0.35); }
+
 /* ---- bloques de código: cabecera con lenguaje y botón de copiar ---- */
 .codeblock { margin: 7px 0; border: 1px solid var(--line2); border-radius: 14px; overflow: hidden; background: rgba(0,0,0,0.42); }
 .codeblock-head {

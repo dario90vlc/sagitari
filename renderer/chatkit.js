@@ -86,6 +86,7 @@ const ChatKit = (function () {
     find_symbol:     { label: 'Buscar símbolo',   icon: 'search',   verb: 'Buscando dónde se define' },
     search_code:     { label: 'Buscar en el proyecto', icon: 'search', verb: 'Buscando en el código' },
     apply_patch:     { label: 'Cambios en varios archivos', icon: 'save', verb: 'Aplicando cambios' },
+    todo_write:      { label: 'Lista de tareas',  icon: 'list',     verb: 'Actualizando la lista de tareas' },
     delegate:        { label: 'Subagente',        icon: 'agents',   verb: 'Delegando' },
   };
 
@@ -116,6 +117,7 @@ const ChatKit = (function () {
     find_symbol: ['query', 'name'],
     search_code: ['query', 'q'],
     apply_patch: ['changes', 'summary'],
+    todo_write: ['todos'],
     delegate: ['agent', 'task'],
     notify: ['title', 'message'],
     system_info: ['query', 'what'],
@@ -144,6 +146,13 @@ const ChatKit = (function () {
       const who = s ? s.label : String(a.agent);
       const task = flatValue(a.task, 80);
       return task ? who + ' → ' + task : who;
+    }
+    // la lista de tareas: «3 tareas · 1 en curso», nunca el JSON crudo
+    if (String(name) === 'todo_write' && Array.isArray(a.todos)) {
+      const l = a.todos;
+      const enCurso = l.filter(t => t && t.status === 'in_progress').length;
+      const hechas = l.filter(t => t && t.status === 'completed').length;
+      return l.length + ' tareas' + (enCurso ? ' · ' + enCurso + ' en curso' : '') + (hechas ? ' · ' + hechas + ' hechas' : '');
     }
     // hasOwnProperty: el modelo puede emitir una herramienta llamada `constructor`
     // (o `toString`, `__proto__`…); leerlas del prototipo daba un valor no iterable

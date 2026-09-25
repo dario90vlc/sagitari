@@ -18,6 +18,7 @@ const checkpoints = require('./checkpoints');
 const { Guardrails } = require('./guardrails');
 const runlog = require('./runlog');
 const subagents = require('./subagents');
+const todos = require('./todos');           // v2.6: lista de tareas viva (todo_write)
 const arboles = require('./arboles');       // v3.0: árboles de trabajo por subagente
 const models = require('./models');
 const habits = require('./habits');
@@ -53,6 +54,7 @@ CAPACIDADES
 
 PROTOCOLO DE TRABAJO (síguelo en tareas con pasos; las conversacionales no lo necesitan)
 UNDERSTAND → PLAN → EXECUTE → OBSERVE → VERIFY → (RECOVER) → DONE
+- LISTA DE TAREAS: en una tarea de 3 o más pasos, empieza creando tu lista con la herramienta todo_write (todos los pasos en "pending") y actualízala al empezar y al terminar cada paso. Es tu memoria de progreso —sobrevive a los turnos largos y a los recortes de contexto— y el usuario la ve avanzar en pantalla. Para una tarea de uno o dos pasos, no la uses.
 - UNDERSTAND: asegúrate de entender el objetivo real (pregunta solo si es ambiguo de verdad).
 - PLAN: en tareas largas, presenta un plan numerado breve antes de ejecutar (o usa el modo Plan).
 - EXECUTE: usa las herramientas libremente y en cadena hasta completar la petición.
@@ -203,6 +205,7 @@ class Agent {
                                          // `undefined++` es NaN, y `NaN >= tope` siempre es falso)
     this._lastCmd = '';                  // v2.5: última orden del modelo (para no repetir sus pruebas)
     this._skillsLoaded = new Set();      // ids de skills ya cargadas en este turno (su cuerpo no se repite)
+    this.todos = [];                     // v2.6: lista de tareas viva (todo_write), del turno y de la conversación
     this.guardrails = new Guardrails(opts.guardrailsPolicy || {});   // límites + permisos
     this._llmTimeoutMs = null;           // ms sin datos del proveedor antes de cortar (null = default)
     this.pendingConfirm = null;          // {resolve, call} mientras el usuario decide
@@ -220,7 +223,7 @@ class Agent {
     const nuevo = opencode.sessionFor(convId);
     // al cambiar de conversación el resumen plegado de la anterior no vale para nada
     // (y contarlo sería peor que no tenerlo)
-    if (nuevo !== this.sessionId) { this._resumen = ''; this._plegado = []; }
+    if (nuevo !== this.sessionId) { this._resumen = ''; this._plegado = []; this.todos = []; }
     this.sessionId = nuevo;
   }
 
@@ -517,7 +520,7 @@ class Agent {
          ...imgUrls.map(u => ({ type: 'image_url', image_url: { url: u } }))]
       : userText;
     // conversación nueva (o historial vaciado al borrarla): el resumen anterior no vale
-    if (!this.history.length) { this._resumen = ''; this._plegado = []; }
+    if (!this.history.length) { this._resumen = ''; this._plegado = []; this.todos = []; }
     cambios.olvidar((settings.settings && settings.settings.workspace) || path.join(os.homedir(), 'Desktop', 'Sagitari'));
     this._currentRequest = userText || '';
     this.history.push({ role: 'user', content });
@@ -572,6 +575,9 @@ class Agent {
       + (settings.settings?.reviewGate === false
           ? '\n\nREVISIÓN DEL CAMBIO: desactivada por el usuario.'
           : '\n\nREVISIÓN DEL CAMBIO: activa. Tu código pasa por una revisión automática antes de cerrar; si te devuelve un hallazgo BLOQUEANTE, arréglalo en el mismo turno.')
+      // v2.6: la lista de tareas viva va en CADA paso (bloque volátil): es lo que el
+      // modelo conserva aunque el historial se recorte. Vacía si no hay lista.
+      + (this.todos.length ? '\n\n' + todos.bloquePrompt(this.todos) : '')
       + dinamico;
     // el resumen de lo plegado abre el contexto (mensaje de usuario: los proveedores no
     // aceptan un segundo system a mitad de conversación)
@@ -1208,6 +1214,19 @@ class Agent {
             ? await this._delegate(spec, args, { settings, signal, screenshotFn: this.screenshotFn, browser: this.browser })
             : `Error: subagente desconocido "${args.agent}". Disponibles: ${subagents.SUBAGENT_KEYS.join(', ')}.`;
         }
+      } else if (name === 'todo_write') {
+        /* v2.6: la lista de tareas es estado del propio agente, no una acción sobre el
+           sistema: se gestiona aquí, sin pasar por el ejecutor. Se guarda ya normalizada
+           (única «in_progress», sin duplicados, con tope) para que ni el prompt ni la
+           interfaz enseñen una lista incoherente. */
+        const r = todos.normalizar(args && args.todos);
+        if (!r.ok) {
+          result = 'Error: ' + r.error;
+        } else {
+          this.todos = r.todos;
+          this.emit({ type: 'todos', todos: this.todos });
+          result = todos.resumen(this.todos) + (r.aviso ? '\nNota: ' + r.aviso : '');
+        }
       } else {
         result = await executeTool(name, args, {
           emit: (e) => this.emit(e),
@@ -1696,6 +1715,7 @@ function statusFor(name, args) {
     case 'media_control': return 'Multimedia · ' + args.action;
     case 'window_manage': return 'Ventanas · ' + args.action;
     case 'system_info': return 'Leyendo información del sistema';
+    case 'todo_write': return 'Actualizando la lista de tareas';
     default: return name;
   }
 }

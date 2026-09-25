@@ -43,7 +43,7 @@ const POR_HERRAMIENTA = {
   delegate: [],
   read_file: [], view_image: [], list_dir: [], search_files: [],
   repo_map: [], find_symbol: [], content: [],
-  remember: [], use_skill: [], system_info: [], notify: [],
+  remember: [], use_skill: [], system_info: [], notify: [], todo_write: [],
 };
 
 /** Recursos que necesita una llamada. MCP es un mundo aparte (herramientas del usuario). */

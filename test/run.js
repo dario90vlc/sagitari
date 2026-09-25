@@ -11,5 +11,6 @@
   require('./20-chat');
   require('./30-sistema');
   require('./40-agente');
+  require('./45-todos');
   await runAll();
 })();

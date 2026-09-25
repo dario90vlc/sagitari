@@ -43,5 +43,5 @@ _*.ps1
 # Mesa de diseño (briefs y capturas locales, no se publican)
 .impeccable/
 
-# Id del companion local (regla versionada; antes solo vivía en .git/info/exclude)
-.freebuff/
+# Directorios de trabajo de asistentes locales (no se versionan)
+.agent/

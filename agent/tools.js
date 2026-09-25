@@ -37,6 +37,7 @@ const RISK = {
   system_info: 'safe',
   remember: 'safe',   // guardar un recuerdo no toca el sistema: no pide permiso
   use_skill: 'safe',
+  todo_write: 'safe', // la lista de tareas es estado del propio agente: no toca nada del sistema
   delegate: 'safe',   // v1.4: la delegación no pide permiso; las herramientas del SUBAGENTE sí (con los mismos niveles)
 };
 
@@ -369,6 +370,32 @@ const defs = [
           confidence: { type: 'number', description: '0-1: cómo de seguro estás del recuerdo (0.8 por defecto)' }
         },
         required: ['text']
+      }
+    }
+  },
+  {
+    type: 'function',
+    function: {
+      name: 'todo_write',
+      description: 'Crea o actualiza tu LISTA DE TAREAS del turno: un plan de trabajo vivo que el usuario ve en pantalla y que sobrevive a los turnos largos y a los recortes de contexto (viaja en tu prompt en cada paso). Úsala en tareas de 3 o más pasos: mándala al empezar con todos los pasos en "pending", y vuelve a llamarla cuando empieces un paso ("in_progress") y cuando lo termines ("completed"). Envía SIEMPRE la lista COMPLETA y actualizada, no solo el paso que cambia: así el estado nunca se corrompe. Solo puede haber un paso "in_progress" a la vez. Para una tarea de uno o dos pasos no la uses.',
+      parameters: {
+        type: 'object',
+        properties: {
+          todos: {
+            type: 'array',
+            description: 'La lista COMPLETA de tareas, en orden. Enviar [] borra la lista.',
+            items: {
+              type: 'object',
+              properties: {
+                content: { type: 'string', description: 'Qué hay que hacer, en imperativo y breve (ej: "Añadir el campo url al modelo").' },
+                status: { type: 'string', enum: ['pending', 'in_progress', 'completed'], description: 'Estado del paso.' },
+                activeForm: { type: 'string', description: 'El mismo paso en presente mientras se hace (ej: "Añadiendo el campo url"). Opcional.' }
+              },
+              required: ['content', 'status']
+            }
+          }
+        },
+        required: ['todos']
       }
     }
   },

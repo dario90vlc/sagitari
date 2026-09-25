@@ -436,7 +436,7 @@ function agentEmit(e, isBackground) {
       const c = currentConv();
       if (c && e.text) {
         const tt = trazaActual();
-        const conTraza = (tt && (tt.tools.length || (tt.think && tt.think.text))) ? tt : null;
+        const conTraza = (tt && (tt.tools.length || (tt.think && tt.think.text) || (tt.todos && tt.todos.length))) ? tt : null;
         // Se guarda la narración COMPLETA del turno, no solo el párrafo final:
         // reabrir la conversación enseña lo mismo que se vio en vivo.
         const completo = (e.transcript && e.transcript.length > e.text.length) ? e.transcript : e.text;

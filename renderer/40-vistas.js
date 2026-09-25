@@ -101,7 +101,7 @@ function resetChatView(messages) {
       html = html.replace(/He adjuntado archivos para que los uses en tu respuesta:\n\n[\s\S]*$/, '').trim();
     }
     const tieneTraza = m.role === 'assistant' && m.trace
-      && (((m.trace.tools || []).length) || (m.trace.think && m.trace.think.text));
+      && (((m.trace.tools || []).length) || (m.trace.think && m.trace.think.text) || ((m.trace.todos || []).length));
     if (tieneTraza) restaurarTraza(b, m.trace, html);   // razonamiento + herramientas + respuesta
     else b.innerHTML = fmt(html || '');
     if (m.attachments && m.attachments.length) paintAttachments(b, m.attachments);

@@ -480,6 +480,10 @@ window.sagitari.onAgentEvent((ev) => {
       setChatStatus(etiquetaEquipo(ev) + ' — trabajando…');
       feed(etiquetaEquipo(ev), 'pur');
       break;
+    // v2.6: el modelo actualizó su lista de tareas: se repinta el estado real
+    case 'todos':
+      todosCard(ev);
+      break;
     // cierre de una delegación: la tarjeta del subagente con su estado y su evidencia
     case 'delegate_done':
       delegationCard(ev);
