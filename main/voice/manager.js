@@ -28,15 +28,23 @@ function createVoiceManager({ emit, stt, tts, onPhrase = () => {}, settings = ()
   let cola = [];
   let hablando = null;
   let seq = 0;
-  let ultimoFin = 0;   // cuándo terminó de sonar la última frase (para la cola de eco)
+  let ultimoFin = 0; // cuándo terminó de sonar la última frase (para la cola de eco)
   /* Adelanto: síntesis de la frase SIGUIENTE mientras suena la actual. Sin esto,
      cada frase cuesta su síntesis entera en silencio (un proceso nuevo por frase
      en el motor de Windows, ~1 s). Con esto, al terminar una frase la siguiente
      ya está lista y el hueco entre frases es solo el cambio de audio. */
-  let adelanto = null;   // { frase, promesa } o null
+  let adelanto = null; // { frase, promesa } o null
 
-  const pon = (e) => { assertEvent(e); emit(e); };
-  const setEstado = (s) => { if (estado !== s) { estado = s; pon({ type: 'state', state: s }); } };
+  const pon = (e) => {
+    assertEvent(e);
+    emit(e);
+  };
+  const setEstado = (s) => {
+    if (estado !== s) {
+      estado = s;
+      pon({ type: 'state', state: s });
+    }
+  };
 
   async function open() {
     await stt.start();
@@ -51,8 +59,12 @@ function createVoiceManager({ emit, stt, tts, onPhrase = () => {}, settings = ()
   async function close({ motores = true } = {}) {
     stopSpeaking();
     if (motores) {
-      try { await stt.stop(); } catch {}
-      try { tts.dispose && tts.dispose(); } catch {}
+      try {
+        await stt.stop();
+      } catch {}
+      try {
+        tts.dispose && tts.dispose();
+      } catch {}
     }
   }
 
@@ -67,7 +79,9 @@ function createVoiceManager({ emit, stt, tts, onPhrase = () => {}, settings = ()
          sonando—. Interrumpir de verdad sigue siendo cosa del nivel del micrófono en el
          panel, y en cuanto salta deja de haber «hablando». */
       if (estado === 'hablando') return;
-      setEstado('oyendo'); emit(ev); return;
+      setEstado('oyendo');
+      emit(ev);
+      return;
     }
     if (ev.type === 'final') {
       if (!ev.text || !ev.text.trim()) return;
@@ -87,7 +101,10 @@ function createVoiceManager({ emit, stt, tts, onPhrase = () => {}, settings = ()
          sigue trabajando (o borraría el «oyendo» de la frase buena anterior), y el test de
          esta tarea exige «oyendo» tras un final limpio seguido de uno basura. Lo cazó la
          ejecución del brief; mismo caso que el ruling de la fusión de frases. */
-      if (j.basura) { pon({ type: 'notice', text: 'No te he entendido (' + j.motivo + ').' }); return; }
+      if (j.basura) {
+        pon({ type: 'notice', text: 'No te he entendido (' + j.motivo + ').' });
+        return;
+      }
       setEstado('oyendo');
       emit(ev);
       return;
@@ -107,7 +124,11 @@ function createVoiceManager({ emit, stt, tts, onPhrase = () => {}, settings = ()
     /* Hablar no depende del micrófono: la cola de frases y su síntesis van aparte del modo
        voz (la lectura del chat entra por aquí con el modo cerrado). Si se exigiera «abierto»,
        `say()` encolaría frases que nadie sonaría nunca. */
-    if (!frase) { hablando = null; setEstado('escuchando'); return; }
+    if (!frase) {
+      hablando = null;
+      setEstado('escuchando');
+      return;
+    }
     hablando = frase;
     setEstado('hablando');
     const aj = settings() || {};
@@ -115,14 +136,21 @@ function createVoiceManager({ emit, stt, tts, onPhrase = () => {}, settings = ()
     let r;
     if (adelanto && adelanto.frase === frase) {
       // ya sintetizada mientras sonaba la anterior: sin espera
-      try { r = await adelanto.promesa; } catch (e) { r = { wav: null, error: e.message }; }
+      try {
+        r = await adelanto.promesa;
+      } catch (e) {
+        r = { wav: null, error: e.message };
+      }
       adelanto = null;
     } else {
-      if (adelanto && adelanto.frase !== frase) adelanto = null;   // la cola cambió (interrupción): ese audio ya no vale
-      try { r = await tts.sintetizar(frase, params); }
-      catch (e) { r = { wav: null, error: e.message }; }
+      if (adelanto && adelanto.frase !== frase) adelanto = null; // la cola cambió (interrupción): ese audio ya no vale
+      try {
+        r = await tts.sintetizar(frase, params);
+      } catch (e) {
+        r = { wav: null, error: e.message };
+      }
     }
-    if (hablando !== frase) return;                      // la interrumpieron mientras sintetizaba
+    if (hablando !== frase) return; // la interrumpieron mientras sintetizaba
     if (!r || !r.wav) {
       /* El motivo va en el aviso: «no he podido leer» sin más no dice si la voz falla
          siempre (voces sin instalar) o ha sido una frase puntual. */
@@ -134,7 +162,7 @@ function createVoiceManager({ emit, stt, tts, onPhrase = () => {}, settings = ()
     seq += 1;
     /* La voz usada viaja con la frase: el renderer enseña qué voz está sonando (natural
        o de escritorio) sin preguntar de nuevo al motor. */
-    onPhrase({ id: seq, bytes: r.wav, voz: r.voz, natural: !!r.natural });   // el renderer lo reproduce y avisa con spoken(id)
+    onPhrase({ id: seq, bytes: r.wav, voz: r.voz, natural: !!r.natural }); // el renderer lo reproduce y avisa con spoken(id)
     // Mientras suena esta frase se sintetiza la siguiente: al llegar su turno
     // el audio ya está listo. Solo UNA por delante (más sería sintetizar frases
     // que una interrupción tiraría) y con los ajustes del momento.
@@ -151,15 +179,15 @@ function createVoiceManager({ emit, stt, tts, onPhrase = () => {}, settings = ()
   }
 
   function spoken(id) {
-    if (id !== seq) return;                              // una frase vieja que ya no importa
-    ultimoFin = Date.now();                              // desde aquí corre la cola de eco
+    if (id !== seq) return; // una frase vieja que ya no importa
+    ultimoFin = Date.now(); // desde aquí corre la cola de eco
     siguiente();
   }
 
   function stopSpeaking() {
     cola = [];
     hablando = null;
-    adelanto = null;   // el audio adelantado ya no vale (nueva secuencia tras interrumpir)
+    adelanto = null; // el audio adelantado ya no vale (nueva secuencia tras interrumpir)
     ultimoFin = 0;
     if (estado === 'hablando') setEstado('escuchando');
   }

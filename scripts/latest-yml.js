@@ -31,7 +31,10 @@ const NOMBRE_YML = 'latest.yml';
 
 /** Los binarios que la release publica (y que, por tanto, deben estar firmados). */
 function binarios(dir) {
-  return fs.readdirSync(dir).filter(f => /^SAGITARI-.*\.exe$/i.test(f)).sort();
+  return fs
+    .readdirSync(dir)
+    .filter((f) => /^SAGITARI-.*\.exe$/i.test(f))
+    .sort();
 }
 
 /**
@@ -44,7 +47,10 @@ function revisar(dir, parsed) {
   const bien = [];
   for (const f of binarios(dir)) {
     const publicada = u.sha512For(parsed, f);
-    if (!publicada) { faltan.push(f); continue; }
+    if (!publicada) {
+      faltan.push(f);
+      continue;
+    }
     (publicada === u.sha512Of(path.join(dir, f)) ? bien : malas).push(f);
   }
   return { faltan, malas, ok: bien };
@@ -53,7 +59,7 @@ function revisar(dir, parsed) {
 /** Reconstruye el yml con todos los binarios firmados. Devuelve el texto nuevo. */
 function completar(dir, parsed, original) {
   const exes = binarios(dir);
-  const setup = exes.find(f => /-Setup-/i.test(f)) || exes[0];
+  const setup = exes.find((f) => /-Setup-/i.test(f)) || exes[0];
   if (!setup) throw new Error('no hay ningún SAGITARI-*.exe en ' + dir);
   // El hash superior es el del fichero `path` (el Setup). Se conserva el que ya
   // traía el yml si sigue siendo el del Setup; si no, se recalcula.
@@ -61,7 +67,7 @@ function completar(dir, parsed, original) {
   const shaSuperior = u.sha512For(parsed, pathOriginal) || u.sha512Of(path.join(dir, pathOriginal));
   const fecha = (String(original || '').match(/^releaseDate:\s*(.+)$/m) || [])[1] || "'" + new Date().toISOString() + "'";
   const lineas = ['version: ' + parsed.version, 'files:'];
-  for (const f of [pathOriginal, ...exes.filter(f => f !== pathOriginal)]) {
+  for (const f of [pathOriginal, ...exes.filter((f) => f !== pathOriginal)]) {
     lineas.push('  - url: ' + f);
     lineas.push('    sha512: ' + u.sha512Of(path.join(dir, f)));
     lineas.push('    size: ' + fs.statSync(path.join(dir, f)).size);
@@ -78,7 +84,7 @@ function salir(mensaje) {
 }
 
 function main() {
-  const args = process.argv.slice(2).filter(a => !a.startsWith('--'));
+  const args = process.argv.slice(2).filter((a) => !a.startsWith('--'));
   const check = process.argv.includes('--check');
   const dir = path.resolve(args[0] || 'dist');
   const ymlPath = path.join(dir, NOMBRE_YML);
@@ -100,7 +106,7 @@ function main() {
     if (antes.faltan.length) console.log('binarios sin firma en el yml: ' + antes.faltan.join(', '));
     texto = completar(dir, parsed, texto);
     fs.writeFileSync(ymlPath, texto);
-    parsed = u.parseLatestYml(fs.readFileSync(ymlPath, 'utf8'));   // se relee lo escrito
+    parsed = u.parseLatestYml(fs.readFileSync(ymlPath, 'utf8')); // se relee lo escrito
     console.log('latest.yml completado con ' + exes.length + ' binarios');
   }
 

@@ -13,20 +13,22 @@ const fs = require('fs');
 const path = require('path');
 
 let HABITS_FILE = path.join(require('./datadir').dataDir(), 'habits.json');
-const TOP_N = 5;          // entradas por categoría en el prompt
-const MIN_COUNT = 2;      // mínimo de repeticiones para considerar un hábito
-const MAX_ENTRIES = 50;   // techo por categoría (recorte del mapa persistido)
-const FORGET_DAYS = 180;  // olvido por antigüedad
+const TOP_N = 5; // entradas por categoría en el prompt
+const MIN_COUNT = 2; // mínimo de repeticiones para considerar un hábito
+const MAX_ENTRIES = 50; // techo por categoría (recorte del mapa persistido)
+const FORGET_DAYS = 180; // olvido por antigüedad
 const CATEGORIES = ['tools', 'apps', 'commands', 'folders', 'sites'];
 
-let _tainted = false;   // el archivo en disco no es legible/nuestro: no pisarlo
+let _tainted = false; // el archivo en disco no es legible/nuestro: no pisarlo
 
 /** Escritura atómica: escribe a .tmp y renombra, conservando el .bak anterior. */
 function _atomicWrite(file, text) {
   const tmp = file + '.tmp';
   fs.mkdirSync(path.dirname(file), { recursive: true });
   fs.writeFileSync(tmp, text, 'utf8');
-  try { fs.copyFileSync(file, file + '.bak'); } catch {}   // aún no había archivo: no es un fallo
+  try {
+    fs.copyFileSync(file, file + '.bak');
+  } catch {} // aún no había archivo: no es un fallo
   fs.renameSync(tmp, file);
 }
 
@@ -35,7 +37,7 @@ function _load() {
   try {
     raw = fs.readFileSync(HABITS_FILE, 'utf8');
   } catch (e) {
-    if (e.code === 'ENOENT') return {};   // no existe → perfil vacío legítimo
+    if (e.code === 'ENOENT') return {}; // no existe → perfil vacío legítimo
     // Error de E/S transitorio (EBUSY/EPERM): no es "sin hábitos"; no persistir nada.
     _tainted = true;
     console.error('habits.load: no se pudo leer ' + HABITS_FILE + ': ' + e.message);
@@ -51,7 +53,7 @@ function _load() {
     const dest = HABITS_FILE.replace(/\.json$/i, '') + '.corrupt-' + Date.now() + '.json';
     try {
       fs.renameSync(HABITS_FILE, dest);
-      _tainted = false;   // el original ya está a salvo: se puede escribir un perfil nuevo
+      _tainted = false; // el original ya está a salvo: se puede escribir un perfil nuevo
       console.error('habits.load: ' + e.message + ' — conservado en ' + dest);
     } catch (e2) {
       _tainted = true;
@@ -62,19 +64,21 @@ function _load() {
 }
 
 function _save(d) {
-  if (_tainted) return;   // el archivo en disco no es nuestro: no destruirlo con un perfil vacío
+  if (_tainted) return; // el archivo en disco no es nuestro: no destruirlo con un perfil vacío
   try {
     _atomicWrite(HABITS_FILE, JSON.stringify(d, null, 2));
-  } catch (e) { console.error('habits.save', e.message); }
+  } catch (e) {
+    console.error('habits.save', e.message);
+  }
 }
 
 function _bump(d, map, key, weight = 1, cat = '') {
   if (!key) return;
   const k = String(key);
   map[k] = (Number(map[k]) || 0) + weight;
-  if (!cat) return;   // categorías sin olvido (modes) no necesitan marca de uso
+  if (!cat) return; // categorías sin olvido (modes) no necesitan marca de uso
   d.seen = d.seen || {};
-  d.seen[cat + '|' + k] = Date.now();   // marca de uso para el olvido por antigüedad
+  d.seen[cat + '|' + k] = Date.now(); // marca de uso para el olvido por antigüedad
 }
 
 /**
@@ -91,9 +95,12 @@ function _prune(d) {
     d[cat] = Object.fromEntries(
       Object.entries(map)
         .filter(([, count]) => Number(count) > 0)
-        .filter(([key]) => { const t = Number(seen[cat + '|' + key]); return !t || t >= cutoff; })
-        .sort((a, b) => (Number(b[1]) - Number(a[1])) || String(a[0]).localeCompare(String(b[0])))
-        .slice(0, MAX_ENTRIES)
+        .filter(([key]) => {
+          const t = Number(seen[cat + '|' + key]);
+          return !t || t >= cutoff;
+        })
+        .sort((a, b) => Number(b[1]) - Number(a[1]) || String(a[0]).localeCompare(String(b[0])))
+        .slice(0, MAX_ENTRIES),
     );
   }
   const alive = new Set();
@@ -117,19 +124,43 @@ function observe(type, ev = {}) {
     d.tools = d.tools || {};
     _bump(d, d.tools, ev.name, 1, 'tools');
     const args = ev.args || {};
-    if (ev.name === 'open_app' && args.name) { d.apps = d.apps || {}; _bump(d, d.apps, String(args.name).toLowerCase().replace(/\.exe$/, ''), 1, 'apps'); }
+    if (ev.name === 'open_app' && args.name) {
+      d.apps = d.apps || {};
+      _bump(
+        d,
+        d.apps,
+        String(args.name)
+          .toLowerCase()
+          .replace(/\.exe$/, ''),
+        1,
+        'apps',
+      );
+    }
     if (ev.name === 'run_command' && args.command) {
       const cmd = String(args.command).trim().split(/\s+/)[0];
-      if (cmd) { d.commands = d.commands || {}; _bump(d, d.commands, cmd.toLowerCase(), 1, 'commands'); }
+      if (cmd) {
+        d.commands = d.commands || {};
+        _bump(d, d.commands, cmd.toLowerCase(), 1, 'commands');
+      }
       const cwd = String(args.cwd || '').trim();
-      if (cwd) { d.folders = d.folders || {}; _bump(d, d.folders, cwd, 1, 'folders'); }
+      if (cwd) {
+        d.folders = d.folders || {};
+        _bump(d, d.folders, cwd, 1, 'folders');
+      }
     }
     if ((ev.name === 'write_file' || ev.name === 'list_dir' || ev.name === 'read_file') && args.path) {
       const dir = String(args.path).replace(/[\\/][^\\/]*$/, '');
-      if (dir) { d.folders = d.folders || {}; _bump(d, d.folders, dir, 1, 'folders'); }
+      if (dir) {
+        d.folders = d.folders || {};
+        _bump(d, d.folders, dir, 1, 'folders');
+      }
     }
     if (ev.name === 'browser_control' && args.url) {
-      try { const host = new URL(/^https?:/.test(args.url) ? args.url : 'https://' + args.url).hostname; d.sites = d.sites || {}; _bump(d, d.sites, host, 1, 'sites'); } catch {}
+      try {
+        const host = new URL(/^https?:/.test(args.url) ? args.url : 'https://' + args.url).hostname;
+        d.sites = d.sites || {};
+        _bump(d, d.sites, host, 1, 'sites');
+      } catch {}
     }
   }
   if (type === 'mode') {
@@ -140,7 +171,7 @@ function observe(type, ev = {}) {
     d.confirms = d.confirms || { approved: 0, denied: 0 };
     d.confirms[ev.approved ? 'approved' : 'denied']++;
   }
-  _prune(d);   // olvido por antigüedad + recorte por categoría
+  _prune(d); // olvido por antigüedad + recorte por categoría
   _save(d);
 }
 
@@ -148,7 +179,7 @@ function observe(type, ev = {}) {
 
 function _top(map, n = TOP_N) {
   return Object.entries(map || {})
-    .sort((a, b) => (Number(b[1]) - Number(a[1])) || String(a[0]).localeCompare(String(b[0])))
+    .sort((a, b) => Number(b[1]) - Number(a[1]) || String(a[0]).localeCompare(String(b[0])))
     .filter(([, c]) => c >= MIN_COUNT)
     .slice(0, n)
     .map(([k]) => k);
@@ -156,8 +187,7 @@ function _top(map, n = TOP_N) {
 
 /** Entradas de un mapa ordenadas por frecuencia (empate resuelto por clave). */
 function _sorted(map) {
-  return Object.entries(map || {})
-    .sort((a, b) => (Number(b[1]) - Number(a[1])) || String(a[0]).localeCompare(String(b[0])));
+  return Object.entries(map || {}).sort((a, b) => Number(b[1]) - Number(a[1]) || String(a[0]).localeCompare(String(b[0])));
 }
 
 /** Perfil legible para inyectar en el system prompt (vacío si no hay datos). */
@@ -178,14 +208,18 @@ function profile() {
   if (modes.length && modes[0][1] >= MIN_COUNT) lines.push(`- Modo de agente preferido: ${modes[0][0]}.`);
   const c = d.confirms || { approved: 0, denied: 0 };
   const total = c.approved + c.denied;
-  if (total >= 5 && c.denied / total >= 0.4) lines.push('- El usuario DENIEGA muchas confirmaciones: sé conservador, explica antes de actuar.');
+  if (total >= 5 && c.denied / total >= 0.4)
+    lines.push('- El usuario DENIEGA muchas confirmaciones: sé conservador, explica antes de actuar.');
   return lines.join('\n');
 }
 
 /** Estadísticas para la UI. */
 function stats() {
   const d = _load();
-  const rows = (map, n) => _sorted(map).slice(0, n).map(([name, count]) => ({ name, count }));
+  const rows = (map, n) =>
+    _sorted(map)
+      .slice(0, n)
+      .map(([name, count]) => ({ name, count }));
   return {
     tools: rows(d.tools, 8),
     apps: rows(d.apps, 8),
@@ -198,7 +232,13 @@ function stats() {
   };
 }
 
-function reset() { _load(); _save({}); }
-function _resetForTests(file) { HABITS_FILE = file; _tainted = false; }
+function reset() {
+  _load();
+  _save({});
+}
+function _resetForTests(file) {
+  HABITS_FILE = file;
+  _tainted = false;
+}
 
 module.exports = { observe, profile, stats, reset, __test: { _resetForTests, _prune, MAX_ENTRIES, FORGET_DAYS } };

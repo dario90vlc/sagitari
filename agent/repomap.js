@@ -26,8 +26,8 @@ const indiceCompartido = require('./indice');
 // Reexportados del recorrido único (este módulo los mantuvo en su API pública
 // y `busqueda.js` los usaba desde aquí).
 const IGNORADOS = indiceCompartido.IGNORADOS;
-const MAX_FICHERO = 200 * 1024;      // por encima de esto no es código que se lea entero
-const MAX_FICHEROS = 6000;           // tope duro del recorrido
+const MAX_FICHERO = 200 * 1024; // por encima de esto no es código que se lea entero
+const MAX_FICHEROS = 6000; // tope duro del recorrido
 const MAX_SIMBOLOS_POR_FICHERO = 80;
 const MAX_PROFUNDIDAD = 8;
 
@@ -38,7 +38,10 @@ const PATRONES = {
   js: [
     [/^\s*(?:export\s+)?(?:async\s+)?function\s+([A-Za-z_$][\w$]*)/, 'función'],
     [/^\s*(?:export\s+)?class\s+([A-Za-z_$][\w$]*)/, 'clase'],
-    [/^\s*(?:export\s+)?(?:const|let|var)\s+([A-Za-z_$][\w$]*)\s*=\s*(?:async\s*)?(?:function\b|\([^)]*\)\s*=>|[A-Za-z_$][\w$]*\s*=>)/, 'función'],
+    [
+      /^\s*(?:export\s+)?(?:const|let|var)\s+([A-Za-z_$][\w$]*)\s*=\s*(?:async\s*)?(?:function\b|\([^)]*\)\s*=>|[A-Za-z_$][\w$]*\s*=>)/,
+      'función',
+    ],
     [/^\s*(?:module\.)?exports\.([A-Za-z_$][\w$]*)\s*=/, 'export'],
     [/^\s*exports\.([A-Za-z_$][\w$]*)\s*=/, 'export'],
   ],
@@ -63,19 +66,32 @@ const PATRONES = {
     [/^\s*(?:abstract\s+|final\s+)?class\s+(\w+)/, 'clase'],
   ],
   jvm: [
-    [/^\s*(?:public|private|protected|internal|static|sealed|abstract|partial|async|override|virtual|final|\s)*\s(?:class|interface|record|struct|enum)\s+(\w+)/, 'tipo'],
-    [/^\s*(?:public|private|protected|internal|static|async|override|virtual|\s)+[\w<>\[\],.?]+\s+(\w+)\s*\(/, 'método'],
+    [
+      /^\s*(?:public|private|protected|internal|static|sealed|abstract|partial|async|override|virtual|final|\s)*\s(?:class|interface|record|struct|enum)\s+(\w+)/,
+      'tipo',
+    ],
+    [/^\s*(?:public|private|protected|internal|static|async|override|virtual|\s)+[\w<>[\],.?]+\s+(\w+)\s*\(/, 'método'],
   ],
-  md: [
-    [/^(#{1,3})\s+(.+?)\s*$/, 'sección'],
-  ],
+  md: [[/^(#{1,3})\s+(.+?)\s*$/, 'sección']],
 };
 /** Exportaciones en bloque: `module.exports = { a, b }` (el estilo de este repo). */
 const EXPORT_EN_BLOQUE = /^\s*module\.exports\s*=\s*\{([^}]*)\}/;
 const EXT_A_LENGUAJE = {
-  '.js': 'js', '.mjs': 'js', '.cjs': 'js', '.jsx': 'js', '.ts': 'js', '.tsx': 'js',
-  '.py': 'py', '.go': 'go', '.rs': 'rs', '.rb': 'rb', '.php': 'php',
-  '.java': 'jvm', '.cs': 'jvm', '.kt': 'jvm', '.md': 'md',
+  '.js': 'js',
+  '.mjs': 'js',
+  '.cjs': 'js',
+  '.jsx': 'js',
+  '.ts': 'js',
+  '.tsx': 'js',
+  '.py': 'py',
+  '.go': 'go',
+  '.rs': 'rs',
+  '.rb': 'rb',
+  '.php': 'php',
+  '.java': 'jvm',
+  '.cs': 'jvm',
+  '.kt': 'jvm',
+  '.md': 'md',
 };
 
 /* --------------------------------------------------------------------------- *
@@ -84,8 +100,12 @@ const EXT_A_LENGUAJE = {
  * --------------------------------------------------------------------------- */
 
 // Alias del recorrido único (firmas idénticas a las que había aquí).
-function reglasIgnoradas(workspace) { return indiceCompartido.reglasIgnoradas(workspace); }
-function ignoradoPorRegla(rel, reglas) { return indiceCompartido.ignoradoPorRegla(rel, reglas); }
+function reglasIgnoradas(workspace) {
+  return indiceCompartido.reglasIgnoradas(workspace);
+}
+function ignoradoPorRegla(rel, reglas) {
+  return indiceCompartido.ignoradoPorRegla(rel, reglas);
+}
 
 function simbolosDe(texto, ext) {
   const lenguaje = EXT_A_LENGUAJE[ext];
@@ -97,7 +117,10 @@ function simbolosDe(texto, ext) {
     if (!l.trim() || l.trim().startsWith('//') || l.trim().startsWith('*')) continue;
     const bloque = lenguaje === 'js' ? l.match(EXPORT_EN_BLOQUE) : null;
     if (bloque) {
-      for (const n of bloque[1].split(',').map(x => x.trim().split(':')[0].trim()).filter(Boolean)) {
+      for (const n of bloque[1]
+        .split(',')
+        .map((x) => x.trim().split(':')[0].trim())
+        .filter(Boolean)) {
         if (/^[A-Za-z_$][\w$]*$/.test(n)) out.push({ name: n, kind: 'export', line: i + 1 });
       }
       continue;
@@ -132,9 +155,16 @@ function construir(workspace, opts = {}) {
   const archivos = [];
   for (const f of recorrido.archivos) {
     const ext = extDe(f.ruta);
-    if (f.grande) { archivos.push({ ruta: f.ruta, ext, bytes: f.bytes, simbolos: [], grande: true }); continue; }
+    if (f.grande) {
+      archivos.push({ ruta: f.ruta, ext, bytes: f.bytes, simbolos: [], grande: true });
+      continue;
+    }
     let texto;
-    try { texto = fs.readFileSync(f.abs, 'utf8'); } catch { continue; }
+    try {
+      texto = fs.readFileSync(f.abs, 'utf8');
+    } catch {
+      continue;
+    }
     archivos.push({ ruta: f.ruta, ext, bytes: f.bytes, simbolos: simbolosDe(texto, ext) });
   }
   archivos.sort((a, b) => a.ruta.localeCompare(b.ruta));
@@ -150,7 +180,7 @@ function construir(workspace, opts = {}) {
  *  avisa (executors.invalidarMapa) y el resto del tiempo se sirve de memoria.
  * --------------------------------------------------------------------------- */
 const TTL_MS = 20000;
-let cache = null;   // { raiz, ts, indice }
+let cache = null; // { raiz, ts, indice }
 
 function indice(workspace, opts = {}) {
   const ahora = Date.now();
@@ -163,7 +193,9 @@ function invalidar(workspace) {
   if (!cache) return;
   if (!workspace || cache.raiz === workspace) cache = null;
 }
-function _resetForTests() { cache = null; }
+function _resetForTests() {
+  cache = null;
+}
 
 /* --------------------------------------------------------------------------- *
  *  Vistas
@@ -185,12 +217,19 @@ function mapa(workspace, opts = {}) {
   for (const [dir, lista] of [...porCarpeta.entries()].sort((a, b) => a[0].localeCompare(b[0]))) {
     const bloque = [dir + '/'];
     for (const a of lista) {
-      const nombres = a.simbolos.filter(s => s.kind !== 'sección').map(s => s.name);
-      const detalle = nombres.length ? `: ${nombres.slice(0, 14).join(', ')}${nombres.length > 14 ? ` … (+${nombres.length - 14})` : ''}` : '';
+      const nombres = a.simbolos.filter((s) => s.kind !== 'sección').map((s) => s.name);
+      const detalle = nombres.length
+        ? `: ${nombres.slice(0, 14).join(', ')}${nombres.length > 14 ? ` … (+${nombres.length - 14})` : ''}`
+        : '';
       bloque.push(`  ${path.basename(a.ruta)}${detalle}`);
     }
     const texto = bloque.join('\n');
-    if (usado + texto.length > presupuesto) { partes.push(`…(mapa recortado: usa find_symbol o list_dir para el resto${idx.truncado ? '; el recorrido está topado a ' + MAX_FICHEROS + ' archivos' : ''})`); break; }
+    if (usado + texto.length > presupuesto) {
+      partes.push(
+        `…(mapa recortado: usa find_symbol o list_dir para el resto${idx.truncado ? '; el recorrido está topado a ' + MAX_FICHEROS + ' archivos' : ''})`,
+      );
+      break;
+    }
     partes.push(texto);
     usado += texto.length + 1;
   }
@@ -200,22 +239,32 @@ function mapa(workspace, opts = {}) {
 /** Bloque corto para el prompt: solo si el proyecto es lo bastante grande. */
 function bloquePrompt(workspace, opts = {}) {
   let idx;
-  try { idx = indice(workspace, opts); } catch { return ''; }
+  try {
+    idx = indice(workspace, opts);
+  } catch {
+    return '';
+  }
   if (idx.totales.ficheros < (opts.minFicheros || 25)) return '';
   const ranking = idx.archivos
-    .filter(a => a.simbolos.length)
+    .filter((a) => a.simbolos.length)
     .sort((a, b) => b.simbolos.length - a.simbolos.length)
     .slice(0, 12);
   if (!ranking.length) return '';
   const lineas = [`MAPA DEL PROYECTO (${idx.totales.ficheros} archivos — índice, no lo leas todo):`];
   let usado = lineas[0].length;
   for (const a of ranking) {
-    const l = `- ${a.ruta}: ${a.simbolos.filter(s => s.kind !== 'sección').slice(0, 8).map(s => s.name).join(', ')}`;
+    const l = `- ${a.ruta}: ${a.simbolos
+      .filter((s) => s.kind !== 'sección')
+      .slice(0, 8)
+      .map((s) => s.name)
+      .join(', ')}`;
     if (usado + l.length > (opts.maxChars || 1500)) break;
     lineas.push(l);
     usado += l.length + 1;
   }
-  lineas.push('- Para el resto: repo_map (por carpetas), find_symbol (dónde se define algo) y search_code (busca por CONTENIDO: coincidencias exactas + lo más relacionado). Antes de leer un archivo entero, busca.');
+  lineas.push(
+    '- Para el resto: repo_map (por carpetas), find_symbol (dónde se define algo) y search_code (busca por CONTENIDO: coincidencias exactas + lo más relacionado). Antes de leer un archivo entero, busca.',
+  );
   return lineas.join('\n');
 }
 
@@ -225,7 +274,9 @@ function bloquePrompt(workspace, opts = {}) {
  */
 function buscar(workspace, consulta, opts = {}) {
   const idx = indice(workspace, opts);
-  const q = String(consulta || '').trim().toLowerCase();
+  const q = String(consulta || '')
+    .trim()
+    .toLowerCase();
   const limite = opts.limit || 40;
   const partes = q.split(/[\s./\\]+/).filter(Boolean);
   const puntua = (texto) => {
@@ -237,7 +288,7 @@ function buscar(workspace, consulta, opts = {}) {
     // camelCase: "abrirCuenta" se encuentra con "abrir cuenta"
     if (!p && partes.length > 1) {
       const plano = t.replace(/[^a-z0-9]/g, '');
-      if (partes.every(x => plano.includes(x))) p += 20;
+      if (partes.every((x) => plano.includes(x))) p += 20;
     }
     return p;
   };
@@ -256,7 +307,7 @@ function buscar(workspace, consulta, opts = {}) {
   archivos.sort((x, y) => y.puntos - x.puntos || x.ruta.localeCompare(y.ruta));
   return {
     hits: hits.slice(0, limite),
-    archivos: archivos.slice(0, 15).map(x => x.ruta),
+    archivos: archivos.slice(0, 15).map((x) => x.ruta),
     totales: { simbolos: hits.length, archivos: archivos.length },
   };
 }
@@ -264,7 +315,8 @@ function buscar(workspace, consulta, opts = {}) {
 /** Texto listo para devolver al modelo desde la herramienta find_symbol. */
 function textoBusqueda(workspace, consulta, opts = {}) {
   const r = buscar(workspace, consulta, opts);
-  if (!r.hits.length && !r.archivos.length) return `Sin resultados para «${consulta}». Prueba con menos palabras o usa repo_map para ver el índice.`;
+  if (!r.hits.length && !r.archivos.length)
+    return `Sin resultados para «${consulta}». Prueba con menos palabras o usa repo_map para ver el índice.`;
   const lineas = [];
   if (r.hits.length) {
     lineas.push(`${r.hits.length}${r.totales.simbolos > r.hits.length ? ' de ' + r.totales.simbolos : ''} definiciones:`);
@@ -278,6 +330,17 @@ function textoBusqueda(workspace, consulta, opts = {}) {
 }
 
 module.exports = {
-  construir, indice, invalidar, mapa, bloquePrompt, buscar, textoBusqueda, simbolosDe,
-  IGNORADOS, MAX_FICHEROS, reglasIgnoradas, ignoradoPorRegla, _resetForTests,
+  construir,
+  indice,
+  invalidar,
+  mapa,
+  bloquePrompt,
+  buscar,
+  textoBusqueda,
+  simbolosDe,
+  IGNORADOS,
+  MAX_FICHEROS,
+  reglasIgnoradas,
+  ignoradoPorRegla,
+  _resetForTests,
 };

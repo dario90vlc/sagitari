@@ -1,6 +1,11 @@
 /* SAGITARI renderer — 20-voz.js (antes app.js 1340-2752): feed de actividad, agentes, skills, voz, confirmaciones, envío y adjuntos
    Script clásico: comparte el scope global con los demás 1x-*.js.
    El orden de carga en index.html preserva el orden original. */
+/* global hablarEnFlujo, silenciarLecturaVoz */
+/* hablarEnFlujo y silenciarLecturaVoz están definidas en 40-vistas.js (scope compartido) */
+/* global pasosConMotor, reiniciarLecturaVoz */
+/* pasosConMotor está en 30-ajustes.js y reiniciarLecturaVoz en 40-vistas.js (scope compartido) */
+/* exported renderMarket */
 // ============ activity feed + live agents ============
 const FEED_MAX = 6;
 /* TABLERO: reloj de estación del rail (hora local tabular, late 1 vez por segundo
@@ -35,7 +40,7 @@ const AGENT_MAP = {
   notify: { el: 'agentCard-ops', name: 'Operador', icon: 'bell', cls: 'a-p2', desc: 'Enviando notificación' },
   media_control: { el: 'agentCard-ops', name: 'Operador', icon: 'music', cls: 'a-p2', desc: 'Control multimedia' },
   window_manage: { el: 'agentCard-ops', name: 'Operador', icon: 'window', cls: 'a-p2', desc: 'Gestionando ventanas' },
-  system_info: { el: 'agentCard-analyst', name: 'Analista', icon: 'monitor', cls: 'a-b2', desc: 'Leyendo el sistema' }
+  system_info: { el: 'agentCard-analyst', name: 'Analista', icon: 'monitor', cls: 'a-b2', desc: 'Leyendo el sistema' },
 };
 
 function agentStart(toolName) {
@@ -57,18 +62,32 @@ function agentStart(toolName) {
 // map a status text like "Terminal — npm install" back to a tool name
 function agentStartForStatus(statusText) {
   const t = String(statusText || '');
-  const found = Object.keys(AGENT_MAP).find(n => t.toLowerCase().startsWith(n) || t.includes(AGENT_MAP[n].name));
+  const found = Object.keys(AGENT_MAP).find((n) => t.toLowerCase().startsWith(n) || t.includes(AGENT_MAP[n].name));
   if (found) return agentStart(found);
   const prefix = t.split(/ [—·-]/)[0].toLowerCase();
-  const hint = { terminal: 'run_command', leyendo: 'read_file', escribiendo: 'write_file', explorando: 'list_dir', buscando: 'search_files', navegador: 'browser_control', capturando: 'screenshot', portapapeles: 'clipboard', multimedia: 'media_control', ventanas: 'window_manage' }[prefix];
+  const hint = {
+    terminal: 'run_command',
+    leyendo: 'read_file',
+    escribiendo: 'write_file',
+    explorando: 'list_dir',
+    buscando: 'search_files',
+    navegador: 'browser_control',
+    capturando: 'screenshot',
+    portapapeles: 'clipboard',
+    multimedia: 'media_control',
+    ventanas: 'window_manage',
+  }[prefix];
   agentStart(hint || 'run_command');
 }
 function agentStop() {
-  document.querySelectorAll('.acard.on').forEach(c => c.classList.remove('on'));
+  document.querySelectorAll('.acard.on').forEach((c) => c.classList.remove('on'));
   updateAgentCount();
 }
 /** id de tarjeta → agente: permite limpiar el rail cuando una tarjeta se apaga. */
-const CARD_AGENT = Object.values(AGENT_MAP).reduce((acc, a) => { if (!acc[a.el]) acc[a.el] = a; return acc; }, {});
+const CARD_AGENT = Object.values(AGENT_MAP).reduce((acc, a) => {
+  if (!acc[a.el]) acc[a.el] = a;
+  return acc;
+}, {});
 
 function updateAgentCount() {
   const cards = [...document.querySelectorAll('.acard.on')];
@@ -86,8 +105,10 @@ function updateAgentCount() {
   // terminadas mientras el contador marcaba 0 (lista y número se contradecían)
   const rail = $('#railAgents');
   if (!rail) return;
-  const live = new Set(cards.map(c => CARD_AGENT[c.id] && CARD_AGENT[c.id].name).filter(Boolean));
-  rail.querySelectorAll('.ragent').forEach(d => { if (!live.has(d.dataset.agent)) d.remove(); });
+  const live = new Set(cards.map((c) => CARD_AGENT[c.id] && CARD_AGENT[c.id].name).filter(Boolean));
+  rail.querySelectorAll('.ragent').forEach((d) => {
+    if (!live.has(d.dataset.agent)) d.remove();
+  });
 }
 updateAgentCount();
 
@@ -95,7 +116,9 @@ updateAgentCount();
 function refreshAgentsPanels() {
   const v = $('#view-agents');
   if (!v || !v.classList.contains('on') || document.hidden) return;
-  renderToolTray(); renderHealth(); renderHabits();
+  renderToolTray();
+  renderHealth();
+  renderHabits();
 }
 
 /** «Actividad de herramientas» = lo realmente usado en la sesión, no el catálogo. */
@@ -103,32 +126,55 @@ async function renderToolTray() {
   const tray = $('#toolTrayList');
   if (!tray) return;
   let fired = [];
-  try { fired = ((await window.sagitari.getAgentsLive()) || {}).toolsFired || []; }
-  catch (e) { tray.innerHTML = `<div class="subnote">No se pudo leer la actividad: ${esc((e && e.message) || e)}</div>`; return; }
-  if (!fired.length) { tray.innerHTML = '<div class="subnote">Todavía no se ha usado ninguna herramienta en esta sesión.</div>'; return; }
-  tray.innerHTML = fired.map(t => {
-    const label = t.name + ' ×' + t.count;
-    return `<span class="toolchip" title="${esc(label)}"><span class="tc-mark">${ic(K.tool(t.name).icon)}</span><span class="tc-txt" title="${esc(label)}">${esc(label)}</span></span>`;
-  }).join('');
+  try {
+    fired = ((await window.sagitari.getAgentsLive()) || {}).toolsFired || [];
+  } catch (e) {
+    tray.innerHTML = `<div class="subnote">No se pudo leer la actividad: ${esc((e && e.message) || e)}</div>`;
+    return;
+  }
+  if (!fired.length) {
+    tray.innerHTML = '<div class="subnote">Todavía no se ha usado ninguna herramienta en esta sesión.</div>';
+    return;
+  }
+  tray.innerHTML = fired
+    .map((t) => {
+      const label = t.name + ' ×' + t.count;
+      return `<span class="toolchip" title="${esc(label)}"><span class="tc-mark">${ic(K.tool(t.name).icon)}</span><span class="tc-txt" title="${esc(label)}">${esc(label)}</span></span>`;
+    })
+    .join('');
 }
 
 // ============ v1.6: Model Health panel ============
 async function renderHealth() {
   const box = $('#healthList');
   if (!box) return;
-  let rows = [], err = null;
-  try { rows = (await window.sagitari.healthGet()) || []; } catch (e) { err = e; }
-  if (err) { box.innerHTML = `<div class="subnote">No se pudo leer la salud del modelo: ${esc((err && err.message) || err)}</div>`; return; }
-  if (!rows.length) { box.innerHTML = '<div class="subnote">Sin datos todavía. Cada llamada al modelo registrará latencia, errores y tokens aquí.</div>'; return; }
-  box.innerHTML = rows.map(r => {
-    const health = r.errorRate >= 0.3 ? 'mag' : r.errorRate > 0 ? 'a-y' : 'ok';
-    const plain = `${r.model} · ${r.calls} llamadas · ${r.avgLatencyMs || '—'} ms · ${(r.tokensIn + r.tokensOut).toLocaleString('es')} tok`
-      + `${r.errors ? ' · ' + r.errors + ' errores' : ''}${r.fallbacks ? ' · ' + r.fallbacks + (r.fallbacks === 1 ? ' relevo' : ' relevos') : ''}`;
-    return `<div class="toolchip" title="${esc(r.lastError || '')}">
+  let rows = [],
+    err = null;
+  try {
+    rows = (await window.sagitari.healthGet()) || [];
+  } catch (e) {
+    err = e;
+  }
+  if (err) {
+    box.innerHTML = `<div class="subnote">No se pudo leer la salud del modelo: ${esc((err && err.message) || err)}</div>`;
+    return;
+  }
+  if (!rows.length) {
+    box.innerHTML = '<div class="subnote">Sin datos todavía. Cada llamada al modelo registrará latencia, errores y tokens aquí.</div>';
+    return;
+  }
+  box.innerHTML = rows
+    .map((r) => {
+      const health = r.errorRate >= 0.3 ? 'mag' : r.errorRate > 0 ? 'a-y' : 'ok';
+      const plain =
+        `${r.model} · ${r.calls} llamadas · ${r.avgLatencyMs || '—'} ms · ${(r.tokensIn + r.tokensOut).toLocaleString('es')} tok` +
+        `${r.errors ? ' · ' + r.errors + ' errores' : ''}${r.fallbacks ? ' · ' + r.fallbacks + (r.fallbacks === 1 ? ' relevo' : ' relevos') : ''}`;
+      return `<div class="toolchip" title="${esc(r.lastError || '')}">
       <span class="dot ${health}"></span>
       <span class="tc-txt" title="${esc(plain)}"><b>${esc(r.model)}</b> · ${r.calls} llamadas · ${r.avgLatencyMs || '—'} ms · ${(r.tokensIn + r.tokensOut).toLocaleString('es')} tok${r.errors ? ' · ' + r.errors + ' errores' : ''}${r.fallbacks ? ' · ' + r.fallbacks + (r.fallbacks === 1 ? ' relevo' : ' relevos') : ''}</span>
     </div>`;
-  }).join('');
+    })
+    .join('');
 }
 
 // ============ v2.0: hábitos observados ============
@@ -136,27 +182,35 @@ async function renderHabits() {
   const box = $('#habitsList');
   if (!box) return;
   let s = {};
-  try { s = await window.sagitari.habitsGet(); } catch {}
+  try {
+    s = await window.sagitari.habitsGet();
+  } catch {}
   const parts = [];
-  const fmtList = (arr, icon) => (arr || []).length
-    ? `<div class="toolchip" title="${esc(arr.map(x => x.name + ' ×' + x.count).join(' · '))}"><span class="tc-mark">${ic(icon)}</span><span class="tc-txt" title="${esc(arr.map(x => x.name + ' ×' + x.count).join(' · '))}">${arr.map(x => `${esc(x.name)} ×${x.count}`).join(' · ')}</span></div>`
-    : '';
+  const fmtList = (arr, icon) =>
+    (arr || []).length
+      ? `<div class="toolchip" title="${esc(arr.map((x) => x.name + ' ×' + x.count).join(' · '))}"><span class="tc-mark">${ic(icon)}</span><span class="tc-txt" title="${esc(arr.map((x) => x.name + ' ×' + x.count).join(' · '))}">${arr.map((x) => `${esc(x.name)} ×${x.count}`).join(' · ')}</span></div>`
+      : '';
   parts.push(fmtList(s.apps, 'zap'));
   parts.push(fmtList(s.commands, 'terminal'));
   parts.push(fmtList(s.sites, 'globe'));
   const c = s.confirms || {};
-  if (c.approved || c.denied) parts.push(`<div class="toolchip"><span class="tc-mark">${ic('check')}</span><span class="tc-txt" title="Confirmaciones aceptadas y denegadas">confirmaciones: ${c.approved || 0} aceptadas · ${c.denied || 0} denegadas</span></div>`);
-  box.innerHTML = parts.filter(Boolean).join('') || '<div class="subnote">Aún no hay hábitos observados. Se aprenden solo de lo que SAGITARI hace por ti.</div>';
+  if (c.approved || c.denied)
+    parts.push(
+      `<div class="toolchip"><span class="tc-mark">${ic('check')}</span><span class="tc-txt" title="Confirmaciones aceptadas y denegadas">confirmaciones: ${c.approved || 0} aceptadas · ${c.denied || 0} denegadas</span></div>`,
+    );
+  box.innerHTML =
+    parts.filter(Boolean).join('') ||
+    '<div class="subnote">Aún no hay hábitos observados. Se aprenden solo de lo que SAGITARI hace por ti.</div>';
 }
 
 /** Resumen legible de una importación: instaladas y omitidas (con el motivo). */
 function importSummary(inst) {
   const list = Array.isArray(inst) ? inst : [];
-  const ok = list.filter(s => !s.skipped).map(s => s.name);
-  const omitidas = list.filter(s => s.skipped);
+  const ok = list.filter((s) => !s.skipped).map((s) => s.name);
+  const omitidas = list.filter((s) => s.skipped);
   let txt = ok.length ? 'Instaladas: ' + ok.join(', ') : 'No se instaló ninguna skill';
   if (omitidas.length) {
-    txt += ' · Omitidas: ' + omitidas.map(s => s.name + (s.reason ? ' (' + s.reason + ')' : '')).join(', ');
+    txt += ' · Omitidas: ' + omitidas.map((s) => s.name + (s.reason ? ' (' + s.reason + ')' : '')).join(', ');
   }
   return txt;
 }
@@ -166,13 +220,13 @@ function importSummary(inst) {
    de qué repo) y el segundo confirma. Una skill son instrucciones que el
    agente obedecerá, no un texto inerte: instalar sin mirar es darle órdenes
    a un desconocido. `say` pinta el aviso donde lo vea el usuario. */
-const skillImportArmed = {};   // repo -> true si ya se enseñó la previa
+const skillImportArmed = {}; // repo -> true si ya se enseñó la previa
 async function skillsImportConfirmed(repo, say) {
   const r = await window.sagitari.skillsImport(repo, skillImportArmed[repo] ? { confirm: true } : undefined);
   if (r && r.needsConfirm) {
     skillImportArmed[repo] = true;
     say('Revisa antes de instalar — ' + (r.error || 'pulsa otra vez para confirmar.'));
-    return null;   // previa mostrada: el segundo clic instala
+    return null; // previa mostrada: el segundo clic instala
   }
   delete skillImportArmed[repo];
   return r;
@@ -181,23 +235,37 @@ async function renderMarket() {
   const box = $('#marketList');
   if (!box) return;
   let items = [];
-  try { items = await window.sagitari.marketCatalog(); } catch {}
-  box.innerHTML = items.map(f => `
+  try {
+    items = await window.sagitari.marketCatalog();
+  } catch {}
+  box.innerHTML =
+    items
+      .map(
+        (f) => `
     <div class="memitem">
       <span class="tc-mark">${ic('zap')}</span>
       <span class="mt"><b>${esc(f.repo)}</b> <span class="md">· ${esc(f.category)}</span><br><small class="md">${esc(f.description)}</small></span>
       ${f.installed ? '<span class="md" style="color:var(--ok)">✓ instalado</span>' : `<button class="btn primary sq" data-install="${esc(f.repo)}" title="Instalar">${ic('download')}</button>`}
-    </div>`).join('') || '<div class="subnote">Catálogo no disponible sin conexión.</div>';
-  box.querySelectorAll('[data-install]').forEach(b => {
+    </div>`,
+      )
+      .join('') || '<div class="subnote">Catálogo no disponible sin conexión.</div>';
+  box.querySelectorAll('[data-install]').forEach((b) => {
     b.onclick = async () => {
       b.disabled = true;
       $('#marketMsg').textContent = 'Instalando ' + b.dataset.install + '…';
       try {
-        const inst = await skillsImportConfirmed(b.dataset.install, (t) => { $('#marketMsg').textContent = t; });
-        if (!inst) { renderMarket(); return; }   // previa a la vista: el segundo clic confirma
+        const inst = await skillsImportConfirmed(b.dataset.install, (t) => {
+          $('#marketMsg').textContent = t;
+        });
+        if (!inst) {
+          renderMarket();
+          return;
+        } // previa a la vista: el segundo clic confirma
         $('#marketMsg').textContent = importSummary(inst);
         renderSkills();
-      } catch (e) { $('#marketMsg').textContent = 'Error: ' + (e.message || e); }
+      } catch (e) {
+        $('#marketMsg').textContent = 'Error: ' + (e.message || e);
+      }
       renderMarket();
     };
   });
@@ -212,43 +280,65 @@ $('#marketSearchBtn').onclick = async () => {
   btn.disabled = true;
   try {
     const res = await window.sagitari.marketSearch(q);
-    box.innerHTML = res.map(r => `
+    box.innerHTML =
+      res
+        .map(
+          (r) => `
       <div class="memitem">
         <span class="tc-mark">${ic('search')}</span>
         <span class="mt"><b>${esc(r.repo)}</b> <span class="md">★ ${r.stars}</span><br><small class="md">${esc(r.description)}</small></span>
         <button class="btn primary sq" data-install="${esc(r.repo)}" title="Instalar">${ic('download')}</button>
-      </div>`).join('') || '<div class="subnote">Sin resultados.</div>';
-    box.querySelectorAll('[data-install]').forEach(b => {
+      </div>`,
+        )
+        .join('') || '<div class="subnote">Sin resultados.</div>';
+    box.querySelectorAll('[data-install]').forEach((b) => {
       b.onclick = async () => {
         b.disabled = true;
         try {
-          const inst = await skillsImportConfirmed(b.dataset.install, (t) => { $('#marketMsg').textContent = t; });
-          if (!inst) { b.disabled = false; return; }   // previa a la vista: reactivar para el segundo clic
-          $('#marketMsg').textContent = 'Instalado: ' + b.dataset.install; renderSkills();
+          const inst = await skillsImportConfirmed(b.dataset.install, (t) => {
+            $('#marketMsg').textContent = t;
+          });
+          if (!inst) {
+            b.disabled = false;
+            return;
+          } // previa a la vista: reactivar para el segundo clic
+          $('#marketMsg').textContent = 'Instalado: ' + b.dataset.install;
+          renderSkills();
+        } catch (e) {
+          $('#marketMsg').textContent = 'Error: ' + (e.message || e);
         }
-        catch (e) { $('#marketMsg').textContent = 'Error: ' + (e.message || e); }
       };
     });
     $('#marketMsg').textContent = '';
-  } catch (e) { $('#marketMsg').textContent = 'Error: ' + (e.message || e); }
-  finally { btn.disabled = false; }
+  } catch (e) {
+    $('#marketMsg').textContent = 'Error: ' + (e.message || e);
+  } finally {
+    btn.disabled = false;
+  }
 };
 $('#skillsUpdateAllBtn').onclick = async () => {
   const btn = $('#skillsUpdateAllBtn');
   if (btn.disabled) return;
   // Actualizar es traer instrucciones nuevas de repos ajenos que el agente
   // obedecerá: no es un «update» inocuo y no se hace en silencio.
-  const yes = await askConfirm($('#skillsUpdateAllBtn'), '¿Actualizar todas las skills desde sus repos?', 'Traerá instrucciones nuevas de terceros que el agente obedecerá.');
+  const yes = await askConfirm(
+    $('#skillsUpdateAllBtn'),
+    '¿Actualizar todas las skills desde sus repos?',
+    'Traerá instrucciones nuevas de terceros que el agente obedecerá.',
+  );
   if (!yes) return;
   $('#marketMsg').textContent = 'Actualizando skills…';
   btn.disabled = true;
   try {
     const res = await window.sagitari.skillsUpdateAll();
-    const changed = res.filter(r => r.changed).length;
+    const changed = res.filter((r) => r.changed).length;
     $('#marketMsg').textContent = `${res.length} skills con origen · ${changed} actualizadas`;
     renderSkills();
-  } catch (e) { $('#marketMsg').textContent = 'Error: ' + (e.message || e); }
-  finally { btn.disabled = false; }
+  } catch (e) {
+    $('#marketMsg').textContent = 'Error: ' + (e.message || e);
+  } finally {
+    btn.disabled = false;
+  }
 };
 
 // ============ agent events ============
@@ -260,7 +350,10 @@ $('#skillsUpdateAllBtn').onclick = async () => {
 let streamRaf = 0;
 let streamTarget = null;
 function cancelStreamRender() {
-  if (streamRaf) { cancelAnimationFrame(streamRaf); streamRaf = 0; }
+  if (streamRaf) {
+    cancelAnimationFrame(streamRaf);
+    streamRaf = 0;
+  }
   streamTarget = null;
 }
 function scheduleStreamRender(holder) {
@@ -271,7 +364,7 @@ function scheduleStreamRender(holder) {
     const h = streamTarget;
     streamTarget = null;
     if (!h || !h.isConnected) return;
-    if (!h._openText) return;   // se congeló antes del frame: no se repinta nada
+    if (!h._openText) return; // se congeló antes del frame: no se repinta nada
     /* El segmento abierto se repinta EN SU SITIO (no se borra y re-anexa al
        final como antes): así cada tramo de narración queda donde nació, entre
        las tarjetas de herramientas que lo rodean, en orden cronológico. */
@@ -314,12 +407,13 @@ function freezeStream() {
    detrás: la franja de pasos es lo único que dice por dónde va el agente mientras
    trabaja. Se alimenta de los mismos eventos que ya usa el chat y con LA MISMA etiqueta
    humana (`K.tool`), para que diga lo mismo en los dos sitios. */
-const PASOS_VOZ_MAX = 5;   // la franja es un estado, no un historial: sin tope, una tarea
-                           // de cien herramientas la haría crecer sin fin (y sin verse)
+const PASOS_VOZ_MAX = 5; // la franja es un estado, no un historial: sin tope, una tarea
+// de cien herramientas la haría crecer sin fin (y sin verse)
 let pasosVoz = [];
 
 function pasoVoz(ev, ok, labelCustom) {
-  const label = labelCustom || (K.tool(ev.name).label + (ev.subagent && K.subagent(ev.subagent) ? ' · ' + K.subagent(ev.subagent).label : ''));
+  const label =
+    labelCustom || K.tool(ev.name).label + (ev.subagent && K.subagent(ev.subagent) ? ' · ' + K.subagent(ev.subagent).label : '');
   /* El `tool` abre el paso (queda «en curso») y el `tool_result` lo CIERRA marcándolo, en
      vez de añadir una fila nueva: el mismo trabajo saldría dos veces y, con cinco huecos,
      se comería él solo la franja. Si no hay paso abierto que cerrar —porque se recortó o
@@ -348,16 +442,28 @@ window.sagitari.onAgentEvent((ev) => {
        turno de voz: sin este filtro, una tarea que sigue corriendo pinta «Navegador» o
        «Captura de pantalla» en el panel mientras el usuario habla de otra cosa. */
     switch (ev.type) {
-      case 'status': feed(ev.text, 'pur'); break;
-      case 'tool': feed(ev.name || 'herramienta', 'pur'); break;
-      case 'tool_result': feed((ev.name || '') + ' — ' + String(ev.result || 'ok').slice(0, 90), (String(ev.result || '').startsWith('Error') ? 'err' : 'ok')); break;
+      case 'status':
+        feed(ev.text, 'pur');
+        break;
+      case 'tool':
+        feed(ev.name || 'herramienta', 'pur');
+        break;
+      case 'tool_result':
+        feed((ev.name || '') + ' — ' + String(ev.result || 'ok').slice(0, 90), String(ev.result || '').startsWith('Error') ? 'err' : 'ok');
+        break;
       case 'delegate_start':
         feed(etiquetaEquipo(ev), 'pur');
         break;
       case 'delegate_done': {
         const who = (K.subagent(ev.subagent) || {}).label || 'Subagente';
         const st = String(ev.status || 'OK').toUpperCase();
-        feed(who + ' — ' + (st === 'FAILED' ? 'falló' : (st === 'PARTIAL' ? 'a medias' : 'terminó')) + (ev.result ? ': ' + String(ev.result).slice(0, 80) : ''), st === 'FAILED' ? 'err' : 'ok');
+        feed(
+          who +
+            ' — ' +
+            (st === 'FAILED' ? 'falló' : st === 'PARTIAL' ? 'a medias' : 'terminó') +
+            (ev.result ? ': ' + String(ev.result).slice(0, 80) : ''),
+          st === 'FAILED' ? 'err' : 'ok',
+        );
         break;
       }
       case 'task_done':
@@ -370,7 +476,7 @@ window.sagitari.onAgentEvent((ev) => {
         if ($('#view-tasks').classList.contains('on')) renderTasks();
         break;
       case 'task_update':
-        feed(ev.note || ('Tarea: ' + ev.status), 'blu');
+        feed(ev.note || 'Tarea: ' + ev.status, 'blu');
         if ($('#view-tasks').classList.contains('on')) renderTasks();
         break;
       case 'guardrail':
@@ -381,9 +487,14 @@ window.sagitari.onAgentEvent((ev) => {
         feed('Error en una tarea en segundo plano', 'err');
         showToast(ev.message || 'Error en una tarea en segundo plano');
         break;
-      case 'confirm_request': showConfirm(ev); break;
-      case 'toast': showToast(ev.title + ': ' + ev.message); break;
-      default: break;   // delta/assistant_done/busy/stopped/image se ignoran
+      case 'confirm_request':
+        showConfirm(ev);
+        break;
+      case 'toast':
+        showToast(ev.title + ': ' + ev.message);
+        break;
+      default:
+        break; // delta/assistant_done/busy/stopped/image se ignoran
     }
     return;
   }
@@ -408,7 +519,7 @@ window.sagitari.onAgentEvent((ev) => {
           pendingTurn.plan = renderPlanCard(b, p.steps);
           pendingTurn.plan.next();
           b._stream = p.body;
-          b._openText = p.body;   // el segmento abierto enseña lo mismo que el stream
+          b._openText = p.body; // el segmento abierto enseña lo mismo que el stream
         }
       }
       scheduleStreamRender(b);
@@ -422,7 +533,7 @@ window.sagitari.onAgentEvent((ev) => {
     /* Razonamiento del modelo (solo llega si el usuario lo activó en Ajustes). Se pinta
        en su bloque y NUNCA en la burbuja ni en la voz: no es la respuesta. */
     case 'thinking_delta': {
-      if (ev.subagent) break;   // el de un subagente es trabajo interno (va en su tarjeta)
+      if (ev.subagent) break; // el de un subagente es trabajo interno (va en su tarjeta)
       const d = ensureThinkBlock();
       d._texto = (d._texto || '') + ev.text;
       d._desde = d._desde || Date.now();
@@ -437,13 +548,14 @@ window.sagitari.onAgentEvent((ev) => {
       const d = pendingTurn && pendingTurn.think;
       if (!d) break;
       if (typeof ev.text === 'string' && ev.text) d._texto = ev.text;
-      if (!String(d._texto || '').trim()) {   // el modelo no razonó nada: no hay bloque
+      if (!String(d._texto || '').trim()) {
+        // el modelo no razonó nada: no hay bloque
         d.remove();
         pendingTurn.think = null;
         break;
       }
-      const ms = (d._desde && d._hasta) ? (d._hasta - d._desde) : Number(ev.durationMs) || 0;
-      d._terminado = true;   // para el reloj
+      const ms = d._desde && d._hasta ? d._hasta - d._desde : Number(ev.durationMs) || 0;
+      d._terminado = true; // para el reloj
       d._ms = ms;
       metaRazonamiento(d);
       // SÍNCRONO a propósito: es el cierre del bloque (ver scheduleThinkRender)
@@ -455,12 +567,15 @@ window.sagitari.onAgentEvent((ev) => {
     // un reintento en otro modelo: lo que pensó el que falló no se mezcla con lo nuevo
     case 'thinking_reset': {
       const d = pendingTurn && pendingTurn.think;
-      if (d) { d.remove(); pendingTurn.think = null; }
+      if (d) {
+        d.remove();
+        pendingTurn.think = null;
+      }
       break;
     }
     // cada llamada a herramienta abre su propia tarjeta con argumentos y estado
     case 'tool':
-      freezeStream();   // la narración hasta aquí queda encima de esta tarjeta
+      freezeStream(); // la narración hasta aquí queda encima de esta tarjeta
       toolCard(ev);
       setChatStatus(K.tool(ev.name).verb + (ev.subagent && K.subagent(ev.subagent) ? ' — ' + K.subagent(ev.subagent).label : '') + '…');
       feed(K.tool(ev.name).label + (ev.subagent ? ' · ' + K.subagent(ev.subagent).label : ''), 'pur');
@@ -474,7 +589,7 @@ window.sagitari.onAgentEvent((ev) => {
       break;
     // arranque de una delegación: se pinta en el tablero del equipo al instante
     case 'delegate_start':
-      freezeStream();   // igual que con herramientas: intercalado cronológico
+      freezeStream(); // igual que con herramientas: intercalado cronológico
       equipoChip(ev);
       pasoVoz({ name: 'delegate', subagent: ev.subagent }, undefined, etiquetaEquipo(ev));
       setChatStatus(etiquetaEquipo(ev) + ' — trabajando…');
@@ -490,7 +605,12 @@ window.sagitari.onAgentEvent((ev) => {
       equipoCierra(ev);
       pasoVoz({ name: 'delegate', subagent: ev.subagent }, String(ev.status || 'OK').toUpperCase() !== 'FAILED', etiquetaEquipo(ev));
       agentStop();
-      feed(((K.subagent(ev.subagent) || {}).label || 'Subagente') + ' — ' + (String(ev.status || 'OK').toUpperCase() === 'FAILED' ? 'falló' : 'terminó'), String(ev.status || '').toUpperCase() === 'FAILED' ? 'err' : 'ok');
+      feed(
+        ((K.subagent(ev.subagent) || {}).label || 'Subagente') +
+          ' — ' +
+          (String(ev.status || 'OK').toUpperCase() === 'FAILED' ? 'falló' : 'terminó'),
+        String(ev.status || '').toUpperCase() === 'FAILED' ? 'err' : 'ok',
+      );
       break;
     case 'tool_result':
       completeToolCard(ev);
@@ -503,7 +623,8 @@ window.sagitari.onAgentEvent((ev) => {
     case 'image': {
       const b = ensureAssistantBubble();
       const img = document.createElement('img');
-      img.src = ev.dataUrl; img.className = 'shot';
+      img.src = ev.dataUrl;
+      img.className = 'shot';
       pinImage(img);
       b.appendChild(img);
       scroll();
@@ -522,7 +643,9 @@ window.sagitari.onAgentEvent((ev) => {
          que el markdown final): se guarda ANTES de cerrar la burbuja, porque
          `finishAssistant` suelta la referencia. Se pasa la narración completa
          (tramos congelados + abierto), no solo el tramo abierto. */
-      const leidoHastaAqui = ((pendingAssistant && pendingAssistant._frozenText) ? pendingAssistant._frozenText + '\n\n' : '') + ((pendingAssistant && pendingAssistant._stream) || ev.text);
+      const leidoHastaAqui =
+        (pendingAssistant && pendingAssistant._frozenText ? pendingAssistant._frozenText + '\n\n' : '') +
+        ((pendingAssistant && pendingAssistant._stream) || ev.text);
       finishAssistant(ev.text);
       busy = false;
       setSendMode();
@@ -577,7 +700,7 @@ window.sagitari.onAgentEvent((ev) => {
       refreshAgentsPanels();
       break;
     case 'task_update':
-      feed(ev.note || ('Tarea: ' + ev.status), 'blu');
+      feed(ev.note || 'Tarea: ' + ev.status, 'blu');
       if ($('#view-tasks').classList.contains('on')) renderTasks();
       break;
     case 'confirm_request':
@@ -592,11 +715,11 @@ window.sagitari.onAgentEvent((ev) => {
         applyModeTheme(currentRunMode);
         setChatStatus(K.mode(currentRunMode).tagline);
         feed('Sagitari está trabajando · ' + K.mode(currentRunMode).label, 'blu');
-        if (devMode) paintMeta();   // métricas del turno que arranca, no las del anterior
+        if (devMode) paintMeta(); // métricas del turno que arranca, no las del anterior
       } else {
         // terminó la ejecución: el color vuelve al modo que tengas elegido
         applyModeTheme(mode);
-        agentStop();                // sin ejecución no queda ningún agente vivo
+        agentStop(); // sin ejecución no queda ningún agente vivo
         // Un corte por guardarraíl sale del bucle SIN respuesta final, así que el
         // turno quedaba abierto: la respuesta siguiente se escribía DENTRO de la
         // burbuja anterior (encima de la pregunta recién enviada) y el turno se
@@ -645,7 +768,7 @@ window.sagitari.onAgentEvent((ev) => {
       {
         // el error se pinta DENTRO del turno cortado si lo había: sin duplicar
         // burbujas ni dejar una respuesta huérfana sin su causa
-        const target = (hadTurn && lastAssistantEl) ? lastAssistantEl : bubble('ai');
+        const target = hadTurn && lastAssistantEl ? lastAssistantEl : bubble('ai');
         const em = document.createElement('span');
         em.className = 'errmsg';
         // el fallo crudo del proveedor no dice nada al usuario: se traduce a una
@@ -658,7 +781,9 @@ window.sagitari.onAgentEvent((ev) => {
         const reintentar = document.createElement('button');
         reintentar.className = 'btn';
         reintentar.textContent = 'Reintentar';
-        reintentar.onclick = () => { window.sagitari.retryChat(); };
+        reintentar.onclick = () => {
+          window.sagitari.retryChat();
+        };
         em.appendChild(pista);
         em.appendChild(reintentar);
         target.appendChild(em);
@@ -681,7 +806,9 @@ window.sagitari.onAgentEvent((ev) => {
   }
 });
 
-function glowOffSoon() { setTimeout(() => window.sagitari.glow('off'), 2600); }
+function glowOffSoon() {
+  setTimeout(() => window.sagitari.glow('off'), 2600);
+}
 
 // ============ v1.1: confirmación de acciones + métricas de ejecución ============
 /* Cola FIFO de confirmaciones: con varias tareas en background (Ajustes permite
@@ -701,9 +828,11 @@ let currentConfirm = null;
    No hay dos caminos de respuesta: hay uno con dos puertas. */
 function pedirConfirmacionEnVoz(ev) {
   if (!ev || !window.VoiceMode || !window.VoiceMode.abierto()) return;
-  const texto = 'El agente quiere: ' + (ev.description || ev.tool)
-    + (confirmQueue.length > 1 ? ' · 1 de ' + confirmQueue.length : '')
-    + (ev.summary ? ' — ' + String(ev.summary).slice(0, 240) : '');
+  const texto =
+    'El agente quiere: ' +
+    (ev.description || ev.tool) +
+    (confirmQueue.length > 1 ? ' · 1 de ' + confirmQueue.length : '') +
+    (ev.summary ? ' — ' + String(ev.summary).slice(0, 240) : '');
   window.VoiceMode.pedirConfirmacion({
     texto,
     si: () => resolveConfirm(true),
@@ -730,7 +859,10 @@ function paintConfirm() {
   const bar = $('#confirmBar');
   const ev = confirmQueue[0];
   currentConfirm = ev || null;
-  if (!ev) { if (bar) bar.hidden = true; return; }
+  if (!ev) {
+    if (bar) bar.hidden = true;
+    return;
+  }
   pedirConfirmacionEnVoz(ev);
   const who = ev.runId ? ' (tarea en segundo plano)' : '';
   // con varias esperando se dice cuál se está viendo: «1 de 3»
@@ -782,8 +914,15 @@ $('#confirmNo').onclick = () => resolveConfirm(false);
 document.addEventListener('keydown', (e) => {
   const bar = $('#confirmBar');
   if (!bar || bar.hidden) return;
-  if (e.key === 'Escape') { e.preventDefault(); resolveConfirm(false); return; }
-  if (e.key === 'Enter' && document.activeElement !== bar && bar.contains(document.activeElement)) { e.preventDefault(); resolveConfirm(true); }
+  if (e.key === 'Escape') {
+    e.preventDefault();
+    resolveConfirm(false);
+    return;
+  }
+  if (e.key === 'Enter' && document.activeElement !== bar && bar.contains(document.activeElement)) {
+    e.preventDefault();
+    resolveConfirm(true);
+  }
 });
 
 /**
@@ -812,9 +951,11 @@ function askConfirm(anchor, message, detail) {
        por finish(): la promesa quedaba pendiente para siempre (el botón que la
        espera, disabled) y el listener de teclado, vivo. El observador la cierra
        como cancelada en cuanto deja de estar conectada. */
-    const mo = new MutationObserver(() => { if (!bar.isConnected) finish(false); });
+    const mo = new MutationObserver(() => {
+      if (!bar.isConnected) finish(false);
+    });
     const finish = (v) => {
-      if (done) return;                 // una barra se resuelve UNA vez
+      if (done) return; // una barra se resuelve UNA vez
       done = true;
       mo.disconnect();
       document.removeEventListener('keydown', onKey, true);
@@ -822,11 +963,19 @@ function askConfirm(anchor, message, detail) {
       resolve(v);
     };
     const onKey = (e) => {
-      if (e.key === 'Escape') { e.preventDefault(); e.stopPropagation(); finish(false); }
+      if (e.key === 'Escape') {
+        e.preventDefault();
+        e.stopPropagation();
+        finish(false);
+      }
       // Enter sólo confirma con el foco en un BOTÓN de la barra (no en la barra,
       // que ahora es la que recibe el foco al abrirse): si el usuario se ha ido a
       // escribir, o acaba de aparecer la tarjeta, Enter no borra nada
-      else if (e.key === 'Enter' && document.activeElement !== bar && bar.contains(document.activeElement)) { e.preventDefault(); e.stopPropagation(); finish(true); }
+      else if (e.key === 'Enter' && document.activeElement !== bar && bar.contains(document.activeElement)) {
+        e.preventDefault();
+        e.stopPropagation();
+        finish(true);
+      }
     };
     bar.querySelector('[data-ok]').onclick = () => finish(true);
     bar.querySelector('[data-no]').onclick = () => finish(false);
@@ -841,21 +990,41 @@ function askConfirm(anchor, message, detail) {
   });
 }
 
-let devMode = false;
+const devMode = false;
 async function paintMeta() {
   const line = $('#devMeta');
   if (!line) return;
-  if (!devMode) { line.hidden = true; return; }
+  if (!devMode) {
+    line.hidden = true;
+    return;
+  }
   try {
     const m = await window.sagitari.metaGet();
     const r = m.run || {};
     const gr = m.guardrails || {};
     line.hidden = false;
-    line.textContent = (m.model || '—') + ' · turno: ' + (r.tokensIn || 0) + ' in / ' + (r.tokensOut || 0) + ' out tok · '
-      + (r.llmCalls || 0) + ' llamadas · ' + (r.toolCalls || 0) + ' herramientas · ' + (r.lastLatencyMs || 0) + ' ms'
-      + ' · límites: ' + (gr.maxSteps || '∞') + ' pasos / ' + (gr.maxDurationMs ? Math.round(gr.maxDurationMs / 60000) + ' min' : '∞')
-      + ' / silencio ' + ((CFG.settings.llmTimeoutMs ?? 120000) ? Math.round((CFG.settings.llmTimeoutMs ?? 120000) / 1000) + ' s' : '∞');
-  } catch { line.hidden = true; }
+    line.textContent =
+      (m.model || '—') +
+      ' · turno: ' +
+      (r.tokensIn || 0) +
+      ' in / ' +
+      (r.tokensOut || 0) +
+      ' out tok · ' +
+      (r.llmCalls || 0) +
+      ' llamadas · ' +
+      (r.toolCalls || 0) +
+      ' herramientas · ' +
+      (r.lastLatencyMs || 0) +
+      ' ms' +
+      ' · límites: ' +
+      (gr.maxSteps || '∞') +
+      ' pasos / ' +
+      (gr.maxDurationMs ? Math.round(gr.maxDurationMs / 60000) + ' min' : '∞') +
+      ' / silencio ' +
+      ((CFG.settings.llmTimeoutMs ?? 120000) ? Math.round((CFG.settings.llmTimeoutMs ?? 120000) / 1000) + ' s' : '∞');
+  } catch {
+    line.hidden = true;
+  }
 }
 setInterval(paintMeta, 2000);
 // v1.3: la vista Tareas se refresca sola SÓLO mientras está visible (estado en vivo);
@@ -895,11 +1064,11 @@ async function enviarTexto(text, atts = []) {
   // el turno del usuario queda sellado con el modo con el que se envió: en el
   // historial se ve de un vistazo qué respondió cada modo
   currentRunMode = K.mode(mode).key;
-  dayStamp();   // si el hilo cruza la medianoche, el separador sale con la pregunta
+  dayStamp(); // si el hilo cruza la medianoche, el separador sale con la pregunta
   const b = bubble('user', { mode: currentRunMode });
   b.textContent = text;
   // los adjuntos se ven en la burbuja (miniaturas y nombres), no solo en el texto
-  const visAtts = atts.filter(a => a.kind === 'image' ? a.dataUrl : true);
+  const visAtts = atts.filter((a) => (a.kind === 'image' ? a.dataUrl : true));
   if (visAtts.length) paintAttachments(b, visAtts);
   setChatTitle(text || (atts[0] && atts[0].name) || 'Nueva conversación');
   pinned = true;
@@ -931,17 +1100,24 @@ async function sendFrom(elId) {
   // Mientras el agente trabaja, el botón es «Detener»: debe funcionar aunque el
   // campo esté vacío (lo habitual, porque el texto se limpió al enviarlo).
   // Por eso este caso va ANTES de la comprobación de texto vacío.
-  if (busy) { window.sagitari.stopChat(); feed('Deteniendo…', 'err'); return; }
+  if (busy) {
+    window.sagitari.stopChat();
+    feed('Deteniendo…', 'err');
+    return;
+  }
   const text = el.value.trim();
   const atts = pendingAttachments.slice();
   if (!text && !atts.length) return;
-  el.value = ''; el.style.height = '';
+  el.value = '';
+  el.style.height = '';
   clearAttachments();
   // si el dictado estaba activo, detenerlo y limpiar su estado visual
   if (listening) {
     listening = false;
-    voiceBuffer = ''; lastPartial = ''; vozBase = '';
-    $$('.cbtn').forEach(b => b.classList.remove('on'));
+    voiceBuffer = '';
+    lastPartial = '';
+    vozBase = '';
+    $$('.cbtn').forEach((b) => b.classList.remove('on'));
     el.classList.remove('rec');
     window.sagitari.glow('off');
     await window.sagitari.voiceStop();
@@ -951,51 +1127,72 @@ async function sendFrom(elId) {
 
 // ============ adjuntos: archivos, documentos e imágenes ============
 const MAX_ATTACHMENTS = 8;
-let pendingAttachments = [];   // { name, kind: 'image'|'text'|'binary', size, dataUrl?, text?, note? }
+let pendingAttachments = []; // { name, kind: 'image'|'text'|'binary', size, dataUrl?, text?, note? }
 
 function renderAttachStrip() {
   const strip = $('#attachStrip');
-  if (!pendingAttachments.length) { strip.hidden = true; strip.innerHTML = ''; return; }
+  if (!pendingAttachments.length) {
+    strip.hidden = true;
+    strip.innerHTML = '';
+    return;
+  }
   strip.hidden = false;
   strip.innerHTML = '';
   for (const a of pendingAttachments) {
     const chip = document.createElement('div');
     chip.className = 'atchip' + (a.kind === 'image' ? ' img' : a.kind === 'binary' ? ' bin' : '');
     if (a.kind === 'image' && a.dataUrl) {
-      const im = document.createElement('img'); im.src = a.dataUrl; im.alt = '';
+      const im = document.createElement('img');
+      im.src = a.dataUrl;
+      im.alt = '';
       chip.appendChild(im);
     } else {
-      const icn = document.createElement('span'); icn.className = 'ic'; icn.innerHTML = ic(a.kind === 'binary' ? 'file' : 'doc');
+      const icn = document.createElement('span');
+      icn.className = 'ic';
+      icn.innerHTML = ic(a.kind === 'binary' ? 'file' : 'doc');
       chip.appendChild(icn);
     }
-    const meta = document.createElement('span'); meta.className = 'nm';
+    const meta = document.createElement('span');
+    meta.className = 'nm';
     meta.textContent = a.name + (a.kind === 'binary' && a.note ? ' · ' + a.note : '');
     meta.title = a.name + ' · ' + (a.size ? Math.round(a.size / 1024) + ' KB' : '');
     chip.appendChild(meta);
-    const x = document.createElement('button'); x.className = 'rm'; x.title = 'Quitar'; x.innerHTML = ic('x');
-    x.onclick = () => { pendingAttachments = pendingAttachments.filter(p => p !== a); renderAttachStrip(); };
+    const x = document.createElement('button');
+    x.className = 'rm';
+    x.title = 'Quitar';
+    x.innerHTML = ic('x');
+    x.onclick = () => {
+      pendingAttachments = pendingAttachments.filter((p) => p !== a);
+      renderAttachStrip();
+    };
     chip.appendChild(x);
     strip.appendChild(chip);
   }
 }
-function clearAttachments() { pendingAttachments = []; renderAttachStrip(); }
+function clearAttachments() {
+  pendingAttachments = [];
+  renderAttachStrip();
+}
 
 /* Miniaturas de los adjuntos dentro de la burbuja del usuario (en vivo y al
    recargar el historial). Solo visual: el contenido real ya viajó al modelo. */
 function paintAttachments(bubbleEl, atts) {
   const box = document.createElement('div');
   box.className = 'msg-atts';
-  for (const a of (atts || [])) {
+  for (const a of atts || []) {
     if (a.kind === 'image' && a.dataUrl) {
       const im = document.createElement('img');
-      im.src = a.dataUrl; im.alt = a.name; im.className = 'msg-att-img';
-      pinImage(im);   // la miniatura carga tarde: reajusta el final si seguías el hilo
+      im.src = a.dataUrl;
+      im.alt = a.name;
+      im.className = 'msg-att-img';
+      pinImage(im); // la miniatura carga tarde: reajusta el final si seguías el hilo
       im.onclick = () => window.sagitari.openExternal && /^https?:/.test(a.dataUrl) && window.sagitari.openExternal(a.dataUrl);
       box.appendChild(im);
     } else {
       const chip = document.createElement('span');
       chip.className = 'msg-att-file' + (a.kind === 'binary' ? ' bin' : '');
-      chip.innerHTML = ic(a.kind === 'binary' ? 'file' : 'doc') + `<b></b><small>${a.size ? Math.round(a.size / 1024) + ' KB' : ''}</small>`;
+      chip.innerHTML =
+        ic(a.kind === 'binary' ? 'file' : 'doc') + `<b></b><small>${a.size ? Math.round(a.size / 1024) + ' KB' : ''}</small>`;
       chip.querySelector('b').textContent = a.name;
       box.appendChild(chip);
     }
@@ -1004,10 +1201,16 @@ function paintAttachments(bubbleEl, atts) {
 }
 
 async function addAttachmentPath(p) {
-  if (pendingAttachments.length >= MAX_ATTACHMENTS) { showToast(`Máximo ${MAX_ATTACHMENTS} adjuntos por mensaje`); return; }
+  if (pendingAttachments.length >= MAX_ATTACHMENTS) {
+    showToast(`Máximo ${MAX_ATTACHMENTS} adjuntos por mensaje`);
+    return;
+  }
   const r = await window.sagitari.attachmentsRead(p);
-  if (!r || !r.ok) { showToast('No se pudo leer: ' + ((r && r.error) || 'error desconocido')); return; }
-  if (pendingAttachments.some(a => a.name === r.att.name && a.size === r.att.size)) return;   // ya está
+  if (!r || !r.ok) {
+    showToast('No se pudo leer: ' + ((r && r.error) || 'error desconocido'));
+    return;
+  }
+  if (pendingAttachments.some((a) => a.name === r.att.name && a.size === r.att.size)) return; // ya está
   pendingAttachments.push(r.att);
   renderAttachStrip();
   goto('chat');
@@ -1019,24 +1222,35 @@ async function addAttachmentPath(p) {
 function filePathOf(f) {
   if (!f) return '';
   try {
-    if (f.path) return f.path;   // versiones antiguas / objetos ya resueltos
+    if (f.path) return f.path; // versiones antiguas / objetos ya resueltos
     return (window.sagitari.filePath && window.sagitari.filePath(f)) || '';
-  } catch { return ''; }
+  } catch {
+    return '';
+  }
 }
 
 async function addAttachmentFiles(files) {
   const list = [...(files || [])];
   const room = MAX_ATTACHMENTS - pendingAttachments.length;
-  if (room <= 0) { showToast(`Máximo ${MAX_ATTACHMENTS} adjuntos por mensaje`); return; }
+  if (room <= 0) {
+    showToast(`Máximo ${MAX_ATTACHMENTS} adjuntos por mensaje`);
+    return;
+  }
   // recorta al hueco REAL: antes cortaba a 8 y los que sobraban se perdían sin aviso
   if (list.length > room) showToast(`Máximo ${MAX_ATTACHMENTS} adjuntos por mensaje`);
   for (const f of list.slice(0, room)) {
     if (f && f.path) await addAttachmentPath(f.path);
     else if (f && f.type && f.type.startsWith('image/') && f.dataUrl) {
       // imagen pegada/drag&drop desde fuera del sistema de ficheros
-      if (pendingAttachments.length < MAX_ATTACHMENTS && !pendingAttachments.some(a => a.dataUrl === f.dataUrl)) {
-        pendingAttachments.push({ name: f.name || 'imagen pegada', kind: 'image', size: Math.round((f.dataUrl.length * 3) / 4), dataUrl: f.dataUrl });
-        renderAttachStrip(); goto('chat');
+      if (pendingAttachments.length < MAX_ATTACHMENTS && !pendingAttachments.some((a) => a.dataUrl === f.dataUrl)) {
+        pendingAttachments.push({
+          name: f.name || 'imagen pegada',
+          kind: 'image',
+          size: Math.round((f.dataUrl.length * 3) / 4),
+          dataUrl: f.dataUrl,
+        });
+        renderAttachStrip();
+        goto('chat');
       }
     }
   }
@@ -1045,18 +1259,25 @@ async function addAttachmentFiles(files) {
 $('#chatAttach').onclick = async () => {
   try {
     const paths = await window.sagitari.attachmentsPick();
-    for (const p of (paths || [])) await addAttachmentPath(p);
-  } catch (e) { showToast('No se pudieron adjuntar archivos: ' + ((e && e.message) || e)); }
+    for (const p of paths || []) await addAttachmentPath(p);
+  } catch (e) {
+    showToast('No se pudieron adjuntar archivos: ' + ((e && e.message) || e));
+  }
 };
 
 // drag & drop sobre toda la vista del chat
 const chatView = $('#view-chat');
-['dragover', 'dragenter'].forEach(t => chatView.addEventListener(t, (e) => { e.preventDefault(); chatView.classList.add('dragging'); }));
-['dragleave', 'drop', 'dragend'].forEach(t => chatView.addEventListener(t, () => chatView.classList.remove('dragging')));
+['dragover', 'dragenter'].forEach((t) =>
+  chatView.addEventListener(t, (e) => {
+    e.preventDefault();
+    chatView.classList.add('dragging');
+  }),
+);
+['dragleave', 'drop', 'dragend'].forEach((t) => chatView.addEventListener(t, () => chatView.classList.remove('dragging')));
 chatView.addEventListener('drop', (e) => {
   e.preventDefault();
-  const files = [...(e.dataTransfer || {}).files || []];
-  if (files.length) addAttachmentFiles(files.map(f => ({ path: filePathOf(f), name: f.name, type: f.type })));
+  const files = [...((e.dataTransfer || {}).files || [])];
+  if (files.length) addAttachmentFiles(files.map((f) => ({ path: filePathOf(f), name: f.name, type: f.type })));
   else {
     const txt = (e.dataTransfer || {}).getData('text/uri-list') || (e.dataTransfer || {}).getData('text/plain');
     if (txt && /^data:image\//.test(txt.trim())) addAttachmentFiles([{ dataUrl: txt.trim(), name: 'imagen pegada' }]);
@@ -1066,11 +1287,14 @@ chatView.addEventListener('drop', (e) => {
 // pegar imágenes directamente en el compositor
 $('#chatInput').addEventListener('paste', (e) => {
   const items = [...((e.clipboardData || {}).items || [])];
-  const imgs = items.filter(it => it.type && it.type.startsWith('image/'));
+  const imgs = items.filter((it) => it.type && it.type.startsWith('image/'));
   if (!imgs.length) return;
   // con el cupo lleno se avisa ANTES de bloquear el pegado: un slice(0,0) se lo
   // tragaba en silencio y el usuario creía que no había funcionado
-  if (pendingAttachments.length >= MAX_ATTACHMENTS) { showToast(`Máximo ${MAX_ATTACHMENTS} adjuntos por mensaje`); return; }
+  if (pendingAttachments.length >= MAX_ATTACHMENTS) {
+    showToast(`Máximo ${MAX_ATTACHMENTS} adjuntos por mensaje`);
+    return;
+  }
   e.preventDefault();
   for (const it of imgs.slice(0, MAX_ATTACHMENTS - pendingAttachments.length)) {
     const blob = it.getAsFile && it.getAsFile();
@@ -1090,16 +1314,29 @@ const skillMenu = $('#skillMenu');
 let skillList = [];
 let skillIdx = -1;
 async function refreshSkillList() {
-  try { skillList = (await window.sagitari.skillsList()).filter(s => s.enabled); } catch { skillList = []; }
+  try {
+    skillList = (await window.sagitari.skillsList()).filter((s) => s.enabled);
+  } catch {
+    skillList = [];
+  }
 }
 function renderSkillMenu(query) {
   const q = (query || '').toLowerCase();
-  const items = skillList.filter(s => !q || s.name.toLowerCase().includes(q) || (s.description || '').toLowerCase().includes(q));
-  if (!items.length) { skillMenu.hidden = true; return; }
-  skillMenu.innerHTML = `<div class="sm-head">SKILLS — escribe para filtrar</div>` + items.map((s, i) =>
-    `<div class="sm-item${i === skillIdx ? ' on' : ''}" data-i="${i}">
+  const items = skillList.filter((s) => !q || s.name.toLowerCase().includes(q) || (s.description || '').toLowerCase().includes(q));
+  if (!items.length) {
+    skillMenu.hidden = true;
+    return;
+  }
+  skillMenu.innerHTML =
+    `<div class="sm-head">SKILLS — escribe para filtrar</div>` +
+    items
+      .map(
+        (s, i) =>
+          `<div class="sm-item${i === skillIdx ? ' on' : ''}" data-i="${i}">
       <span class="tc-mark">${ic('zap')}</span><span class="sm-name">${esc(s.name)}</span><span class="sm-desc">${esc(s.description || '')}</span>
-    </div>`).join('');
+    </div>`,
+      )
+      .join('');
   skillMenu.hidden = false;
   skillMenu._items = items;
   const on = skillMenu.querySelector('.sm-item.on');
@@ -1111,10 +1348,18 @@ function openSkillMenu() {
   // no debe reabrirlo (si no, Enter volvería a elegir en vez de enviar)
   if (v === skillMenu._for) return;
   const m = v.match(/^\/([\w-]*)\s*$/);
-  if (m) { refreshSkillList().then(() => { skillIdx = skillList.length ? 0 : -1; renderSkillMenu(m[1]); }); }
-  else closeSkillMenu();
+  if (m) {
+    refreshSkillList().then(() => {
+      skillIdx = skillList.length ? 0 : -1;
+      renderSkillMenu(m[1]);
+    });
+  } else closeSkillMenu();
 }
-function closeSkillMenu() { skillMenu.hidden = true; skillIdx = -1; skillMenu._for = $('#chatInput').value; }
+function closeSkillMenu() {
+  skillMenu.hidden = true;
+  skillIdx = -1;
+  skillMenu._for = $('#chatInput').value;
+}
 function chooseSkill(name) {
   const rest = $('#chatInput').value.replace(/^\/[\w-]*\s*/, '');
   $('#chatInput').value = '/' + name + (rest ? ' ' + rest : ' ');
@@ -1122,15 +1367,38 @@ function chooseSkill(name) {
   $('#chatInput').focus();
 }
 $('#chatInput').addEventListener('input', openSkillMenu);
-$('#chatInput').addEventListener('focus', () => { if ($('#chatInput').value.startsWith('/')) openSkillMenu(); });
+$('#chatInput').addEventListener('focus', () => {
+  if ($('#chatInput').value.startsWith('/')) openSkillMenu();
+});
 $('#chatInput').addEventListener('keydown', (e) => {
   if (!skillMenu.hidden) {
-    if (e.key === 'ArrowDown') { e.preventDefault(); skillIdx = (skillIdx + 1) % skillMenu._items.length; renderSkillMenu($('#chatInput').value.replace(/^\/[\w-]*/, '')); return; }
-    if (e.key === 'ArrowUp') { e.preventDefault(); skillIdx = (skillIdx - 1 + skillMenu._items.length) % skillMenu._items.length; renderSkillMenu($('#chatInput').value.replace(/^\/[\w-]*/, '')); return; }
-    if (e.key === 'Enter' || e.key === 'Tab') { e.preventDefault(); const it = skillMenu._items[skillIdx]; if (it) chooseSkill(it.name); return; }
-    if (e.key === 'Escape') { closeSkillMenu(); return; }
+    if (e.key === 'ArrowDown') {
+      e.preventDefault();
+      skillIdx = (skillIdx + 1) % skillMenu._items.length;
+      renderSkillMenu($('#chatInput').value.replace(/^\/[\w-]*/, ''));
+      return;
+    }
+    if (e.key === 'ArrowUp') {
+      e.preventDefault();
+      skillIdx = (skillIdx - 1 + skillMenu._items.length) % skillMenu._items.length;
+      renderSkillMenu($('#chatInput').value.replace(/^\/[\w-]*/, ''));
+      return;
+    }
+    if (e.key === 'Enter' || e.key === 'Tab') {
+      e.preventDefault();
+      const it = skillMenu._items[skillIdx];
+      if (it) chooseSkill(it.name);
+      return;
+    }
+    if (e.key === 'Escape') {
+      closeSkillMenu();
+      return;
+    }
   }
-  if (e.key === 'Enter' && !e.shiftKey) { e.preventDefault(); sendFrom('#chatInput'); }
+  if (e.key === 'Enter' && !e.shiftKey) {
+    e.preventDefault();
+    sendFrom('#chatInput');
+  }
 });
 skillMenu.addEventListener('mousedown', (e) => {
   const el = e.target.closest('.sm-item');
@@ -1139,15 +1407,19 @@ skillMenu.addEventListener('mousedown', (e) => {
   const it = skillMenu._items[+el.dataset.i];
   if (it) chooseSkill(it.name);
 });
-document.addEventListener('click', (e) => { if (!skillMenu.contains(e.target) && e.target.id !== 'chatInput') closeSkillMenu(); });
+document.addEventListener('click', (e) => {
+  if (!skillMenu.contains(e.target) && e.target.id !== 'chatInput') closeSkillMenu();
+});
 // sugerencias del estado vacío del chat: rellenan el compositor, no envían
-$$('.ce-hint').forEach(c => c.addEventListener('click', () => {
-  if (c.dataset.goto) return goto(c.dataset.goto);
-  const input = $('#chatInput');
-  input.value = c.dataset.fill || '';
-  autoGrow(input);
-  input.focus();
-}));
+$$('.ce-hint').forEach((c) =>
+  c.addEventListener('click', () => {
+    if (c.dataset.goto) return goto(c.dataset.goto);
+    const input = $('#chatInput');
+    input.value = c.dataset.fill || '';
+    autoGrow(input);
+    input.focus();
+  }),
+);
 
 // ============ voice ============
 // Auto-ajuste de altura de los composers (también al escribir a mano)
@@ -1160,8 +1432,8 @@ $('#chatInput').addEventListener('input', () => autoGrow($('#chatInput')));
 // Dictado continuo y acumulativo: los finales se CONCATENAN en el input, no lo
 // sobrescriben. El micrófono sigue activo hasta que lo apagas o envías — nunca
 // se envía solo a mitad de frase.
-let voiceBuffer = '';      // texto ya confirmado (de finales anteriores)
-let lastPartial = '';      // hipótesis en curso (para reemplazar en el input)
+let voiceBuffer = ''; // texto ya confirmado (de finales anteriores)
+let lastPartial = ''; // hipótesis en curso (para reemplazar en el input)
 /* Lo que ya había escrito el usuario al empezar a dictar: el dictado se compone SOBRE
    ello. El comentario de arriba prometía no sobrescribir el input, pero la primera
    hipótesis parcial lo vaciaba y se comía el prompt a medio escribir. */
@@ -1169,7 +1441,9 @@ let vozBase = '';
 function paintVoice(partial) {
   const el = $('#chatInput');
   const text = (vozBase + voiceBuffer + (partial || '')).trimStart();
-  if (el.value !== text) { el.value = text; }
+  if (el.value !== text) {
+    el.value = text;
+  }
   el.classList.toggle('rec', true);
   autoGrow(el);
 }
@@ -1179,8 +1453,10 @@ function wireMic(btnId) {
     // El micro es la puerta del modo voz. Con Alt se conserva el dictado de siempre,
     // que sigue siendo lo cómodo para escribir un prompt largo y revisarlo.
     if (!e.altKey) {
-      if (window.VoiceMode.abierto()) { await window.VoiceMode.cerrar(); await cerrarTapPcm(); }
-      else {
+      if (window.VoiceMode.abierto()) {
+        await window.VoiceMode.cerrar();
+        await cerrarTapPcm();
+      } else {
         /* La lectura del chat comparte el AudioContext de la sesión, y al abrir el modo
            voz se reutiliza: sin soltar antes lo que estuviera sonando, una frase a medias
            del chat seguía colgada de un buffer source sin dueño y la primera frase del
@@ -1195,13 +1471,16 @@ function wireMic(btnId) {
       return;
     }
     if (listening) {
-      listening = false; btn.classList.remove('on');
+      listening = false;
+      btn.classList.remove('on');
       vozBase = '';
       window.sagitari.glow('off');
       await window.sagitari.voiceStop();
     } else {
-      listening = true; btn.classList.add('on');
-      voiceBuffer = ''; lastPartial = '';
+      listening = true;
+      btn.classList.add('on');
+      voiceBuffer = '';
+      lastPartial = '';
       const ya = $('#chatInput').value.replace(/\s+$/, '');
       vozBase = ya ? ya + ' ' : '';
       window.sagitari.glow('listen', 'voice');
@@ -1221,16 +1500,27 @@ wireMic('#chatMic');
    guarda UNA frase en cola y sale sola cuando el agente queda libre. */
 let vozEnEspera = null;
 function vaciarColaVoz() {
-  if (vozEnEspera && !busy) { const t = vozEnEspera; vozEnEspera = null; enviarTexto(t); }
+  if (vozEnEspera && !busy) {
+    const t = vozEnEspera;
+    vozEnEspera = null;
+    enviarTexto(t);
+  }
 }
 window.VoiceMode.setEnviar((text) => {
-  if (busy) { vozEnEspera = text; window.VoiceMode.handle({ type: 'notice', text: 'Te he oído; lo envío en cuanto termine lo anterior.' }); return; }
+  if (busy) {
+    vozEnEspera = text;
+    window.VoiceMode.handle({ type: 'notice', text: 'Te he oído; lo envío en cuanto termine lo anterior.' });
+    return;
+  }
   return enviarTexto(text);
 });
 window.sagitari.onVoiceEvent((ev) => {
   /* El proceso principal puede ordenar reabrir el tap (voice:rescue con whisper de
      guardia): su captura es la única fuente de audio del dictado local. */
-  if (ev && ev.type === 'reabrir-tap') { reabrirTapVoz(); return; }
+  if (ev && ev.type === 'reabrir-tap') {
+    reabrirTapVoz();
+    return;
+  }
   window.VoiceMode.handle(ev);
   if (ev && (ev.type === 'notice' || ev.type === 'state')) actualizarEstadoMotorEscucha();
 });
@@ -1252,16 +1542,20 @@ let __tapFallos = 0;
 function enviarPcmAlMotor(f, srOrigen, estadoPcm) {
   const srDestino = 16000;
   const comb = new Float32Array(estadoPcm.resto.length + f.length);
-  comb.set(estadoPcm.resto, 0); comb.set(f, estadoPcm.resto.length);
+  comb.set(estadoPcm.resto, 0);
+  comb.set(f, estadoPcm.resto.length);
   const fuera = [];
   while (estadoPcm.pos + 1 < comb.length) {
-    const i0 = Math.floor(estadoPcm.pos), frac = estadoPcm.pos - i0;
-    const v0 = comb[i0], v1 = comb[i0 + 1];
+    const i0 = Math.floor(estadoPcm.pos),
+      frac = estadoPcm.pos - i0;
+    const v0 = comb[i0],
+      v1 = comb[i0 + 1];
     fuera.push(Math.max(-32768, Math.min(32767, Math.round((v0 + (v1 - v0) * frac) * 32767))));
     estadoPcm.pos += RATIO_PCM(srOrigen, srDestino);
   }
   const corta = Math.floor(estadoPcm.pos);
-  estadoPcm.resto = comb.slice(corta); estadoPcm.pos -= corta;
+  estadoPcm.resto = comb.slice(corta);
+  estadoPcm.pos -= corta;
   if (!fuera.length) return;
   const b = new Int16Array(fuera.length);
   for (let i = 0; i < fuera.length; i++) b[i] = fuera[i];
@@ -1274,7 +1568,8 @@ function enviarPcmAlMotor(f, srOrigen, estadoPcm) {
 const RATIO_PCM = (srOrigen, srDestino) => srOrigen / srDestino;
 async function abrirTapPcm() {
   if (__tapPcm) return;
-  let stream = null, ctx = null;
+  let stream = null,
+    ctx = null;
   try {
     if (!window.VoiceMode || !window.VoiceMode.abierto()) return;
     if (!(await window.sagitari.voicePcmActivo())) return;
@@ -1284,48 +1579,71 @@ async function abrirTapPcm() {
     /* SIN sampleRate forzado (ver enviarPcmAlMotor) y con resume: un contexto
        suspendido no procesa el grafo ni entrega un solo chunk. */
     ctx = new AudioCtx();
-    if (ctx.state === 'suspended') { try { await ctx.resume(); } catch {} }
+    if (ctx.state === 'suspended') {
+      try {
+        await ctx.resume();
+      } catch {}
+    }
     const fuente = ctx.createMediaStreamSource(stream);
     /* Gain a CERO entre el tap y el destino: el nodo cuelga del grafo (Chromium lo
        procesa siempre) pero devuelve ni un mito del micro a los altavoces. Antes el
        nodo quedaba colgando solo — un grafo sin destino puede no procesarse nunca. */
-    const mudo = ctx.createGain(); mudo.gain.value = 0;
+    const mudo = ctx.createGain();
+    mudo.gain.value = 0;
     const estadoPcm = { resto: new Float32Array(0), pos: 0 };
     const enviar = (f) => enviarPcmAlMotor(f, ctx.sampleRate, estadoPcm);
     let nodo;
     try {
-      await ctx.audioWorklet.addModule(URL.createObjectURL(new Blob([
-        'class TapPCM extends AudioWorkletProcessor {' +
-        '  process(inputs) {' +
-        '    const ch = inputs[0] && inputs[0][0];' +
-        '    if (ch) this.port.postMessage(ch.slice(0));' +
-        '    return true;' +
-        '  }' +
-        '}' +
-        'registerProcessor("tap-pcm", TapPCM);'
-      ], { type: 'text/javascript' })));
+      await ctx.audioWorklet.addModule(
+        URL.createObjectURL(
+          new Blob(
+            [
+              'class TapPCM extends AudioWorkletProcessor {' +
+                '  process(inputs) {' +
+                '    const ch = inputs[0] && inputs[0][0];' +
+                '    if (ch) this.port.postMessage(ch.slice(0));' +
+                '    return true;' +
+                '  }' +
+                '}' +
+                'registerProcessor("tap-pcm", TapPCM);',
+            ],
+            { type: 'text/javascript' },
+          ),
+        ),
+      );
       nodo = new AudioWorkletNode(ctx, 'tap-pcm');
       /* Un procesador que revienta en el hilo de audio no lanza aquí: lo cuenta y
          lo dice — sin esto, un tap muerto era un panel «Escuchando» para siempre. */
-      nodo.onprocessorerror = () => { __tapFallos++; showToast('Dictado local: el capturador de audio falló; cierra y reabre el modo voz.'); };
+      nodo.onprocessorerror = () => {
+        __tapFallos++;
+        showToast('Dictado local: el capturador de audio falló; cierra y reabre el modo voz.');
+      };
       nodo.port.onmessage = (e) => enviar(e.data);
       fuente.connect(nodo);
     } catch (eWorklet) {
       /* Respaldo (CSP restrictiva o Chromium viejo): ScriptProcessor hace el mismo
          trabajo en el hilo principal — algo más de ruido, pero audio de verdad. */
       nodo = ctx.createScriptProcessor(1024, 1, 1);
-      nodo.onaudioprocess = (ev) => { const ch = ev.inputBuffer.getChannelData(0); enviar(ch); };
+      nodo.onaudioprocess = (ev) => {
+        const ch = ev.inputBuffer.getChannelData(0);
+        enviar(ch);
+      };
       fuente.connect(nodo);
     }
-    nodo.connect(mudo); mudo.connect(ctx.destination);
+    nodo.connect(mudo);
+    mudo.connect(ctx.destination);
     __tapPcm = { stream, ctx, nodo, mudo };
     __tapFallos = 0;
   } catch (e) {
     /* ANTES este catch referenciaba variables fuera de su ámbito y moría en silencio:
        el tap moría y el panel se quedaba «Escuchando» sin una sola pista. Ahora se
        suelta SOLO lo que se llegó a adquirir y el fallo SE MUESTRA. */
-    try { if (stream) stream.getTracks().forEach((t) => t.stop()); } catch {}
-    try { if (ctx && ctx.state !== 'closed') ctx.close(); } catch {}
+    try {
+      if (stream) stream.getTracks().forEach((t) => t.stop());
+    } catch {}
+    try {
+      if (ctx && ctx.state !== 'closed') ctx.close();
+    } catch {}
     __tapFallos++;
     showToast('Dictado local: no he podido enganchar el micrófono (' + (e && e.message ? e.message : e) + ').');
     console.error('[tap-pcm] fallo al abrir:', e);
@@ -1335,24 +1653,44 @@ async function abrirTapPcm() {
 /* Cierra el tap: sin panel abierto no hay nadie transcribiendo, y el micro no debe
    quedar capturando para nadie. */
 async function cerrarTapPcm() {
-  const tap = __tapPcm; __tapPcm = null;
+  const tap = __tapPcm;
+  __tapPcm = null;
   if (!tap) return;
-  try { tap.nodo.port.onmessage = null; } catch {}
-  try { tap.nodo.onaudioprocess = null; } catch {}
-  try { tap.nodo.disconnect(); } catch {}
-  try { tap.mudo.disconnect(); } catch {}
-  try { tap.stream.getTracks().forEach((t) => t.stop()); } catch {}
-  try { if (tap.ctx.state !== 'closed') await tap.ctx.close(); } catch {}
+  try {
+    tap.nodo.port.onmessage = null;
+  } catch {}
+  try {
+    tap.nodo.onaudioprocess = null;
+  } catch {}
+  try {
+    tap.nodo.disconnect();
+  } catch {}
+  try {
+    tap.mudo.disconnect();
+  } catch {}
+  try {
+    tap.stream.getTracks().forEach((t) => t.stop());
+  } catch {}
+  try {
+    if (tap.ctx.state !== 'closed') await tap.ctx.close();
+  } catch {}
 }
 
 /* El panel avisa al abrir y al cerrar (botón, Esc, «adiós»): aquí se engancha y se
    suelta el tap de micrófono del dictado local, sea cual sea la puerta. Un único dueño
    del ciclo de vida — el panel — evita dos micros abiertos por llamadas dobles. */
-window.__alAbrirModoVoz = () => { abrirTapPcm(); };
-window.__alCerrarModoVoz = () => { cerrarTapPcm(); };
+window.__alAbrirModoVoz = () => {
+  abrirTapPcm();
+};
+window.__alCerrarModoVoz = () => {
+  cerrarTapPcm();
+};
 /* Reapertura del tap (rescate del vigía u orden del proceso principal): cerrar y
    volver a enganchar la captura sin tocar la sesión del panel. */
-async function reabrirTapVoz() { await cerrarTapPcm(); await abrirTapPcm(); }
+async function reabrirTapVoz() {
+  await cerrarTapPcm();
+  await abrirTapPcm();
+}
 window.__reabrirTap = reabrirTapVoz;
 window.__tapEstado = () => !!__tapPcm;
 
@@ -1363,14 +1701,19 @@ window.__tapEstado = () => !!__tapPcm;
    fallar y vuelve a avisar, y la app se queda girando—. Es el único aviso que se salta, y
    solo ese: los demás (p. ej. «no te he entendido») sí se dicen. */
 const AVISO_SIN_VOZ = 'No he podido leer la respuesta en voz alta.';
-window.VoiceMode.setHablar((t) => { if (CFG.settings.ttsNotices && t !== AVISO_SIN_VOZ) speak(t, { forzar: true }); });
+window.VoiceMode.setHablar((t) => {
+  if (CFG.settings.ttsNotices && t !== AVISO_SIN_VOZ) speak(t, { forzar: true });
+});
 
 /* Lo que el panel necesita saber de la app para poder parar de verdad: si el agente está
    trabajando (para reconocer «para»/«detente» como una orden sobre el turno EN CURSO) y
    por dónde pararlo (el mismo `stopChat` del botón Detener del compositor, que el panel
    tapa). Antes, con el modo voz abierto, la única forma de detener al agente era esperar. */
 window.VoiceMode.setOcupado(() => busy);
-window.VoiceMode.setParar(() => { feed('Deteniendo…', 'err'); window.sagitari.stopChat(); });
+window.VoiceMode.setParar(() => {
+  feed('Deteniendo…', 'err');
+  window.sagitari.stopChat();
+});
 /* Interrupción (barge-in): lo que queda de la respuesta deja de leerse. Sin esto, callar la
    frase en curso no callaba la lectura — la siguiente frase del stream volvía a sonar. */
 window.VoiceMode.setInterrumpido(() => silenciarLecturaVoz());
@@ -1383,10 +1726,14 @@ window.VoiceMode.setInterrumpido(() => silenciarLecturaVoz());
 window.sagitari.onVoiceReady((lang) => showToast('Dictado activo (' + lang + '). Habla ahora; pulsa el micro o envía para terminar.'));
 // motor clásico = precisión inferior: avisar que con el reconocimiento online mejora mucho
 window.sagitari.onVoiceMode((mode) => {
-  if (mode === 'sapi') showToast('Motor de voz clásico activo. Activa "Reconocimiento de voz en línea" en Windows (Privacidad > Voz) para máxima precisión.');
+  if (mode === 'sapi')
+    showToast('Motor de voz clásico activo. Activa "Reconocimiento de voz en línea" en Windows (Privacidad > Voz) para máxima precisión.');
 });
 window.sagitari.onVoiceHint((m) => showToast('Dictado: ' + m));
-window.sagitari.onVoice((text) => { lastPartial = text ? text + ' ' : ''; paintVoice(lastPartial); });
+window.sagitari.onVoice((text) => {
+  lastPartial = text ? text + ' ' : '';
+  paintVoice(lastPartial);
+});
 window.sagitari.onVoiceFinal((text) => {
   if (text && text.trim()) voiceBuffer += text.trim() + ' ';
   lastPartial = '';
@@ -1396,8 +1743,9 @@ window.sagitari.onVoiceError((m) => {
   showToast('Dictado: ' + m);
   listening = false;
   vozBase = '';
-  $$('.cbtn').forEach(b => b.classList.remove('on'));
-  const rec = document.querySelector('.rec'); if (rec) rec.classList.remove('rec');
+  $$('.cbtn').forEach((b) => b.classList.remove('on'));
+  const rec = document.querySelector('.rec');
+  if (rec) rec.classList.remove('rec');
 });
 
 // ============ window buttons ============

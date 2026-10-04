@@ -46,18 +46,20 @@ const LOCAL_PRESETS = ['ollama', 'lmstudio'];
 function fallbackChain(config, category) {
   const providers = (config && config.providers) || [];
   const active = config && config.active;
-  const manual = (config && config.fallbackChain) || [];   // providerIds en orden (opcional)
-  const byId = Object.fromEntries(providers.map(p => [p.id, p]));
+  const manual = (config && config.fallbackChain) || []; // providerIds en orden (opcional)
+  const byId = Object.fromEntries(providers.map((p) => [p.id, p]));
   const out = [];
   const push = (p, role) => {
     if (!p || !p.baseUrl) return;
-    if (out.some(x => x.providerId === p.id)) return;
+    if (out.some((x) => x.providerId === p.id)) return;
     // El modelo ELEGIDO por el usuario manda (active.model / activeModel):
     // pickModelFor solo rellena cuando el proveedor no tiene elección explícita.
     // Antes se reelegía SIEMPRE por categoría y una petición «simple» cambiaba
     // en silencio p. ej. mimo-v2.5 por deepseek-flash (coincidía con /flash/):
     // el usuario probaba un modelo, la app pedía otro, y «ese modelo no va».
-    const model = (!p.activeModel && category && p.models && pickModelFor(p.models, category)) || (p.activeModel && p.models && p.models.includes(p.activeModel) ? p.activeModel : (p.models && p.models[0]) || p.activeModel);
+    const model =
+      (!p.activeModel && category && p.models && pickModelFor(p.models, category)) ||
+      (p.activeModel && p.models && p.models.includes(p.activeModel) ? p.activeModel : (p.models && p.models[0]) || p.activeModel);
     if (!model) return;
     // cada entrada viaja con su protocolo (chat/completions, messages o responses)
     const format = protocols.detectFormat({ baseUrl: p.baseUrl, providerId: p.id, model, format: p.format });
@@ -78,7 +80,16 @@ function fallbackChain(config, category) {
   push(activeProv, 'primary');
   // 2) orden manual del usuario
   for (const id of manual) push(byId[id], 'secondary');
-  const isLocal = (p) => LOCAL_PRESETS.some(l => String(p.id || '').toLowerCase().includes(l) || String(p.baseUrl || '').toLowerCase().includes(l));
+  const isLocal = (p) =>
+    LOCAL_PRESETS.some(
+      (l) =>
+        String(p.id || '')
+          .toLowerCase()
+          .includes(l) ||
+        String(p.baseUrl || '')
+          .toLowerCase()
+          .includes(l),
+    );
   // 3) resto de proveedores cloud guardados
   for (const p of providers) {
     if (isLocal(p)) continue;
@@ -106,7 +117,7 @@ function pickModelFor(models, category) {
     simple: /(mini|flash|haiku|8b|small|fast)/i,
   }[category];
   if (prefer) {
-    const m = list.find(id => prefer.test(id));
+    const m = list.find((id) => prefer.test(id));
     if (m) return m;
   }
   return list[0];
@@ -119,7 +130,7 @@ let HEALTH_FILE = path.join(require('./datadir').dataDir(), 'model-health.json')
 /* El fichero se lee una vez y se mantiene en memoria: `record()` corre en cada
    llamada al modelo y no debe releer ni reescribir el JSON entero cada vez. */
 let _cache = null;
-let _tainted = false;   // no se pudo leer el fichero: no se pisa con el almacén vacío
+let _tainted = false; // no se pudo leer el fichero: no se pisa con el almacén vacío
 
 function _load() {
   if (_cache) return _cache;
@@ -133,7 +144,9 @@ function _load() {
     // record() reescriba el histórico con lo poco de esta sesión.
     if (e && e.code !== 'ENOENT') {
       _tainted = true;
-      try { fs.renameSync(HEALTH_FILE, HEALTH_FILE + '.corrupt-' + Date.now()); } catch {}
+      try {
+        fs.renameSync(HEALTH_FILE, HEALTH_FILE + '.corrupt-' + Date.now());
+      } catch {}
     }
     _cache = {};
   }
@@ -154,10 +167,23 @@ function _save(data) {
 /** Registra una llamada a un modelo. ok=false con error cuenta como fallo. */
 function record(model, { ok, durationMs, tokens, error, fallbackFrom, costUsd }) {
   const data = _load();
-  const m = data[model] || { calls: 0, errors: 0, totalLatencyMs: 0, tokensIn: 0, tokensOut: 0, costUsd: 0, fallbacks: 0, lastError: null, lastUsed: null };
+  const m = data[model] || {
+    calls: 0,
+    errors: 0,
+    totalLatencyMs: 0,
+    tokensIn: 0,
+    tokensOut: 0,
+    costUsd: 0,
+    fallbacks: 0,
+    lastError: null,
+    lastUsed: null,
+  };
   m.calls++;
   if (durationMs) m.totalLatencyMs += durationMs;
-  if (tokens) { m.tokensIn += tokens.prompt_tokens || 0; m.tokensOut += tokens.completion_tokens || 0; }
+  if (tokens) {
+    m.tokensIn += tokens.prompt_tokens || 0;
+    m.tokensOut += tokens.completion_tokens || 0;
+  }
   // el coste por modelo sólo se calculaba por ejecución y en memoria: el panel
   // Model Health publicaba siempre $0.0000
   if (costUsd) m.costUsd = (Number(m.costUsd) || 0) + Number(costUsd);
@@ -180,23 +206,29 @@ function record(model, { ok, durationMs, tokens, error, fallbackFrom, costUsd })
 /** Resumen por modelo para el panel: latencia media, tasa de error, etc. */
 function summary() {
   const data = _load();
-  return Object.entries(data).map(([model, m]) => ({
-    model,
-    calls: m.calls,
-    errors: m.errors,
-    errorRate: m.calls ? +(m.errors / m.calls).toFixed(3) : 0,
-    avgLatencyMs: m.calls ? Math.round(m.totalLatencyMs / m.calls) : null,
-    tokensIn: m.tokensIn,
-    tokensOut: m.tokensOut,
-    costUsd: +Number(m.costUsd || 0).toFixed(4),
-    fallbacks: m.fallbacks || 0,
-    lastError: m.lastError,
-    lastOk: typeof m.lastOk === 'boolean' ? m.lastOk : null,
-    lastUsed: m.lastUsed,
-  })).sort((a, b) => b.calls - a.calls);
+  return Object.entries(data)
+    .map(([model, m]) => ({
+      model,
+      calls: m.calls,
+      errors: m.errors,
+      errorRate: m.calls ? +(m.errors / m.calls).toFixed(3) : 0,
+      avgLatencyMs: m.calls ? Math.round(m.totalLatencyMs / m.calls) : null,
+      tokensIn: m.tokensIn,
+      tokensOut: m.tokensOut,
+      costUsd: +Number(m.costUsd || 0).toFixed(4),
+      fallbacks: m.fallbacks || 0,
+      lastError: m.lastError,
+      lastOk: typeof m.lastOk === 'boolean' ? m.lastOk : null,
+      lastUsed: m.lastUsed,
+    }))
+    .sort((a, b) => b.calls - a.calls);
 }
 
 /** Para tests: redirige el fichero. */
-function _resetForTests(file) { HEALTH_FILE = file; _cache = null; _tainted = false; }
+function _resetForTests(file) {
+  HEALTH_FILE = file;
+  _cache = null;
+  _tainted = false;
+}
 
 module.exports = { CATEGORIES, classify, fallbackChain, pickModelFor, record, summary, _resetForTests };

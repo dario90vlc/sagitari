@@ -44,7 +44,8 @@ function dibLength(size) {
  * @param {Buffer} rgba píxeles RGBA rectos, de arriba abajo, `size * size * 4` bytes
  */
 function dibEntry(rgba, size) {
-  const W = size, H = size;
+  const W = size,
+    H = size;
   const need = W * H * 4;
   if (!Buffer.isBuffer(rgba) || rgba.length < need) {
     throw new Error('dibEntry: se esperaban ' + need + ' bytes RGBA y hay ' + (rgba ? rgba.length : 0));
@@ -52,25 +53,25 @@ function dibEntry(rgba, size) {
 
   const xor = Buffer.alloc(need);
   for (let y = 0; y < H; y++) {
-    const src = (H - 1 - y) * W * 4;      // el DIB se escribe de abajo arriba
+    const src = (H - 1 - y) * W * 4; // el DIB se escribe de abajo arriba
     const dst = y * W * 4;
     for (let x = 0; x < W * 4; x += 4) {
-      xor[dst + x] = rgba[src + x + 2];       // B
-      xor[dst + x + 1] = rgba[src + x + 1];   // G
-      xor[dst + x + 2] = rgba[src + x];       // R
-      xor[dst + x + 3] = rgba[src + x + 3];   // A
+      xor[dst + x] = rgba[src + x + 2]; // B
+      xor[dst + x + 1] = rgba[src + x + 1]; // G
+      xor[dst + x + 2] = rgba[src + x]; // R
+      xor[dst + x + 3] = rgba[src + x + 3]; // A
     }
   }
   const mask = Buffer.alloc(maskRowBytes(W) * H);
 
   const hdr = Buffer.alloc(40);
-  hdr.writeUInt32LE(40, 0);                       // biSize
-  hdr.writeInt32LE(W, 4);                         // biWidth
-  hdr.writeInt32LE(H * 2, 8);                     // biHeight: XOR + máscara
-  hdr.writeUInt16LE(1, 12);                       // biPlanes
-  hdr.writeUInt16LE(32, 14);                      // biBitCount
-  hdr.writeUInt32LE(0, 16);                       // biCompression: BI_RGB
-  hdr.writeUInt32LE(xor.length + mask.length, 20);// biSizeImage
+  hdr.writeUInt32LE(40, 0); // biSize
+  hdr.writeInt32LE(W, 4); // biWidth
+  hdr.writeInt32LE(H * 2, 8); // biHeight: XOR + máscara
+  hdr.writeUInt16LE(1, 12); // biPlanes
+  hdr.writeUInt16LE(32, 14); // biBitCount
+  hdr.writeUInt32LE(0, 16); // biCompression: BI_RGB
+  hdr.writeUInt32LE(xor.length + mask.length, 20); // biSizeImage
 
   return Buffer.concat([hdr, xor, mask]);
 }
@@ -94,8 +95,8 @@ function icoEntry(size, rgba, encodePng) {
 function buildIco(entries) {
   if (!Array.isArray(entries) || !entries.length) throw new Error('buildIco: sin entradas');
   const header = Buffer.alloc(6);
-  header.writeUInt16LE(0, 0);                     // reservado
-  header.writeUInt16LE(1, 2);                     // tipo: icono
+  header.writeUInt16LE(0, 0); // reservado
+  header.writeUInt16LE(1, 2); // tipo: icono
   header.writeUInt16LE(entries.length, 4);
 
   const dir = Buffer.alloc(16 * entries.length);
@@ -103,12 +104,12 @@ function buildIco(entries) {
   const blobs = [];
   entries.forEach(({ s, data }, i) => {
     const e = i * 16;
-    dir.writeUInt8(s >= 256 ? 0 : s, e);          // 256 se codifica como 0
+    dir.writeUInt8(s >= 256 ? 0 : s, e); // 256 se codifica como 0
     dir.writeUInt8(s >= 256 ? 0 : s, e + 1);
-    dir.writeUInt8(0, e + 2);                     // colores de paleta
-    dir.writeUInt8(0, e + 3);                     // reservado
-    dir.writeUInt16LE(1, e + 4);                  // planos
-    dir.writeUInt16LE(32, e + 6);                 // bits por píxel
+    dir.writeUInt8(0, e + 2); // colores de paleta
+    dir.writeUInt8(0, e + 3); // reservado
+    dir.writeUInt16LE(1, e + 4); // planos
+    dir.writeUInt16LE(32, e + 6); // bits por píxel
     dir.writeUInt32LE(data.length, e + 8);
     dir.writeUInt32LE(offset, e + 12);
     offset += data.length;

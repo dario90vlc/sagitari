@@ -43,7 +43,7 @@ const updater = require(path.join(RAIZ, 'main', 'updater.js'));
 /** Electron de verdad; null si no está instalado. */
 function electronExe() {
   try {
-    const p = require('electron');            // desde Node devuelve la ruta del binario
+    const p = require('electron'); // desde Node devuelve la ruta del binario
     if (typeof p === 'string' && fs.existsSync(p)) return p;
   } catch {}
   const p = path.join(RAIZ, 'node_modules', 'electron', 'dist', 'electron.exe');
@@ -60,8 +60,7 @@ function planAntiguo({ name, installer, args, logPath }) {
   const script = updater.installHelperScript({ name, installer, args, logPath });
   return {
     file: 'powershell.exe',
-    args: ['-NoProfile', '-NonInteractive', '-WindowStyle', 'Hidden',
-      '-EncodedCommand', Buffer.from(script, 'utf16le').toString('base64')],
+    args: ['-NoProfile', '-NonInteractive', '-WindowStyle', 'Hidden', '-EncodedCommand', Buffer.from(script, 'utf16le').toString('base64')],
     spawnOpts: { stdio: 'ignore', windowsHide: true },
   };
 }
@@ -83,7 +82,13 @@ function preparar(dir, nombre) {
       const p1 = path.join(a, e.name);
       const p2 = path.join(b, e.name === path.basename(src) ? nombre + '.exe' : e.name);
       if (e.isDirectory()) walk(p1, p2);
-      else if (!fs.existsSync(p2)) { try { fs.linkSync(p1, p2); } catch { fs.copyFileSync(p1, p2); } }
+      else if (!fs.existsSync(p2)) {
+        try {
+          fs.linkSync(p1, p2);
+        } catch {
+          fs.copyFileSync(p1, p2);
+        }
+      }
     }
   };
   walk(path.dirname(src), dir);
@@ -102,8 +107,10 @@ async function sinProceso(nombre, ms = 10000) {
   while (Date.now() - t0 < ms) {
     let out = '';
     try {
-      const r = spawnSync('tasklist', ['/FI', 'IMAGENAME eq ' + nombre + '.exe', '/FO', 'CSV', '/NH'],
-        { windowsHide: true, encoding: 'utf8' });
+      const r = spawnSync('tasklist', ['/FI', 'IMAGENAME eq ' + nombre + '.exe', '/FO', 'CSV', '/NH'], {
+        windowsHide: true,
+        encoding: 'utf8',
+      });
       out = String((r && r.stdout) || '');
     } catch {}
     if (!rx.test(out)) return true;
@@ -114,32 +121,35 @@ async function sinProceso(nombre, ms = 10000) {
 
 /** Guion del padre: lanza el plan, espera el RASTRO (no «que siga vivo») y sale. */
 function escribirPadre(padreJs, padreTxt) {
-  fs.writeFileSync(padreJs, [
-    "'use strict';",
-    "const fs = require('fs');",
-    "const { app } = require('electron');",
-    "const { spawn } = require('child_process');",
-    'const [file, argsJson, optsJson, logPath, padreTxt] = process.argv.slice(2);',
-    "const rastro = () => { try { return fs.readFileSync(logPath, 'utf8'); } catch { return ''; } };",
-    "app.whenReady().then(async () => {",
-    "  try { fs.rmSync(logPath, { force: true }); } catch {}",
-    "  let h = null;",
-    "  try {",
-    '    h = spawn(file, JSON.parse(argsJson), JSON.parse(optsJson));',
-    "    try { h.unref(); } catch {}",
-    "    h.on('error', () => {});",
-    "  } catch (e) {",
-    "    return salir('FALLO al lanzar: ' + e.message);",
-    "  }",
-    "  const t0 = Date.now();",
-    "  while (Date.now() - t0 < 45000) {",
-    "    if (rastro().includes('asistente iniciado')) break;",
-    "    await new Promise((r) => setTimeout(r, 200));",
-    "  }",
-    "  salir('arrancado=' + rastro().includes('asistente iniciado') + ' esperado_ms=' + (Date.now() - t0));",
-    "});",
-    "function salir(info) { fs.writeFileSync(padreTxt, info); setTimeout(() => app.quit(), 500); }",
-  ].join('\n'));
+  fs.writeFileSync(
+    padreJs,
+    [
+      "'use strict';",
+      "const fs = require('fs');",
+      "const { app } = require('electron');",
+      "const { spawn } = require('child_process');",
+      'const [file, argsJson, optsJson, logPath, padreTxt] = process.argv.slice(2);',
+      "const rastro = () => { try { return fs.readFileSync(logPath, 'utf8'); } catch { return ''; } };",
+      'app.whenReady().then(async () => {',
+      '  try { fs.rmSync(logPath, { force: true }); } catch {}',
+      '  let h = null;',
+      '  try {',
+      '    h = spawn(file, JSON.parse(argsJson), JSON.parse(optsJson));',
+      '    try { h.unref(); } catch {}',
+      "    h.on('error', () => {});",
+      '  } catch (e) {',
+      "    return salir('FALLO al lanzar: ' + e.message);",
+      '  }',
+      '  const t0 = Date.now();',
+      '  while (Date.now() - t0 < 45000) {',
+      "    if (rastro().includes('asistente iniciado')) break;",
+      '    await new Promise((r) => setTimeout(r, 200));',
+      '  }',
+      "  salir('arrancado=' + rastro().includes('asistente iniciado') + ' esperado_ms=' + (Date.now() - t0));",
+      '});',
+      'function salir(info) { fs.writeFileSync(padreTxt, info); setTimeout(() => app.quit(), 500); }',
+    ].join('\n'),
+  );
 }
 
 /**
@@ -149,20 +159,23 @@ function escribirPadre(padreJs, padreTxt) {
  * por construcción, no por suerte del árbol de procesos.
  */
 function escribirPadreTarea(padreJs, padreTxt) {
-  fs.writeFileSync(padreJs, [
-    "'use strict';",
-    "const fs = require('fs');",
-    "const { app } = require('electron');",
-    "const [updaterPath, dir, name, installer, args, logPath, taskName, txt] = process.argv.slice(2);",
-    "const updater = require(updaterPath);",
-    "app.whenReady().then(async () => {",
-    "  try {",
-    "    await updater.programarInstalacion({ dir, name, installer, args, logPath, taskName, waitMs: 20000 });",
-    "    salir('programada=' + taskName);",
-    "  } catch (e) { salir('FALLO al programar: ' + (e && e.message)); }",
-    "});",
-    "function salir(info) { fs.writeFileSync(txt, info); setTimeout(() => app.quit(), 500); }",
-  ].join('\n'));
+  fs.writeFileSync(
+    padreJs,
+    [
+      "'use strict';",
+      "const fs = require('fs');",
+      "const { app } = require('electron');",
+      'const [updaterPath, dir, name, installer, args, logPath, taskName, txt] = process.argv.slice(2);',
+      'const updater = require(updaterPath);',
+      'app.whenReady().then(async () => {',
+      '  try {',
+      '    await updater.programarInstalacion({ dir, name, installer, args, logPath, taskName, waitMs: 20000 });',
+      "    salir('programada=' + taskName);",
+      "  } catch (e) { salir('FALLO al programar: ' + (e && e.message)); }",
+      '});',
+      'function salir(info) { fs.writeFileSync(txt, info); setTimeout(() => app.quit(), 500); }',
+    ].join('\n'),
+  );
 }
 
 /**
@@ -172,7 +185,7 @@ function escribirPadreTarea(padreJs, padreTxt) {
  *   debe fallar, 'tarea' = Programador de tareas (vía principal desde la 3.3.4).
  */
 async function pasada({ dir, nombre, exe = null, diseño = 'nuevo', capMs = 45000 }) {
-  const d = path.join(dir, diseño === 'tarea' ? 'tarea' : (diseño === 'nuevo' ? 'nuevo' : 'antiguo'));
+  const d = path.join(dir, diseño === 'tarea' ? 'tarea' : diseño === 'nuevo' ? 'nuevo' : 'antiguo');
   fs.rmSync(d, { recursive: true, force: true });
   /* El runtime de Electron se monta UNA vez para todas las pasadas: el exe lleva el
      mismo nombre en las dos (el que `Get-Process` busca), así que compartirlo es
@@ -208,7 +221,11 @@ async function pasada({ dir, nombre, exe = null, diseño = 'nuevo', capMs = 4500
 
   const hijo = spawn(exe, spawnArgs, { stdio: 'ignore', windowsHide: true });
   hijo.on('error', () => {});
-  const capar = () => { try { hijo.kill(); } catch {} };
+  const capar = () => {
+    try {
+      hijo.kill();
+    } catch {}
+  };
 
   const t0 = Date.now();
   while (Date.now() - t0 < capMs && !fs.existsSync(salida)) await new Promise((r) => setTimeout(r, 250));
@@ -221,7 +238,9 @@ async function pasada({ dir, nombre, exe = null, diseño = 'nuevo', capMs = 4500
     const t1 = Date.now();
     while (Date.now() - t1 < 8000) {
       let t = '';
-      try { t = fs.readFileSync(log, 'utf8'); } catch {}
+      try {
+        t = fs.readFileSync(log, 'utf8');
+      } catch {}
       if (/instalador termino con codigo/.test(t) || /FALLO al lanzar el instalador/.test(t)) break;
       await new Promise((r) => setTimeout(r, 200));
     }
@@ -233,18 +252,22 @@ async function pasada({ dir, nombre, exe = null, diseño = 'nuevo', capMs = 4500
   // higiene: la tarea es de un solo uso y el ayudante se autoborra al terminar,
   // pero si la pasada falló antes, no se deja basura en el Programador.
   if (diseño === 'tarea') {
-    try { spawnSync('schtasks', ['/delete', '/tn', taskName, '/f'], { windowsHide: true }); } catch {}
+    try {
+      spawnSync('schtasks', ['/delete', '/tn', taskName, '/f'], { windowsHide: true });
+    } catch {}
   }
   // la siguiente pasada no puede empezar con este proceso todavía vivo
   const limpio = await sinProceso(nombre);
   return {
-    nombre, limpio,
+    nombre,
+    limpio,
     diseño,
     arranco: /asistente iniciado/.test(diario),
     ejecuto: fs.existsSync(salida),
     orden: /\/S --updated --force-run/.test(args),
     codigo0: /instalador termino con codigo 0/.test(diario),
-    args: args.trim(), padre,
+    args: args.trim(),
+    padre,
     diario: diario.replace(/\s+/g, ' ').trim(),
   };
 }
@@ -256,13 +279,19 @@ async function pasada({ dir, nombre, exe = null, diseño = 'nuevo', capMs = 4500
 async function verificar({ dir, pasadas = 1, conControl = true, capMs = 45000 } = {}) {
   const base = dir || fs.mkdtempSync(path.join(os.tmpdir(), 'sagitari-verif-'));
   const nombre = 'SAGVERIF' + Math.random().toString(16).slice(2, 8).toUpperCase();
-  const prep = preparar(base, nombre);            // una sola vez para todo
+  const prep = preparar(base, nombre); // una sola vez para todo
   if (!prep.ok) return { estado: 'sin-electron', pasadas: [{ saltada: true, motivo: prep.motivo }], control: null };
   /* Un exe con nombre propio por pasada (enlace al mismo archivo, sin copiarlo): así el
      ayudante de una pasada no se queda esperando a la anterior, que puede estar cerrándose. */
   const conNombre = (nom) => {
     const p = path.join(base, nom + '.exe');
-    if (!fs.existsSync(p)) { try { fs.linkSync(prep.exe, p); } catch { fs.copyFileSync(prep.exe, p); } }
+    if (!fs.existsSync(p)) {
+      try {
+        fs.linkSync(prep.exe, p);
+      } catch {
+        fs.copyFileSync(prep.exe, p);
+      }
+    }
     return p;
   };
   const hechas = [];
@@ -298,15 +327,32 @@ if (require.main === module) {
     }
     for (const [i, p] of r.pasadas.entries()) {
       const bien = p.arranco && p.ejecuto && p.orden && p.codigo0;
-      console.log('pasada ' + (i + 1) + ': ' + (bien ? 'OK' : 'FALLO')
-        + '  [ayudante=' + p.arranco + ' ejecutado=' + p.ejecuto + ' orden=' + p.orden + ' codigo0=' + p.codigo0 + ' limpio=' + p.limpio + ']');
+      console.log(
+        'pasada ' +
+          (i + 1) +
+          ': ' +
+          (bien ? 'OK' : 'FALLO') +
+          '  [ayudante=' +
+          p.arranco +
+          ' ejecutado=' +
+          p.ejecuto +
+          ' orden=' +
+          p.orden +
+          ' codigo0=' +
+          p.codigo0 +
+          ' limpio=' +
+          p.limpio +
+          ']',
+      );
       console.log('  padre   : ' + p.padre);
       console.log('  diario  : ' + p.diario);
       console.log('  señuelo : ' + p.args);
     }
     if (r.control) {
-      console.log('control (PowerShell directo, el diseño que falló): ' +
-        (r.controlRoto ? 'OK — no instala, como debe' : 'FALLO — instala, el arnés no mide el cierre real'));
+      console.log(
+        'control (PowerShell directo, el diseño que falló): ' +
+          (r.controlRoto ? 'OK — no instala, como debe' : 'FALLO — instala, el arnés no mide el cierre real'),
+      );
       console.log('  diario  : ' + r.control.diario);
     }
     console.log('\n' + (r.estado === 'ok' ? 'TODO OK' : 'HAY FALLOS'));

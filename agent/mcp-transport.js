@@ -19,8 +19,8 @@ const DEFAULT_TIMEOUT_MS = 60000;
 function createLineReader(onMessage) {
   let buf = '';
   let noise = 0;
-  const dec = new StringDecoder('utf8');   // la conversión tiene que ser incremental:
-                                           // un chunk puede cortar un carácter multibyte
+  const dec = new StringDecoder('utf8'); // la conversión tiene que ser incremental:
+  // un chunk puede cortar un carácter multibyte
   return (chunk) => {
     buf += typeof chunk === 'string' ? chunk : dec.write(chunk);
     let idx;
@@ -29,7 +29,12 @@ function createLineReader(onMessage) {
       buf = buf.slice(idx + 1);
       if (!line.trim()) continue;
       let msg = null;
-      try { msg = JSON.parse(line); } catch { noise++; continue; }
+      try {
+        msg = JSON.parse(line);
+      } catch {
+        noise++;
+        continue;
+      }
       onMessage(msg, noise);
     }
   };
@@ -38,11 +43,11 @@ function createLineReader(onMessage) {
 /** Peticiones en vuelo emparejadas por id, con timeout y fallo global. */
 class Rpc {
   constructor({ send, onNotice, defaultTimeoutMs = DEFAULT_TIMEOUT_MS }) {
-    this.send = send;                       // (text) => void
+    this.send = send; // (text) => void
     this.onNotice = onNotice || (() => {}); // (method, params, id) => void; id es null
-                                            // en las notificaciones y no-null cuando el
-                                            // servidor espera respuesta (contestar con
-                                            // send(JSON.stringify({ jsonrpc: '2.0', id, result })))
+    // en las notificaciones y no-null cuando el
+    // servidor espera respuesta (contestar con
+    // send(JSON.stringify({ jsonrpc: '2.0', id, result })))
     this.timeoutMs = defaultTimeoutMs;
     this._id = 0;
     this._pending = new Map();
@@ -60,14 +65,29 @@ class Rpc {
         reject(new Error(`timeout: ${method} no respondió en ${cuanto}.`));
       }, ms);
       this._pending.set(id, {
-        resolve: (v) => { clearTimeout(timer); resolve(v); },
-        reject: (e) => { clearTimeout(timer); reject(e); },
+        resolve: (v) => {
+          clearTimeout(timer);
+          resolve(v);
+        },
+        reject: (e) => {
+          clearTimeout(timer);
+          reject(e);
+        },
       });
       // El llamante puede querer el id para poder cancelar ESTA petición mientras
       // está en vuelo (p. ej. el botón Detener del agente).
-      if (typeof onStart === 'function') { try { onStart(id); } catch {} }
-      try { this.send(JSON.stringify({ jsonrpc: '2.0', id, method, params })); }
-      catch (e) { this._pending.delete(id); clearTimeout(timer); reject(e); }
+      if (typeof onStart === 'function') {
+        try {
+          onStart(id);
+        } catch {}
+      }
+      try {
+        this.send(JSON.stringify({ jsonrpc: '2.0', id, method, params }));
+      } catch (e) {
+        this._pending.delete(id);
+        clearTimeout(timer);
+        reject(e);
+      }
     });
   }
 
@@ -85,7 +105,9 @@ class Rpc {
 
   notify(method, params = {}) {
     if (this._dead) return;
-    try { this.send(JSON.stringify({ jsonrpc: '2.0', method, params })); } catch {}
+    try {
+      this.send(JSON.stringify({ jsonrpc: '2.0', method, params }));
+    } catch {}
   }
 
   /**
@@ -98,7 +120,10 @@ class Rpc {
     // Las peticiones del servidor se miran ANTES que las respuestas: una respuesta
     // nunca lleva `method`, y un `ping` del servidor con un id que choque con una
     // petición nuestra se consumía como si fuera su respuesta.
-    if (msg.method) { this.onNotice(msg.method, msg.params || {}, msg.id ?? null); return; }
+    if (msg.method) {
+      this.onNotice(msg.method, msg.params || {}, msg.id ?? null);
+      return;
+    }
     if (msg.id != null && this._pending.has(msg.id)) {
       const p = this._pending.get(msg.id);
       this._pending.delete(msg.id);
@@ -114,7 +139,9 @@ class Rpc {
     this._pending.clear();
   }
 
-  get alive() { return !this._dead; }
+  get alive() {
+    return !this._dead;
+  }
 }
 
 /* Línea de comandos para cmd.exe. En Windows `npx`/`npm` son .cmd y Node ≥20 se
@@ -125,7 +152,9 @@ function buildCmdLine(command, args = []) {
   const partes = [String(command || ''), ...args.map((a) => String(a))];
   for (const p of partes) {
     if (/["%^&|<>]/.test(p) || /[\r\n]/.test(p)) {
-      throw new Error('El comando o un argumento contiene caracteres que cmd.exe interpretaría (" % ^ & | < > o salto de línea). Simplifícalo.');
+      throw new Error(
+        'El comando o un argumento contiene caracteres que cmd.exe interpretaría (" % ^ & | < > o salto de línea). Simplifícalo.',
+      );
     }
   }
   return partes.map((p) => (/\s/.test(p) ? '"' + p + '"' : p)).join(' ');
@@ -156,14 +185,19 @@ function valorPath(env) {
  */
 function buscarEnPath(nombre, { env = process.env, fsMod = fs } = {}) {
   const dirs = valorPath(env).split(path.delimiter).filter(Boolean);
-  const conExt = /\.[a-z0-9]+$/i.test(nombre);   // si ya trae extensión no se prueba a añadirle otra
-  const exts = (!conExt && process.platform === 'win32')
-    ? String(env.PATHEXT || '.COM;.EXE;.BAT;.CMD').split(';').filter(Boolean)
-    : [''];
+  const conExt = /\.[a-z0-9]+$/i.test(nombre); // si ya trae extensión no se prueba a añadirle otra
+  const exts =
+    !conExt && process.platform === 'win32'
+      ? String(env.PATHEXT || '.COM;.EXE;.BAT;.CMD')
+          .split(';')
+          .filter(Boolean)
+      : [''];
   for (const d of dirs) {
     for (const ext of exts) {
       const p = path.join(d, nombre + ext);
-      try { if (fsMod.existsSync(p)) return p; } catch {}
+      try {
+        if (fsMod.existsSync(p)) return p;
+      } catch {}
     }
   }
   return null;
@@ -207,7 +241,11 @@ function resolveCommand(command, args, opts = {}) {
        posible es un «no se reconoce como un comando» de cmd.exe que el usuario no
        puede arreglar sin saber qué falta. Se dice antes y con el arreglo. */
     if (ES_GESTOR.test(cmd) && !hayNodeEnPath(opts)) {
-      throw new Error('«' + cmd + '» necesita Node.js instalado en este equipo (la app no incluye npm). Instala Node.js desde nodejs.org y vuelve a probar; si el servidor es un archivo .js local, pon el COMANDO como «node» y su ruta en los argumentos.');
+      throw new Error(
+        '«' +
+          cmd +
+          '» necesita Node.js instalado en este equipo (la app no incluye npm). Instala Node.js desde nodejs.org y vuelve a probar; si el servidor es un archivo .js local, pon el COMANDO como «node» y su ruta en los argumentos.',
+      );
     }
     const com = process.env.ComSpec || 'cmd.exe';
     // `verbatim` es imprescindible: si Node vuelve a citar por su cuenta, escapa las
@@ -235,7 +273,9 @@ function createStdioTransport({ command, args = [], cwd, env = {}, defaultTimeou
     stdio: ['pipe', 'pipe', 'pipe'],
   });
   let stderr = '';
-  child.stderr.on('data', (d) => { stderr = (stderr + d.toString('utf8')).slice(-8192); });
+  child.stderr.on('data', (d) => {
+    stderr = (stderr + d.toString('utf8')).slice(-8192);
+  });
   // stdin de un servidor que acaba de morir: sin este listener, el EPIPE del write
   // es un error no capturado y se lleva por delante el proceso principal.
   child.stdin.on('error', () => {});
@@ -247,16 +287,28 @@ function createStdioTransport({ command, args = [], cwd, env = {}, defaultTimeou
   const avisarSalida = (code) => {
     if (exited) return;
     exited = true;
-    if (rpc) rpc.fail(`el servidor MCP terminó (código ${code === null || code === undefined ? 'desconocido' : code}).` + (stderr ? '\n' + stderr.trim().split('\n').slice(-4).join('\n') : ''));
-    for (const h of exitHandlers) { try { h(code); } catch {} }
+    if (rpc)
+      rpc.fail(
+        `el servidor MCP terminó (código ${code === null || code === undefined ? 'desconocido' : code}).` +
+          (stderr ? '\n' + stderr.trim().split('\n').slice(-4).join('\n') : ''),
+      );
+    for (const h of exitHandlers) {
+      try {
+        h(code);
+      } catch {}
+    }
   };
   child.on('error', (e) => avisarSalida('error: ' + e.message));
   child.on('exit', (code) => avisarSalida(code));
 
-  const feed = createLineReader((m, noise) => { if (m && rpc) rpc.handleMessage(m); });
+  const feed = createLineReader((m, noise) => {
+    if (m && rpc) rpc.handleMessage(m);
+  });
   child.stdout.on('data', feed);
   rpc = new Rpc({
-    send: (text) => { if (!child.stdin.destroyed) child.stdin.write(text + '\n'); },
+    send: (text) => {
+      if (!child.stdin.destroyed) child.stdin.write(text + '\n');
+    },
     onNotice,
     defaultTimeoutMs,
   });
@@ -265,15 +317,29 @@ function createStdioTransport({ command, args = [], cwd, env = {}, defaultTimeou
     rpc,
     pid: child.pid,
     stderrTail: () => stderr,
-    onExit: (cb) => { exitHandlers.push(cb); if (exited) cb(-1); },
-    kill: () => { try { child.stdin.end(); } catch {} try { killTree(child); } catch {} },
+    onExit: (cb) => {
+      exitHandlers.push(cb);
+      if (exited) cb(-1);
+    },
+    kill: () => {
+      try {
+        child.stdin.end();
+      } catch {}
+      try {
+        killTree(child);
+      } catch {}
+    },
   };
 }
 
 /** Solo https, o http si el destino es loopback (ahí el token no sale del equipo). */
 function httpUrlAllowed(raw) {
   let u = null;
-  try { u = new URL(String(raw || '')); } catch { return false; }
+  try {
+    u = new URL(String(raw || ''));
+  } catch {
+    return false;
+  }
   if (u.protocol === 'https:') return true;
   if (u.protocol !== 'http:') return false;
   return ['localhost', '127.0.0.1', '::1', '[::1]'].includes(u.hostname);
@@ -283,12 +349,17 @@ function httpUrlAllowed(raw) {
 function parseSseText(text) {
   const out = [];
   for (const bloque of String(text || '').split(/\r?\n\r?\n/)) {
-    const datos = bloque.split(/\r?\n/).filter(l => l.startsWith('data:')).map(l => l.slice(5).trimStart());
+    const datos = bloque
+      .split(/\r?\n/)
+      .filter((l) => l.startsWith('data:'))
+      .map((l) => l.slice(5).trimStart());
     if (!datos.length) continue;
     // Las líneas `data:` del mismo evento se unen con \n (spec SSE): entre tokens
     // ese salto es espacio en blanco válido para JSON. Un mensaje mal formado (una
     // cadena partida, por ejemplo) no parsea y se descarta.
-    try { out.push(JSON.parse(datos.join('\n'))); } catch {}
+    try {
+      out.push(JSON.parse(datos.join('\n')));
+    } catch {}
   }
   return out;
 }
@@ -307,10 +378,16 @@ function createHttpTransport({ url, headers = {}, defaultTimeoutMs, fetchFn = fe
     if (muerto) return;
     muerto = motivo;
     rpc.fail(motivo);
-    for (const h of exitHandlers) { try { h(motivo); } catch {} }
+    for (const h of exitHandlers) {
+      try {
+        h(motivo);
+      } catch {}
+    }
   };
   const rpc = new Rpc({
-    send: (text) => { void enviar(text); },
+    send: (text) => {
+      void enviar(text);
+    },
     onNotice,
     defaultTimeoutMs,
   });
@@ -321,10 +398,18 @@ function createHttpTransport({ url, headers = {}, defaultTimeoutMs, fetchFn = fe
       // El temporizador del Rpc acota la espera lógica; este signal acota la
       // petición HTTP de verdad (si no, una petición colgada deja el socket vivo
       // para siempre aunque la llamada ya haya fallado por timeout).
-      const res = await fetchFn(url, { method: 'POST', headers: cabeceras, body: text, signal: AbortSignal.timeout((defaultTimeoutMs || DEFAULT_TIMEOUT_MS) + 2000) });
+      const res = await fetchFn(url, {
+        method: 'POST',
+        headers: cabeceras,
+        body: text,
+        signal: AbortSignal.timeout((defaultTimeoutMs || DEFAULT_TIMEOUT_MS) + 2000),
+      });
       const sid = res.headers.get('mcp-session-id');
       if (sid) session = sid;
-      if (!res.ok) { avisarMuerte(`el servidor MCP respondió ${res.status}.`); return; }
+      if (!res.ok) {
+        avisarMuerte(`el servidor MCP respondió ${res.status}.`);
+        return;
+      }
       const tipo = String(res.headers.get('content-type') || '');
       const body = await res.text();
       // 202 sin cuerpo: es lo que la spec manda para notificaciones y respuestas, así
@@ -345,9 +430,25 @@ function createHttpTransport({ url, headers = {}, defaultTimeoutMs, fetchFn = fe
   return {
     rpc,
     sessionId: () => session,
-    onExit: (cb) => { exitHandlers.push(cb); if (muerto) cb(muerto); },
-    kill: () => { session = null; },
+    onExit: (cb) => {
+      exitHandlers.push(cb);
+      if (muerto) cb(muerto);
+    },
+    kill: () => {
+      session = null;
+    },
   };
 }
 
-module.exports = { DEFAULT_TIMEOUT_MS, createLineReader, Rpc, buildCmdLine, resolveCommand, buscarEnPath, createStdioTransport, httpUrlAllowed, parseSseText, createHttpTransport };
+module.exports = {
+  DEFAULT_TIMEOUT_MS,
+  createLineReader,
+  Rpc,
+  buildCmdLine,
+  resolveCommand,
+  buscarEnPath,
+  createStdioTransport,
+  httpUrlAllowed,
+  parseSseText,
+  createHttpTransport,
+};

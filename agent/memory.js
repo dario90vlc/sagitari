@@ -16,18 +16,20 @@ const path = require('path');
 
 const CONFIG_DIR = require('./datadir').dataDir();
 let MEMORY_FILE = path.join(CONFIG_DIR, 'memory.json');
-const MAX_MEMORIES = 300;         // techo duro del almacén
-const MAX_IN_CONTEXT = 30;        // tope de recuerdos inyectados en el prompt
+const MAX_MEMORIES = 300; // techo duro del almacén
+const MAX_IN_CONTEXT = 30; // tope de recuerdos inyectados en el prompt
 
 let cache = null;
-let tainted = false;   // el archivo no se pudo interpretar: NO persistir un almacén vacío encima
+let tainted = false; // el archivo no se pudo interpretar: NO persistir un almacén vacío encima
 
 /** Escritura atómica: escribe a .tmp y renombra, conservando el .bak anterior. */
 function atomicWrite(file, text) {
   const tmp = file + '.tmp';
   fs.mkdirSync(path.dirname(file), { recursive: true });
   fs.writeFileSync(tmp, text, 'utf8');
-  try { fs.copyFileSync(file, file + '.bak'); } catch {}   // aún no había archivo: no es un fallo
+  try {
+    fs.copyFileSync(file, file + '.bak');
+  } catch {} // aún no había archivo: no es un fallo
   fs.renameSync(tmp, file);
 }
 
@@ -48,7 +50,10 @@ function load() {
   try {
     raw = fs.readFileSync(MEMORY_FILE, 'utf8');
   } catch (e) {
-    if (e.code === 'ENOENT') { cache = []; return cache; }   // no existe → memoria vacía legítima
+    if (e.code === 'ENOENT') {
+      cache = [];
+      return cache;
+    } // no existe → memoria vacía legítima
     // Error de E/S (EBUSY/EPERM transitorios de Windows): NO significa "no hay memoria".
     tainted = true;
     cache = [];
@@ -65,17 +70,19 @@ function load() {
     cache = [];
     quarantine(e.message);
   }
-  if (cache.length) prune();   // poda automática al cargar (una vez por proceso)
+  if (cache.length) prune(); // poda automática al cargar (una vez por proceso)
   return cache;
 }
 
 function save() {
   if (!cache) return;
-  if (tainted && !cache.length) return;   // tras un error de lectura nunca se persiste un almacén vacío
+  if (tainted && !cache.length) return; // tras un error de lectura nunca se persiste un almacén vacío
   try {
     atomicWrite(MEMORY_FILE, JSON.stringify(cache, null, 2));
     tainted = false;
-  } catch (e) { console.error('memory.save', e.message); }
+  } catch (e) {
+    console.error('memory.save', e.message);
+  }
 }
 
 /** Normaliza un recuerdo: migra el formato antiguo {id,text,date} rellenando metadata. */
@@ -92,13 +99,60 @@ function normalize(m) {
   };
 }
 
-function clamp01(n) { n = Number(n); return Number.isFinite(n) ? Math.min(1, Math.max(0, n)) : 0.5; }
+function clamp01(n) {
+  n = Number(n);
+  return Number.isFinite(n) ? Math.min(1, Math.max(0, n)) : 0.5;
+}
 
 /** Tokeniza en minúsculas quitando stopwords ES/EN cortas (suficiente para solapamiento léxico). */
 function tokenize(s) {
-  const STOP = new Set(['de', 'la', 'el', 'los', 'las', 'un', 'una', 'unos', 'unas', 'y', 'o', 'que', 'en', 'a', 'del', 'se', 'por', 'con', 'para', 'su', 'al', 'lo', 'como', 'mas', 'más', 'pero', 'es', 'son', 'the', 'and', 'for', 'with', 'this', 'that', 'my', 'your', 'of', 'to', 'in']);
-  return String(s || '').toLowerCase().normalize('NFD').replace(/[\u0300-\u036f]/g, '')
-    .split(/[^a-z0-9ñ]+/i).filter(t => t.length >= 3 && !STOP.has(t));
+  const STOP = new Set([
+    'de',
+    'la',
+    'el',
+    'los',
+    'las',
+    'un',
+    'una',
+    'unos',
+    'unas',
+    'y',
+    'o',
+    'que',
+    'en',
+    'a',
+    'del',
+    'se',
+    'por',
+    'con',
+    'para',
+    'su',
+    'al',
+    'lo',
+    'como',
+    'mas',
+    'más',
+    'pero',
+    'es',
+    'son',
+    'the',
+    'and',
+    'for',
+    'with',
+    'this',
+    'that',
+    'my',
+    'your',
+    'of',
+    'to',
+    'in',
+  ]);
+  return String(s || '')
+    .toLowerCase()
+    .normalize('NFD')
+    .replace(/[\u0300-\u036f]/g, '')
+    .split(/[^a-z0-9ñ]+/i)
+    .filter((t) => t.length >= 3 && !STOP.has(t));
 }
 
 /* ---------- scoring ---------- */
@@ -114,9 +168,9 @@ function scoreAgainst(mem, contextText) {
   if (!a.size || !b.size) return { score: mem.importance * 0.3, overlap: 0 };
   let inter = 0;
   for (const t of a) if (b.has(t)) inter++;
-  const overlap = inter / (a.size + b.size - inter);   // Jaccard 0..1
+  const overlap = inter / (a.size + b.size - inter); // Jaccard 0..1
   const ageDays = (Date.now() - Date.parse(mem.date || 0)) / 86400000;
-  const freshness = 1 / (1 + ageDays / 30);            // decae con ~1 mes de constante
+  const freshness = 1 / (1 + ageDays / 30); // decae con ~1 mes de constante
   return {
     overlap,
     score: overlap * 2.0 + mem.importance * 0.6 + mem.confidence * 0.2 + freshness * 0.4,
@@ -135,8 +189,8 @@ function relevantMemories(contextText, opts = {}) {
   const limit = Math.min(Math.max(opts.limit || MAX_IN_CONTEXT, 1), MAX_IN_CONTEXT);
   const minScore = Number.isFinite(opts.minScore) ? opts.minScore : 0.4;
   const scored = list
-    .map(m => ({ mem: m, ...scoreAgainst(m, contextText) }))
-    .filter(x => x.overlap > 0 && x.score >= minScore)
+    .map((m) => ({ mem: m, ...scoreAgainst(m, contextText) }))
+    .filter((x) => x.overlap > 0 && x.score >= minScore)
     .sort((x, y) => y.score - x.score)
     .slice(0, limit);
   if (scored.length) {
@@ -150,25 +204,35 @@ function relevantMemories(contextText, opts = {}) {
   }
   // fallback: los más importantes (nunca contexto vacío si hay memoria)
   return list
-    .map(m => ({ mem: m, score: m.importance * 0.6, overlap: 0 }))
+    .map((m) => ({ mem: m, score: m.importance * 0.6, overlap: 0 }))
     .sort((x, y) => y.score - x.score)
     .slice(0, Math.min(5, limit));
 }
 
 /* ---------- CRUD ---------- */
 
-function list() { return load().map(m => ({ ...m })); }
+function list() {
+  return load().map((m) => ({ ...m }));
+}
 
 /**
  * Añade un recuerdo con metadata completa.
  * @returns el recuerdo creado. Deduplica por texto igual (refuerza en su lugar).
  */
 function add({ text, source = 'user', importance = 0.5, confidence = 0.8 }) {
-  const t = String(text || '').trim().slice(0, 500);
+  const t = String(text || '')
+    .trim()
+    .slice(0, 500);
   if (!t) return null;
   const list0 = load();
-  const dup = list0.find(m => m.text.toLowerCase() === t.toLowerCase());
-  if (dup) { dup.importance = clamp01(Math.max(dup.importance, importance)); dup.uses++; dup.lastUsed = new Date().toISOString(); save(); return { ...dup }; }
+  const dup = list0.find((m) => m.text.toLowerCase() === t.toLowerCase());
+  if (dup) {
+    dup.importance = clamp01(Math.max(dup.importance, importance));
+    dup.uses++;
+    dup.lastUsed = new Date().toISOString();
+    save();
+    return { ...dup };
+  }
   const m = normalize({ text: t, source, importance: clamp01(importance), confidence: clamp01(confidence) });
   list0.unshift(m);
   cache = list0.slice(0, MAX_MEMORIES);
@@ -176,11 +240,15 @@ function add({ text, source = 'user', importance = 0.5, confidence = 0.8 }) {
   return { ...m };
 }
 
-function remove(id) { cache = load().filter(m => m.id !== id); save(); return { ok: true }; }
+function remove(id) {
+  cache = load().filter((m) => m.id !== id);
+  save();
+  return { ok: true };
+}
 
 /** Actualiza metadata (importancia, confianza) desde la UI. */
 function update(id, patch = {}) {
-  const m = load().find(x => x.id === id);
+  const m = load().find((x) => x.id === id);
   if (!m) return { ok: false, error: 'recuerdo no encontrado' };
   if (patch.importance !== undefined) m.importance = clamp01(patch.importance);
   if (patch.confidence !== undefined) m.confidence = clamp01(patch.confidence);
@@ -198,25 +266,36 @@ function prune(minConfidence = 0.2, olderThanDays = 180) {
   const before = load().length;
   const now = Date.now();
   const maxAge = (Number(olderThanDays) || 180) * 86400000;
-  const maxIdle = 60 * 86400000;         // 2 meses sin usarse
+  const maxIdle = 60 * 86400000; // 2 meses sin usarse
   const lowConf = Number.isFinite(Number(minConfidence)) ? Number(minConfidence) : 0.2;
-  cache = load().filter(m => {
+  cache = load().filter((m) => {
     const created = Date.parse(m.date) || now;
     const last = Date.parse(m.lastUsed) || created;
-    if (m.confidence < lowConf && m.uses === 0) return false;   // confianza ínfima y sin uso
+    if (m.confidence < lowConf && m.uses === 0) return false; // confianza ínfima y sin uso
     const old = now - created >= maxAge;
     const idle = now - last >= maxIdle;
     return !(old && idle && m.uses < 3 && m.importance < 0.6);
   });
-  if (cache.length !== before) save();   // solo escribe si algo cambió
+  if (cache.length !== before) save(); // solo escribe si algo cambió
   return { removed: before - cache.length };
 }
 
 /** Para tests: reinicia el singleton apuntando a otro archivo. */
-function _resetForTests(file) { cache = null; tainted = false; MEMORY_FILE = file; }
+function _resetForTests(file) {
+  cache = null;
+  tainted = false;
+  MEMORY_FILE = file;
+}
 
 module.exports = {
-  list, add, remove, update, prune, relevantMemories, scoreAgainst, tokenize,
+  list,
+  add,
+  remove,
+  update,
+  prune,
+  relevantMemories,
+  scoreAgainst,
+  tokenize,
   __file: () => MEMORY_FILE,
   __test: { _resetForTests, normalize, MAX_MEMORIES, MAX_IN_CONTEXT },
 };

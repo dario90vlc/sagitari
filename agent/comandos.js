@@ -44,9 +44,15 @@ const PROHIBIDOS = [
   { rx: /\b(del|erase|rd|rmdir)\b[^\n]*\s[a-z]:[\\/]?\s*$/i, motivo: 'borrar la raíz de una unidad' },
   { rx: /\b(del|erase|rd|rmdir)\b[^\n]*\s[a-z]:[\\/](?=\s|$)/i, motivo: 'borrar la raíz de una unidad' },
   { rx: /\brm\s+-[a-z]*[rf][a-z]*\s+\/(?:\s|$)/i, motivo: 'borrar la raíz del sistema de archivos' },
-  { rx: /\bRemove-Item\b[^\n]*-[^\n]*Recurse[^\n]*\b(?:[a-z]:[\\/]\s*$|[a-z]:[\\/](?=\s|")|C:\\Windows|C:\\Program Files)/i, motivo: 'borrar de forma recursiva una raíz del sistema' },
+  {
+    rx: /\bRemove-Item\b[^\n]*-[^\n]*Recurse[^\n]*\b(?:[a-z]:[\\/]\s*$|[a-z]:[\\/](?=\s|")|C:\\Windows|C:\\Program Files)/i,
+    motivo: 'borrar de forma recursiva una raíz del sistema',
+  },
   // borrar dentro de Windows / Program Files
-  { rx: /\b(del|erase|rd|rmdir|rm|Remove-Item)\b[^\n]*\bC:[\\/](Windows|Program Files|ProgramData|Users[\\/][^\\/]+[\\/](AppData|Documents))[\\/]/i, motivo: 'borrar dentro de las carpetas del sistema' },
+  {
+    rx: /\b(del|erase|rd|rmdir|rm|Remove-Item)\b[^\n]*\bC:[\\/](Windows|Program Files|ProgramData|Users[\\/][^\\/]+[\\/](AppData|Documents))[\\/]/i,
+    motivo: 'borrar dentro de las carpetas del sistema',
+  },
   { rx: /\bmls\b|\bcacls\b/i, motivo: 'operación no soportada en Windows' },
   { rx: /:\s*\(\s*\)\s*\{[^\n]*\|[^\n]*:&/, motivo: 'bomba de procesos' },
 ];
@@ -60,8 +66,14 @@ const SENSIBLES = [
   { rx: /\|\s*(iex|Invoke-Expression)\b/i, motivo: 'ejecutar código descargado al vuelo (Invoke-Expression)' },
 
   // --- ofuscación y descarga remota (bypass del tubo clásico) ---
-  { rx: /\b(powershell|pwsh)(\.exe)?\b[^\n]*?(?:\s-(e|en|enc|encodedcommand)\b|EncodedCommand|FromBase64String)/i, motivo: 'ejecutar código ofuscado o codificado en base64 (PowerShell)' },
-  { rx: /DownloadString|DownloadFile|Invoke-WebRequest|Invoke-RestMethod|Start-BitsTransfer|Net\.WebClient|FromBase64String/i, motivo: 'descargar código o datos remotos para su ejecución' },
+  {
+    rx: /\b(powershell|pwsh)(\.exe)?\b[^\n]*?(?:\s-(e|en|enc|encodedcommand)\b|EncodedCommand|FromBase64String)/i,
+    motivo: 'ejecutar código ofuscado o codificado en base64 (PowerShell)',
+  },
+  {
+    rx: /DownloadString|DownloadFile|Invoke-WebRequest|Invoke-RestMethod|Start-BitsTransfer|Net\.WebClient|FromBase64String/i,
+    motivo: 'descargar código o datos remotos para su ejecución',
+  },
   { rx: /\b(mshta|rundll32)(\.exe)?\b[^\n]*https?:/i, motivo: 'ejecutar código remoto con un binario del sistema (LOLBin)' },
   { rx: /\bcertutil(\.exe)?\b[^\n]*-urlcache/i, motivo: 'descargar un archivo remoto con certutil' },
   { rx: /(^|[\s&;|])start\s+"[^"]*"\s*https?:|(^|[\s&;|])start\s+https?:/i, motivo: 'abrir una URL desde la terminal' },
@@ -97,12 +109,18 @@ const SENSIBLES = [
   { rx: /\breg\s+(add|delete|import|restore)\b/i, motivo: 'modificar el registro de Windows' },
   { rx: /\b(sc|net)\s+(start|stop|config|create|delete)\b/i, motivo: 'crear, borrar o configurar un servicio' },
   { rx: /\bschtasks\b[^\n]*\/(create|delete|change)/i, motivo: 'crear, borrar o modificar una tarea programada' },
-  { rx: /\b(New-Service|Remove-Service|New-ScheduledTask|Register-ScheduledTask|Unregister-ScheduledTask)\b/i, motivo: 'registrar un servicio o una tarea programada' },
+  {
+    rx: /\b(New-Service|Remove-Service|New-ScheduledTask|Register-ScheduledTask|Unregister-ScheduledTask)\b/i,
+    motivo: 'registrar un servicio o una tarea programada',
+  },
   { rx: /\bnet\s+(user|localgroup|share)\b/i, motivo: 'crear, borrar o modificar cuentas y recursos compartidos' },
   { rx: /\b(New-LocalUser|Remove-LocalUser|Add-LocalGroupMember)\b/i, motivo: 'modificar cuentas de usuario del equipo' },
   { rx: /\bSet-ExecutionPolicy\b/i, motivo: 'cambiar la política de ejecución de PowerShell' },
   { rx: /\b(Add|Set|Remove)-MpPreference\b/i, motivo: 'cambiar la configuración del antivirus' },
-  { rx: /\b(New-NetFirewallRule|Remove-NetFirewallRule|Set-NetFirewallProfile)\b|\bnetsh\s+advfirewall\b/i, motivo: 'cambiar el cortafuegos' },
+  {
+    rx: /\b(New-NetFirewallRule|Remove-NetFirewallRule|Set-NetFirewallProfile)\b|\bnetsh\s+advfirewall\b/i,
+    motivo: 'cambiar el cortafuegos',
+  },
   { rx: /\bnetsh\b/i, motivo: 'reconfigurar la red del equipo' },
   { rx: /\b(powercfg|shutdown|Stop-Computer|Restart-Computer)\b/i, motivo: 'cambiar el estado o la energía del equipo' },
   { rx: /\b(taskkill|Stop-Process)\b[^\n]*\/?[fF]\b|\btaskkill\b[^\n]*\/f\b/i, motivo: 'matar procesos a la fuerza' },
@@ -123,7 +141,8 @@ const SENSIBLES = [
  *  comando es UNA orden sencilla: en cuanto encadena (`&&`, `;`, `|`, `>`), la
  *  lista blanca deja de valer, porque ya no se sabe qué se ejecuta después.
  * --------------------------------------------------------------------------- */
-const PERMITIDOS = /^\s*(dir|ls|tree|type|cat|head|tail|find|findstr|where|which|echo|pwd|cd|whoami|hostname|date|time|ver|set\b|git\s+(status|log|diff|show|branch|remote|describe|rev-parse|ls-files|shortlog|blame|config\s+--get)|(node|npm|npx|pnpm|yarn|bun|python|py|pip|git|docker|java|go|cargo|rustc|dotnet|ffmpeg|rg|code)\s+(-{1,2}[a-z]|--version)\b|(npm|pnpm|yarn|bun)\s+(test|run|ls|list|outdated)\b)/i;
+const PERMITIDOS =
+  /^\s*(dir|ls|tree|type|cat|head|tail|find|findstr|where|which|echo|pwd|cd|whoami|hostname|date|time|ver|set\b|git\s+(status|log|diff|show|branch|remote|describe|rev-parse|ls-files|shortlog|blame|config\s+--get)|(node|npm|npx|pnpm|yarn|bun|python|py|pip|git|docker|java|go|cargo|rustc|dotnet|ffmpeg|rg|code)\s+(-{1,2}[a-z]|--version)\b|(npm|pnpm|yarn|bun)\s+(test|run|ls|list|outdated)\b)/i;
 
 /** Cadena con algo más que una orden simple (encadenada, redirigida o sustituida). */
 function compuesta(cmd) {
@@ -137,7 +156,9 @@ function compuesta(cmd) {
  * prueba y el diagnóstico puedan citarlo.
  */
 function clasificar(cmd) {
-  const t = String(cmd == null ? '' : cmd).replace(/\s+/g, ' ').trim();
+  const t = String(cmd == null ? '' : cmd)
+    .replace(/\s+/g, ' ')
+    .trim();
   if (!t) return { nivel: 'normal', motivo: '', regla: '' };
 
   for (let i = 0; i < PROHIBIDOS.length; i++) {
@@ -160,7 +181,9 @@ function clasificar(cmd) {
 
 /** ¿Solo lee? (lo usa la interfaz para explicar por qué un comando no molestó). */
 function esSeguro(cmd) {
-  const t = String(cmd == null ? '' : cmd).replace(/\s+/g, ' ').trim();
+  const t = String(cmd == null ? '' : cmd)
+    .replace(/\s+/g, ' ')
+    .trim();
   if (!t || compuesta(t)) return false;
   return PERMITIDOS.test(t);
 }

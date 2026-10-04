@@ -58,7 +58,7 @@ contextBridge.exposeInMainWorld('sagitari', {
   ttsList: () => ipcRenderer.invoke('tts:list'),
   ttsInstall: () => ipcRenderer.invoke('tts:install'),
   onTtsInstall: on('tts:installProgress', ([p]) => [p]),
-  onTtsPhrase: on('tts:phrase', ([p]) => [p]),      // { id, bytes }
+  onTtsPhrase: on('tts:phrase', ([p]) => [p]), // { id, bytes }
   ttsPlayed: (id) => ipcRenderer.send('tts:played', id),
   ttsStop: () => ipcRenderer.send('tts:stop'),
   ttsReset: () => ipcRenderer.send('tts:reset'),
@@ -88,7 +88,7 @@ contextBridge.exposeInMainWorld('sagitari', {
   pauseChat: () => ipcRenderer.invoke('chat:pause'),
   skillsList: () => ipcRenderer.invoke('skills:list'),
   skillsToggle: (id, enabled) => ipcRenderer.invoke('skills:toggle', { id, enabled }),
-  skillsImport: (repo, opts) => ipcRenderer.invoke('skills:import', (opts && typeof opts === 'object') ? { repo, ...opts } : repo),
+  skillsImport: (repo, opts) => ipcRenderer.invoke('skills:import', opts && typeof opts === 'object' ? { repo, ...opts } : repo),
   skillsCreate: (data) => ipcRenderer.invoke('skills:create', data),
   skillsDelete: (id) => ipcRenderer.invoke('skills:delete', id),
   skillsSearch: (q) => ipcRenderer.invoke('skills:search', q),
@@ -134,5 +134,5 @@ contextBridge.exposeInMainWorld('sagitari', {
   mcpRefresh: (id) => ipcRenderer.invoke('mcp:refresh', id),
   mcpLog: (id) => ipcRenderer.invoke('mcp:log', id),
   mcpImport: (json) => ipcRenderer.invoke('mcp:import', json),
-  mcpExport: () => ipcRenderer.invoke('mcp:export')
+  mcpExport: () => ipcRenderer.invoke('mcp:export'),
 });

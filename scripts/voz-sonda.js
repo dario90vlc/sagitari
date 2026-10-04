@@ -73,7 +73,9 @@ function anota(linea) {
 }
 
 setTimeout(() => {
-  try { p.kill(); } catch {}
+  try {
+    p.kill();
+  } catch {}
   veredicto();
 }, SEGUNDOS * 1000);
 
@@ -85,9 +87,13 @@ function veredicto() {
     if (visto.avisos.length) console.log('Los avisos de arriba dicen por qué.');
     return;
   }
-  console.log('Motor en uso: ' + visto.motor + (visto.motor === 'winrt'
-    ? '  (el moderno: es el que reconoce bien)'
-    : '  (el CLÁSICO: oye mucho peor, y es la causa de que no te reconozca)'));
+  console.log(
+    'Motor en uso: ' +
+      visto.motor +
+      (visto.motor === 'winrt'
+        ? '  (el moderno: es el que reconoce bien)'
+        : '  (el CLÁSICO: oye mucho peor, y es la causa de que no te reconozca)'),
+  );
   if (visto.idioma) console.log('Idioma con el que escucha: ' + visto.idioma + '   (pedido: ' + LANG + ')');
   console.log('Frases reconocidas: ' + visto.finales.length + (visto.parciales ? ' (+' + visto.parciales + ' hipótesis en curso)' : ''));
   for (const f of visto.finales) console.log('   +' + f.t.toFixed(1) + 's  ' + f.texto);
@@ -112,5 +118,10 @@ function veredicto() {
 /* La sonda no deja el micrófono abierto: si el usuario la corta con Ctrl+C, se mata el
    proceso de PowerShell en lugar de dejarlo escuchando en segundo plano. */
 for (const senal of ['SIGINT', 'SIGTERM']) {
-  process.on(senal, () => { try { p.kill(); } catch {} process.exit(130); });
+  process.on(senal, () => {
+    try {
+      p.kill();
+    } catch {}
+    process.exit(130);
+  });
 }

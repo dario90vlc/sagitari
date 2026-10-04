@@ -25,12 +25,47 @@ const BASURA = [
   'no te olvides de suscribirte',
 ];
 
-const normalizar = (t) => String(t).toLowerCase().normalize('NFD').replace(/[\u0300-\u036f]/g, '').replace(/[^a-z0-9ñ ]/g, ' ').replace(/\s+/g, ' ').trim();
+const normalizar = (t) =>
+  String(t)
+    .toLowerCase()
+    .normalize('NFD')
+    .replace(/[\u0300-\u036f]/g, '')
+    .replace(/[^a-z0-9ñ ]/g, ' ')
+    .replace(/\s+/g, ' ')
+    .trim();
 
 const ACRONIMOS_VALIDOS = new Set([
-  'css', 'sql', 'gpt', 'pdf', 'jpg', 'png', 'svg', 'xml', 'txt', 'md',
-  'cd', 'ls', 'ps', 'npm', 'git', 'api', 'cli', 'json', 'url', 'http',
-  'https', 'ui', 'ux', 'app', 'id', 'os', 'ws', 'db', 'ai', 'llm', 'mcp'
+  'css',
+  'sql',
+  'gpt',
+  'pdf',
+  'jpg',
+  'png',
+  'svg',
+  'xml',
+  'txt',
+  'md',
+  'cd',
+  'ls',
+  'ps',
+  'npm',
+  'git',
+  'api',
+  'cli',
+  'json',
+  'url',
+  'http',
+  'https',
+  'ui',
+  'ux',
+  'app',
+  'id',
+  'os',
+  'ws',
+  'db',
+  'ai',
+  'llm',
+  'mcp',
 ]);
 
 const REGLAS = [
@@ -45,7 +80,7 @@ const REGLAS = [
       if (/[aeiou0-9]/.test(n)) return false;
       const palabras = n.split(/\s+/).filter(Boolean);
       return !palabras.some((p) => ACRONIMOS_VALIDOS.has(p));
-    }
+    },
   },
   /* `ms` = 0 significa «no se sabe», y el motor de Windows NO manda duración: sin el
      `ms > 0`, toda respuesta corta («sí», «no», «ok») se descartaría como basura y el modo
@@ -56,11 +91,17 @@ const REGLAS = [
     prueba: (t) => {
       const w = normalizar(t).split(/\s+/).filter(Boolean);
       return w.length >= 4 && new Set(w).size === 1;
-    }
+    },
   },
   /* El prefijo solo se aplica a entradas de varias palabras: si no, «música a todo
      volumen» o «risas aparte, abre el navegador» caerían por empezar como una alucinación. */
-  { motivo: 'está en la lista negra de alucinaciones', prueba: (t) => { const n = normalizar(t); return BASURA.some((b) => n === b || (b.includes(' ') && n.startsWith(b))); } },
+  {
+    motivo: 'está en la lista negra de alucinaciones',
+    prueba: (t) => {
+      const n = normalizar(t);
+      return BASURA.some((b) => n === b || (b.includes(' ') && n.startsWith(b)));
+    },
+  },
 ];
 
 function esBasura(text, ms = 0) {

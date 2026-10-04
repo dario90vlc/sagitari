@@ -17,7 +17,12 @@ const { CAPACIDADES_BASE } = require('./contract');
    al usuario sin voz en el portable). Ver ruta-script.js. */
 const { rutaScriptReal } = require('./ruta-script');
 
-function createTtsWindows({ spawnFn = spawn, dataDir = os.tmpdir(), scriptPath = rutaScriptReal(path.join(__dirname, '..', 'tts.ps1')), rate = 0 } = {}) {
+function createTtsWindows({
+  spawnFn = spawn,
+  dataDir = os.tmpdir(),
+  scriptPath = rutaScriptReal(path.join(__dirname, '..', 'tts.ps1')),
+  rate = 0,
+} = {}) {
   /* Los temporales de una frase viven bajo NUESTRA carpeta, no sueltos en %TEMP%: así
      dispose() puede barrer de verdad lo que deje una síntesis interrumpida (si el proceso
      muere a mitad, el .txt con la frase del usuario y el .wav se quedaban huérfanos y sin
@@ -27,7 +32,13 @@ function createTtsWindows({ spawnFn = spawn, dataDir = os.tmpdir(), scriptPath =
   let carpetaLista = false;
   const carpeta = () => {
     if (carpetaLista) return dir;
-    try { fs.mkdirSync(dir, { recursive: true }); carpetaLista = true; return dir; } catch { return os.tmpdir(); }
+    try {
+      fs.mkdirSync(dir, { recursive: true });
+      carpetaLista = true;
+      return dir;
+    } catch {
+      return os.tmpdir();
+    }
   };
 
   function correr(args, texto) {
@@ -39,10 +50,31 @@ function createTtsWindows({ spawnFn = spawn, dataDir = os.tmpdir(), scriptPath =
       const salida = { voz: '', ms: 0, error: '', file: tmpWav, natural: false };
       let proc;
       try {
-        proc = spawnFn('powershell.exe', ['-NoProfile', '-ExecutionPolicy', 'Bypass', '-File', scriptPath,
-          '-Lang', args.lang || 'es-ES', '-Voice', args.voice || '', '-TextFile', tmpText, '-OutFile', tmpWav, '-Rate', String(args.rate ?? rate)], { windowsHide: true });
+        proc = spawnFn(
+          'powershell.exe',
+          [
+            '-NoProfile',
+            '-ExecutionPolicy',
+            'Bypass',
+            '-File',
+            scriptPath,
+            '-Lang',
+            args.lang || 'es-ES',
+            '-Voice',
+            args.voice || '',
+            '-TextFile',
+            tmpText,
+            '-OutFile',
+            tmpWav,
+            '-Rate',
+            String(args.rate ?? rate),
+          ],
+          { windowsHide: true },
+        );
       } catch (e) {
-        try { fs.unlinkSync(tmpText); } catch {}
+        try {
+          fs.unlinkSync(tmpText);
+        } catch {}
         resolve({ ...salida, error: e.message });
         return;
       }
@@ -51,20 +83,26 @@ function createTtsWindows({ spawnFn = spawn, dataDir = os.tmpdir(), scriptPath =
          entrada) y la promesa de aquí abajo no resolvía nunca: la frase se sintetizaba
          pero nadie la recibía. Medido con una sonda: sin esto, ni «-List» ni la síntesis
          devolvían el control, con la salida ya escrita en el pipe. */
-      try { proc.stdin.end(); } catch {}
+      try {
+        proc.stdin.end();
+      } catch {}
       /* Red de seguridad, como en el `tts:speak` de siempre: `Await` del guion espera con
          Wait(-1) a una tarea de WinRT, así que una voz atascada dejaría esta promesa colgada
          para siempre (y el .txt con la frase del usuario, en el disco). */
       const killTimer = setTimeout(() => {
         salida.error = salida.error || 'la síntesis tardó demasiado';
-        try { proc.kill(); } catch {}
+        try {
+          proc.kill();
+        } catch {}
       }, 60000);
       /* `spawn` no lanza cuando no puede arrancar (ENOENT, EACCES): avisa por el evento
          'error'. Sin listener, Node lo relanzaría como excepción no capturada y, como en
          ese caso no llega ningún 'exit', la promesa no resolvería y el .txt se quedaría. */
       proc.on('error', (e) => {
-        clearTimeout(killTimer);   // sin desarmarlo, el temporizador mantendría el proceso vivo
-        try { fs.unlinkSync(tmpText); } catch {}
+        clearTimeout(killTimer); // sin desarmarlo, el temporizador mantendría el proceso vivo
+        try {
+          fs.unlinkSync(tmpText);
+        } catch {}
         resolve({ ...salida, error: e.message });
       });
       let buf = '';
@@ -83,10 +121,14 @@ function createTtsWindows({ spawnFn = spawn, dataDir = os.tmpdir(), scriptPath =
           else if (linea.startsWith('ERROR::')) salida.error = linea.slice(7).trim();
         }
       });
-      proc.stderr.on('data', (d) => { if (!salida.error) salida.error = d.toString('utf8').trim().slice(0, 200); });
+      proc.stderr.on('data', (d) => {
+        if (!salida.error) salida.error = d.toString('utf8').trim().slice(0, 200);
+      });
       proc.on('exit', () => {
         clearTimeout(killTimer);
-        try { fs.unlinkSync(tmpText); } catch {}
+        try {
+          fs.unlinkSync(tmpText);
+        } catch {}
         resolve(salida);
       });
     });
@@ -94,7 +136,11 @@ function createTtsWindows({ spawnFn = spawn, dataDir = os.tmpdir(), scriptPath =
 
   async function sintetizar(texto, { voice = '', lang = 'es-ES', rate: r } = {}) {
     const r1 = await correr({ lang, voice, rate: r }, texto);
-    const limpio = () => { try { fs.unlinkSync(r1.file); } catch {} };
+    const limpio = () => {
+      try {
+        fs.unlinkSync(r1.file);
+      } catch {}
+    };
     if (r1.error || !fs.existsSync(r1.file)) {
       limpio();
       /* Una voz NATURAL que falla no se sustituye en silencio: el carril de respaldo
@@ -103,7 +149,13 @@ function createTtsWindows({ spawnFn = spawn, dataDir = os.tmpdir(), scriptPath =
          error sube con la causa y el renderer decide avisar; sin voz pedida natural, el
          respaldo sigue siendo válido y este caso no se diferencia del resto. */
       if (r1.error && /natural/i.test(String(voice || ''))) {
-        return { wav: null, voz: voice, ms: r1.ms, natural: false, error: 'la voz natural no ha podido sintetizar (no la sustituyo por una robótica): ' + r1.error };
+        return {
+          wav: null,
+          voz: voice,
+          ms: r1.ms,
+          natural: false,
+          error: 'la voz natural no ha podido sintetizar (no la sustituyo por una robótica): ' + r1.error,
+        };
       }
       return { wav: null, voz: r1.voz, ms: r1.ms, natural: r1.natural, error: r1.error || 'sin audio' };
     }
@@ -116,14 +168,27 @@ function createTtsWindows({ spawnFn = spawn, dataDir = os.tmpdir(), scriptPath =
     const r = await new Promise((resolve) => {
       const l = [];
       let proc;
-      try { proc = spawnFn('powershell.exe', ['-NoProfile', '-ExecutionPolicy', 'Bypass', '-File', scriptPath, '-List'], { windowsHide: true }); }
-      catch { resolve(l); return; }
-      try { proc.stdin.end(); } catch {}   // sin esto PowerShell no termina: ver la nota de correr()
+      try {
+        proc = spawnFn('powershell.exe', ['-NoProfile', '-ExecutionPolicy', 'Bypass', '-File', scriptPath, '-List'], { windowsHide: true });
+      } catch {
+        resolve(l);
+        return;
+      }
+      try {
+        proc.stdin.end();
+      } catch {} // sin esto PowerShell no termina: ver la nota de correr()
       /* Mismos dos seguros que en correr(): el 'error' del arranque (que no trae 'exit' y
          sin listener tumbaría el proceso) y un tope de tiempo, para que el desplegable de
          voces no se quede girando si PowerShell no contesta. */
-      const killTimer = setTimeout(() => { try { proc.kill(); } catch {} }, 60000);
-      proc.on('error', () => { clearTimeout(killTimer); resolve(l); });
+      const killTimer = setTimeout(() => {
+        try {
+          proc.kill();
+        } catch {}
+      }, 60000);
+      proc.on('error', () => {
+        clearTimeout(killTimer);
+        resolve(l);
+      });
       let buf = '';
       proc.stdout.on('data', (d) => {
         buf += d.toString('utf8');
@@ -139,7 +204,10 @@ function createTtsWindows({ spawnFn = spawn, dataDir = os.tmpdir(), scriptPath =
           }
         }
       });
-      proc.on('exit', () => { clearTimeout(killTimer); resolve(l); });
+      proc.on('exit', () => {
+        clearTimeout(killTimer);
+        resolve(l);
+      });
     });
     return r;
   }
@@ -149,7 +217,9 @@ function createTtsWindows({ spawnFn = spawn, dataDir = os.tmpdir(), scriptPath =
      una carpeta que ya no existe. */
   function dispose() {
     carpetaLista = false;
-    try { fs.rmSync(dir, { recursive: true, force: true }); } catch {}
+    try {
+      fs.rmSync(dir, { recursive: true, force: true });
+    } catch {}
   }
 
   return { nombre: 'windows', capacidades: { ...CAPACIDADES_BASE }, listarVoces, sintetizar, dispose };

@@ -28,7 +28,7 @@ function registerMcpIpc(ipcMain, ctx) {
     if (!v.ok) return { ok: false, error: v.error };
     const server = v.value;
     // el formulario no reenvía los secretos: un valor vacío conserva el guardado
-    const previo = (config.mcp.servers || []).find(s => s.id === server.id);
+    const previo = (config.mcp.servers || []).find((s) => s.id === server.id);
     if (previo) {
       server.env = mcpConfig.mergeSecrets(previo.env, server.env);
       server.headers = mcpConfig.mergeSecrets(previo.headers, server.headers);
@@ -39,7 +39,7 @@ function registerMcpIpc(ipcMain, ctx) {
       if (payload.timeoutMs === undefined) server.timeoutMs = previo.timeoutMs;
       if (payload.cwd === undefined && server.transport === 'stdio') server.cwd = previo.cwd || '';
     }
-    config.mcp.servers = [...(config.mcp.servers || []).filter(s => s.id !== server.id), server];
+    config.mcp.servers = [...(config.mcp.servers || []).filter((s) => s.id !== server.id), server];
     wireMcp();
     const r = persistConfig();
     // el id saneado y su comodín de permisos viajan de vuelta: la UI necesita el comodín
@@ -52,14 +52,14 @@ function registerMcpIpc(ipcMain, ctx) {
   ipcMain.handle('mcp:delete', (e, id) => {
     const config = cfg();
     const sid = mcpConfig.rawId(id);
-    config.mcp.servers = (config.mcp.servers || []).filter(s => s.id !== sid);
+    config.mcp.servers = (config.mcp.servers || []).filter((s) => s.id !== sid);
     // los permisos de un servidor borrado quedarían huérfanos (y si vuelve, con
     // los niveles de antes, que el usuario ya no ve en ningún sitio). Las claves se
     // buscan con el slug del nombre expuesto, NO con el id crudo: si no, un id con
     // guion o de más de 16 caracteres dejaría sus permisos ahí para siempre.
     const prefijo = 'mcp__' + serverSlug(sid) + '__';
     for (const k of Object.keys(config.security.permissions || {})) {
-      if (k.startsWith(prefijo)) delete config.security.permissions[k];   // cubre `mcp__<slug>__*` y cada `mcp__<slug>__<tool>`
+      if (k.startsWith(prefijo)) delete config.security.permissions[k]; // cubre `mcp__<slug>__*` y cada `mcp__<slug>__<tool>`
     }
     setAgentPolicy(config.security);
     wireMcp();
@@ -72,13 +72,16 @@ function registerMcpIpc(ipcMain, ctx) {
   ipcMain.handle('mcp:toggle', (e, { id, enabled }) => {
     const config = cfg();
     const sid = mcpConfig.rawId(id);
-    const s = (config.mcp.servers || []).find(x => x.id === sid);
+    const s = (config.mcp.servers || []).find((x) => x.id === sid);
     if (!s) return { ok: false, error: 'servidor MCP desconocido' };
     s.enabled = enabled !== false;
     // reconfigure aplica el cambio: apagado suelta el proceso y deja de ofrecer herramientas
     wireMcp();
     // activar una fila debe dejarla lista, no solo marcar la bandera
-    if (config.mcp.enabled !== false && s.enabled) wireMcp().ensure(s.id).catch(() => {});
+    if (config.mcp.enabled !== false && s.enabled)
+      wireMcp()
+        .ensure(s.id)
+        .catch(() => {});
     const r = persistConfig();
     return r.ok ? { ok: true, servers: mcpState().servers } : { ok: false, error: r.error };
   });
@@ -96,17 +99,17 @@ function registerMcpIpc(ipcMain, ctx) {
   ipcMain.handle('mcp:refresh', async (e, id) => {
     const sid = mcpConfig.rawId(id);
     const r = await wireMcp().ensure(sid);
-    return { ok: r.ok, error: r.error || null, server: mcpState().servers.find(s => s.id === sid) };
+    return { ok: r.ok, error: r.error || null, server: mcpState().servers.find((s) => s.id === sid) };
   });
 
   ipcMain.handle('mcp:test', async (e, id) => {
     const sid = mcpConfig.rawId(id);
     const r = await wireMcp().ensure(sid);
-    return { ok: r.ok, error: r.error || null, server: mcpState().servers.find(s => s.id === sid) };
+    return { ok: r.ok, error: r.error || null, server: mcpState().servers.find((s) => s.id === sid) };
   });
 
   ipcMain.handle('mcp:log', (e, id) => {
-    const s = mcpState().servers.find(x => x.id === mcpConfig.rawId(id));
+    const s = mcpState().servers.find((x) => x.id === mcpConfig.rawId(id));
     return { ok: !!s, log: (s && s.logTail) || '', error: (s && s.error) || null };
   });
 
@@ -117,8 +120,8 @@ function registerMcpIpc(ipcMain, ctx) {
     // NO escribe: devuelve la vista previa con conflictos para que el usuario confirme
     const r = mcpConfig.parseMcpImport(String(json || ''));
     if (!r.ok) return r;
-    const existentes = new Set((config.mcp.servers || []).map(s => s.id));
-    return { ok: true, servers: r.servers.map(s => ({ ...s, conflict: existentes.has(s.id) })) };
+    const existentes = new Set((config.mcp.servers || []).map((s) => s.id));
+    return { ok: true, servers: r.servers.map((s) => ({ ...s, conflict: existentes.has(s.id) })) };
   });
 }
 

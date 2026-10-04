@@ -24,14 +24,14 @@
    ============================================================================ */
 
 const { spawn } = require('child_process');
-const electron = require('electron');   // en un proceso Node normal: la ruta del binario
+const electron = require('electron'); // en un proceso Node normal: la ruta del binario
 const path = require('path');
 
 const APP_DIR = path.join(__dirname, '..');
 const args = process.argv.slice(2);
 const quiereJson = args.includes('--json');
 
-const hijo = spawn(electron, ['.', '--banco', ...args.filter(a => a !== '--json')], {
+const hijo = spawn(electron, ['.', '--banco', ...args.filter((a) => a !== '--json')], {
   cwd: APP_DIR,
   stdio: ['ignore', 'pipe', 'pipe'],
   env: { ...process.env, ELECTRON_RUN_AS_NODE: '' },
@@ -40,7 +40,7 @@ const hijo = spawn(electron, ['.', '--banco', ...args.filter(a => a !== '--json'
 let salida = '';
 hijo.stdout.on('data', (d) => {
   salida += String(d);
-  if (!quiereJson) process.stdout.write(d);   // el progreso se ve en vivo
+  if (!quiereJson) process.stdout.write(d); // el progreso se ve en vivo
 });
 hijo.stderr.on('data', (d) => {
   salida += String(d);
@@ -50,7 +50,10 @@ hijo.stderr.on('data', (d) => {
 hijo.on('close', (codigo) => {
   if (quiereJson) {
     // El informe es la última línea con llaves: se busca y se saca sola.
-    const ultimo = salida.split('\n').reverse().find(l => l.trim().startsWith('{'));
+    const ultimo = salida
+      .split('\n')
+      .reverse()
+      .find((l) => l.trim().startsWith('{'));
     if (ultimo) process.stdout.write(ultimo + '\n');
     else process.stderr.write(salida);
   }

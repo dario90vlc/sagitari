@@ -8,11 +8,13 @@ const CDP_PORT = 9333;
 
 function getTargets() {
   return new Promise((resolve, reject) => {
-    http.get(`http://127.0.0.1:${CDP_PORT}/json`, (res) => {
-      let d = '';
-      res.on('data', (c) => (d += c));
-      res.on('end', () => resolve(JSON.parse(d)));
-    }).on('error', reject);
+    http
+      .get(`http://127.0.0.1:${CDP_PORT}/json`, (res) => {
+        let d = '';
+        res.on('data', (c) => (d += c));
+        res.on('end', () => resolve(JSON.parse(d)));
+      })
+      .on('error', reject);
   });
 }
 
@@ -23,13 +25,22 @@ function connect(url) {
     const pending = new Map();
     ws.on('message', (m) => {
       const msg = JSON.parse(m);
-      if (msg.id && pending.has(msg.id)) { pending.get(msg.id)(msg); pending.delete(msg.id); }
+      if (msg.id && pending.has(msg.id)) {
+        pending.get(msg.id)(msg);
+        pending.delete(msg.id);
+      }
     });
-    ws.on('open', () => resolve({
-      send(method, params = {}) {
-        return new Promise((res) => { const i = ++id; pending.set(i, res); ws.send(JSON.stringify({ id: i, method, params })); });
-      },
-    }));
+    ws.on('open', () =>
+      resolve({
+        send(method, params = {}) {
+          return new Promise((res) => {
+            const i = ++id;
+            pending.set(i, res);
+            ws.send(JSON.stringify({ id: i, method, params }));
+          });
+        },
+      }),
+    );
     ws.on('error', reject);
   });
 }
@@ -39,7 +50,13 @@ const sleep = (ms) => new Promise((r) => setTimeout(r, ms));
 (async () => {
   const targets = await getTargets();
   const page = targets.find((t) => t.type === 'page' && /index\.html/.test(t.url));
-  if (!page) { console.error('PAGE_NOT_FOUND', targets.map(t => t.url)); process.exit(1); }
+  if (!page) {
+    console.error(
+      'PAGE_NOT_FOUND',
+      targets.map((t) => t.url),
+    );
+    process.exit(1);
+  }
   const c = await connect(page.webSocketDebuggerUrl);
 
   // Stage a demo conversation with the app's own bubble()/dayStamp()/scroll().
@@ -73,4 +90,7 @@ const sleep = (ms) => new Promise((r) => setTimeout(r, ms));
 
   console.log('DRIVE_OK');
   process.exit(0);
-})().catch((e) => { console.error('DRIVE_FAIL', e.message); process.exit(1); });
+})().catch((e) => {
+  console.error('DRIVE_FAIL', e.message);
+  process.exit(1);
+});

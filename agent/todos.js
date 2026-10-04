@@ -24,35 +24,63 @@
  *  ignora (o se ignora la llamada entera si no hay un solo elemento válido).
  */
 
-const MAX_TAREAS = 20;    // tope de pasos: una lista de 60 no es un plan, es un volcado
-const MAX_TEXTO = 200;    // caracteres por tarea
+const MAX_TAREAS = 20; // tope de pasos: una lista de 60 no es un plan, es un volcado
+const MAX_TEXTO = 200; // caracteres por tarea
 
 /* Estados canónicos (los mismos que expone la herramienta al modelo). */
 const ESTADOS = ['pending', 'in_progress', 'completed'];
 
 /* Sinónimos frecuentes → estado canónico. Todo en minúsculas. */
 const ALIAS_ESTADO = {
-  pending: 'pending', pendiente: 'pending', pendientes: 'pending', todo: 'pending', 'por hacer': 'pending', por_hacer: 'pending', abierta: 'pending', nueva: 'pending',
-  in_progress: 'in_progress', 'in-progress': 'in_progress', inprogress: 'in_progress', 'en curso': 'in_progress', en_curso: 'in_progress', doing: 'in_progress', active: 'in_progress', actual: 'in_progress', en_progreso: 'in_progress', haciendo: 'in_progress',
-  completed: 'completed', complete: 'completed', done: 'completed', completada: 'completed', completado: 'completed', hecha: 'completed', hecho: 'completed', listo: 'completed', lista: 'completed', terminada: 'completed', terminado: 'completed',
+  pending: 'pending',
+  pendiente: 'pending',
+  pendientes: 'pending',
+  todo: 'pending',
+  'por hacer': 'pending',
+  por_hacer: 'pending',
+  abierta: 'pending',
+  nueva: 'pending',
+  in_progress: 'in_progress',
+  'in-progress': 'in_progress',
+  inprogress: 'in_progress',
+  'en curso': 'in_progress',
+  en_curso: 'in_progress',
+  doing: 'in_progress',
+  active: 'in_progress',
+  actual: 'in_progress',
+  en_progreso: 'in_progress',
+  haciendo: 'in_progress',
+  completed: 'completed',
+  complete: 'completed',
+  done: 'completed',
+  completada: 'completed',
+  completado: 'completed',
+  hecha: 'completed',
+  hecho: 'completed',
+  listo: 'completed',
+  lista: 'completed',
+  terminada: 'completed',
+  terminado: 'completed',
 };
 
 /** Marca de una tarea para los resúmenes de texto (mismo símbolo para el modelo y la UI). */
 function marcador(status) {
-  return status === 'completed' ? '[x]' : (status === 'in_progress' ? '[>]' : '[ ]');
+  return status === 'completed' ? '[x]' : status === 'in_progress' ? '[>]' : '[ ]';
 }
 
 /** Cuenta de estados, para el prompt y la interfaz. */
 function estado(todos) {
   const l = Array.isArray(todos) ? todos : [];
-  const completadas = l.filter(t => t && t.status === 'completed').length;
-  const enCurso = l.filter(t => t && t.status === 'in_progress').length;
+  const completadas = l.filter((t) => t && t.status === 'completed').length;
+  const enCurso = l.filter((t) => t && t.status === 'in_progress').length;
   return { total: l.length, completadas, enCurso, pendientes: Math.max(0, l.length - completadas - enCurso) };
 }
 
 /** Recorta y aplana un texto de tarea a una línea. */
 function limpiar(s, max = MAX_TEXTO) {
-  const t = String(s == null ? '' : s).replace(/\s+/g, ' ').trim();
+  const t = String(s == null ? '' : s)
+    .replace(/\s+/g, ' ')
+    .trim();
   return t.length > max ? t.slice(0, max).trimEnd() : t;
 }
 
@@ -76,14 +104,26 @@ function normalizar(entrada) {
   const vistos = new Set();
   let truncada = false;
   for (const raw of entrada) {
-    if (todos.length >= MAX_TAREAS) { truncada = true; break; }
-    if (!raw || typeof raw !== 'object' || Array.isArray(raw)) { avisos.push('se ignoró un elemento que no es un objeto'); continue; }
-    const content = limpiar(raw.content != null ? raw.content : (raw.text != null ? raw.text : raw.tarea));
-    if (!content) { avisos.push('se ignoró una tarea sin "content"'); continue; }
+    if (todos.length >= MAX_TAREAS) {
+      truncada = true;
+      break;
+    }
+    if (!raw || typeof raw !== 'object' || Array.isArray(raw)) {
+      avisos.push('se ignoró un elemento que no es un objeto');
+      continue;
+    }
+    const content = limpiar(raw.content != null ? raw.content : raw.text != null ? raw.text : raw.tarea);
+    if (!content) {
+      avisos.push('se ignoró una tarea sin "content"');
+      continue;
+    }
     const clave = content.toLowerCase();
-    if (vistos.has(clave)) { avisos.push('se ignoró una tarea duplicada: «' + content.slice(0, 60) + '»'); continue; }
+    if (vistos.has(clave)) {
+      avisos.push('se ignoró una tarea duplicada: «' + content.slice(0, 60) + '»');
+      continue;
+    }
     vistos.add(clave);
-    const bruto = raw.status != null ? raw.status : (raw.estado != null ? raw.estado : 'pending');
+    const bruto = raw.status != null ? raw.status : raw.estado != null ? raw.estado : 'pending';
     const status = ALIAS_ESTADO[String(bruto).toLowerCase().trim()] || 'pending';
     const activeForm = limpiar(raw.activeForm != null ? raw.activeForm : raw.active_form);
     todos.push({ id: 'T' + (todos.length + 1), content, status, activeForm });
@@ -114,10 +154,11 @@ function resumen(todos) {
   const e = estado(l);
   if (!e.total) return 'Lista de tareas vacía: no hay nada pendiente.';
   const cab = `Lista de tareas actualizada — ${e.completadas} de ${e.total} completadas, ${e.enCurso} en curso, ${e.pendientes} pendientes.`;
-  const cuerpo = l.map(t => `- ${marcador(t.status)} ${t.content}`).join('\n');
-  const siguiente = (e.pendientes || e.enCurso)
-    ? 'Sigue con la tarea en curso y vuelve a llamar a todo_write al terminarla.'
-    : 'Todas completadas: cierra con tu resumen.';
+  const cuerpo = l.map((t) => `- ${marcador(t.status)} ${t.content}`).join('\n');
+  const siguiente =
+    e.pendientes || e.enCurso
+      ? 'Sigue con la tarea en curso y vuelve a llamar a todo_write al terminarla.'
+      : 'Todas completadas: cierra con tu resumen.';
   return cab + '\n' + cuerpo + '\n' + siguiente;
 }
 
@@ -129,21 +170,33 @@ function bloquePrompt(todos) {
   const l = Array.isArray(todos) ? todos : [];
   if (!l.length) return '';
   const e = estado(l);
-  const cuerpo = l.map(t => `- ${marcador(t.status)} ${t.content}`).join('\n');
-  return 'LISTA DE TAREAS DEL TURNO (la mantiene todo_write; es tu memoria de progreso y sobrevive a los recortes de contexto)\n'
-    + cuerpo + '\n'
-    + `Progreso: ${e.completadas}/${e.total} completadas, ${e.enCurso} en curso, ${e.pendientes} pendientes.`
-    + '\nManténla al día: marca completed en cuanto termines un paso y pon en in_progress solo el que estés haciendo ahora. '
-    + 'Si aparece un paso nuevo, añádelo reenviando la lista COMPLETA.';
+  const cuerpo = l.map((t) => `- ${marcador(t.status)} ${t.content}`).join('\n');
+  return (
+    'LISTA DE TAREAS DEL TURNO (la mantiene todo_write; es tu memoria de progreso y sobrevive a los recortes de contexto)\n' +
+    cuerpo +
+    '\n' +
+    `Progreso: ${e.completadas}/${e.total} completadas, ${e.enCurso} en curso, ${e.pendientes} pendientes.` +
+    '\nManténla al día: marca completed en cuanto termines un paso y pon en in_progress solo el que estés haciendo ahora. ' +
+    'Si aparece un paso nuevo, añádelo reenviando la lista COMPLETA.'
+  );
 }
 
 /** Primer texto de tarea apto para voz/etiqueta (presente si lo hay, si no el imperativo). */
 function etiquetaActiva(t) {
   if (!t) return '';
-  return (t.status === 'in_progress' && t.activeForm) ? t.activeForm : t.content;
+  return t.status === 'in_progress' && t.activeForm ? t.activeForm : t.content;
 }
 
 module.exports = {
-  MAX_TAREAS, MAX_TEXTO, ESTADOS, ALIAS_ESTADO,
-  marcador, estado, limpiar, normalizar, resumen, bloquePrompt, etiquetaActiva,
+  MAX_TAREAS,
+  MAX_TEXTO,
+  ESTADOS,
+  ALIAS_ESTADO,
+  marcador,
+  estado,
+  limpiar,
+  normalizar,
+  resumen,
+  bloquePrompt,
+  etiquetaActiva,
 };

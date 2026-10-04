@@ -29,17 +29,17 @@ const path = require('path');
  *  json: se valida en el propio proceso (JSON.parse), sin lanzar nada.
  * --------------------------------------------------------------------------- */
 const SINTAXIS = {
-  '.js':   { etiqueta: 'JavaScript', prog: 'node', extraArgs: ['--check'] },
-  '.mjs':  { etiqueta: 'JavaScript', prog: 'node', extraArgs: ['--check'] },
-  '.cjs':  { etiqueta: 'JavaScript', prog: 'node', extraArgs: ['--check'] },
-  '.jsx':  { etiqueta: 'JavaScript', prog: 'node', extraArgs: ['--check'] },
+  '.js': { etiqueta: 'JavaScript', prog: 'node', extraArgs: ['--check'] },
+  '.mjs': { etiqueta: 'JavaScript', prog: 'node', extraArgs: ['--check'] },
+  '.cjs': { etiqueta: 'JavaScript', prog: 'node', extraArgs: ['--check'] },
+  '.jsx': { etiqueta: 'JavaScript', prog: 'node', extraArgs: ['--check'] },
   '.json': { etiqueta: 'JSON', json: true },
-  '.py':   { etiqueta: 'Python', prog: 'python', extraArgs: ['-m', 'py_compile'] },
-  '.rb':   { etiqueta: 'Ruby', prog: 'ruby', extraArgs: ['-c'] },
-  '.php':  { etiqueta: 'PHP', prog: 'php', extraArgs: ['-l'] },
-  '.sh':   { etiqueta: 'Shell', prog: 'bash', extraArgs: ['-n'] },
+  '.py': { etiqueta: 'Python', prog: 'python', extraArgs: ['-m', 'py_compile'] },
+  '.rb': { etiqueta: 'Ruby', prog: 'ruby', extraArgs: ['-c'] },
+  '.php': { etiqueta: 'PHP', prog: 'php', extraArgs: ['-l'] },
+  '.sh': { etiqueta: 'Shell', prog: 'bash', extraArgs: ['-n'] },
   '.bash': { etiqueta: 'Shell', prog: 'bash', extraArgs: ['-n'] },
-  '.go':   { etiqueta: 'Go', prog: 'gofmt', extraArgs: ['-e'] },
+  '.go': { etiqueta: 'Go', prog: 'gofmt', extraArgs: ['-e'] },
 };
 
 /** Descriptor para comprobar la sintaxis de un archivo, o null si no se sabe. */
@@ -51,21 +51,37 @@ function comprobacionSintaxis(archivo) {
 }
 
 /** ¿Qué extensiones sabemos comprobar? (para el prompt y los tests) */
-function extensionesCubiertas() { return Object.keys(SINTAXIS); }
+function extensionesCubiertas() {
+  return Object.keys(SINTAXIS);
+}
 
 /* --------------------------------------------------------------------------- *
  *  Detección del perfil
  * --------------------------------------------------------------------------- */
 
 function leerJSON(archivo) {
-  try { return JSON.parse(fs.readFileSync(archivo, 'utf8')); } catch { return null; }
+  try {
+    return JSON.parse(fs.readFileSync(archivo, 'utf8'));
+  } catch {
+    return null;
+  }
 }
 function hay(dir, nombre) {
-  try { return fs.existsSync(path.join(dir, nombre)); } catch { return false; }
+  try {
+    return fs.existsSync(path.join(dir, nombre));
+  } catch {
+    return false;
+  }
 }
 function glob1(dir, re) {
-  try { return fs.readdirSync(dir, { withFileTypes: true }).filter(e => e.isFile() && re.test(e.name)).map(e => e.name); }
-  catch { return []; }
+  try {
+    return fs
+      .readdirSync(dir, { withFileTypes: true })
+      .filter((e) => e.isFile() && re.test(e.name))
+      .map((e) => e.name);
+  } catch {
+    return [];
+  }
 }
 
 /** Gestor de paquetes de Node por el fichero de bloqueo (npm si no hay ninguno). */
@@ -107,19 +123,22 @@ function detectar(workspace) {
       p.tipos.push('typescript');
       p.indicadores.push('tsconfig.json');
       const local = hay(dir, path.join('node_modules', '.bin', 'tsc'));
-      if (!p.build) p.build = (local ? `${p.gestor} exec tsc --noEmit` : 'npx tsc --noEmit');
+      if (!p.build) p.build = local ? `${p.gestor} exec tsc --noEmit` : 'npx tsc --noEmit';
     }
   }
 
   /* ---- Python ---- */
-  const pyCfg = ['pyproject.toml', 'setup.py', 'setup.cfg', 'requirements.txt', 'tox.ini', 'pytest.ini'].filter(n => hay(dir, n));
+  const pyCfg = ['pyproject.toml', 'setup.py', 'setup.cfg', 'requirements.txt', 'tox.ini', 'pytest.ini'].filter((n) => hay(dir, n));
   if (pyCfg.length) {
     p.tipos.push('python');
     p.indicadores.push(...pyCfg);
     const pytest = hay(dir, 'pytest.ini') || hay(dir, 'tox.ini') || pyCfg.includes('pyproject.toml');
     p.tests = pytest ? 'python -m pytest -q' : 'python -m unittest';
-    const lint = ['ruff.toml', '.ruff.toml', '.flake8'].find(n => hay(dir, n));
-    if (lint) { p.indicadores.push(lint); p.lint = lint.includes('ruff') ? 'ruff check .' : 'flake8'; }
+    const lint = ['ruff.toml', '.ruff.toml', '.flake8'].find((n) => hay(dir, n));
+    if (lint) {
+      p.indicadores.push(lint);
+      p.lint = lint.includes('ruff') ? 'ruff check .' : 'flake8';
+    }
   }
 
   /* ---- Go ---- */
@@ -178,10 +197,13 @@ function detectar(workspace) {
 
   /* ---- Makefile: solo si declara el objetivo (un `make` a secas puede hacer cualquier cosa) */
   if (hay(dir, 'Makefile') || hay(dir, 'makefile')) {
-    const mk = ['Makefile', 'makefile'].find(n => hay(dir, n));
+    const mk = ['Makefile', 'makefile'].find((n) => hay(dir, n));
     try {
       const txt = fs.readFileSync(path.join(dir, mk), 'utf8');
-      if (/^test:/m.test(txt)) { p.tests = p.tests || 'make test'; p.indicadores.push(mk); }
+      if (/^test:/m.test(txt)) {
+        p.tests = p.tests || 'make test';
+        p.indicadores.push(mk);
+      }
       if (/^build:/m.test(txt)) p.build = p.build || 'make build';
     } catch {}
   }
@@ -192,18 +214,43 @@ function detectar(workspace) {
 /* El perfil se relee cuando cambian los indicadores, no en cada turno: leer el
    package.json en cada prompt es barato, pero el agente lo pide varias veces por
    turno (prompt, cierre, revisión) y no tiene por qué cambiar en medio. */
-let cache = null;   // { raiz, firma, perfil }
+let cache = null; // { raiz, firma, perfil }
 
 /** Firma barata: nombres + mtime/tamaño de los indicadores que pueden cambiar. */
 function firma(dir) {
-  const nombres = ['package.json', 'tsconfig.json', 'pyproject.toml', 'setup.py', 'setup.cfg', 'requirements.txt',
-    'pytest.ini', 'tox.ini', 'go.mod', 'Cargo.toml', 'pom.xml', 'build.gradle', 'build.gradle.kts',
-    'composer.json', 'Gemfile', 'Rakefile', 'Makefile', 'makefile', 'pnpm-lock.yaml', 'yarn.lock', 'bun.lockb'];
+  const nombres = [
+    'package.json',
+    'tsconfig.json',
+    'pyproject.toml',
+    'setup.py',
+    'setup.cfg',
+    'requirements.txt',
+    'pytest.ini',
+    'tox.ini',
+    'go.mod',
+    'Cargo.toml',
+    'pom.xml',
+    'build.gradle',
+    'build.gradle.kts',
+    'composer.json',
+    'Gemfile',
+    'Rakefile',
+    'Makefile',
+    'makefile',
+    'pnpm-lock.yaml',
+    'yarn.lock',
+    'bun.lockb',
+  ];
   const partes = [];
   for (const n of nombres) {
-    try { const s = fs.statSync(path.join(dir, n)); partes.push(n + ':' + s.mtimeMs + ':' + s.size); } catch {}
+    try {
+      const s = fs.statSync(path.join(dir, n));
+      partes.push(n + ':' + s.mtimeMs + ':' + s.size);
+    } catch {}
   }
-  const otros = glob1(dir, /\.(sln|csproj|fsproj)$/i).sort().join(',');
+  const otros = glob1(dir, /\.(sln|csproj|fsproj)$/i)
+    .sort()
+    .join(',');
   return partes.join('|') + '|' + otros;
 }
 
@@ -218,7 +265,9 @@ function perfil(workspace) {
   return p;
 }
 
-function _resetForTests() { cache = null; }
+function _resetForTests() {
+  cache = null;
+}
 
 /* --------------------------------------------------------------------------- *
  *  Bloque para el prompt
@@ -236,11 +285,22 @@ function bloquePrompt(workspace) {
   if (p.tests) lineas.push(`- Tests: ${p.tests}  ← ejecútalo para verificar lo que cambias antes de dar algo por hecho.`);
   if (p.build) lineas.push(`- Compilación/tipos: ${p.build}`);
   if (p.lint) lineas.push(`- Lint: ${p.lint}`);
-  lineas.push('- Al escribir código se comprueba sola la SINTAXIS, y además pasan los comprobadores del proyecto sobre lo que has cambiado: si te llega un error, arréglalo en el mismo turno (los que ya estaban en el archivo antes de que lo tocaras se te dicen aparte: no los arregles salvo que se te pida).');
-  if (p.tests || p.build) lineas.push('- Al terminar el turno, la comprobación de arriba se EJECUTA sobre lo que hay en disco; si falla, se te devuelve la salida y tienes que arreglarlo antes de cerrar.');
+  lineas.push(
+    '- Al escribir código se comprueba sola la SINTAXIS, y además pasan los comprobadores del proyecto sobre lo que has cambiado: si te llega un error, arréglalo en el mismo turno (los que ya estaban en el archivo antes de que lo tocaras se te dicen aparte: no los arregles salvo que se te pida).',
+  );
+  if (p.tests || p.build)
+    lineas.push(
+      '- Al terminar el turno, la comprobación de arriba se EJECUTA sobre lo que hay en disco; si falla, se te devuelve la salida y tienes que arreglarlo antes de cerrar.',
+    );
   return lineas.join('\n');
 }
 
 module.exports = {
-  detectar, perfil, firma, bloquePrompt, comprobacionSintaxis, extensionesCubiertas, _resetForTests,
+  detectar,
+  perfil,
+  firma,
+  bloquePrompt,
+  comprobacionSintaxis,
+  extensionesCubiertas,
+  _resetForTests,
 };

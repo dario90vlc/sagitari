@@ -29,7 +29,10 @@ const UA = 'SAGITARI-updater';
 
 /** «v2.2.0-beta.1» → { nums: [2,2,0], pre: 'beta.1' } (null si no es una versión). */
 function parseVersion(v) {
-  const m = String(v == null ? '' : v).trim().replace(/^v/i, '').match(/^(\d+)\.(\d+)\.(\d+)(?:[-+](.*))?$/);
+  const m = String(v == null ? '' : v)
+    .trim()
+    .replace(/^v/i, '')
+    .match(/^(\d+)\.(\d+)\.(\d+)(?:[-+](.*))?$/);
   if (!m) return null;
   return { nums: [Number(m[1]), Number(m[2]), Number(m[3])], pre: m[4] || '' };
 }
@@ -41,7 +44,7 @@ function compareVersions(a, b) {
   if (!A || !B) return 0;
   for (let i = 0; i < 3; i++) if (A.nums[i] !== B.nums[i]) return A.nums[i] < B.nums[i] ? -1 : 1;
   if (A.pre === B.pre) return 0;
-  if (!A.pre) return 1;    // 2.0.0 > 2.0.0-beta.1
+  if (!A.pre) return 1; // 2.0.0 > 2.0.0-beta.1
   if (!B.pre) return -1;
   return A.pre < B.pre ? -1 : 1;
 }
@@ -51,7 +54,7 @@ function compareVersions(a, b) {
 /** Localiza en la release lo que sabemos usar. */
 function pickAssets(release) {
   const assets = (release && release.assets) || [];
-  const find = (rx) => assets.find(a => rx.test(String(a.name || ''))) || null;
+  const find = (rx) => assets.find((a) => rx.test(String(a.name || ''))) || null;
   const slim = (a) => (a ? { name: a.name, url: a.browser_download_url, size: a.size || 0 } : null);
   return {
     setup: slim(find(/^SAGITARI-Setup-.*\.exe$/i)),
@@ -63,7 +66,7 @@ function pickAssets(release) {
 /** Url desde la que se descarga el binario que corresponde a este modo de ejecución. */
 function assetFor(kind, assets) {
   if (!assets) return null;
-  const a = kind === 'portable' ? (assets.portable || assets.setup) : (assets.setup || assets.portable);
+  const a = kind === 'portable' ? assets.portable || assets.setup : assets.setup || assets.portable;
   return a || null;
 }
 
@@ -84,11 +87,16 @@ function parseLatestYml(text) {
   // con /m casan en cualquier línea, así que el corte se hace por indentación).
   const block = src.match(/^files:[ \t]*\r?\n((?:[ \t]+[^\n]*\r?\n?)*)/m);
   if (block) {
-    for (const item of block[1].split(/^[ \t]*-[ \t]*/m).filter(s => s.trim())) {
+    for (const item of block[1].split(/^[ \t]*-[ \t]*/m).filter((s) => s.trim())) {
       const url = (item.match(/url:\s*(.+)/) || [])[1];
       const sha512 = (item.match(/sha512:\s*(.+)/) || [])[1];
       const size = (item.match(/size:\s*(\d+)/) || [])[1];
-      if (url || sha512) out.files.push({ url: url ? url.trim().replace(/^['"]|['"]$/g, '') : null, sha512: sha512 ? sha512.trim() : null, size: size ? Number(size) : null });
+      if (url || sha512)
+        out.files.push({
+          url: url ? url.trim().replace(/^['"]|['"]$/g, '') : null,
+          sha512: sha512 ? sha512.trim() : null,
+          size: size ? Number(size) : null,
+        });
     }
   }
   return out;
@@ -102,9 +110,9 @@ function parseLatestYml(text) {
  */
 function sha512For(parsed, assetName) {
   if (!parsed || !assetName) return null;
-  const entry = (parsed.files || []).find(f => f.url === assetName);
+  const entry = (parsed.files || []).find((f) => f.url === assetName);
   if (entry && entry.sha512) return entry.sha512;
-  return parsed.path === assetName ? (parsed.sha512 || null) : null;
+  return parsed.path === assetName ? parsed.sha512 || null : null;
 }
 
 /**
@@ -125,7 +133,11 @@ function motivoSinFirma({ tieneYml, assetName, expected, error } = {}) {
 
 /** sha512 en base64 (el formato que usa latest.yml), o null si no se pudo leer. */
 function sha512Of(file) {
-  try { return crypto.createHash('sha512').update(fs.readFileSync(file)).digest('base64'); } catch { return null; }
+  try {
+    return crypto.createHash('sha512').update(fs.readFileSync(file)).digest('base64');
+  } catch {
+    return null;
+  }
 }
 
 /* ---------- comprobación ---------- */
@@ -135,16 +147,26 @@ function sha512Of(file) {
  * @returns {Promise<{ok, current, latest, available, url, name, publishedAt, notes, assets, assetsOk, error?}>}
  */
 async function checkForUpdate({ currentVersion, fetchFn = fetch, api = API_LATEST, timeoutMs = 12000 } = {}) {
-  const base = { ok: true, current: currentVersion, latest: null, available: false, url: null, name: null, publishedAt: null, notes: null, assets: null };
+  const base = {
+    ok: true,
+    current: currentVersion,
+    latest: null,
+    available: false,
+    url: null,
+    name: null,
+    publishedAt: null,
+    notes: null,
+    assets: null,
+  };
   try {
     const res = await fetchFn(api, {
       headers: { 'User-Agent': UA, Accept: 'application/vnd.github+json' },
       signal: AbortSignal.timeout(timeoutMs),
     });
-    if (res.status === 404) return { ...base, error: 'sin releases publicadas' };   // repo sin ninguna release
+    if (res.status === 404) return { ...base, error: 'sin releases publicadas' }; // repo sin ninguna release
     if (!res.ok) return { ...base, ok: false, error: 'GitHub respondió ' + res.status };
     const rel = await res.json();
-    if (!rel || rel.draft || rel.prerelease) return base;                            // borradores/prerelease no cuentan
+    if (!rel || rel.draft || rel.prerelease) return base; // borradores/prerelease no cuentan
     const latest = String(rel.tag_name || '').replace(/^v/i, '');
     const assets = pickAssets(rel);
     return {
@@ -159,7 +181,7 @@ async function checkForUpdate({ currentVersion, fetchFn = fetch, api = API_LATES
       assetsOk: !!(assets.setup || assets.portable),
     };
   } catch (e) {
-    const msg = e && e.name === 'TimeoutError' ? 'la comprobación tardó demasiado' : ((e && e.message) || 'error de red');
+    const msg = e && e.name === 'TimeoutError' ? 'la comprobación tardó demasiado' : (e && e.message) || 'error de red';
     return { ...base, ok: false, error: msg };
   }
 }
@@ -168,8 +190,9 @@ async function checkForUpdate({ currentVersion, fetchFn = fetch, api = API_LATES
 
 /** Directorio y nombre donde dejar el binario descargado, según el modo. */
 function downloadTarget({ kind, assetName, env = process.env }) {
-  const name = String(assetName || 'sagitari-update.exe').replace(/[^\w.\-]/g, '_');
-  if (kind === 'portable' && env.PORTABLE_EXECUTABLE_DIR) return { dir: env.PORTABLE_EXECUTABLE_DIR, path: path.join(env.PORTABLE_EXECUTABLE_DIR, name) };
+  const name = String(assetName || 'sagitari-update.exe').replace(/[^\w.-]/g, '_');
+  if (kind === 'portable' && env.PORTABLE_EXECUTABLE_DIR)
+    return { dir: env.PORTABLE_EXECUTABLE_DIR, path: path.join(env.PORTABLE_EXECUTABLE_DIR, name) };
   const dir = path.join(os.tmpdir(), 'sagitari-update');
   return { dir, path: path.join(dir, name) };
 }
@@ -191,7 +214,10 @@ async function downloadTo(url, dest, { fetchFn = fetch, onProgress = null, timeo
     idle = setTimeout(() => ac.abort(new Error('la descarga se quedó sin datos')), idleTimeoutMs);
   };
   const deadline = timeoutMs > 0 ? setTimeout(() => ac.abort(new Error('la descarga tardó demasiado')), timeoutMs) : null;
-  const clearWatchdogs = () => { clearTimeout(idle); clearTimeout(deadline); };
+  const clearWatchdogs = () => {
+    clearTimeout(idle);
+    clearTimeout(deadline);
+  };
   try {
     const res = await fetchFn(url, {
       headers: { 'User-Agent': UA, Accept: 'application/octet-stream' },
@@ -251,9 +277,10 @@ function signatureOf(file, { spawnFn = spawn, env = process.env, timeoutMs = 200
     try {
       if (process.platform !== 'win32') return resolve(null);
       // La ruta va por entorno: no se interpola en la línea de comandos.
-      const ps = 'Get-AuthenticodeSignature -LiteralPath $env:SAGITARI_SIG_FILE | '
-        + 'ForEach-Object { [pscustomobject]@{ status = "$($_.Status)"; signer = "$($_.SignerCertificate.Subject)" } } '
-        + '| ConvertTo-Json -Compress';
+      const ps =
+        'Get-AuthenticodeSignature -LiteralPath $env:SAGITARI_SIG_FILE | ' +
+        'ForEach-Object { [pscustomobject]@{ status = "$($_.Status)"; signer = "$($_.SignerCertificate.Subject)" } } ' +
+        '| ConvertTo-Json -Compress';
       // PowerShell 5.1 hereda el PSModulePath del proceso que la lanza. Si la app
       // se lanzó desde PowerShell 7, delante van los módulos de la 7 y la 5.1
       // intenta cargar Microsoft.PowerShell.Security desde ahí: es incompatible,
@@ -270,22 +297,40 @@ function signatureOf(file, { spawnFn = spawn, env = process.env, timeoutMs = 200
         ].join(path.delimiter),
       };
       const p = spawnFn('powershell.exe', ['-NoProfile', '-NonInteractive', '-Command', ps], {
-        windowsHide: true, env: childEnv,
+        windowsHide: true,
+        env: childEnv,
       });
       let out = '';
       let done = false;
-      const finish = (v) => { if (!done) { done = true; try { p.kill(); } catch {} resolve(v); } };
+      const finish = (v) => {
+        if (!done) {
+          done = true;
+          try {
+            p.kill();
+          } catch {}
+          resolve(v);
+        }
+      };
       const timer = setTimeout(() => finish(null), timeoutMs);
-      p.stdout.on('data', (d) => { out += d; });
+      p.stdout.on('data', (d) => {
+        out += d;
+      });
       p.stdout.on('end', () => {
         clearTimeout(timer);
         try {
           const r = JSON.parse(out.trim());
           finish(r && r.status ? { status: String(r.status), signer: String(r.signer || '') || null } : null);
-        } catch { finish(null); }
+        } catch {
+          finish(null);
+        }
       });
-      p.on('error', () => { clearTimeout(timer); finish(null); });
-    } catch { resolve(null); }
+      p.on('error', () => {
+        clearTimeout(timer);
+        finish(null);
+      });
+    } catch {
+      resolve(null);
+    }
   });
 }
 
@@ -313,58 +358,66 @@ function signatureOf(file, { spawnFn = spawn, env = process.env, timeoutMs = 200
 function installHelperScript({ name, installer, args = '/S --updated', logPath, waitMs = 90000, graceMs = 1200, taskName = null } = {}) {
   // (el guion es agnóstico del lanzador: sirve igual bajo cmd que bajo PowerShell
   //  directo, que es justo lo que permite comparar las dos formas en el arnés)
-  const q = (s) => "'" + String(s == null ? '' : s).replace(/'/g, "''") + "'";   // literal de PowerShell
-  const lista = String(args || '').split(/\s+/).filter(Boolean).map(q).join(',');
+  const q = (s) => "'" + String(s == null ? '' : s).replace(/'/g, "''") + "'"; // literal de PowerShell
+  const lista = String(args || '')
+    .split(/\s+/)
+    .filter(Boolean)
+    .map(q)
+    .join(',');
   const espera = Number.isFinite(waitMs) && waitMs > 0 ? Math.round(waitMs) : 90000;
   const gracia = Number.isFinite(graceMs) && graceMs >= 0 ? Math.round(graceMs) : 1200;
   // Ojo: dentro de los literales simples NO se interpola nada de JavaScript.
-  return [
-    "$ErrorActionPreference = 'Continue'",
-    '$log = ' + q(logPath),
-    'function Diag([string]$m) { try { Add-Content -LiteralPath $log -Value ((Get-Date -Format o) + " " + $m) -Encoding utf8 } catch {} }',
-    "Diag ('asistente iniciado (pid=' + $PID + ', PowerShell ' + $PSVersionTable.PSVersion.ToString() + ')')",
-    "if ($env:SAGITARI_NO_WINDOW_DEBUG) { Diag ('ventana del asistente=' + (Get-Process -Id $PID).MainWindowHandle) }",
-    "$fin = (Get-Date).AddMilliseconds(" + espera + ')' ,
-    '$espera = 0',
-    // Latido cada ~10 s: si el ayudante muere, el diario dice CUÁNDO fue lo
-    // último que hizo en vez de quedarse en «asistente iniciado» para siempre
-    // (ese silencio es justo lo que dejó sin diagnosticar todos los fallos).
-    '$latido = 0',
-    "while ((Get-Date) -lt $fin) {",
-    '  $viva = Get-Process -Name ' + q(name) + ' -ErrorAction SilentlyContinue',
-    '  if (-not $viva) { break }',
-    '  Start-Sleep -Milliseconds 400',
-    '  $espera += 400',
-    "  $latido += 400",
-    "  if ($latido -ge 10000) { $latido = 0; Diag ('sigo esperando a la app (llevo ' + $espera + ' ms)') }",
-    '}',
-    "Diag ('la app ya no esta en ejecucion (espera ' + $espera + ' ms)')",
-    "$vivo = @(Get-Process -Name " + q(name) + " -ErrorAction SilentlyContinue).Count -gt 0",
-    "Diag ('al lanzar el instalador la app seguia en ejecucion: ' + $vivo)",
-    'Start-Sleep -Milliseconds ' + gracia,
-    'try {',
-    // -PassThru -Wait: el diario recoge TAMBIÉN el código de salida del instalador.
-    // Sin él, un instalador que falla dejaba el mismo rastro que uno que no llegó a
-    // arrancar, y el usuario se quedaba sin saber qué había pasado.
-    '  $p = Start-Process -FilePath ' + q(installer) + ' -ArgumentList ' + (lista || "'/S'") + ' -PassThru -ErrorAction Stop',
-    "  Diag 'instalador lanzado'",   // ANTES de esperar: el rastro queda aunque el instalador tarde
-    '  if ($p) {',
-    '    $p.WaitForExit()',
-    '    Diag ("instalador termino con codigo " + $p.ExitCode)',
-    '  } else { Diag "el instalador no devolvio proceso (lo ejecuto Windows por asociacion)" }',
-    '} catch {',
-    "  Diag ('FALLO al lanzar el instalador: ' + $_.Exception.Message)",
-    '  exit 1',
-    '}',
-  ].join('\n') + (taskName
-    // Limpieza cuando el lanzador es el Programador de tareas: la tarea de un
-    // solo uso y este .ps1 no se quedan tirados. Va al final para no borrar
-    // nada si el instalador falló antes (el diario sigue ahí para diagnosticar).
-    ? '\n' + [
-      "try { schtasks /delete /tn " + q(taskName) + ' /f | Out-Null; Diag ' + q('tarea programada eliminada') + ' } catch {}',
-      "try { Remove-Item -LiteralPath $PSCommandPath -Force -ErrorAction Stop } catch { Diag ('no se pudo borrar el guion: ' + $_.Exception.Message) }",
-    ].join('\n')
-    : '');
+  return (
+    [
+      "$ErrorActionPreference = 'Continue'",
+      '$log = ' + q(logPath),
+      'function Diag([string]$m) { try { Add-Content -LiteralPath $log -Value ((Get-Date -Format o) + " " + $m) -Encoding utf8 } catch {} }',
+      "Diag ('asistente iniciado (pid=' + $PID + ', PowerShell ' + $PSVersionTable.PSVersion.ToString() + ')')",
+      "if ($env:SAGITARI_NO_WINDOW_DEBUG) { Diag ('ventana del asistente=' + (Get-Process -Id $PID).MainWindowHandle) }",
+      '$fin = (Get-Date).AddMilliseconds(' + espera + ')',
+      '$espera = 0',
+      // Latido cada ~10 s: si el ayudante muere, el diario dice CUÁNDO fue lo
+      // último que hizo en vez de quedarse en «asistente iniciado» para siempre
+      // (ese silencio es justo lo que dejó sin diagnosticar todos los fallos).
+      '$latido = 0',
+      'while ((Get-Date) -lt $fin) {',
+      '  $viva = Get-Process -Name ' + q(name) + ' -ErrorAction SilentlyContinue',
+      '  if (-not $viva) { break }',
+      '  Start-Sleep -Milliseconds 400',
+      '  $espera += 400',
+      '  $latido += 400',
+      "  if ($latido -ge 10000) { $latido = 0; Diag ('sigo esperando a la app (llevo ' + $espera + ' ms)') }",
+      '}',
+      "Diag ('la app ya no esta en ejecucion (espera ' + $espera + ' ms)')",
+      '$vivo = @(Get-Process -Name ' + q(name) + ' -ErrorAction SilentlyContinue).Count -gt 0',
+      "Diag ('al lanzar el instalador la app seguia en ejecucion: ' + $vivo)",
+      'Start-Sleep -Milliseconds ' + gracia,
+      'try {',
+      // -PassThru -Wait: el diario recoge TAMBIÉN el código de salida del instalador.
+      // Sin él, un instalador que falla dejaba el mismo rastro que uno que no llegó a
+      // arrancar, y el usuario se quedaba sin saber qué había pasado.
+      '  $p = Start-Process -FilePath ' + q(installer) + ' -ArgumentList ' + (lista || "'/S'") + ' -PassThru -ErrorAction Stop',
+      "  Diag 'instalador lanzado'", // ANTES de esperar: el rastro queda aunque el instalador tarde
+      '  if ($p) {',
+      '    $p.WaitForExit()',
+      '    Diag ("instalador termino con codigo " + $p.ExitCode)',
+      '  } else { Diag "el instalador no devolvio proceso (lo ejecuto Windows por asociacion)" }',
+      '} catch {',
+      "  Diag ('FALLO al lanzar el instalador: ' + $_.Exception.Message)",
+      '  exit 1',
+      '}',
+    ].join('\n') +
+    (taskName
+      ? // Limpieza cuando el lanzador es el Programador de tareas: la tarea de un
+        // solo uso y este .ps1 no se quedan tirados. Va al final para no borrar
+        // nada si el instalador falló antes (el diario sigue ahí para diagnosticar).
+        '\n' +
+        [
+          'try { schtasks /delete /tn ' + q(taskName) + ' /f | Out-Null; Diag ' + q('tarea programada eliminada') + ' } catch {}',
+          "try { Remove-Item -LiteralPath $PSCommandPath -Force -ErrorAction Stop } catch { Diag ('no se pudo borrar el guion: ' + $_.Exception.Message) }",
+        ].join('\n')
+      : '')
+  );
 }
 
 /**
@@ -448,7 +501,10 @@ function writeHelperPs(psPath, opts = {}) {
   // Huella del guion que acabamos de escribir: programarInstalacion la comprueba
   // justo antes de disparar la tarea (un proceso del usuario podría haberlo
   // modificado entre la escritura y el /run: el .ps1 vive en %TEMP%).
-  const sha256 = crypto.createHash('sha256').update('﻿' + script, 'utf8').digest('hex');
+  const sha256 = crypto
+    .createHash('sha256')
+    .update('﻿' + script, 'utf8')
+    .digest('hex');
   return { psPath, script, sha256 };
 }
 
@@ -475,11 +531,13 @@ function scheduleCreateArgs({ taskName = TASK_NAME, psPath, startTime } = {}) {
  * rápidas). Lanza si schtasks falla: el llamante decide el plan B.
  */
 async function programarInstalacion({ dir, name, installer, args, logPath, waitMs, graceMs, taskName = TASK_NAME, execFn = null } = {}) {
-  const exec = execFn || ((cmd, argv) => {
-    const { spawnSync } = require('child_process');
-    const r = spawnSync(cmd, argv, { windowsHide: true, encoding: 'utf8' });
-    return { code: r.status, stdout: String(r.stdout || ''), stderr: String(r.stderr || '') };
-  });
+  const exec =
+    execFn ||
+    ((cmd, argv) => {
+      const { spawnSync } = require('child_process');
+      const r = spawnSync(cmd, argv, { windowsHide: true, encoding: 'utf8' });
+      return { code: r.status, stdout: String(r.stdout || ''), stderr: String(r.stderr || '') };
+    });
   const psPath = helperPsPath(dir);
   const { script, sha256 } = writeHelperPs(psPath, { name, installer, args, logPath, waitMs, graceMs, taskName });
   const creada = await exec('schtasks', scheduleCreateArgs({ taskName, psPath, startTime: taskTimePlus(5) }));
@@ -494,18 +552,24 @@ async function programarInstalacion({ dir, name, installer, args, logPath, waitM
     const enDisco = fs.readFileSync(psPath, 'utf8');
     const huella = crypto.createHash('sha256').update(enDisco, 'utf8').digest('hex');
     if (huella !== sha256) {
-      try { await exec('schtasks', ['/delete', '/tn', taskName, '/f']); } catch {}
+      try {
+        await exec('schtasks', ['/delete', '/tn', taskName, '/f']);
+      } catch {}
       throw new Error('el guion de instalación cambió en disco antes de dispararse; abortado por seguridad');
     }
   } catch (e) {
     if (/cambió en disco/.test(e.message)) throw e;
     // Si ni siquiera se puede releer, tampoco se dispara a ciegas.
-    try { await exec('schtasks', ['/delete', '/tn', taskName, '/f']); } catch {}
+    try {
+      await exec('schtasks', ['/delete', '/tn', taskName, '/f']);
+    } catch {}
     throw new Error('no se pudo verificar el guion de instalación (' + e.message + ')');
   }
   const disparo = await exec('schtasks', ['/run', '/tn', taskName]);
   if (disparo.code !== 0) {
-    try { await exec('schtasks', ['/delete', '/tn', taskName, '/f']); } catch {}
+    try {
+      await exec('schtasks', ['/delete', '/tn', taskName, '/f']);
+    } catch {}
     throw new Error('la tarea se programó pero no arrancó (' + String((disparo.stderr || disparo.stdout || '').trim()).slice(0, 160) + ')');
   }
   return { ok: true, taskName, psPath, script };
@@ -531,4 +595,30 @@ function hostKind({ isPackaged, env = process.env } = {}) {
   return env.PORTABLE_EXECUTABLE_DIR ? 'portable' : 'nsis';
 }
 
-module.exports = { REPO, API_LATEST, parseVersion, compareVersions, pickAssets, assetFor, parseLatestYml, sha512For, motivoSinFirma, sha512Of, checkForUpdate, downloadTarget, downloadTo, hostKind, signatureOf, installHelperScript, afterExitCommand, pendingFor, TASK_NAME, helperPsPath, writeHelperPs, taskTimePlus, taskRunLine, scheduleCreateArgs, programarInstalacion };
+module.exports = {
+  REPO,
+  API_LATEST,
+  parseVersion,
+  compareVersions,
+  pickAssets,
+  assetFor,
+  parseLatestYml,
+  sha512For,
+  motivoSinFirma,
+  sha512Of,
+  checkForUpdate,
+  downloadTarget,
+  downloadTo,
+  hostKind,
+  signatureOf,
+  installHelperScript,
+  afterExitCommand,
+  pendingFor,
+  TASK_NAME,
+  helperPsPath,
+  writeHelperPs,
+  taskTimePlus,
+  taskRunLine,
+  scheduleCreateArgs,
+  programarInstalacion,
+};

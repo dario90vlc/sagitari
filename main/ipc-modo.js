@@ -25,7 +25,9 @@ function registerModoIpc(ipcMain, ctx) {
   // ---- agent mode (Think / Plan / Act) — v2.0: observa la preferencia ----
   ipcMain.handle('mode:set', (e, mode) => {
     cfg().settings.mode = ['think', 'plan', 'act'].includes(mode) ? mode : 'act';
-    try { ctx.getHabits().observe('mode', { mode: cfg().settings.mode }); } catch {}
+    try {
+      ctx.getHabits().observe('mode', { mode: cfg().settings.mode });
+    } catch {}
     saveConfig();
     return cfg().settings.mode;
   });
@@ -34,16 +36,20 @@ function registerModoIpc(ipcMain, ctx) {
   ipcMain.handle('agents:live', () => ({
     running: ag() ? ag().isBusy() : false,
     mode: cfg().settings.mode || 'act',
-    toolsFired: ag() ? ag().getToolsFired() : []
+    toolsFired: ag() ? ag().getToolsFired() : [],
   }));
 
   // ---- v1.7 marketplace + v1.6 routing/health + v2.0 hábitos ----
   ipcMain.handle('market:catalog', async () => {
-    const imported = (await ctx.getSkills().listSkills()).map(s => s.source && s.source.repo).filter(Boolean);
+    const imported = (await ctx.getSkills().listSkills()).map((s) => s.source && s.source.repo).filter(Boolean);
     return marketplace.catalog(imported);
   });
   ipcMain.handle('market:search', async (e, q) => marketplace.searchGitHub(String(q || 'skill')));
-  ipcMain.handle('skills:openFolder', async () => { const d = ctx.getSkills().skillsDir(); await fsp.mkdir(d, { recursive: true }); require('electron').shell.openPath(d); });
+  ipcMain.handle('skills:openFolder', async () => {
+    const d = ctx.getSkills().skillsDir();
+    await fsp.mkdir(d, { recursive: true });
+    require('electron').shell.openPath(d);
+  });
 }
 
 module.exports = { registerModoIpc };

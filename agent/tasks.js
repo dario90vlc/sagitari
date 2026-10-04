@@ -18,11 +18,11 @@
 const checkpoints = require('./checkpoints');
 const runlog = require('./runlog');
 
-const TICK_MS = 20 * 1000;   // revisión de tareas programadas y de la cola
-const MAX_ATTEMPTS = 3;      // reintentos automáticos por tarea (autoResume)
-const RETRY_BACKOFF_MS = 60 * 1000;   // backoff exponencial base
-const LIVE_STATUS = ['running', 'pending', 'scheduled'];   // estados vivos (no borrables)
-const RESUME_TAIL = 12;      // eventos del historial que resume el prompt de reanudación
+const TICK_MS = 20 * 1000; // revisión de tareas programadas y de la cola
+const MAX_ATTEMPTS = 3; // reintentos automáticos por tarea (autoResume)
+const RETRY_BACKOFF_MS = 60 * 1000; // backoff exponencial base
+const LIVE_STATUS = ['running', 'pending', 'scheduled']; // estados vivos (no borrables)
+const RESUME_TAIL = 12; // eventos del historial que resume el prompt de reanudación
 
 /**
  * Prompt de reanudación: el agente nuevo arranca con history=[] así que hay que
@@ -31,19 +31,22 @@ const RESUME_TAIL = 12;      // eventos del historial que resume el prompt de re
  */
 function buildResumePrompt(run) {
   const history = Array.isArray(run.history) ? run.history : [];
-  if (!history.length) return run.goal;   // primer arranque: no hay nada que resumir
-  const done = history.slice(-RESUME_TAIL)
-    .filter(h => !String(h.summary || '').includes('[REANUDACIÓN]'))   // no arrastrar prompts previos
-    .map(h => {
+  if (!history.length) return run.goal; // primer arranque: no hay nada que resumir
+  const done = history
+    .slice(-RESUME_TAIL)
+    .filter((h) => !String(h.summary || '').includes('[REANUDACIÓN]')) // no arrastrar prompts previos
+    .map((h) => {
       const what = [h.step, h.tool].filter(Boolean).join(' · ');
-      const detail = String(h.summary || '').replace(/\s+/g, ' ').slice(0, 160);
+      const detail = String(h.summary || '')
+        .replace(/\s+/g, ' ')
+        .slice(0, 160);
       const mark = h.ok === false ? 'FALLÓ' : 'ok';
       return '- ' + (what || 'paso') + ' [' + mark + ']' + (detail ? ': ' + detail : '');
     });
   const plan = (Array.isArray(run.plan) ? run.plan : [])
-    .filter(p => !p || p.done !== true)
-    .map(p => '- ' + (typeof p === 'string' ? p : (p.text || p.title || p.step || '')))
-    .filter(l => l.length > 2);
+    .filter((p) => !p || p.done !== true)
+    .map((p) => '- ' + (typeof p === 'string' ? p : p.text || p.title || p.step || ''))
+    .filter((l) => l.length > 2);
   const parts = [
     '[REANUDACIÓN] Esta tarea ya se estaba ejecutando y se retoma ahora. NO repitas las acciones que ya se completaron; continúa a partir de lo hecho.',
     'Objetivo: ' + run.goal,
@@ -65,17 +68,21 @@ class TaskManager {
    */
   constructor({ getSettings, agentFactory, emit, notify, isRunBusy }) {
     this.getSettings = getSettings || (() => ({}));
-    this.agentFactory = agentFactory || (() => { throw new Error('agentFactory no configurado'); });
+    this.agentFactory =
+      agentFactory ||
+      (() => {
+        throw new Error('agentFactory no configurado');
+      });
     this.emit = emit || (() => {});
     this.notify = notify || (() => {});
     // ¿Ese run lo tiene el chat en marcha? Lo inyecta main.js: sin esta comprobación,
     // «Reanudar» en la vista Tareas lanzaba un SEGUNDO agente sobre el mismo runId
     // mientras el chat seguía ejecutándolo (mismas herramientas, dos escritores).
     this.isRunBusy = isRunBusy || (() => false);
-    this.agents = new Map();     // runId -> Agent en ejecución
-    this._liveRuns = new Map();  // runId -> objeto run vivo que muta el agente (para cancelar/borrar)
-    this._notified = new Set();  // runIds ya avisados (no repetir el toast/notificación)
-    this._stopped = false;       // apagado/cancelación global: la cola no arranca nada más
+    this.agents = new Map(); // runId -> Agent en ejecución
+    this._liveRuns = new Map(); // runId -> objeto run vivo que muta el agente (para cancelar/borrar)
+    this._notified = new Set(); // runIds ya avisados (no repetir el toast/notificación)
+    this._stopped = false; // apagado/cancelación global: la cola no arranca nada más
     this._timer = setInterval(() => this._tick(), TICK_MS);
     if (this._timer.unref) this._timer.unref();
   }
@@ -97,7 +104,7 @@ class TaskManager {
       if (t > Date.now() + 5000) status = 'scheduled';
     }
     const run = checkpoints.newRun({ goal: text, mode: mode || 'act', status, scheduledAt, origin });
-    this._stopped = false;             // hay trabajo nuevo: la cola vuelve a arrancar
+    this._stopped = false; // hay trabajo nuevo: la cola vuelve a arrancar
     this._notified.delete(run.runId);
     checkpoints.save(run);
     this._update(run, 'Tarea ' + (status === 'scheduled' ? 'programada' : 'en cola'));
@@ -109,10 +116,13 @@ class TaskManager {
   pause(runId) {
     const run = checkpoints.read(runId);
     if (!run) return { ok: false, error: 'Tarea no encontrada.' };
-    if (run.status === 'paused') return { ok: true };   // ya está pausada: no-op
+    if (run.status === 'paused') return { ok: true }; // ya está pausada: no-op
     if (run.status === 'running') {
       const a = this.agents.get(runId);
-      if (a) { a.pause(); return { ok: true }; }   // el agente emite 'paused' con checkpoint
+      if (a) {
+        a.pause();
+        return { ok: true };
+      } // el agente emite 'paused' con checkpoint
       checkpoints.pause(run);
       this._update(run, 'Tarea pausada');
       return { ok: true };
@@ -135,9 +145,9 @@ class TaskManager {
     if (!['paused', 'interrupted', 'pending', 'failed'].includes(run.status)) {
       return { ok: false, error: 'La tarea está ' + run.status + ' y no se puede reanudar.' };
     }
-    this._stopped = false;         // el usuario pide trabajo: la cola vuelve a arrancar
-    this._notified.delete(runId);  // su desenlace se puede volver a avisar
-    run.attempts = 0;              // reanudación manual: presupuesto de reintentos limpio
+    this._stopped = false; // el usuario pide trabajo: la cola vuelve a arrancar
+    this._notified.delete(runId); // su desenlace se puede volver a avisar
+    run.attempts = 0; // reanudación manual: presupuesto de reintentos limpio
     run.nextAttemptAt = null;
     checkpoints.setStatus(run, 'pending');
     this._update(run, 'Tarea reanudada — en cola');
@@ -157,10 +167,15 @@ class TaskManager {
       // Marca el objeto que retiene el agente: sus record/fail/complete posteriores
       // escriben sobre él y no pueden devolver el run a 'running' (antes resucitaba).
       live.cancelRequested = true;
-      live.closed = true;   // el agente deja de registrar pasos de esta tarea
+      live.closed = true; // el agente deja de registrar pasos de esta tarea
     }
     const a = this.agents.get(runId);
-    if (a) { try { a.stop(); } catch {} this.agents.delete(runId); }
+    if (a) {
+      try {
+        a.stop();
+      } catch {}
+      this.agents.delete(runId);
+    }
     checkpoints.cancel(run, reason || 'Cancelada por el usuario');
     this._update(run, 'Tarea cancelada');
     // el aviso se da AQUÍ; el .finally del chat abortado no debe repetirlo (antes
@@ -179,10 +194,15 @@ class TaskManager {
     const run = checkpoints.read(runId);
     if (!run) return { ok: false, error: 'Tarea no encontrada.' };
     const a = this.agents.get(runId);
-    if (a) { try { a.stop(); } catch {} this.agents.delete(runId); }
+    if (a) {
+      try {
+        a.stop();
+      } catch {}
+      this.agents.delete(runId);
+    }
     const live = this._liveRuns.get(runId);
     if (live) {
-      live.removed = true;   // ninguna escritura suya debe recrear la carpeta borrada
+      live.removed = true; // ninguna escritura suya debe recrear la carpeta borrada
       live.closed = true;
       live.cancelRequested = true;
     }
@@ -195,18 +215,30 @@ class TaskManager {
 
   /** Lista de tareas con estado vivo (meta del agente si está corriendo). */
   list() {
-    return checkpoints.list('all').map(t => {
+    return checkpoints.list('all').map((t) => {
       const a = this.agents.get(t.runId);
       if (a) {
         const m = a.getMeta();
-        return { ...t, live: { busy: m.busy, tokensIn: m.tokensIn, tokensOut: m.tokensOut, costUsd: m.costUsd, toolCalls: m.toolCalls, toolsFired: a.getToolsFired() } };
+        return {
+          ...t,
+          live: {
+            busy: m.busy,
+            tokensIn: m.tokensIn,
+            tokensOut: m.tokensOut,
+            costUsd: m.costUsd,
+            toolCalls: m.toolCalls,
+            toolsFired: a.getToolsFired(),
+          },
+        };
       }
       return t;
     });
   }
 
   /** True si algún agente en background sigue vivo (para app quit). */
-  hasRunning() { return this.agents.size > 0; }
+  hasRunning() {
+    return this.agents.size > 0;
+  }
 
   /** Detiene todas las tareas en background (al cerrar la app: quedan interrumpidas). */
   stopAll() {
@@ -215,7 +247,9 @@ class TaskManager {
     // el apagado (cuando el navegador y la voz ya se habían matado).
     this._stopped = true;
     for (const [runId, a] of this.agents) {
-      try { a.stop(); } catch {}
+      try {
+        a.stop();
+      } catch {}
       const run = checkpoints.read(runId);
       if (run && run.status === 'running') checkpoints.interrupt(run);
     }
@@ -230,7 +264,8 @@ class TaskManager {
   autoResume() {
     const s = this.getSettings();
     if (s && s.settings && s.settings.autoResumeTasks === false) return { resumed: 0 };
-    let resumed = 0, abandoned = 0;
+    let resumed = 0,
+      abandoned = 0;
     for (const t of checkpoints.list('active')) {
       if (t.status !== 'interrupted') continue;
       const run = checkpoints.read(t.runId);
@@ -238,12 +273,16 @@ class TaskManager {
       const attempts = Number(run.attempts) || 0;
       if (attempts >= MAX_ATTEMPTS) {
         // Presupuesto agotado: se archiva como fallida y deja de re-encolarse.
-        checkpoints.fail(run, { step: run.step || 'EXECUTE', tool: null, message: 'Sin reanudar: ' + attempts + ' reintentos automáticos agotados' });
+        checkpoints.fail(run, {
+          step: run.step || 'EXECUTE',
+          tool: null,
+          message: 'Sin reanudar: ' + attempts + ' reintentos automáticos agotados',
+        });
         this._update(run, 'Tarea no reanudada: reintentos automáticos agotados');
         abandoned++;
         continue;
       }
-      if (run.nextAttemptAt && Date.parse(run.nextAttemptAt) > Date.now()) continue;   // aún en backoff
+      if (run.nextAttemptAt && Date.parse(run.nextAttemptAt) > Date.now()) continue; // aún en backoff
       run.attempts = attempts + 1;
       run.nextAttemptAt = new Date(Date.now() + RETRY_BACKOFF_MS * Math.pow(2, Math.min(attempts, 6))).toISOString();
       checkpoints.setStatus(run, 'pending');
@@ -255,19 +294,23 @@ class TaskManager {
   }
 
   /** Cierra el manager (tests / quit). */
-  dispose() { this._stopped = true; clearInterval(this._timer); }
+  dispose() {
+    this._stopped = true;
+    clearInterval(this._timer);
+  }
 
   /* ================= motor interno ================= */
 
   /** Arranca tareas pendientes hasta agotar la concurrencia configurada. */
   _pump() {
-    if (this._stopped) return;   // apagando: no se arranca nada nuevo
+    if (this._stopped) return; // apagando: no se arranca nada nuevo
     const s = this.getSettings();
     const max = Math.max(1, Math.min(4, Number(s && s.settings && s.settings.maxConcurrentTasks) || 1));
     if (this.agents.size >= max) return;
-    const pendings = checkpoints.list('active')
-      .filter(t => t.status === 'pending')
-      .sort((a, b) => String(a.createdAt).localeCompare(String(b.createdAt)));   // FIFO
+    const pendings = checkpoints
+      .list('active')
+      .filter((t) => t.status === 'pending')
+      .sort((a, b) => String(a.createdAt).localeCompare(String(b.createdAt))); // FIFO
     for (const t of pendings) {
       if (this.agents.size >= max) break;
       this._start(t.runId);
@@ -284,14 +327,15 @@ class TaskManager {
       this._update(run, 'Tarea en pausa: no hay proveedor/modelo activo');
       return;
     }
-    const prompt = buildResumePrompt(run);   // reanudar lleva el progreso ya hecho
-    checkpoints.resume(run);                 // status → running
-    if (run.status !== 'running') {          // cancelada entre medias: no arrancar
+    const prompt = buildResumePrompt(run); // reanudar lleva el progreso ya hecho
+    checkpoints.resume(run); // status → running
+    if (run.status !== 'running') {
+      // cancelada entre medias: no arrancar
       this._update(run, 'Tarea no iniciada: ' + run.status);
       return;
     }
     const runRef = run;
-    this._liveRuns.set(runId, runRef);       // objeto vivo que retiene el agente
+    this._liveRuns.set(runId, runRef); // objeto vivo que retiene el agente
     let agent;
     try {
       agent = this.agentFactory();
@@ -307,7 +351,7 @@ class TaskManager {
       .then(() => agent.chat(prompt, settings, null, { task: runRef, background: true }))
       .then(
         () => {},
-        (e) => this._chatFailed(runRef, runId, e)   // antes .catch(() => {}): el fallo se perdía
+        (e) => this._chatFailed(runRef, runId, e), // antes .catch(() => {}): el fallo se perdía
       )
       .finally(() => {
         this.agents.delete(runId);
@@ -315,11 +359,11 @@ class TaskManager {
         // estado final: el agente ya marcó completed/failed/interrupted/paused
         const after = checkpoints.read(runId);
         if (after && after.status === 'running') {
-          checkpoints.interrupt(after);   // el chat terminó sin cerrar el checkpoint
+          checkpoints.interrupt(after); // el chat terminó sin cerrar el checkpoint
         }
         const final = checkpoints.read(runId);
         if (final && !this._notified.has(runId)) this.notify(final, final.status);
-        this._pump();   // siguiente tarea de la cola
+        this._pump(); // siguiente tarea de la cola
       });
   }
 
@@ -327,11 +371,15 @@ class TaskManager {
   _chatFailed(run, runId, e) {
     const message = 'Error en el chat de la tarea: ' + (e && e.message ? e.message : String(e));
     console.error('TaskManager: ' + runId + ' — ' + message);
-    try { runlog.log({ agent: 'sagitari', task: runId, event: 'task_error', message }); } catch {}
+    try {
+      runlog.log({ agent: 'sagitari', task: runId, event: 'task_error', message });
+    } catch {}
     try {
       checkpoints.record(run, { step: run.step || 'EXECUTE', tool: null, ok: false, summary: message.slice(0, 160) });
       this._noteFailure(run, message);
-    } catch (e2) { console.error('TaskManager._chatFailed', e2.message); }
+    } catch (e2) {
+      console.error('TaskManager._chatFailed', e2.message);
+    }
   }
 
   /** Fallo persistente: incrementa attempts y fija el backoff para el siguiente intento. */
@@ -350,14 +398,20 @@ class TaskManager {
       for (const t of checkpoints.list('active')) {
         if (t.status === 'scheduled' && t.scheduledAt && Date.parse(t.scheduledAt) <= Date.now()) {
           const run = checkpoints.read(t.runId);
-          if (run) { checkpoints.setStatus(run, 'pending'); due = true; this._update(run, 'Tarea programada: llega la hora'); }
+          if (run) {
+            checkpoints.setStatus(run, 'pending');
+            due = true;
+            this._update(run, 'Tarea programada: llega la hora');
+          }
         }
       }
-      if (due || checkpoints.list('active').some(t => t.status === 'pending')) this._pump();
+      if (due || checkpoints.list('active').some((t) => t.status === 'pending')) this._pump();
     } catch (e) {
       // Un fallo del tick no puede quedar invisible (antes: catch {} vacío).
       console.error('TaskManager._tick', e.message);
-      try { runlog.log({ agent: 'sagitari', event: 'tick_error', message: e.message }); } catch {}
+      try {
+        runlog.log({ agent: 'sagitari', event: 'tick_error', message: e.message });
+      } catch {}
     }
   }
 

@@ -13,11 +13,17 @@ function killTree(child) {
   if (pid && process.platform === 'win32') {
     // taskkill primero, con el padre aún vivo para poder enumerar el árbol; child.kill() como respaldo
     try {
-      exec(`taskkill /PID ${pid} /T /F`, { windowsHide: true }, () => { try { child.kill(); } catch {} });
+      exec(`taskkill /PID ${pid} /T /F`, { windowsHide: true }, () => {
+        try {
+          child.kill();
+        } catch {}
+      });
       return;
     } catch {}
   }
-  try { child.kill(); } catch {}
+  try {
+    child.kill();
+  } catch {}
 }
 
 module.exports = { killTree };

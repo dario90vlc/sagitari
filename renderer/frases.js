@@ -50,13 +50,15 @@
      que ahí hay código (leerlo entero en voz alta no le sirve) sin que la respuesta se
      quede muda si consistía sólo en código. */
   function limpiarParaVoz(trozo) {
-    return String(trozo == null ? '' : trozo)
-      .replace(/```[\s\S]*?```/g, ' código ')
-      /* Las comillas del código en línea se quitan pero su CONTENIDO se lee: un
+    return (
+      String(trozo == null ? '' : trozo)
+        .replace(/```[\s\S]*?```/g, ' código ')
+        /* Las comillas del código en línea se quitan pero su CONTENIDO se lee: un
          `npm install` o un nombre de fichero dicho en voz alta sí sirve de algo. */
-      .replace(/[*_`#>|«»]/g, ' ')
-      .replace(/\s+/g, ' ')
-      .trim();
+        .replace(/[*_`#>|«»]/g, ' ')
+        .replace(/\s+/g, ' ')
+        .trim()
+    );
   }
 
   /* ¿Queda algo que decir en este texto? (Marcadores y espacios no cuentan.) */

@@ -27,10 +27,22 @@ function registerCambiosIpc(ipcMain, ctx) {
     if (!cambios.puedeDeshacer(ws)) return { ok: false, error: 'no hay ningún cambio de este turno que deshacer' };
     const plan = cambios.planDeshacer(ws);
     let r;
-    try { r = cambios.deshacer(ws); }
-    catch (e) { return { ok: false, error: 'no se pudo deshacer: ' + ((e && e.message) || e) } }
-    try { repomap.invalidar(ws); } catch {}
-    runlog.log({ agent: 'sagitari', event: 'undo_turn', archivos: r.archivos.length, restaurados: r.restaurados, borrados: r.borrados, fallos: r.fallos });
+    try {
+      r = cambios.deshacer(ws);
+    } catch (e) {
+      return { ok: false, error: 'no se pudo deshacer: ' + ((e && e.message) || e) };
+    }
+    try {
+      repomap.invalidar(ws);
+    } catch {}
+    runlog.log({
+      agent: 'sagitari',
+      event: 'undo_turn',
+      archivos: r.archivos.length,
+      restaurados: r.restaurados,
+      borrados: r.borrados,
+      fallos: r.fallos,
+    });
     return { ok: true, ...r, plan: plan.length };
   });
 
@@ -38,7 +50,7 @@ function registerCambiosIpc(ipcMain, ctx) {
   ipcMain.handle('cambios:estado', async () => {
     const ws = ctx.getWorkspace();
     const plan = cambios.puedeDeshacer(ws) ? cambios.planDeshacer(ws) : [];
-    return { ok: true, puede: plan.length > 0, archivos: plan.map(x => x.ruta) };
+    return { ok: true, puede: plan.length > 0, archivos: plan.map((x) => x.ruta) };
   });
 
   /* Reglas del proyecto (SAGITARI.md / AGENTS.md): la interfaz enseña CUÁLES se están
@@ -48,8 +60,10 @@ function registerCambiosIpc(ipcMain, ctx) {
     const ws = ctx.getWorkspace();
     try {
       const { fuentes } = instrucciones.leer(ws);
-      return { ok: true, workspace: ws, fuentes, candidatos: instrucciones.candidatas(ws).map(c => c.etiqueta) };
-    } catch (e) { return { ok: false, error: (e && e.message) || String(e), fuentes: [], candidatos: [] } }
+      return { ok: true, workspace: ws, fuentes, candidatos: instrucciones.candidatas(ws).map((c) => c.etiqueta) };
+    } catch (e) {
+      return { ok: false, error: (e && e.message) || String(e), fuentes: [], candidatos: [] };
+    }
   });
 
   /** Crea una plantilla de SAGITARI.md en el proyecto (sin pisar nada si ya existe). */
@@ -82,7 +96,9 @@ function registerCambiosIpc(ipcMain, ctx) {
       fs.writeFileSync(destino, plantilla, 'utf8');
       runlog.log({ agent: 'sagitari', event: 'instructions_created', ruta: destino });
       return { ok: true, ruta: destino };
-    } catch (e) { return { ok: false, error: (e && e.message) || String(e) } }
+    } catch (e) {
+      return { ok: false, error: (e && e.message) || String(e) };
+    }
   });
 }
 

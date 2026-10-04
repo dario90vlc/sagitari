@@ -19,11 +19,11 @@ const path = require('path');
 const crypto = require('crypto');
 
 let TASKS_DIR = path.join(require('./datadir').dataDir(), 'tasks');
-const HISTORY_MAX = 60;   // eventos conservados por run.json
+const HISTORY_MAX = 60; // eventos conservados por run.json
 
 const ALL_STATUS = ['pending', 'scheduled', 'running', 'paused', 'interrupted', 'failed', 'completed', 'cancelled'];
-const LIVE_STATUS = ['running', 'pending', 'scheduled'];   // vivos: no se borran sin detenerlos antes
-const ARCHIVED_STATUS = ['completed', 'failed', 'cancelled'];   // histórico (sujeto a poda)
+const LIVE_STATUS = ['running', 'pending', 'scheduled']; // vivos: no se borran sin detenerlos antes
+const ARCHIVED_STATUS = ['completed', 'failed', 'cancelled']; // histórico (sujeto a poda)
 
 function dirFor(status) {
   if (status === 'completed') return path.join(TASKS_DIR, 'completed');
@@ -32,14 +32,18 @@ function dirFor(status) {
   return TASKS_DIR;
 }
 
-function fileFor(run) { return path.join(dirFor(run.status), run.runId, 'run.json'); }
+function fileFor(run) {
+  return path.join(dirFor(run.status), run.runId, 'run.json');
+}
 
 /** Escritura atómica: escribe a .tmp y renombra, conservando el .bak anterior. */
 function atomicWrite(file, text) {
   const tmp = file + '.tmp';
   fs.mkdirSync(path.dirname(file), { recursive: true });
   fs.writeFileSync(tmp, text, 'utf8');
-  try { fs.copyFileSync(file, file + '.bak'); } catch {}   // aún no había archivo: no es un fallo
+  try {
+    fs.copyFileSync(file, file + '.bak');
+  } catch {} // aún no había archivo: no es un fallo
   fs.renameSync(tmp, file);
 }
 
@@ -48,7 +52,9 @@ function copiesOf(runId) {
   const out = [];
   for (const s of ALL_STATUS) {
     const file = path.join(dirFor(s), runId, 'run.json');
-    try { out.push({ file, run: JSON.parse(fs.readFileSync(file, 'utf8')) }); } catch {}
+    try {
+      out.push({ file, run: JSON.parse(fs.readFileSync(file, 'utf8')) });
+    } catch {}
   }
   return out;
 }
@@ -67,8 +73,10 @@ function newerCopy(a, b) {
 function newRunId() {
   for (let i = 0; i < 5; i++) {
     let id = null;
-    try { id = crypto.randomUUID(); } catch {}
-    if (!id) break;                       // Node sin randomUUID: usa el formato clásico
+    try {
+      id = crypto.randomUUID();
+    } catch {}
+    if (!id) break; // Node sin randomUUID: usa el formato clásico
     if (!copiesOf(id).length) return id;
   }
   return 't' + Date.now().toString(36) + Math.random().toString(36).slice(2, 5);
@@ -84,8 +92,8 @@ function newRun({ goal, mode, step, status = 'running', scheduledAt = null, orig
     goal: String(goal || '').slice(0, 4000),
     mode: mode || 'act',
     step: step || 'EXECUTE',
-    scheduledAt: scheduledAt || null,   // ISO: tarea programada (v1.3)
-    origin,                              // 'chat' | 'background' | 'scheduled'
+    scheduledAt: scheduledAt || null, // ISO: tarea programada (v1.3)
+    origin, // 'chat' | 'background' | 'scheduled'
     lastOkStep: null,
     plan: [],
     history: [],
@@ -102,7 +110,7 @@ function save(run) {
   const copies = copiesOf(run.runId);
   // La cancelación es terminal e irreversible: ni el objeto vivo (marcado por el
   // TaskManager) ni una copia ya persistida como 'cancelled' pueden volver a running.
-  if (run.cancelRequested || copies.some(c => c.run.status === 'cancelled')) {
+  if (run.cancelRequested || copies.some((c) => c.run.status === 'cancelled')) {
     run.cancelRequested = true;
     run.status = 'cancelled';
   }
@@ -112,7 +120,7 @@ function save(run) {
     const destDir = path.dirname(dest);
     fs.mkdirSync(destDir, { recursive: true });
     const copy = { ...run };
-    delete copy.cancelRequested;   // marcas de control en vivo: no forman parte del checkpoint
+    delete copy.cancelRequested; // marcas de control en vivo: no forman parte del checkpoint
     delete copy.removed;
     if (copy.history && copy.history.length > HISTORY_MAX) copy.history = copy.history.slice(-HISTORY_MAX);
     atomicWrite(dest, JSON.stringify(copy, null, 2));
@@ -121,9 +129,13 @@ function save(run) {
     for (const c of copies) {
       const dir = path.dirname(c.file);
       if (dir === destDir) continue;
-      try { fs.rmSync(dir, { recursive: true, force: true }); } catch {}
+      try {
+        fs.rmSync(dir, { recursive: true, force: true });
+      } catch {}
     }
-  } catch (e) { console.error('checkpoints.save', e.message); }
+  } catch (e) {
+    console.error('checkpoints.save', e.message);
+  }
   // poda solo al archivar (una vez por tarea): el histórico no puede crecer sin techo
   if (ARCHIVED_STATUS.includes(run.status)) pruneArchived();
   return run;
@@ -137,15 +149,25 @@ function pruneArchived(keep = ARCHIVE_KEEP) {
   for (const status of ['completed', 'failed', 'cancelled']) {
     const base = dirFor(status);
     let entries;
-    try { entries = fs.readdirSync(base, { withFileTypes: true }).filter(e => e.isDirectory()); } catch { continue; }
+    try {
+      entries = fs.readdirSync(base, { withFileTypes: true }).filter((e) => e.isDirectory());
+    } catch {
+      continue;
+    }
     if (entries.length <= keep) continue;
-    const dated = entries.map(e => {
-      let t = 0;
-      try { t = fs.statSync(path.join(base, e.name)).mtimeMs; } catch {}
-      return { name: e.name, t };
-    }).sort((a, b) => b.t - a.t);
+    const dated = entries
+      .map((e) => {
+        let t = 0;
+        try {
+          t = fs.statSync(path.join(base, e.name)).mtimeMs;
+        } catch {}
+        return { name: e.name, t };
+      })
+      .sort((a, b) => b.t - a.t);
     for (const e of dated.slice(keep)) {
-      try { fs.rmSync(path.join(base, e.name), { recursive: true, force: true }); } catch {}
+      try {
+        fs.rmSync(path.join(base, e.name), { recursive: true, force: true });
+      } catch {}
     }
   }
 }
@@ -162,26 +184,44 @@ function read(runId) {
 function list(status = 'all') {
   const out = [];
   const ARCHIVED = ['completed', 'failed', 'cancelled'];
-  const dirs = status === 'all'
-    ? [['', null], ['completed', null], ['failed', null], ['cancelled', null]]
-    : status === 'active'
-      ? [['', null]]                                // SOLO activas: pending|scheduled|running|paused|interrupted
-      : [[ARCHIVED.includes(status) ? status : '', null]];
+  const dirs =
+    status === 'all'
+      ? [
+          ['', null],
+          ['completed', null],
+          ['failed', null],
+          ['cancelled', null],
+        ]
+      : status === 'active'
+        ? [['', null]] // SOLO activas: pending|scheduled|running|paused|interrupted
+        : [[ARCHIVED.includes(status) ? status : '', null]];
   for (const [sub] of dirs) {
     const base = sub ? path.join(TASKS_DIR, sub) : TASKS_DIR;
     let entries = [];
-    try { entries = fs.readdirSync(base, { withFileTypes: true }); } catch { continue; }
+    try {
+      entries = fs.readdirSync(base, { withFileTypes: true });
+    } catch {
+      continue;
+    }
     for (const e of entries) {
       if (!e.isDirectory()) continue;
       const f = path.join(base, e.name, 'run.json');
       try {
         const r = JSON.parse(fs.readFileSync(f, 'utf8'));
         out.push({
-          runId: r.runId, status: r.status, goal: r.goal, step: r.step, mode: r.mode,
-          lastOkStep: r.lastOkStep, lastError: r.lastError, result: r.result,
-          scheduledAt: r.scheduledAt || null, origin: r.origin || 'chat',
+          runId: r.runId,
+          status: r.status,
+          goal: r.goal,
+          step: r.step,
+          mode: r.mode,
+          lastOkStep: r.lastOkStep,
+          lastError: r.lastError,
+          result: r.result,
+          scheduledAt: r.scheduledAt || null,
+          origin: r.origin || 'chat',
           steps: (r.history || []).length,
-          createdAt: r.createdAt, updatedAt: r.updatedAt,
+          createdAt: r.createdAt,
+          updatedAt: r.updatedAt,
         });
       } catch {}
     }
@@ -206,12 +246,23 @@ function record(run, event) {
 }
 
 /** Marca el paso actual. */
-function setStep(run, step) { if (run) { run.step = step; save(run); } return run; }
+function setStep(run, step) {
+  if (run) {
+    run.step = step;
+    save(run);
+  }
+  return run;
+}
 
 /** Registra un fallo: qué paso falló y por qué. */
 function fail(run, { step, tool, message }) {
   if (!run) return run;
-  run.lastError = { step: step || run.step, tool: tool || null, message: String(message || '').slice(0, 500), ts: new Date().toISOString() };
+  run.lastError = {
+    step: step || run.step,
+    tool: tool || null,
+    message: String(message || '').slice(0, 500),
+    ts: new Date().toISOString(),
+  };
   run.status = 'failed';
   return save(run);
 }
@@ -224,30 +275,56 @@ function complete(run, result) {
   return save(run);
 }
 
-function pause(run) { if (run) { run.status = 'paused'; save(run); } return run; }
-function resume(run) { if (run) { run.status = 'running'; save(run); } return run; }
+function pause(run) {
+  if (run) {
+    run.status = 'paused';
+    save(run);
+  }
+  return run;
+}
+function resume(run) {
+  if (run) {
+    run.status = 'running';
+    save(run);
+  }
+  return run;
+}
 
 /** Marca como interrumpida (crash/cierre): candidata a recuperación. */
-function interrupt(run) { if (run) { run.status = 'interrupted'; save(run); } return run; }
+function interrupt(run) {
+  if (run) {
+    run.status = 'interrupted';
+    save(run);
+  }
+  return run;
+}
 
 /** v1.3: cambia a cualquier estado (cola del TaskManager). */
 function setStatus(run, status) {
-  if (run && ALL_STATUS.includes(status)) { run.status = status; save(run); }
+  if (run && ALL_STATUS.includes(status)) {
+    run.status = status;
+    save(run);
+  }
   return run;
 }
 
 /** v1.3: cancelación — la tarea deja de estar activa y se archiva como cancelled. */
 function cancel(run, reason) {
   if (!run) return run;
-  run.cancelRequested = true;   // irreversible: ninguna escritura posterior puede reactivarla
+  run.cancelRequested = true; // irreversible: ninguna escritura posterior puede reactivarla
   run.status = 'cancelled';
-  run.lastError = { step: run.step || 'EXECUTE', tool: null, message: String(reason || 'Cancelada por el usuario').slice(0, 300), ts: new Date().toISOString() };
+  run.lastError = {
+    step: run.step || 'EXECUTE',
+    tool: null,
+    message: String(reason || 'Cancelada por el usuario').slice(0, 300),
+    ts: new Date().toISOString(),
+  };
   return save(run);
 }
 
 /** Tareas recuperables: interrumpidas (y pausadas si el usuario lo pide). */
 function recoverable() {
-  return list('active').filter(t => t.status === 'interrupted' || t.status === 'paused');
+  return list('active').filter((t) => t.status === 'interrupted' || t.status === 'paused');
 }
 
 /**
@@ -262,13 +339,37 @@ function remove(runId) {
     return { ok: false, error: 'La tarea está ' + run.status + ': deténla o cancélala antes de borrarla.' };
   }
   for (const s of ALL_STATUS) {
-    try { fs.rmSync(path.join(dirFor(s), runId), { recursive: true, force: true }); } catch {}
+    try {
+      fs.rmSync(path.join(dirFor(s), runId), { recursive: true, force: true });
+    } catch {}
   }
   return { ok: true };
 }
 
 /** Para tests: redirige el directorio de tareas. */
-function _resetForTests(dir) { TASKS_DIR = dir; }
-function _dir() { return TASKS_DIR; }
+function _resetForTests(dir) {
+  TASKS_DIR = dir;
+}
+function _dir() {
+  return TASKS_DIR;
+}
 
-module.exports = { newRun, save, read, list, record, setStep, fail, complete, pause, resume, interrupt, cancel, setStatus, recoverable, remove, _dir, __test: { _resetForTests, ALL_STATUS, LIVE_STATUS, ARCHIVED_STATUS, ARCHIVE_KEEP, copiesOf, pruneArchived } };
+module.exports = {
+  newRun,
+  save,
+  read,
+  list,
+  record,
+  setStep,
+  fail,
+  complete,
+  pause,
+  resume,
+  interrupt,
+  cancel,
+  setStatus,
+  recoverable,
+  remove,
+  _dir,
+  __test: { _resetForTests, ALL_STATUS, LIVE_STATUS, ARCHIVED_STATUS, ARCHIVE_KEEP, copiesOf, pruneArchived },
+};

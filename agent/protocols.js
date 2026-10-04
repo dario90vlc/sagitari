@@ -58,7 +58,10 @@ const OPENCODE_MODEL_FORMAT = {
   'muse-spark-1.2-contributor': 'responses',
 };
 
-const norm = (s) => String(s || '').toLowerCase().trim();
+const norm = (s) =>
+  String(s || '')
+    .toLowerCase()
+    .trim();
 
 /* ------------------------------------------------------------------------ *
  *  Razonamiento visible (opcional)
@@ -92,7 +95,7 @@ function needsThinkingFlag(cfg, format) {
   if (!cfg.thinking) return false;
   if (format === 'anthropic') return ANTHROPIC_THINKING.test(norm(cfg.model));
   if (format === 'responses') return OPENAI_REASONING.test(norm(cfg.model));
-  return false;   // openai: quien lo tenga lo manda sin pedir permiso
+  return false; // openai: quien lo tenga lo manda sin pedir permiso
 }
 
 /**
@@ -118,7 +121,7 @@ function detectFormat(input = {}) {
   if (FORMATS.includes(explicit)) return explicit;
   const pid = norm(input.providerId);
   const bu = norm(input.baseUrl);
-  const model = norm(input.model).split('/').pop();   // admite "opencode-go/glm-5.3-flash"
+  const model = norm(input.model).split('/').pop(); // admite "opencode-go/glm-5.3-flash"
   if (pid.includes('anthropic') || bu.includes('anthropic.com')) return 'anthropic';
   if (pid.includes('opencode') || bu.includes('opencode.ai')) {
     return OPENCODE_MODEL_FORMAT[model] || 'openai';
@@ -155,7 +158,10 @@ function authHeaders(cfg, format) {
 function textOf(content) {
   if (typeof content === 'string') return content;
   if (!Array.isArray(content)) return content ? String(content) : '';
-  return content.filter(p => p && p.type === 'text').map(p => p.text || '').join('\n');
+  return content
+    .filter((p) => p && p.type === 'text')
+    .map((p) => p.text || '')
+    .join('\n');
 }
 
 /** Descompone un data-URL de imagen. */
@@ -212,7 +218,7 @@ async function readSSE(resp, signal, onEvent, opts = {}) {
   const decoder = new TextDecoder();
   let buf = '';
   let aborted = false;
-  let complete = false;   // el adaptador avisó de que la respuesta ya está entera
+  let complete = false; // el adaptador avisó de que la respuesta ya está entera
   let idleError = null;
   let idleTimer = null;
   let idleMs = DEFAULT_SILENCE_MS;
@@ -225,7 +231,9 @@ async function readSSE(resp, signal, onEvent, opts = {}) {
   // y el botón Detener no haría nada. Cancelar el reader resuelve la lectura.
   const stop = () => {
     aborted = true;
-    try { reader.cancel().catch(() => {}); } catch {}
+    try {
+      reader.cancel().catch(() => {});
+    } catch {}
   };
   if (signal) {
     if (signal.aborted) stop();
@@ -233,7 +241,12 @@ async function readSSE(resp, signal, onEvent, opts = {}) {
   }
   // Y el silencio también: cada chunk reinicia el reloj; si vence, cortamos la
   // lectura y salimos con error en vez de colgar el turno eternamente.
-  const disarmIdle = () => { if (idleTimer) { clearTimeout(idleTimer); idleTimer = null; } };
+  const disarmIdle = () => {
+    if (idleTimer) {
+      clearTimeout(idleTimer);
+      idleTimer = null;
+    }
+  };
   const armIdle = () => {
     disarmIdle();
     if (!idleMs) return;
@@ -241,7 +254,9 @@ async function readSSE(resp, signal, onEvent, opts = {}) {
       // si el usuario abortó justo en la ventana del timeout, gana el abort: no
       // se reporta un timeout que en realidad fue una parada manual
       if (signal && signal.aborted) return;
-      idleError = new Error(`timeout: el proveedor no envió datos durante ${Math.round(idleMs / 1000)} s (modelo saturado o bloqueado; prueba otro modelo en Ajustes).`);
+      idleError = new Error(
+        `timeout: el proveedor no envió datos durante ${Math.round(idleMs / 1000)} s (modelo saturado o bloqueado; prueba otro modelo en Ajustes).`,
+      );
       aborted = true;
       stop();
     }, idleMs);
@@ -250,8 +265,15 @@ async function readSSE(resp, signal, onEvent, opts = {}) {
   try {
     while (!aborted && !complete) {
       let step;
-      try { step = await reader.read(); }
-      catch (e) { if (aborted || (signal && signal.aborted)) { aborted = true; break; } throw e; }
+      try {
+        step = await reader.read();
+      } catch (e) {
+        if (aborted || (signal && signal.aborted)) {
+          aborted = true;
+          break;
+        }
+        throw e;
+      }
       const { done, value } = step;
       if (done) break;
       armIdle();
@@ -266,7 +288,10 @@ async function readSSE(resp, signal, onEvent, opts = {}) {
         // que deja el socket abierto tras la respuesta completa hacía esperar al
         // temporizador de silencio: se tiraba una respuesta YA recibida y el
         // fallback la reintentaba en otro modelo, pagándola dos veces.
-        if (ev && onEvent(ev) === false) { complete = true; break; }
+        if (ev && onEvent(ev) === false) {
+          complete = true;
+          break;
+        }
       }
     }
   } finally {
@@ -275,7 +300,9 @@ async function readSSE(resp, signal, onEvent, opts = {}) {
   }
   if (complete) {
     // soltar la conexión aunque el proveedor no la cierre
-    try { reader.cancel().catch(() => {}); } catch {}
+    try {
+      reader.cancel().catch(() => {});
+    } catch {}
   }
   if (idleError) throw idleError;
   if (!aborted && !complete) {
@@ -319,39 +346,48 @@ async function streamOpenAI(cfg, { fetchFn, messages, tools, signal, onText, onT
   let usage = null;
   let first = true;
   const toolCalls = [];
-  const aborted = await readSSE(resp, signal, (ev) => {
-    if (ev.data === '[DONE]') return false;   // respuesta completa: no esperar al cierre del socket
-    let json;
-    try { json = JSON.parse(ev.data); } catch { return; }
-    if (json.usage) usage = json.usage;
-    const delta = json.choices?.[0]?.delta;
-    if (!delta) return;
-    /* Razonamiento: DeepSeek y compañía lo mandan en `reasoning_content`; otros
+  const aborted = await readSSE(
+    resp,
+    signal,
+    (ev) => {
+      if (ev.data === '[DONE]') return false; // respuesta completa: no esperar al cierre del socket
+      let json;
+      try {
+        json = JSON.parse(ev.data);
+      } catch {
+        return;
+      }
+      if (json.usage) usage = json.usage;
+      const delta = json.choices?.[0]?.delta;
+      if (!delta) return;
+      /* Razonamiento: DeepSeek y compañía lo mandan en `reasoning_content`; otros
        (OpenRouter, algunos servidores locales) en `reasoning` o `thinking`. Se
        captura aunque venga sin habérselo pedido, pero el agente solo lo emite a
        la interfaz si el usuario activó verlo. */
-    const razon = reasoningDelta(delta);
-    if (razon) {
-      reasoning += razon;
-      if (onThinking) onThinking(razon);
-    }
-    if (delta.content) {
-      if (first && /^\s*$/.test(delta.content)) return;
-      first = false;
-      text += delta.content;
-      onText(delta.content);
-    }
-    for (const tc of delta.tool_calls || []) {
-      const i = tc.index ?? 0;
-      if (!toolCalls[i]) toolCalls[i] = { id: tc.id || 'call_' + i, type: 'function', function: { name: '', arguments: '' } };
-      if (tc.id) toolCalls[i].id = tc.id;
-      if (tc.function?.name) toolCalls[i].function.name += tc.function.name;
-      if (tc.function?.arguments) toolCalls[i].function.arguments += tc.function.arguments;
-    }
-  }, { silenceTimeoutMs: cfg.silenceTimeoutMs });
+      const razon = reasoningDelta(delta);
+      if (razon) {
+        reasoning += razon;
+        if (onThinking) onThinking(razon);
+      }
+      if (delta.content) {
+        if (first && /^\s*$/.test(delta.content)) return;
+        first = false;
+        text += delta.content;
+        onText(delta.content);
+      }
+      for (const tc of delta.tool_calls || []) {
+        const i = tc.index ?? 0;
+        if (!toolCalls[i]) toolCalls[i] = { id: tc.id || 'call_' + i, type: 'function', function: { name: '', arguments: '' } };
+        if (tc.id) toolCalls[i].id = tc.id;
+        if (tc.function?.name) toolCalls[i].function.name += tc.function.name;
+        if (tc.function?.arguments) toolCalls[i].function.arguments += tc.function.arguments;
+      }
+    },
+    { silenceTimeoutMs: cfg.silenceTimeoutMs },
+  );
   return {
     text: text.trim(),
-    toolCalls: toolCalls.filter(Boolean).filter(t => t.function.name),
+    toolCalls: toolCalls.filter(Boolean).filter((t) => t.function.name),
     reasoning: reasoning.trim(),
     aborted,
     usage,
@@ -382,7 +418,11 @@ function toAnthropicMessages(messages) {
   const system = [];
   const out = [];
   for (const m of messages) {
-    if (m.role === 'system') { const t = textOf(m.content); if (t) system.push(t); continue; }
+    if (m.role === 'system') {
+      const t = textOf(m.content);
+      if (t) system.push(t);
+      continue;
+    }
 
     if (m.role === 'tool') {
       // tool_result admite bloques de texto e imagen: no perdemos los screenshots
@@ -395,8 +435,13 @@ function toAnthropicMessages(messages) {
       }
       const block = { type: 'tool_result', tool_use_id: m.tool_call_id, content: parts.length ? parts : 'OK' };
       const last = out[out.length - 1];
-      if (last && last.role === 'user' && Array.isArray(last.content)
-          && last.content.length && last.content.every(b => b.type === 'tool_result')) {
+      if (
+        last &&
+        last.role === 'user' &&
+        Array.isArray(last.content) &&
+        last.content.length &&
+        last.content.every((b) => b.type === 'tool_result')
+      ) {
         last.content.push(block);
       } else {
         out.push({ role: 'user', content: [block] });
@@ -410,7 +455,9 @@ function toAnthropicMessages(messages) {
       if (t) blocks.push({ type: 'text', text: t });
       for (const tc of m.tool_calls || []) {
         let input = {};
-        try { input = JSON.parse(tc.function?.arguments || '{}'); } catch {}
+        try {
+          input = JSON.parse(tc.function?.arguments || '{}');
+        } catch {}
         blocks.push({ type: 'tool_use', id: tc.id, name: tc.function?.name, input });
       }
       if (blocks.length) out.push({ role: 'assistant', content: blocks });
@@ -443,7 +490,7 @@ function buildBodyAnthropic(cfg, messages, tools) {
   const { system, messages: msgs } = toAnthropicMessages(messages);
   const body = {
     model: cfg.model,
-    max_tokens: cfg.maxTokens || 4096,   // obligatorio en la API Messages
+    max_tokens: cfg.maxTokens || 4096, // obligatorio en la API Messages
     stream: true,
     messages: msgs,
   };
@@ -489,57 +536,68 @@ async function streamAnthropic(cfg, { fetchFn, messages, tools, signal, onText, 
   let reasoning = '';
   let usage = null;
   let failure = null;
-  const blocks = new Map();   // index -> { id, name, args }
-  const aborted = await readSSE(resp, signal, (ev) => {
-    let json;
-    try { json = JSON.parse(ev.data); } catch { return; }
-    const type = json.type || ev.event;
-    switch (type) {
-      case 'message_start':
-        if (json.message?.usage) {
-          usage = {
-            prompt_tokens: json.message.usage.input_tokens || 0,
-            completion_tokens: json.message.usage.output_tokens || 0,
-          };
-        }
-        break;
-      case 'content_block_start':
-        if (json.content_block?.type === 'tool_use') {
-          blocks.set(json.index ?? 0, { id: json.content_block.id, name: json.content_block.name, args: '' });
-        }
-        break;
-      case 'content_block_delta': {
-        const d = json.delta || {};
-        if (d.type === 'text_delta' && d.text) { text += d.text; onText(d.text); }
-        // razonamiento ampliado: solo llega si se habilitó en el cuerpo
-        else if (d.type === 'thinking_delta' && d.thinking) {
-          reasoning += d.thinking;
-          if (onThinking) onThinking(d.thinking);
-        }
-        else if (d.type === 'input_json_delta') {
-          const b = blocks.get(json.index ?? 0);
-          if (b) b.args += d.partial_json || '';
-        }
-        break;
+  const blocks = new Map(); // index -> { id, name, args }
+  const aborted = await readSSE(
+    resp,
+    signal,
+    (ev) => {
+      let json;
+      try {
+        json = JSON.parse(ev.data);
+      } catch {
+        return;
       }
-      case 'message_delta':
-        if (json.usage?.output_tokens != null) {
-          usage = { ...(usage || {}), completion_tokens: json.usage.output_tokens };
+      const type = json.type || ev.event;
+      switch (type) {
+        case 'message_start':
+          if (json.message?.usage) {
+            usage = {
+              prompt_tokens: json.message.usage.input_tokens || 0,
+              completion_tokens: json.message.usage.output_tokens || 0,
+            };
+          }
+          break;
+        case 'content_block_start':
+          if (json.content_block?.type === 'tool_use') {
+            blocks.set(json.index ?? 0, { id: json.content_block.id, name: json.content_block.name, args: '' });
+          }
+          break;
+        case 'content_block_delta': {
+          const d = json.delta || {};
+          if (d.type === 'text_delta' && d.text) {
+            text += d.text;
+            onText(d.text);
+          }
+          // razonamiento ampliado: solo llega si se habilitó en el cuerpo
+          else if (d.type === 'thinking_delta' && d.thinking) {
+            reasoning += d.thinking;
+            if (onThinking) onThinking(d.thinking);
+          } else if (d.type === 'input_json_delta') {
+            const b = blocks.get(json.index ?? 0);
+            if (b) b.args += d.partial_json || '';
+          }
+          break;
         }
-        break;
-      case 'message_stop':
-        return false;   // respuesta completa: no esperar al cierre del socket
-      case 'error':
-        failure = new Error(`Anthropic: ${json.error?.message || 'error de streaming'}`);
-        break;
-    }
-  }, { silenceTimeoutMs: cfg.silenceTimeoutMs });
+        case 'message_delta':
+          if (json.usage?.output_tokens != null) {
+            usage = { ...(usage || {}), completion_tokens: json.usage.output_tokens };
+          }
+          break;
+        case 'message_stop':
+          return false; // respuesta completa: no esperar al cierre del socket
+        case 'error':
+          failure = new Error(`Anthropic: ${json.error?.message || 'error de streaming'}`);
+          break;
+      }
+    },
+    { silenceTimeoutMs: cfg.silenceTimeoutMs },
+  );
   if (failure) throw failure;
 
   if (usage) usage = { ...usage, total_tokens: (usage.prompt_tokens || 0) + (usage.completion_tokens || 0) };
   return {
     text: text.trim(),
-    toolCalls: [...blocks.values()].map(b => ({ id: b.id, type: 'function', function: { name: b.name, arguments: b.args || '{}' } })),
+    toolCalls: [...blocks.values()].map((b) => ({ id: b.id, type: 'function', function: { name: b.name, arguments: b.args || '{}' } })),
     reasoning: reasoning.trim(),
     aborted,
     usage,
@@ -554,14 +612,18 @@ function toResponsesInput(messages) {
   const instructions = [];
   const input = [];
   for (const m of messages) {
-    if (m.role === 'system') { const t = textOf(m.content); if (t) instructions.push(t); continue; }
+    if (m.role === 'system') {
+      const t = textOf(m.content);
+      if (t) instructions.push(t);
+      continue;
+    }
 
     if (m.role === 'tool') {
       input.push({ type: 'function_call_output', call_id: m.tool_call_id, output: textOf(m.content) || 'OK' });
       // las imágenes de una herramienta viajan como entrada de usuario aparte
       // (function_call_output solo admite texto en la API Responses)
       const imgs = imagesOf(m.content);
-      if (imgs.length) input.push({ role: 'user', content: imgs.map(url => ({ type: 'input_image', image_url: url })) });
+      if (imgs.length) input.push({ role: 'user', content: imgs.map((url) => ({ type: 'input_image', image_url: url })) });
       continue;
     }
 
@@ -575,12 +637,14 @@ function toResponsesInput(messages) {
     }
 
     const content = [];
-    if (typeof m.content === 'string') { if (m.content) content.push({ type: 'input_text', text: m.content }); }
-    else for (const part of m.content || []) {
-      if (!part) continue;
-      if (part.type === 'text' && part.text) content.push({ type: 'input_text', text: part.text });
-      else if (part.type === 'image_url' && part.image_url?.url) content.push({ type: 'input_image', image_url: part.image_url.url });
-    }
+    if (typeof m.content === 'string') {
+      if (m.content) content.push({ type: 'input_text', text: m.content });
+    } else
+      for (const part of m.content || []) {
+        if (!part) continue;
+        if (part.type === 'text' && part.text) content.push({ type: 'input_text', text: part.text });
+        else if (part.type === 'image_url' && part.image_url?.url) content.push({ type: 'input_image', image_url: part.image_url.url });
+      }
     if (content.length) input.push({ role: 'user', content });
   }
   return { instructions: instructions.join('\n\n'), input };
@@ -595,7 +659,7 @@ function buildBodyResponses(cfg, messages, tools) {
   if (needsThinkingFlag(cfg, 'responses')) body.reasoning = { summary: 'auto' };
   if (cfg.maxTokens) body.max_output_tokens = cfg.maxTokens;
   if (tools && tools.length) {
-    body.tools = tools.map(t => ({
+    body.tools = tools.map((t) => ({
       type: 'function',
       name: t.function?.name || t.name,
       description: t.function?.description || t.description || '',
@@ -619,52 +683,69 @@ async function streamResponses(cfg, { fetchFn, messages, tools, signal, onText, 
   let reasoning = '';
   let usage = null;
   let failure = null;
-  const calls = new Map();   // item_id -> { id, name, args }
-  const aborted = await readSSE(resp, signal, (ev) => {
-    let json;
-    try { json = JSON.parse(ev.data); } catch { return; }
-    const type = json.type || ev.event;
-    switch (type) {
-      case 'response.output_text.delta':
-        if (json.delta) { text += json.delta; onText(json.delta); }
-        break;
-      // resumen del razonamiento (se pide con reasoning.summary = 'auto')
-      case 'response.reasoning_summary_text.delta':
-      case 'response.reasoning_text.delta':
-        if (json.delta) {
-          reasoning += json.delta;
-          if (onThinking) onThinking(json.delta);
-        }
-        break;
-      case 'response.output_item.added':
-        if (json.item?.type === 'function_call') {
-          calls.set(json.item.id, { id: json.item.call_id || json.item.id, name: json.item.name, args: '' });
-        }
-        break;
-      case 'response.function_call_arguments.delta': {
-        const c = calls.get(json.item_id) || [...calls.values()].pop();
-        if (c) c.args += json.delta || '';
-        break;
+  const calls = new Map(); // item_id -> { id, name, args }
+  const aborted = await readSSE(
+    resp,
+    signal,
+    (ev) => {
+      let json;
+      try {
+        json = JSON.parse(ev.data);
+      } catch {
+        return;
       }
-      case 'response.completed':
-      case 'response.incomplete': {
-        const u = json.response?.usage;
-        if (u) usage = { prompt_tokens: u.input_tokens || 0, completion_tokens: u.output_tokens || 0, total_tokens: u.total_tokens || ((u.input_tokens || 0) + (u.output_tokens || 0)) };
-        return false;   // respuesta completa: no esperar al cierre del socket
+      const type = json.type || ev.event;
+      switch (type) {
+        case 'response.output_text.delta':
+          if (json.delta) {
+            text += json.delta;
+            onText(json.delta);
+          }
+          break;
+        // resumen del razonamiento (se pide con reasoning.summary = 'auto')
+        case 'response.reasoning_summary_text.delta':
+        case 'response.reasoning_text.delta':
+          if (json.delta) {
+            reasoning += json.delta;
+            if (onThinking) onThinking(json.delta);
+          }
+          break;
+        case 'response.output_item.added':
+          if (json.item?.type === 'function_call') {
+            calls.set(json.item.id, { id: json.item.call_id || json.item.id, name: json.item.name, args: '' });
+          }
+          break;
+        case 'response.function_call_arguments.delta': {
+          const c = calls.get(json.item_id) || [...calls.values()].pop();
+          if (c) c.args += json.delta || '';
+          break;
+        }
+        case 'response.completed':
+        case 'response.incomplete': {
+          const u = json.response?.usage;
+          if (u)
+            usage = {
+              prompt_tokens: u.input_tokens || 0,
+              completion_tokens: u.output_tokens || 0,
+              total_tokens: u.total_tokens || (u.input_tokens || 0) + (u.output_tokens || 0),
+            };
+          return false; // respuesta completa: no esperar al cierre del socket
+        }
+        case 'response.failed':
+          failure = new Error(`Responses: ${json.response?.error?.message || 'la respuesta falló'}`);
+          break;
+        case 'error':
+          failure = new Error(`Responses: ${json.message || json.error?.message || 'error de streaming'}`);
+          break;
       }
-      case 'response.failed':
-        failure = new Error(`Responses: ${json.response?.error?.message || 'la respuesta falló'}`);
-        break;
-      case 'error':
-        failure = new Error(`Responses: ${json.message || json.error?.message || 'error de streaming'}`);
-        break;
-    }
-  }, { silenceTimeoutMs: cfg.silenceTimeoutMs });
+    },
+    { silenceTimeoutMs: cfg.silenceTimeoutMs },
+  );
   if (failure) throw failure;
 
   return {
     text: text.trim(),
-    toolCalls: [...calls.values()].map(c => ({ id: c.id, type: 'function', function: { name: c.name, arguments: c.args || '{}' } })),
+    toolCalls: [...calls.values()].map((c) => ({ id: c.id, type: 'function', function: { name: c.name, arguments: c.args || '{}' } })),
     reasoning: reasoning.trim(),
     aborted,
     usage,
@@ -692,9 +773,21 @@ async function stream(cfg, opts) {
 }
 
 module.exports = {
-  FORMATS, OPENCODE_MODEL_FORMAT, DEFAULT_SILENCE_MS, detectFormat, authHeaders,
-  buildBodyOpenAI, buildBodyAnthropic, buildBodyResponses,
-  toAnthropicMessages, toResponsesInput, parseSSEBlock, textOf, imagesOf,
-  needsThinkingFlag, thinkingBudget, reasoningDelta,
+  FORMATS,
+  OPENCODE_MODEL_FORMAT,
+  DEFAULT_SILENCE_MS,
+  detectFormat,
+  authHeaders,
+  buildBodyOpenAI,
+  buildBodyAnthropic,
+  buildBodyResponses,
+  toAnthropicMessages,
+  toResponsesInput,
+  parseSSEBlock,
+  textOf,
+  imagesOf,
+  needsThinkingFlag,
+  thinkingBudget,
+  reasoningDelta,
   stream,
 };

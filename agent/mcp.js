@@ -43,7 +43,10 @@ function mapToolName(serverId, toolName) {
 
 /** Una línea, sin markdown ni saltos: es texto de un tercero en el prompt. */
 function oneLine(text, max = 300) {
-  return String(text || '').replace(/\s+/g, ' ').trim().slice(0, max);
+  return String(text || '')
+    .replace(/\s+/g, ' ')
+    .trim()
+    .slice(0, max);
 }
 
 class McpManager {
@@ -53,23 +56,26 @@ class McpManager {
     this.log = log;
     this._makeTransport = makeTransport || ((s) => this._realTransport(s));
     this._servers = [];
-    this._state = new Map();   // id -> { state, error, tools, logTail, attempts, transport, exposed }
+    this._state = new Map(); // id -> { state, error, tools, logTail, attempts, transport, exposed }
     this.configure(servers);
   }
 
   /** Reconciliar con la configuración: arranca lo nuevo, para lo quitado o cambiado. */
   configure(servers) {
-    const previos = new Map(this._servers.map(s => [s.id, s]));
-    this._servers = (Array.isArray(servers) ? servers : []).filter(s => s && s.id);
+    const previos = new Map(this._servers.map((s) => [s.id, s]));
+    this._servers = (Array.isArray(servers) ? servers : []).filter((s) => s && s.id);
     for (const s of this._servers) {
       const antes = previos.get(s.id);
       const st = this._state.get(s.id);
-      if (!st) { this._state.set(s.id, { state: 'idle', error: null, tools: [], logTail: '', attempts: 0, transport: null, exposed: new Map() }); continue; }
+      if (!st) {
+        this._state.set(s.id, { state: 'idle', error: null, tools: [], logTail: '', attempts: 0, transport: null, exposed: new Map() });
+        continue;
+      }
       // si cambió algo del transporte o se deshabilitó, lo conectado ya no vale
       const clave = (x) => JSON.stringify({ c: x.command, a: x.args, u: x.url, h: x.headers, e: x.env, t: x.transport, d: x.cwd });
       if ((!antes || clave(antes) !== clave(s) || !s.enabled) && st.transport) this._drop(s.id, 'configuración cambiada');
     }
-    for (const id of [...this._state.keys()]) if (!this._servers.some(s => s.id === id)) this._drop(id);
+    for (const id of [...this._state.keys()]) if (!this._servers.some((s) => s.id === id)) this._drop(id);
     this._rebuildExposed();
   }
 
@@ -88,7 +94,9 @@ class McpManager {
     }
   }
 
-  _server(id) { return this._servers.find(s => s.id === id) || null; }
+  _server(id) {
+    return this._servers.find((s) => s.id === id) || null;
+  }
 
   /** Transporte real: stdio o HTTP según la configuración del servidor. */
   _realTransport(s) {
@@ -99,7 +107,12 @@ class McpManager {
       return transport.createHttpTransport({ url: s.url, headers: s.headers || {}, defaultTimeoutMs: timeoutMs, onNotice });
     }
     return transport.createStdioTransport({
-      command: s.command, args: s.args || [], cwd: s.cwd || this.dataDir, env: s.env || {}, defaultTimeoutMs: timeoutMs, onNotice,
+      command: s.command,
+      args: s.args || [],
+      cwd: s.cwd || this.dataDir,
+      env: s.env || {},
+      defaultTimeoutMs: timeoutMs,
+      onNotice,
     });
   }
 
@@ -114,14 +127,20 @@ class McpManager {
     if (method !== 'ping' || id == null) return;
     const st = this._state.get(serverId);
     if (st && st.transport) {
-      try { st.transport.rpc.send(JSON.stringify({ jsonrpc: '2.0', id, result: {} })); } catch {}
+      try {
+        st.transport.rpc.send(JSON.stringify({ jsonrpc: '2.0', id, result: {} }));
+      } catch {}
     }
   }
 
   _drop(id, motivo) {
     const st = this._state.get(id);
     if (!st) return;
-    if (st.transport) { try { st.transport.kill(); } catch {} }
+    if (st.transport) {
+      try {
+        st.transport.kill();
+      } catch {}
+    }
     st.transport = null;
     st.tools = [];
     st.exposed = new Map();
@@ -140,7 +159,9 @@ class McpManager {
     if (!s.enabled) return { ok: false, error: 'el servidor MCP está deshabilitado' };
     if (st.state === 'ready') return { ok: true };
     if (st._connecting) return st._connecting;
-    st._connecting = this._connect(s, st).finally(() => { st._connecting = null; });
+    st._connecting = this._connect(s, st).finally(() => {
+      st._connecting = null;
+    });
     return st._connecting;
   }
 
@@ -152,18 +173,22 @@ class McpManager {
       const tr = this._makeTransport(s);
       st.transport = tr;
       tr.onExit((motivo) => {
-        if (st.transport !== tr) return;   // salida tardía de un transporte ya olvidado
+        if (st.transport !== tr) return; // salida tardía de un transporte ya olvidado
         st.state = 'dead';
         st.error = String(motivo || 'el servidor terminó');
         st.logTail = tr.stderrTail ? tr.stderrTail() : '';
         st.tools = [];
         st.exposed = new Map();
       });
-      const init = await tr.rpc.request('initialize', {
-        protocolVersion: '2025-06-18',
-        capabilities: {},
-        clientInfo: { name: 'SAGITARI', version: this.clientVersion },
-      }, { timeoutMs });
+      const init = await tr.rpc.request(
+        'initialize',
+        {
+          protocolVersion: '2025-06-18',
+          capabilities: {},
+          clientInfo: { name: 'SAGITARI', version: this.clientVersion },
+        },
+        { timeoutMs },
+      );
       tr.rpc.notify('notifications/initialized', {});
       const caps = (init && init.capabilities) || {};
       st.serverInfo = (init && init.serverInfo) || null;
@@ -178,7 +203,12 @@ class McpManager {
       st.state = 'dead';
       st.error = e.message;
       st.logTail = st.transport && st.transport.stderrTail ? st.transport.stderrTail() : '';
-      if (st.transport) { try { st.transport.kill(); } catch {} st.transport = null; }
+      if (st.transport) {
+        try {
+          st.transport.kill();
+        } catch {}
+        st.transport = null;
+      }
       st.tools = [];
       st.exposed = new Map();
       this.log({ agent: 'sagitari', event: 'mcp_error', server: s.id, message: e.message });
@@ -235,7 +265,7 @@ class McpManager {
           function: {
             name,
             description: `[MCP · ${oneLine(s.name || s.id, 40)}] ${oneLine(t.description || t.name)}`,
-            parameters: (t.inputSchema && typeof t.inputSchema === 'object') ? t.inputSchema : { type: 'object', properties: {} },
+            parameters: t.inputSchema && typeof t.inputSchema === 'object' ? t.inputSchema : { type: 'object', properties: {} },
           },
         });
       }
@@ -262,7 +292,7 @@ class McpManager {
   _serverIdOf(exposed) {
     const m = /^mcp__([a-z0-9_]+)__/.exec(String(exposed || ''));
     if (!m) return null;
-    const s = this._servers.find(x => serverSlug(x.id) === m[1]);
+    const s = this._servers.find((x) => serverSlug(x.id) === m[1]);
     return s ? s.id : null;
   }
 
@@ -284,24 +314,45 @@ class McpManager {
       const r = await this.ensure(sid);
       if (!r.ok) return `Error: no pude usar «${exposedName}» porque el servidor MCP «${s.name || s.id}» no está disponible (${r.error}).`;
       info = this.describe(exposedName);
-      if (!info) return `Error: el servidor MCP «${s.name || s.id}» no expone la herramienta «${exposedName}» (¿está bloqueada o fuera de la lista permitida?).`;
+      if (!info)
+        return `Error: el servidor MCP «${s.name || s.id}» no expone la herramienta «${exposedName}» (¿está bloqueada o fuera de la lista permitida?).`;
     }
     if (!info) info = this.describe(exposedName);
     if (!info) return `Error: la herramienta MCP «${exposedName}» no está disponible ahora mismo.`;
-    const ms = Number(timeoutMs) > 0 ? Number(timeoutMs) : (Number(s.timeoutMs) > 0 ? Number(s.timeoutMs) : DEFAULT_TIMEOUT_MS);
+    const ms = Number(timeoutMs) > 0 ? Number(timeoutMs) : Number(s.timeoutMs) > 0 ? Number(s.timeoutMs) : DEFAULT_TIMEOUT_MS;
     let reqId = null;
     // El gancho que usa el agente: mientras la petición está en vuelo, Detener puede
     // cortar SOLO esa llamada (si no, agotaría su timeout sin que el usuario pare nada).
     if (typeof onExit === 'function') {
-      try { onExit({ stop: () => { if (reqId != null) st.transport.rpc.cancel(reqId, 'detenida por el usuario'); } }); } catch {}
+      try {
+        onExit({
+          stop: () => {
+            if (reqId != null) st.transport.rpc.cancel(reqId, 'detenida por el usuario');
+          },
+        });
+      } catch {}
     }
     try {
-      const res = await st.transport.rpc.request('tools/call', { name: info.toolName, arguments: args || {} }, { timeoutMs: ms, onStart: (id) => { reqId = id; } });
+      const res = await st.transport.rpc.request(
+        'tools/call',
+        { name: info.toolName, arguments: args || {} },
+        {
+          timeoutMs: ms,
+          onStart: (id) => {
+            reqId = id;
+          },
+        },
+      );
       const texto = this._flatten(res);
       return res && res.isError ? 'Error del servidor MCP: ' + texto : texto;
     } catch (e) {
       // el transporte puede haber muerto: se marca para que la próxima llamada reconecte
-      if (!st.transport || !st.transport.rpc.alive) { st.state = 'dead'; st.error = e.message; st.tools = []; st.logTail = st.transport && st.transport.stderrTail ? st.transport.stderrTail() : ''; }
+      if (!st.transport || !st.transport.rpc.alive) {
+        st.state = 'dead';
+        st.error = e.message;
+        st.tools = [];
+        st.logTail = st.transport && st.transport.stderrTail ? st.transport.stderrTail() : '';
+      }
       return `Error: la herramienta MCP «${info.toolName}» falló (${e.message}).`;
     }
   }
@@ -312,18 +363,23 @@ class McpManager {
     for (const c of (res && res.content) || []) {
       if (!c || typeof c !== 'object') continue;
       if (c.type === 'text') partes.push(String(c.text || ''));
-      else if (c.type === 'image') partes.push(`[imagen: ${c.mimeType || 'desconocido'}, ${Math.round(String(c.data || '').length * 0.75 / 1024)} KB — no se envía al modelo]`);
+      else if (c.type === 'image')
+        partes.push(
+          `[imagen: ${c.mimeType || 'desconocido'}, ${Math.round((String(c.data || '').length * 0.75) / 1024)} KB — no se envía al modelo]`,
+        );
       else if (c.type === 'resource') partes.push(`[recurso: ${(c.resource && c.resource.uri) || 'sin uri'}]`);
       else partes.push('[' + (c.type || 'contenido') + ']');
     }
     if (!partes.length && res && res.structuredContent) {
-      try { partes.push(JSON.stringify(res.structuredContent)); } catch {}
+      try {
+        partes.push(JSON.stringify(res.structuredContent));
+      } catch {}
     }
     const texto = partes.join('\n').trim() || '(el servidor MCP no devolvió contenido)';
     if (texto.length > MAX_RESULT_CHARS) {
       let corte = MAX_RESULT_CHARS;
       const c = texto.charCodeAt(corte - 1);
-      if (c >= 0xD800 && c <= 0xDBFF) corte--;   // no partir un par suplente
+      if (c >= 0xd800 && c <= 0xdbff) corte--; // no partir un par suplente
       return texto.slice(0, corte) + '\n… (resultado recortado)';
     }
     return texto;
@@ -338,12 +394,14 @@ class McpManager {
         name: s.name || s.id,
         enabled: !!s.enabled,
         transport: s.transport || 'stdio',
-        state: s.enabled ? (st.state || 'idle') : 'off',
+        state: s.enabled ? st.state || 'idle' : 'off',
         error: st.error || null,
         logTail: st.logTail || '',
         serverInfo: st.serverInfo || null,
         tools: [...(st.exposed || new Map()).entries()].map(([exposed, t]) => ({
-          name: exposed, tool: t.name, description: oneLine(t.description, 200),
+          name: exposed,
+          tool: t.name,
+          description: oneLine(t.description, 200),
         })),
       };
     });

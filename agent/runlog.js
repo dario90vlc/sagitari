@@ -12,14 +12,14 @@ const path = require('path');
 const LOG_DIR_DEFAULT = path.join(require('./datadir').dataDir(), 'logs');
 let LOG_DIR = LOG_DIR_DEFAULT;
 let MAX_LOGS = 20;
-let MAX_BYTES = 8 * 1024 * 1024;   // tope por archivo: una sesión larga no crece sin límite
+let MAX_BYTES = 8 * 1024 * 1024; // tope por archivo: una sesión larga no crece sin límite
 
 let stream = null;
 let currentFile = null;
-let written = 0;   // bytes escritos en el archivo actual
+let written = 0; // bytes escritos en el archivo actual
 
 let pruneTimer = null;
-const nombresUsados = new Set();   // nombres abiertos en esta sesión (unicidad en memoria)
+const nombresUsados = new Set(); // nombres abiertos en esta sesión (unicidad en memoria)
 
 /**
  * Borra los ficheros sobrantes dejando MAX_LOGS (el de la sesión incluido).
@@ -35,13 +35,24 @@ function pruneOldLogs() {
   pruneTimer = setTimeout(() => {
     const paso = (intento) => {
       let files = [];
-      try { files = fs.readdirSync(LOG_DIR).filter(f => f.endsWith('.jsonl')).sort(); } catch { return; }
+      try {
+        files = fs
+          .readdirSync(LOG_DIR)
+          .filter((f) => f.endsWith('.jsonl'))
+          .sort();
+      } catch {
+        return;
+      }
       const activo = currentFile && path.basename(currentFile);
-      const otros = files.filter(f => f !== activo);
+      const otros = files.filter((f) => f !== activo);
       const pendientes = otros.slice(0, Math.max(0, otros.length - (MAX_LOGS - 1)));
       for (const f of pendientes) {
-        try { fs.unlinkSync(path.join(LOG_DIR, f)); nombresUsados.delete(f); }
-        catch (e) { if (e.code !== 'ENOENT') continue; } // ENOENT: ya no está
+        try {
+          fs.unlinkSync(path.join(LOG_DIR, f));
+          nombresUsados.delete(f);
+        } catch (e) {
+          if (e.code !== 'ENOENT') continue;
+        } // ENOENT: ya no está
       }
       // Los write streams crean sus archivos de forma asíncrona. Releer la carpeta
       // evita que una poda temprana vea solo el archivo activo y deje los demás.
@@ -68,14 +79,21 @@ function openStream() {
   currentFile = path.join(LOG_DIR, name);
   written = 0;
   stream = fs.createWriteStream(currentFile, { flags: 'a' });
-  stream.on('error', () => { stream = null; });
+  stream.on('error', () => {
+    stream = null;
+  });
   pruneOldLogs();
   return stream;
 }
 
 function ensureStream() {
   if (stream) return stream;
-  try { return openStream(); } catch { stream = null; return null; }
+  try {
+    return openStream();
+  } catch {
+    stream = null;
+    return null;
+  }
 }
 
 /* --------------------------------------------------------------------------- *
@@ -91,21 +109,40 @@ function ensureStream() {
 
 /* Claves cuyo valor nunca se guarda (comparación en minúsculas, sin guiones). */
 const SECRET_KEYS = new Set([
-  'password', 'passwd', 'contrasena', 'contraseña', 'pin', 'token',
-  'apikey', 'api_key', 'auth', 'authorization', 'secret', 'secreto',
-  'cvv', 'cvc', 'tarjeta', 'cardnumber', 'iban', 'ssn', 'dni',
+  'password',
+  'passwd',
+  'contrasena',
+  'contraseña',
+  'pin',
+  'token',
+  'apikey',
+  'api_key',
+  'auth',
+  'authorization',
+  'secret',
+  'secreto',
+  'cvv',
+  'cvc',
+  'tarjeta',
+  'cardnumber',
+  'iban',
+  'ssn',
+  'dni',
 ]);
 
 /* Patrones de secretos dentro de texto libre (claves, Bearer, base64 de -enc). */
 const SECRET_PATTERNS = [
-  /sk-[A-Za-z0-9-_]{8,}/g,                    // OpenAI / compatibles
-  /xox[bpas]-[A-Za-z0-9-]+/g,                 // Slack
-  /gh[pousr]_[A-Za-z0-9]{8,}/g,               // GitHub
-  /Bearer\s+[A-Za-z0-9\-._~+/=]{8,}/gi,       // cabeceras de autorización
+  /sk-[A-Za-z0-9-_]{8,}/g, // OpenAI / compatibles
+  /xox[bpas]-[A-Za-z0-9-]+/g, // Slack
+  /gh[pousr]_[A-Za-z0-9]{8,}/g, // GitHub
+  /Bearer\s+[A-Za-z0-9\-._~+/=]{8,}/gi, // cabeceras de autorización
   /(?<=["'=:]\s*)eyJ[A-Za-z0-9-_]{8,}\.[A-Za-z0-9-_]{8,}\.[A-Za-z0-9-_]{4,}/g, // JWT
 ];
 
-const normKey = (k) => String(k || '').toLowerCase().replace(/[-_]/g, '');
+const normKey = (k) =>
+  String(k || '')
+    .toLowerCase()
+    .replace(/[-_]/g, '');
 
 function redactText(v) {
   let s = String(v);
@@ -124,8 +161,7 @@ function redactValue(key, v, tool) {
   if (typeof v === 'string') {
     if (SECRET_KEYS.has(normKey(key))) return '[REDACTED]';
     // el texto tecleado o pegado puede ser una contraseña: sin marca no se sabe
-    if ((tool === 'clipboard' && (key === 'text' || key === 'content')) ||
-        (tool === 'browser_control' && key === 'text')) {
+    if ((tool === 'clipboard' && (key === 'text' || key === 'content')) || (tool === 'browser_control' && key === 'text')) {
       return v.length > MAX_ARG_CHARS ? v.slice(0, MAX_ARG_CHARS) + '…[truncado]' : redactText(v);
     }
     if (TRUNCATE_KEYS.has(normKey(key)) && v.length > MAX_ARG_CHARS) {
@@ -170,7 +206,9 @@ function log(event) {
     const size = Buffer.byteLength(line, 'utf8');
     // el tope también se aplica dentro de la sesión, no solo al arrancar
     if (written + size > MAX_BYTES) {
-      try { stream && stream.end(); } catch {}
+      try {
+        stream && stream.end();
+      } catch {}
       stream = null;
       s = ensureStream();
       if (!s) return;
@@ -180,7 +218,9 @@ function log(event) {
   } catch {}
 }
 
-function currentLogFile() { return currentFile; }
+function currentLogFile() {
+  return currentFile;
+}
 
 /** Últimas líneas de un archivo sin cargarlo entero (los logs pueden ser grandes). */
 function tailLines(file, maxBytes) {
@@ -191,35 +231,58 @@ function tailLines(file, maxBytes) {
     const buf = Buffer.alloc(len);
     fs.readSync(fd, buf, 0, len, size - len);
     const lines = buf.toString('utf8').split('\n');
-    if (size > len) lines.shift();   // la primera línea puede venir cortada
+    if (size > len) lines.shift(); // la primera línea puede venir cortada
     return lines.filter(Boolean);
-  } finally { fs.closeSync(fd); }
+  } finally {
+    fs.closeSync(fd);
+  }
 }
 
 /** Read the last N events across all log files (newest last), for the dev panel. */
 function readRecent(n = 200) {
   const out = [];
   try {
-    const files = fs.readdirSync(LOG_DIR).filter(f => f.endsWith('.jsonl')).sort().slice(-3);
+    const files = fs
+      .readdirSync(LOG_DIR)
+      .filter((f) => f.endsWith('.jsonl'))
+      .sort()
+      .slice(-3);
     for (const f of files) {
       for (const l of tailLines(path.join(LOG_DIR, f), 512 * 1024)) {
-        try { out.push(JSON.parse(l)); } catch {}
+        try {
+          out.push(JSON.parse(l));
+        } catch {}
       }
     }
   } catch {}
   return out.slice(-n);
 }
 
-function close() { try { stream && stream.end(); } catch {} stream = null; }
+function close() {
+  try {
+    stream && stream.end();
+  } catch {}
+  stream = null;
+}
 
 module.exports = {
-  log, readRecent, currentLogFile, close, LOG_DIR, redactToolArgs, redactEvent,
+  log,
+  readRecent,
+  currentLogFile,
+  close,
+  LOG_DIR,
+  redactToolArgs,
+  redactEvent,
   /* Redirige el almacén y los topes para poder probar rotación y tamaño sin
      escribir 8 MB ni tocar los logs reales del usuario. */
   __test: {
     _resetForTests: ({ dir, maxBytes, maxLogs } = {}) => {
-      try { stream && stream.end(); } catch {}
-      stream = null; currentFile = null; written = 0;
+      try {
+        stream && stream.end();
+      } catch {}
+      stream = null;
+      currentFile = null;
+      written = 0;
       LOG_DIR = dir || LOG_DIR_DEFAULT;
       MAX_BYTES = maxBytes || 8 * 1024 * 1024;
       MAX_LOGS = maxLogs || 20;

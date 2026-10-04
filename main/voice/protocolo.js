@@ -46,7 +46,9 @@ function partirLinea(linea) {
    El punto decimal entra como carácter normal vía la alternativa `\.(?=\d)`: el resto
    de signos y los dígitos siempre son texto normal, así que «tarea 3» no pierde el 3. */
 function trocear(texto) {
-  const limpio = String(texto || '').replace(/```[\s\S]*?```/g, ' (código) ').trim();
+  const limpio = String(texto || '')
+    .replace(/```[\s\S]*?```/g, ' (código) ')
+    .trim();
   if (!limpio) return [];
   const out = [];
   for (const linea of limpio.split(/\r?\n/)) {

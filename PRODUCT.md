@@ -109,7 +109,7 @@ Lo sostienen tres cosas que el producto ya hace:
   **paridad ES/EN**.
 
 **Hechos de producto sin decidir**: ninguno abierto. Lo no blindado puede cambiar con
-justificación (ver *Brand Commitments*).
+justificación (ver _Brand Commitments_).
 
 ## Brand Commitments
 

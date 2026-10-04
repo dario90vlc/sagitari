@@ -13,14 +13,21 @@ const { PNG_MIN_SIZE, DEFAULT_SIZES, dibEntry, icoEntry, buildIco, parseIco } = 
 function decodePNG(file) {
   const data = Buffer.isBuffer(file) ? file : fs.readFileSync(file);
   if (data.readUInt32BE(0) !== 0x89504e47) throw new Error('No es un PNG');
-  let pos = 8, W = 0, H = 0, depth = 8, colorType = 6, idat = [];
+  let pos = 8,
+    W = 0,
+    H = 0,
+    depth = 8,
+    colorType = 6;
+  const idat = [];
   while (pos < data.length) {
     const len = data.readUInt32BE(pos);
     const type = data.toString('ascii', pos + 4, pos + 8);
     const chunk = data.subarray(pos + 8, pos + 8 + len);
     if (type === 'IHDR') {
-      W = chunk.readUInt32BE(0); H = chunk.readUInt32BE(4);
-      depth = chunk[8]; colorType = chunk[9];
+      W = chunk.readUInt32BE(0);
+      H = chunk.readUInt32BE(4);
+      depth = chunk[8];
+      colorType = chunk[9];
     } else if (type === 'IDAT') idat.push(chunk);
     else if (type === 'IEND') break;
     pos += 12 + len;
@@ -44,8 +51,11 @@ function decodePNG(file) {
       else if (f === 2) v += b;
       else if (f === 3) v += (a + b) >> 1;
       else if (f === 4) {
-        const p = a + b - c, pa = Math.abs(p - a), pb = Math.abs(p - b), pc = Math.abs(p - c);
-        v += (pa <= pb && pa <= pc) ? a : (pb <= pc) ? b : c;
+        const p = a + b - c,
+          pa = Math.abs(p - a),
+          pb = Math.abs(p - b),
+          pc = Math.abs(p - c);
+        v += pa <= pb && pa <= pc ? a : pb <= pc ? b : c;
       }
       cur[x] = v & 0xff;
     }
@@ -59,7 +69,7 @@ const CRC_T = (() => {
   const t = new Int32Array(256);
   for (let n = 0; n < 256; n++) {
     let c = n;
-    for (let k = 0; k < 8; k++) c = (c & 1) ? (0xedb88320 ^ (c >>> 1)) : (c >>> 1);
+    for (let k = 0; k < 8; k++) c = c & 1 ? 0xedb88320 ^ (c >>> 1) : c >>> 1;
     t[n] = c;
   }
   return t;
@@ -70,15 +80,19 @@ function crc32(buf) {
   return (c ^ -1) >>> 0;
 }
 function chunk(type, data) {
-  const len = Buffer.alloc(4); len.writeUInt32BE(data.length);
+  const len = Buffer.alloc(4);
+  len.writeUInt32BE(data.length);
   const td = Buffer.concat([Buffer.from(type, 'ascii'), data]);
-  const crc = Buffer.alloc(4); crc.writeUInt32BE(crc32(td));
+  const crc = Buffer.alloc(4);
+  crc.writeUInt32BE(crc32(td));
   return Buffer.concat([len, td, crc]);
 }
 function encodePNG(W, H, rgba) {
   const ihdr = Buffer.alloc(13);
-  ihdr.writeUInt32BE(W, 0); ihdr.writeUInt32BE(H, 4);
-  ihdr[8] = 8; ihdr[9] = 6; // depth 8, RGBA
+  ihdr.writeUInt32BE(W, 0);
+  ihdr.writeUInt32BE(H, 4);
+  ihdr[8] = 8;
+  ihdr[9] = 6; // depth 8, RGBA
   const stride = W * 4;
   const raw = Buffer.alloc((stride + 1) * H);
   for (let y = 0; y < H; y++) {
@@ -89,7 +103,7 @@ function encodePNG(W, H, rgba) {
     Buffer.from([0x89, 0x50, 0x4e, 0x47, 0x0d, 0x0a, 0x1a, 0x0a]),
     chunk('IHDR', ihdr),
     chunk('IDAT', zlib.deflateSync(raw, { level: 9 })),
-    chunk('IEND', Buffer.alloc(0))
+    chunk('IEND', Buffer.alloc(0)),
   ]);
 }
 
@@ -97,15 +111,22 @@ function encodePNG(W, H, rgba) {
 function resize(img, newW, newH) {
   const { W, H, ch, data } = img;
   const out = Buffer.alloc(newW * newH * ch);
-  const sx = W / newW, sy = H / newH;
+  const sx = W / newW,
+    sy = H / newH;
   for (let y = 0; y < newH; y++) {
-    const y0 = Math.floor(y * sy), y1 = Math.max(y0 + 1, Math.floor((y + 1) * sy));
+    const y0 = Math.floor(y * sy),
+      y1 = Math.max(y0 + 1, Math.floor((y + 1) * sy));
     for (let x = 0; x < newW; x++) {
-      const x0 = Math.floor(x * sx), x1 = Math.max(x0 + 1, Math.floor((x + 1) * sx));
+      const x0 = Math.floor(x * sx),
+        x1 = Math.max(x0 + 1, Math.floor((x + 1) * sx));
       for (let c = 0; c < ch; c++) {
-        let sum = 0, n = 0;
+        let sum = 0,
+          n = 0;
         for (let yy = y0; yy < y1 && yy < H; yy++)
-          for (let xx = x0; xx < x1 && xx < W; xx++) { sum += data[(yy * W + xx) * ch + c]; n++; }
+          for (let xx = x0; xx < x1 && xx < W; xx++) {
+            sum += data[(yy * W + xx) * ch + c];
+            n++;
+          }
         out[(y * newW + x) * ch + c] = Math.round(sum / n);
       }
     }
@@ -121,129 +142,193 @@ function resize(img, newW, newH) {
    CommonJS sale justo aquí y deja el pipeline sin ejecutar. */
 if (require.main !== module) {
   module.exports = {
-    decodePNG, encodePNG, resize, rgbaFrom,
-    PNG_MIN_SIZE, DEFAULT_SIZES, dibEntry, icoEntry, buildIco, parseIco,
+    decodePNG,
+    encodePNG,
+    resize,
+    rgbaFrom,
+    PNG_MIN_SIZE,
+    DEFAULT_SIZES,
+    dibEntry,
+    icoEntry,
+    buildIco,
+    parseIco,
   };
-  return;
+} else {
+  main();
 }
+function main() {
+  // ---------- pipeline ----------
+  // Sin argumento, el logo se busca en la raíz del proyecto. Antes apuntaba a una
+  // ruta absoluta del escritorio de una máquina concreta, que en cualquier otro
+  // equipo no existe y hacía fallar el pipeline con un ENOENT confuso.
+  const SRC = process.argv[2] || path.join(__dirname, '..', 'sagitari_logo_transparente.png');
+  const OUT = path.join(__dirname, '..', 'renderer', 'assets');
+  if (!fs.existsSync(SRC)) {
+    console.error('No encuentro el logo original: ' + SRC);
+    console.error('Uso: node scripts/png-ops.js [ruta/al/logo.png]');
+    process.exit(1);
+  }
+  fs.mkdirSync(OUT, { recursive: true });
 
-// ---------- pipeline ----------
-// Sin argumento, el logo se busca en la raíz del proyecto. Antes apuntaba a una
-// ruta absoluta del escritorio de una máquina concreta, que en cualquier otro
-// equipo no existe y hacía fallar el pipeline con un ENOENT confuso.
-const SRC = process.argv[2] || path.join(__dirname, '..', 'sagitari_logo_transparente.png');
-const OUT = path.join(__dirname, '..', 'renderer', 'assets');
-if (!fs.existsSync(SRC)) {
-  console.error('No encuentro el logo original: ' + SRC);
-  console.error('Uso: node scripts/png-ops.js [ruta/al/logo.png]');
-  process.exit(1);
-}
-fs.mkdirSync(OUT, { recursive: true });
+  const img = decodePNG(SRC);
+  const { W, H, ch, data } = img;
+  const A = (x, y) => data[(y * W + x) * ch + (ch === 4 ? 3 : 0)];
+  console.log(`src=${W}x${H} ch=${ch}`);
+  console.log(`samples: corner=${A(2, 2)} center=${A(768, 512)} mark=${A(768, 200)} word=${A(400, 890)}`);
 
-const img = decodePNG(SRC);
-const { W, H, ch, data } = img;
-const A = (x, y) => data[(y * W + x) * ch + (ch === 4 ? 3 : 0)];
-console.log(`src=${W}x${H} ch=${ch}`);
-console.log(`samples: corner=${A(2, 2)} center=${A(768, 512)} mark=${A(768, 200)} word=${A(400, 890)}`);
-
-// 1) split mark vs wordmark: find the two density peaks and cut at the deepest
-//    valley between them (this artwork is soft-glow, so rows never hit zero alpha)
-const rowSum = new Float64Array(H);
-let maxRowSum = 0;
-for (let y = 0; y < H; y++) {
-  let s = 0;
-  for (let x = 0; x < W; x += 2) s += A(x, y);
-  rowSum[y] = s;
-  if (s > maxRowSum) maxRowSum = s;
-}
-// smooth over 9 rows
-const smooth = new Float64Array(H);
-for (let y = 0; y < H; y++) {
-  let s = 0, n = 0;
-  for (let k = -4; k <= 4; k++) { const yy = y + k; if (yy >= 0 && yy < H) { s += rowSum[yy]; n++; } }
-  smooth[y] = s / n;
-}
-const y1 = (() => { let b = 0, bi = 0; for (let y = 0; y < Math.floor(H * 0.6); y++) if (smooth[y] > b) { b = smooth[y]; bi = y; } return bi; })();
-const y2 = (() => { let b = 0, bi = -1; for (let y = Math.floor(H * 0.62); y < H; y++) if (smooth[y] > b) { b = smooth[y]; bi = y; } return bi; })();
-let markBottom = H;
-if (y2 > y1 + 40) {
-  let m = Infinity, mi = y1;
-  for (let y = y1; y < y2; y++) if (smooth[y] < m) { m = smooth[y]; mi = y; }
-  markBottom = mi;
-}
-console.log(`peak1=${y1} peak2=${y2} valley=${markBottom}`);
-
-// 2) bbox of mark — threshold relative to the strongest alpha found in the mark region
-let peakA = 0;
-for (let y = 0; y < markBottom; y += 2)
-  for (let x = 0; x < W; x += 2) { const a = A(x, y); if (a > peakA) peakA = a; }
-const bboxTH = Math.max(20, peakA * 0.18);
-let minX = W, minY = H, maxX = 0, maxY = 0;
-for (let y = 0; y < markBottom; y++)
-  for (let x = 0; x < W; x++)
-    if (A(x, y) > bboxTH) {
-      if (x < minX) minX = x; if (x > maxX) maxX = x;
-      if (y < minY) minY = y; if (y > maxY) maxY = y;
-    }
-console.log(`peakA=${peakA} bboxTH=${bboxTH.toFixed(0)} markBox=(${minX},${minY})-(${maxX},${maxY})`);
-
-// 3) pad + square + clamp
-const pad = Math.floor((maxX - minX) * 0.03) + 4;
-let cx = Math.max(0, minX - pad), cy = Math.max(0, minY - pad);
-let cw = Math.min(W - cx, maxX - minX + 2 * pad), chh = Math.min(H - cy, maxY - minY + 2 * pad);
-if (cw > chh) { cy = Math.max(0, cy - ((cw - chh) >> 1)); chh = Math.min(H - cy, cw); }
-else { cx = Math.max(0, cx - ((chh - cw) >> 1)); cw = Math.min(W - cx, chh); }
-
-// 4) crop
-const mark = Buffer.alloc(cw * chh * ch);
-for (let y = 0; y < chh; y++)
-  data.copy(mark, y * cw * ch, ((cy + y) * W + cx) * ch, ((cy + y) * W + cx + cw) * ch);
-const markImg = { W: cw, H: chh, ch, data: mark };
-fs.writeFileSync(path.join(OUT, 'sagitari-mark.png'), encodePNG(cw, chh, ch === 3 ? rgbaFrom(mark) : mark));
-console.log(`mark=${cw}x${chh} saved`);
-
-// full logo copy
-fs.copyFileSync(SRC, path.join(OUT, 'logo-full.png'));
-
-// 5b) extract the WORDMARK (name with its original font) from the bottom region
-{
-  const wy0 = Math.min(H - 1, markBottom + 20);
-  let wpeak = 0;
-  for (let y = wy0; y < H; y += 2)
-    for (let x = 0; x < W; x += 2) { const a = A(x, y); if (a > wpeak) wpeak = a; }
-  const wTH = Math.max(18, wpeak * 0.16);
-  let wminX = W, wminY = H, wmaxX = 0, wmaxY = 0;
-  for (let y = wy0; y < H; y++)
-    for (let x = 0; x < W; x++)
-      if (A(x, y) > wTH) {
-        if (x < wminX) wminX = x; if (x > wmaxX) wmaxX = x;
-        if (y < wminY) wminY = y; if (y > wmaxY) wmaxY = y;
+  // 1) split mark vs wordmark: find the two density peaks and cut at the deepest
+  //    valley between them (this artwork is soft-glow, so rows never hit zero alpha)
+  const rowSum = new Float64Array(H);
+  let maxRowSum = 0;
+  for (let y = 0; y < H; y++) {
+    let s = 0;
+    for (let x = 0; x < W; x += 2) s += A(x, y);
+    rowSum[y] = s;
+    if (s > maxRowSum) maxRowSum = s;
+  }
+  // smooth over 9 rows
+  const smooth = new Float64Array(H);
+  for (let y = 0; y < H; y++) {
+    let s = 0,
+      n = 0;
+    for (let k = -4; k <= 4; k++) {
+      const yy = y + k;
+      if (yy >= 0 && yy < H) {
+        s += rowSum[yy];
+        n++;
       }
-  const wpad = Math.floor((wmaxX - wminX) * 0.02) + 3;
-  const wx = Math.max(0, wminX - wpad), wy = Math.max(0, wminY - wpad);
-  const ww = Math.min(W - wx, wmaxX - wminX + 2 * wpad), wh = Math.min(H - wy, wmaxY - wminY + 2 * wpad);
-  const wm = Buffer.alloc(ww * wh * ch);
-  for (let y = 0; y < wh; y++)
-    data.copy(wm, y * ww * ch, ((wy + y) * W + wx) * ch, ((wy + y) * W + wx + ww) * ch);
-  fs.writeFileSync(path.join(OUT, 'sagitari-wordmark.png'), encodePNG(ww, wh, ch === 3 ? rgbaFrom({ W: ww, H: wh, ch, data: wm }) : wm));
-  console.log(`wordmark=${ww}x${wh} box=(${wminX},${wminY})-(${wmaxX},${wmaxY}) saved`);
+    }
+    smooth[y] = s / n;
+  }
+  const y1 = (() => {
+    let b = 0,
+      bi = 0;
+    for (let y = 0; y < Math.floor(H * 0.6); y++)
+      if (smooth[y] > b) {
+        b = smooth[y];
+        bi = y;
+      }
+    return bi;
+  })();
+  const y2 = (() => {
+    let b = 0,
+      bi = -1;
+    for (let y = Math.floor(H * 0.62); y < H; y++)
+      if (smooth[y] > b) {
+        b = smooth[y];
+        bi = y;
+      }
+    return bi;
+  })();
+  let markBottom = H;
+  if (y2 > y1 + 40) {
+    let m = Infinity,
+      mi = y1;
+    for (let y = y1; y < y2; y++)
+      if (smooth[y] < m) {
+        m = smooth[y];
+        mi = y;
+      }
+    markBottom = mi;
+  }
+  console.log(`peak1=${y1} peak2=${y2} valley=${markBottom}`);
+
+  // 2) bbox of mark — threshold relative to the strongest alpha found in the mark region
+  let peakA = 0;
+  for (let y = 0; y < markBottom; y += 2)
+    for (let x = 0; x < W; x += 2) {
+      const a = A(x, y);
+      if (a > peakA) peakA = a;
+    }
+  const bboxTH = Math.max(20, peakA * 0.18);
+  let minX = W,
+    minY = H,
+    maxX = 0,
+    maxY = 0;
+  for (let y = 0; y < markBottom; y++)
+    for (let x = 0; x < W; x++)
+      if (A(x, y) > bboxTH) {
+        if (x < minX) minX = x;
+        if (x > maxX) maxX = x;
+        if (y < minY) minY = y;
+        if (y > maxY) maxY = y;
+      }
+  console.log(`peakA=${peakA} bboxTH=${bboxTH.toFixed(0)} markBox=(${minX},${minY})-(${maxX},${maxY})`);
+
+  // 3) pad + square + clamp
+  const pad = Math.floor((maxX - minX) * 0.03) + 4;
+  let cx = Math.max(0, minX - pad),
+    cy = Math.max(0, minY - pad);
+  let cw = Math.min(W - cx, maxX - minX + 2 * pad),
+    chh = Math.min(H - cy, maxY - minY + 2 * pad);
+  if (cw > chh) {
+    cy = Math.max(0, cy - ((cw - chh) >> 1));
+    chh = Math.min(H - cy, cw);
+  } else {
+    cx = Math.max(0, cx - ((chh - cw) >> 1));
+    cw = Math.min(W - cx, chh);
+  }
+
+  // 4) crop
+  const mark = Buffer.alloc(cw * chh * ch);
+  for (let y = 0; y < chh; y++) data.copy(mark, y * cw * ch, ((cy + y) * W + cx) * ch, ((cy + y) * W + cx + cw) * ch);
+  const markImg = { W: cw, H: chh, ch, data: mark };
+  fs.writeFileSync(path.join(OUT, 'sagitari-mark.png'), encodePNG(cw, chh, ch === 3 ? rgbaFrom(mark) : mark));
+  console.log(`mark=${cw}x${chh} saved`);
+
+  // full logo copy
+  fs.copyFileSync(SRC, path.join(OUT, 'logo-full.png'));
+
+  // 5b) extract the WORDMARK (name with its original font) from the bottom region
+  {
+    const wy0 = Math.min(H - 1, markBottom + 20);
+    let wpeak = 0;
+    for (let y = wy0; y < H; y += 2)
+      for (let x = 0; x < W; x += 2) {
+        const a = A(x, y);
+        if (a > wpeak) wpeak = a;
+      }
+    const wTH = Math.max(18, wpeak * 0.16);
+    let wminX = W,
+      wminY = H,
+      wmaxX = 0,
+      wmaxY = 0;
+    for (let y = wy0; y < H; y++)
+      for (let x = 0; x < W; x++)
+        if (A(x, y) > wTH) {
+          if (x < wminX) wminX = x;
+          if (x > wmaxX) wmaxX = x;
+          if (y < wminY) wminY = y;
+          if (y > wmaxY) wmaxY = y;
+        }
+    const wpad = Math.floor((wmaxX - wminX) * 0.02) + 3;
+    const wx = Math.max(0, wminX - wpad),
+      wy = Math.max(0, wminY - wpad);
+    const ww = Math.min(W - wx, wmaxX - wminX + 2 * wpad),
+      wh = Math.min(H - wy, wmaxY - wminY + 2 * wpad);
+    const wm = Buffer.alloc(ww * wh * ch);
+    for (let y = 0; y < wh; y++) data.copy(wm, y * ww * ch, ((wy + y) * W + wx) * ch, ((wy + y) * W + wx + ww) * ch);
+    fs.writeFileSync(path.join(OUT, 'sagitari-wordmark.png'), encodePNG(ww, wh, ch === 3 ? rgbaFrom({ W: ww, H: wh, ch, data: wm }) : wm));
+    console.log(`wordmark=${ww}x${wh} box=(${wminX},${wminY})-(${wmaxX},${wmaxY}) saved`);
+  }
+
+  // 5) sizes + ico — los tamaños pequeños van en BMP/DIB (ver scripts/ico.js)
+  const entries = DEFAULT_SIZES.map((s) => {
+    const rgba = rgbaFrom(resize(markImg, s, s));
+    return { s, data: icoEntry(s, rgba, (size, px) => encodePNG(size, size, px)) };
+  });
+  fs.writeFileSync(path.join(OUT, 'sagitari.ico'), buildIco(entries));
+  console.log('ico written (' + entries.reduce((a, e) => a + e.data.length, 0) + ' bytes, ' + DEFAULT_SIZES.length + ' sizes)');
+  console.log('DONE -> ' + OUT);
 }
-
-// 5) sizes + ico — los tamaños pequeños van en BMP/DIB (ver scripts/ico.js)
-const entries = DEFAULT_SIZES.map(s => {
-  const rgba = rgbaFrom(resize(markImg, s, s));
-  return { s, data: icoEntry(s, rgba, (size, px) => encodePNG(size, size, px)) };
-});
-fs.writeFileSync(path.join(OUT, 'sagitari.ico'), buildIco(entries));
-console.log('ico written (' + entries.reduce((a, e) => a + e.data.length, 0) + ' bytes, ' + DEFAULT_SIZES.length + ' sizes)');
-console.log('DONE -> ' + OUT);
-
 function rgbaFrom(bmp) {
   if (bmp.ch === 4) return bmp.data;
   const o = Buffer.alloc(bmp.W * bmp.H * 4);
   for (let i = 0; i < bmp.W * bmp.H; i++) {
-    o[i * 4] = bmp.data[i * 3]; o[i * 4 + 1] = bmp.data[i * 3 + 1];
-    o[i * 4 + 2] = bmp.data[i * 3 + 2]; o[i * 4 + 3] = 255;
+    o[i * 4] = bmp.data[i * 3];
+    o[i * 4 + 1] = bmp.data[i * 3 + 1];
+    o[i * 4 + 2] = bmp.data[i * 3 + 2];
+    o[i * 4 + 3] = 255;
   }
   return o;
 }

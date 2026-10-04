@@ -17,7 +17,7 @@ app.whenReady().then(() => {
     if (img.isEmpty()) throw new Error('vacía: ' + SRC);
     const mark = img.resize({ width: 512, height: 512, quality: 'best' });
     fs.writeFileSync(path.join(OUT, 'sagitari-mark.png'), mark.toPNG());
-    const entries = DEFAULT_SIZES.map(s => {
+    const entries = DEFAULT_SIZES.map((s) => {
       const dec = decodePNG(mark.resize({ width: s, height: s, quality: 'best' }).toPNG());
       const rgba = dec.ch === 4 ? dec.data : rgbaFrom(dec);
       return { s, data: icoEntry(s, rgba, (size, px) => encodePNG(size, size, px)) };
@@ -26,5 +26,8 @@ app.whenReady().then(() => {
     fs.writeFileSync(path.join(OUT, 'sagitari.ico'), ico);
     console.log('mark 512 + ico ' + ico.length + ' bytes (' + DEFAULT_SIZES.join(',') + ')');
     app.exit(0);
-  } catch (e) { console.error('ERROR: ' + e.message); app.exit(1); }
+  } catch (e) {
+    console.error('ERROR: ' + e.message);
+    app.exit(1);
+  }
 });

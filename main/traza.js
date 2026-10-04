@@ -17,7 +17,7 @@
    Se acota a propósito: `conversations.json` se lee ENTERO al arrancar la app, así que el
    rastro no puede crecer sin freno (el argumento de un write_file es un archivo completo,
    y un resultado de run_command puede traer miles de líneas). */
-const MAX_TRAZA = 80;              // herramientas por turno que se conservan
+const MAX_TRAZA = 80; // herramientas por turno que se conservan
 const clipTraza = (s, n) => {
   const t = String(s == null ? '' : s);
   return t.length > n ? t.slice(0, n) + '\n… (recortado: ' + (t.length - n) + ' caracteres más)' : t;
@@ -26,7 +26,10 @@ function argsTraza(args) {
   if (!args || typeof args !== 'object') return {};
   const out = {};
   for (const [k, v] of Object.entries(args)) {
-    if (typeof v !== 'string') { out[k] = v; continue; }
+    if (typeof v !== 'string') {
+      out[k] = v;
+      continue;
+    }
     // una imagen en base64 o el contenido entero de un archivo no pintan nada en una
     // tarjeta y multiplicarían el tamaño del historial guardado
     out[k] = /^data:[\w/+.-]+;base64,/.test(v) ? '(imagen adjunta, no guardada)' : clipTraza(v, 1200);
@@ -34,7 +37,9 @@ function argsTraza(args) {
   return out;
 }
 let turnTrace = null;
-function trazaNueva() { turnTrace = { tools: [], think: null, todos: null }; }
+function trazaNueva() {
+  turnTrace = { tools: [], think: null, todos: null };
+}
 function trazaApunta(e) {
   if (!turnTrace) return;
   if (e.type === 'tool') {
@@ -49,7 +54,7 @@ function trazaApunta(e) {
     for (let i = turnTrace.tools.length - 1; i >= 0; i--) {
       const t = turnTrace.tools[i];
       if (t.name === e.name && t.ok === undefined) {
-        t.ok = (e.ok === undefined || e.ok === null) ? null : !!e.ok;
+        t.ok = e.ok === undefined || e.ok === null ? null : !!e.ok;
         t.ms = Number(e.durationMs) || 0;
         t.result = clipTraza(e.result, 1200);
         return;
@@ -60,8 +65,10 @@ function trazaApunta(e) {
   if (e.type === 'delegate_done') {
     if (turnTrace.tools.length < MAX_TRAZA) {
       turnTrace.tools.push({
-        delegate: String(e.subagent || ''), status: String(e.status || 'OK'),
-        ms: Number(e.durationMs) || 0, result: clipTraza(e.result, 900),
+        delegate: String(e.subagent || ''),
+        status: String(e.status || 'OK'),
+        ms: Number(e.durationMs) || 0,
+        result: clipTraza(e.result, 900),
       });
     }
     return;
@@ -75,11 +82,19 @@ function trazaApunta(e) {
      Se acota cada tarea como todo lo demás del rastro. */
   if (e.type === 'todos') {
     turnTrace.todos = Array.isArray(e.todos)
-      ? e.todos.map(t => ({ content: clipTraza(t && t.content, 240), status: String((t && t.status) || 'pending'), activeForm: clipTraza(t && t.activeForm, 240) }))
+      ? e.todos.map((t) => ({
+          content: clipTraza(t && t.content, 240),
+          status: String((t && t.status) || 'pending'),
+          activeForm: clipTraza(t && t.activeForm, 240),
+        }))
       : [];
   }
 }
-function trazaActual() { return turnTrace; }
-function trazaCerrar() { turnTrace = null; }
+function trazaActual() {
+  return turnTrace;
+}
+function trazaCerrar() {
+  turnTrace = null;
+}
 
 module.exports = { MAX_TRAZA, clipTraza, argsTraza, trazaNueva, trazaApunta, trazaActual, trazaCerrar };

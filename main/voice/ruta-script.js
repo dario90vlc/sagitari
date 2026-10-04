@@ -25,7 +25,6 @@ const fs = require('fs');
 const os = require('os');
 const path = require('path');
 
-const ASAR = 'app.asar';
 const ASAR_UNPACKED = 'app.asar.unpacked';
 /* La caché es la misma en cada arranque a propósito: el nombre del destino depende del
    guion, no de la sesión, así que no se acumulan copias por abrir la app. */
@@ -40,7 +39,9 @@ function rutaScriptReal(ruta, { fsMod = fs, dirCache = DIR_CACHE } = {}) {
   if (typeof ruta !== 'string' || !/app\.asar[\\/]/.test(ruta)) return ruta;
 
   const gemelo = gemeloDesempaquetado(ruta);
-  try { if (fsMod.existsSync(gemelo)) return gemelo; } catch {}
+  try {
+    if (fsMod.existsSync(gemelo)) return gemelo;
+  } catch {}
 
   try {
     const contenido = fsMod.readFileSync(ruta);
@@ -49,7 +50,9 @@ function rutaScriptReal(ruta, { fsMod = fs, dirCache = DIR_CACHE } = {}) {
     /* La copia se REFRESCA cuando cambia el contenido: una actualización de la app no
        puede dejar un guion viejo en caché —y el guion es el protocolo de la voz. */
     let iguales = false;
-    try { iguales = fsMod.readFileSync(destino).equals(contenido); } catch {}
+    try {
+      iguales = fsMod.readFileSync(destino).equals(contenido);
+    } catch {}
     if (!iguales) fsMod.writeFileSync(destino, contenido);
     return destino;
   } catch {

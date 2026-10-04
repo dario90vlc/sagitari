@@ -19,7 +19,6 @@
    duración y el parser de planes del modo PLAN.
    ============================================================================ */
 const ChatKit = (function () {
-
   /* -------------------------------------------------------------------------
      1. MODOS — cada uno con identidad propia y real
      Los tres perfiles existen ya en el backend (agent/agent.js: MODE_PROFILES):
@@ -28,20 +27,38 @@ const ChatKit = (function () {
      ------------------------------------------------------------------------- */
   const MODES = {
     act: {
-      key: 'act', label: 'ACT', name: 'Actuar', icon: 'zap', dot: 'ok',
-      color: '#34d399', rgb: '52,211,153', cls: 'act',
+      key: 'act',
+      label: 'ACT',
+      name: 'Actuar',
+      icon: 'zap',
+      dot: 'ok',
+      color: '#34d399',
+      rgb: '52,211,153',
+      cls: 'act',
       tagline: 'Ejecuta y reporta, sin plan previo',
       bullets: ['Va directo a la acción', 'Mínima explicación', 'Para tareas claras y cortas'],
     },
     plan: {
-      key: 'plan', label: 'PLAN', name: 'Planificar', icon: 'map', dot: 'pur',
-      color: '#a78bfa', rgb: '167,139,250', cls: 'plan',
+      key: 'plan',
+      label: 'PLAN',
+      name: 'Planificar',
+      icon: 'map',
+      dot: 'pur',
+      color: '#a78bfa',
+      rgb: '167,139,250',
+      cls: 'plan',
       tagline: 'Presenta un plan y lo ejecuta paso a paso',
       bullets: ['Plan numerado antes de actuar', 'Verás los pasos marcarse solos', 'Para tareas largas o delicadas'],
     },
     think: {
-      key: 'think', label: 'THINK', name: 'Razonar', icon: 'brain', dot: 'blu',
-      color: '#7db4ff', rgb: '125,180,255', cls: 'think',
+      key: 'think',
+      label: 'THINK',
+      name: 'Razonar',
+      icon: 'brain',
+      dot: 'blu',
+      color: '#7db4ff',
+      rgb: '125,180,255',
+      cls: 'think',
       tagline: 'Razona en profundidad antes de responder',
       bullets: ['Explora alternativas', 'Explica su razonamiento', 'Para decisiones y análisis'],
     },
@@ -64,30 +81,30 @@ const ChatKit = (function () {
      2. HERRAMIENTAS — nombre técnico → cómo se lo contamos al usuario
      ------------------------------------------------------------------------- */
   const TOOLS = {
-    run_command:     { label: 'Terminal',        icon: 'terminal',  verb: 'Ejecutando' },
-    read_file:       { label: 'Leer archivo',    icon: 'file',      verb: 'Leyendo' },
-    write_file:      { label: 'Escribir archivo', icon: 'save',     verb: 'Escribiendo' },
-    edit_file:       { label: 'Editar archivo',  icon: 'save',     verb: 'Editando' },
-    list_dir:        { label: 'Explorar carpeta', icon: 'folder',   verb: 'Explorando' },
-    search_files:    { label: 'Buscar en archivos', icon: 'search', verb: 'Buscando' },
-    open_app:        { label: 'Abrir aplicación', icon: 'window',   verb: 'Abriendo' },
-    open_url:        { label: 'Abrir web',        icon: 'globe',    verb: 'Abriendo' },
-    browser_control: { label: 'Navegador',        icon: 'compass',  verb: 'Controlando el navegador' },
-    screenshot:      { label: 'Captura de pantalla', icon: 'camera', verb: 'Capturando' },
-    view_image:      { label: 'Ver imagen',       icon: 'eye',      verb: 'Mirando la imagen' },
-    clipboard:       { label: 'Portapapeles',     icon: 'clipboard', verb: 'Usando el portapapeles' },
-    notify:          { label: 'Notificación',     icon: 'bell',     verb: 'Notificando' },
-    media_control:   { label: 'Multimedia',       icon: 'music',    verb: 'Controlando multimedia' },
-    window_manage:   { label: 'Ventanas',         icon: 'window',   verb: 'Gestionando ventanas' },
-    system_info:     { label: 'Sistema',          icon: 'monitor',  verb: 'Consultando el sistema' },
-    remember:        { label: 'Recordar',         icon: 'memory',   verb: 'Guardando en memoria' },
-    use_skill:       { label: 'Skill',            icon: 'spark',    verb: 'Aplicando skill' },
-    repo_map:        { label: 'Mapa del proyecto', icon: 'map',     verb: 'Mapeando el proyecto' },
-    find_symbol:     { label: 'Buscar símbolo',   icon: 'search',   verb: 'Buscando dónde se define' },
-    search_code:     { label: 'Buscar en el proyecto', icon: 'search', verb: 'Buscando en el código' },
-    apply_patch:     { label: 'Cambios en varios archivos', icon: 'save', verb: 'Aplicando cambios' },
-    todo_write:      { label: 'Lista de tareas',  icon: 'list',     verb: 'Actualizando la lista de tareas' },
-    delegate:        { label: 'Subagente',        icon: 'agents',   verb: 'Delegando' },
+    run_command: { label: 'Terminal', icon: 'terminal', verb: 'Ejecutando' },
+    read_file: { label: 'Leer archivo', icon: 'file', verb: 'Leyendo' },
+    write_file: { label: 'Escribir archivo', icon: 'save', verb: 'Escribiendo' },
+    edit_file: { label: 'Editar archivo', icon: 'save', verb: 'Editando' },
+    list_dir: { label: 'Explorar carpeta', icon: 'folder', verb: 'Explorando' },
+    search_files: { label: 'Buscar en archivos', icon: 'search', verb: 'Buscando' },
+    open_app: { label: 'Abrir aplicación', icon: 'window', verb: 'Abriendo' },
+    open_url: { label: 'Abrir web', icon: 'globe', verb: 'Abriendo' },
+    browser_control: { label: 'Navegador', icon: 'compass', verb: 'Controlando el navegador' },
+    screenshot: { label: 'Captura de pantalla', icon: 'camera', verb: 'Capturando' },
+    view_image: { label: 'Ver imagen', icon: 'eye', verb: 'Mirando la imagen' },
+    clipboard: { label: 'Portapapeles', icon: 'clipboard', verb: 'Usando el portapapeles' },
+    notify: { label: 'Notificación', icon: 'bell', verb: 'Notificando' },
+    media_control: { label: 'Multimedia', icon: 'music', verb: 'Controlando multimedia' },
+    window_manage: { label: 'Ventanas', icon: 'window', verb: 'Gestionando ventanas' },
+    system_info: { label: 'Sistema', icon: 'monitor', verb: 'Consultando el sistema' },
+    remember: { label: 'Recordar', icon: 'memory', verb: 'Guardando en memoria' },
+    use_skill: { label: 'Skill', icon: 'spark', verb: 'Aplicando skill' },
+    repo_map: { label: 'Mapa del proyecto', icon: 'map', verb: 'Mapeando el proyecto' },
+    find_symbol: { label: 'Buscar símbolo', icon: 'search', verb: 'Buscando dónde se define' },
+    search_code: { label: 'Buscar en el proyecto', icon: 'search', verb: 'Buscando en el código' },
+    apply_patch: { label: 'Cambios en varios archivos', icon: 'save', verb: 'Aplicando cambios' },
+    todo_write: { label: 'Lista de tareas', icon: 'list', verb: 'Actualizando la lista de tareas' },
+    delegate: { label: 'Subagente', icon: 'agents', verb: 'Delegando' },
   };
 
   const FALLBACK_TOOL = { label: 'Herramienta', icon: 'tools', verb: 'Ejecutando' };
@@ -103,7 +120,11 @@ const ChatKit = (function () {
   /* Claves que, por orden, mejor resumen lo que hace una llamada. */
   const ARG_HINTS = {
     run_command: ['command'],
-    read_file: ['path'], view_image: ['path'], write_file: ['path'], edit_file: ['path'], list_dir: ['path'],
+    read_file: ['path'],
+    view_image: ['path'],
+    write_file: ['path'],
+    edit_file: ['path'],
+    list_dir: ['path'],
     search_files: ['pattern', 'path'],
     open_app: ['name', 'args'],
     open_url: ['url'],
@@ -128,7 +149,11 @@ const ChatKit = (function () {
     const lim = max || 90;
     if (v === null || v === undefined) return '';
     if (typeof v === 'object') {
-      try { return clip(JSON.stringify(v).replace(/[{}\[\]"]/g, ''), lim); } catch { return ''; }
+      try {
+        return clip(JSON.stringify(v).replace(/[[\]{}"]/g, ''), lim);
+      } catch {
+        return '';
+      }
     }
     return clip(String(v).replace(/\s+/g, ' ').trim(), lim);
   }
@@ -150,8 +175,8 @@ const ChatKit = (function () {
     // la lista de tareas: «3 tareas · 1 en curso», nunca el JSON crudo
     if (String(name) === 'todo_write' && Array.isArray(a.todos)) {
       const l = a.todos;
-      const enCurso = l.filter(t => t && t.status === 'in_progress').length;
-      const hechas = l.filter(t => t && t.status === 'completed').length;
+      const enCurso = l.filter((t) => t && t.status === 'in_progress').length;
+      const hechas = l.filter((t) => t && t.status === 'completed').length;
       return l.length + ' tareas' + (enCurso ? ' · ' + enCurso + ' en curso' : '') + (hechas ? ' · ' + hechas + ' hechas' : '');
     }
     // hasOwnProperty: el modelo puede emitir una herramienta llamada `constructor`
@@ -202,8 +227,10 @@ const ChatKit = (function () {
       return dec === '60.0' ? '1 min' : dec.replace('.', ',') + ' s';
     }
     // los segundos se redondean y PUEDEN valer 60 (1 min 59,6 s): hay que acarrearlos
-    const m = Math.floor(n / 60000), s = Math.round((n % 60000) / 1000);
-    const mins = s === 60 ? m + 1 : m, secs = s % 60;
+    const m = Math.floor(n / 60000),
+      s = Math.round((n % 60000) / 1000);
+    const mins = s === 60 ? m + 1 : m,
+      secs = s % 60;
     return mins + ' min' + (secs ? ' ' + secs + ' s' : '');
   }
 
@@ -231,7 +258,9 @@ const ChatKit = (function () {
    * "__Plan__:"— así que se limpia el énfasis markdown antes de comparar.
    */
   function isPlanHeader(line) {
-    const clean = String(line || '').replace(/[*_`#]/g, '').trim();
+    const clean = String(line || '')
+      .replace(/[*_`#]/g, '')
+      .trim();
     return /^plan:?$/i.test(clean);
   }
 
@@ -245,7 +274,10 @@ const ChatKit = (function () {
     const lines = src.split('\n');
     let start = -1;
     for (let i = 0; i < lines.length; i++) {
-      if (isPlanHeader(lines[i])) { start = i + 1; break; }
+      if (isPlanHeader(lines[i])) {
+        start = i + 1;
+        break;
+      }
     }
     if (start < 0) return { steps: [], body: src };
     const steps = [];
@@ -255,18 +287,31 @@ const ChatKit = (function () {
       if (!line.trim()) {
         // una línea en blanco sólo corta el plan si lo siguiente ya no es un paso
         const next = lines[i + 1];
-        if (next === undefined) { end = i; break; }
-        if (!PLAN_STEP.test(next)) { end = i; break; }
+        if (next === undefined) {
+          end = i;
+          break;
+        }
+        if (!PLAN_STEP.test(next)) {
+          end = i;
+          break;
+        }
         end = i + 1;
         continue;
       }
       const m = line.match(PLAN_STEP);
-      if (!m) { end = i; break; }
+      if (!m) {
+        end = i;
+        break;
+      }
       steps.push({ n: steps.length + 1, text: m[2].replace(/\s*\*\*\s*$/g, '').trim() });
       end = i + 1;
     }
     if (!steps.length) return { steps: [], body: src };
-    const body = lines.slice(0, start - 1).concat(lines.slice(end)).join('\n').trim();
+    const body = lines
+      .slice(0, start - 1)
+      .concat(lines.slice(end))
+      .join('\n')
+      .trim();
     return { steps, body };
   }
 
@@ -284,7 +329,10 @@ const ChatKit = (function () {
   /** Primera línea útil de un resultado, para la cabecera de la tarjeta. */
   function resultSummary(result, max) {
     const t = String(result === null || result === undefined ? '' : result).replace(/\r/g, '');
-    const lines = t.split('\n').map(l => l.trim()).filter(Boolean);
+    const lines = t
+      .split('\n')
+      .map((l) => l.trim())
+      .filter(Boolean);
     const first = lines[0] || '';
     const extra = lines.length > 1 ? ` · ${lines.length} líneas` : '';
     return clip(first, max || 120) + extra;
@@ -295,13 +343,13 @@ const ChatKit = (function () {
       clave que no case deja la tarjeta sin etiqueta —y antes rompía el render (ver
       `subagent`)—, así que `verify` se mantiene como alias del verdadero. */
   const SUBAGENTS = {
-    research:     { label: 'Investigador', icon: 'search', cls: 'a-b' },
-    browser:      { label: 'Navegador', icon: 'compass', cls: 'a-c' },
-    coding:       { label: 'Programador', icon: 'code', cls: 'a-p2' },
-    file:         { label: 'Archivador', icon: 'folder', cls: 'a-y' },
-    vision:       { label: 'Analista visual', icon: 'eye', cls: 'a-b2' },
+    research: { label: 'Investigador', icon: 'search', cls: 'a-b' },
+    browser: { label: 'Navegador', icon: 'compass', cls: 'a-c' },
+    coding: { label: 'Programador', icon: 'code', cls: 'a-p2' },
+    file: { label: 'Archivador', icon: 'folder', cls: 'a-y' },
+    vision: { label: 'Analista visual', icon: 'eye', cls: 'a-b2' },
     verification: { label: 'Verificador', icon: 'check', cls: 'a-p' },
-    review:       { label: 'Revisor', icon: 'list', cls: 'a-y2' },
+    review: { label: 'Revisor', icon: 'list', cls: 'a-y2' },
   };
   SUBAGENTS.verify = SUBAGENTS.verification;
 
@@ -356,8 +404,8 @@ const ChatKit = (function () {
    * lista guardada», que es lo que la UI necesita para ofrecer detectarlos.
    */
   function modelChoices(active, providers) {
-    const list = Array.isArray(providers) ? providers.filter(p => p && p.baseUrl) : [];
-    const prov = (active && list.find(p => (active.providerId && p.id === active.providerId) || p.baseUrl === active.baseUrl)) || null;
+    const list = Array.isArray(providers) ? providers.filter((p) => p && p.baseUrl) : [];
+    const prov = (active && list.find((p) => (active.providerId && p.id === active.providerId) || p.baseUrl === active.baseUrl)) || null;
     const current = (active && active.model) || null;
     const seen = new Set();
     const models = [];
@@ -373,12 +421,26 @@ const ChatKit = (function () {
   }
 
   return {
-    MODES, MODE_ORDER, mode, nextMode,
-    TOOLS, tool, summarizeArgs, flatValue,
-    clip, fmtDuration, toolCount, thousands,
-    parsePlan, isPlanHeader, looksFailed, resultSummary,
-    SUBAGENTS, subagent,
-    explainError, modelChoices,
+    MODES,
+    MODE_ORDER,
+    mode,
+    nextMode,
+    TOOLS,
+    tool,
+    summarizeArgs,
+    flatValue,
+    clip,
+    fmtDuration,
+    toolCount,
+    thousands,
+    parsePlan,
+    isPlanHeader,
+    looksFailed,
+    resultSummary,
+    SUBAGENTS,
+    subagent,
+    explainError,
+    modelChoices,
   };
 })();
 

@@ -135,23 +135,23 @@ SAGITARI gives an agent real access to your computer, so safety is part of the p
 
 Useful shortcuts:
 
-| Shortcut | Action |
-|---|---|
-| `Alt+1…9` | Switch sections |
-| `Ctrl+Alt+S` | Show or hide the panel |
-| `Alt+Shift+S` | Bring SAGITARI to the front |
-| `Ctrl+Shift+G` | Trigger a glow pulse |
-| `Alt+M` | Cycle ACT → PLAN → THINK |
-| `/` in chat | Open the skills palette |
+| Shortcut       | Action                      |
+| -------------- | --------------------------- |
+| `Alt+1…9`      | Switch sections             |
+| `Ctrl+Alt+S`   | Show or hide the panel      |
+| `Alt+Shift+S`  | Bring SAGITARI to the front |
+| `Ctrl+Shift+G` | Trigger a glow pulse        |
+| `Alt+M`        | Cycle ACT → PLAN → THINK    |
+| `/` in chat    | Open the skills palette     |
 
 ## Download
 
-| Package | Description |
-|---|---|
+| Package                                                                                       | Description                                                    |
+| --------------------------------------------------------------------------------------------- | -------------------------------------------------------------- |
 | [**⬇ Download SAGITARI for Windows**](https://github.com/dario90vlc/sagitari/releases/latest) | Installer (shortcuts + uninstaller) and portable single `.exe` |
-| [**Release notes**](https://github.com/dario90vlc/sagitari/releases) | Changes, security fixes, and SHA-256 hashes |
+| [**Release notes**](https://github.com/dario90vlc/sagitari/releases)                          | Changes, security fixes, and SHA-256 hashes                    |
 
-> **Windows SmartScreen:** the binaries are currently unsigned, so Windows may show a warning on the first run. Choose *More info → Run anyway* if you trust the download. Verify the SHA-256 hash published in the release notes.
+> **Windows SmartScreen:** the binaries are currently unsigned, so Windows may show a warning on the first run. Choose _More info → Run anyway_ if you trust the download. Verify the SHA-256 hash published in the release notes.
 
 > **Voice engines:** the local neural voice (Piper) and the high-accuracy local dictation (Whisper) are **not** bundled in the installer —they are downloaded on demand from Settings, about 700 MB in total— so the download stays light and voice mode still works with the Windows engines until you install them.
 

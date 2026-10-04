@@ -16,7 +16,9 @@
    Puro Node (sin Electron) y sin I/O salvo leer la versión del package. */
 
 let APP_VERSION = '2.0.0';
-try { APP_VERSION = require('../package.json').version || APP_VERSION; } catch {}
+try {
+  APP_VERSION = require('../package.json').version || APP_VERSION;
+} catch {}
 
 const CLIENT = 'sagitari';
 
@@ -32,12 +34,16 @@ function newSessionId() {
 
 /** ID de sesión ESTABLE a partir de un identificador de conversación. */
 function sessionFor(convId) {
-  const id = String(convId || '').trim().replace(/[^\w.-]+/g, '');
+  const id = String(convId || '')
+    .trim()
+    .replace(/[^\w.-]+/g, '');
   return id ? 'sagi-' + id : newSessionId();
 }
 
 /** User-Agent del cliente (identificación propia, como pide el proveedor). */
-function userAgent() { return 'Sagitari/' + APP_VERSION; }
+function userAgent() {
+  return 'Sagitari/' + APP_VERSION;
+}
 
 /** Cabeceras extra que el proveedor necesita para enrutar y cachear bien. */
 function identityHeaders(baseUrl, sessionId) {

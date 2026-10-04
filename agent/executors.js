@@ -11,10 +11,10 @@ const proyecto = require('./proyecto');
 const diagnosticos = require('./diagnosticos');
 const repomap = require('./repomap');
 const cambios = require('./cambios');
-const busqueda = require('./busqueda');   // v2.5: búsqueda híbrida (exacta + relevancia)
+const busqueda = require('./busqueda'); // v2.5: búsqueda híbrida (exacta + relevancia)
 const hooks = require('./hooks');
-const edicion = require('./edicion');     // v3.0: anclajes tolerantes a espacios
-const comandos = require('./comandos');   // v3.0: qué comando es peligroso y cuál no
+const edicion = require('./edicion'); // v3.0: anclajes tolerantes a espacios
+const comandos = require('./comandos'); // v3.0: qué comando es peligroso y cuál no
 const mcpTransport = require('./mcp-transport');
 const { killTree } = require('./proc');
 const { dataDir } = require('./datadir');
@@ -24,10 +24,19 @@ const { dataDir } = require('./datadir');
    para read/write/edit del agente: attachments.js ya lo bloquea para adjuntos
    y aquí se cierra para las herramientas. Tampoco se escribe en raíces del
    sistema. `resuelta` normaliza sin tocar disco (el archivo puede no existir). */
-const DATOS_DIR = (() => { try { return path.win32.normalize(dataDir().toLowerCase()); } catch { return null; } })();
+const DATOS_DIR = (() => {
+  try {
+    return path.win32.normalize(dataDir().toLowerCase());
+  } catch {
+    return null;
+  }
+})();
 function rutaResuelta(p) {
-  try { return path.win32.normalize(path.win32.resolve(String(p || ''))); }
-  catch { return String(p || ''); }
+  try {
+    return path.win32.normalize(path.win32.resolve(String(p || '')));
+  } catch {
+    return String(p || '');
+  }
 }
 function dentroDe(file, dir) {
   if (!file || !dir) return false;
@@ -55,7 +64,8 @@ function bloqueoEscritura(p) {
 // Windows en español), no en UTF-8: si los bytes no forman UTF-8 válido los decodificamos
 // como CP850 para que los acentos no lleguen corruptos. (Los acentos españoles coinciden
 // en CP850 y CP437, así que la tabla sirve también en equipos con OEM 437.)
-const CP850 = '\u00c7\u00fc\u00e9\u00e2\u00e4\u00e0\u00e5\u00e7\u00ea\u00eb\u00e8\u00ef\u00ee\u00ec\u00c4\u00c5\u00c9\u00e6\u00c6\u00f4\u00f6\u00f2\u00fb\u00f9\u00ff\u00d6\u00dc\u00f8\u00a3\u00d8\u00d7\u0192' +
+const CP850 =
+  '\u00c7\u00fc\u00e9\u00e2\u00e4\u00e0\u00e5\u00e7\u00ea\u00eb\u00e8\u00ef\u00ee\u00ec\u00c4\u00c5\u00c9\u00e6\u00c6\u00f4\u00f6\u00f2\u00fb\u00f9\u00ff\u00d6\u00dc\u00f8\u00a3\u00d8\u00d7\u0192' +
   '\u00e1\u00ed\u00f3\u00fa\u00f1\u00d1\u00aa\u00ba\u00bf\u00ae\u00ac\u00bd\u00bc\u00a1\u00ab\u00bb\u2591\u2592\u2593\u2502\u2524\u00c1\u00c2\u00c0\u00a9\u2563\u2551\u2557\u255d\u00a2\u00a5\u2510' +
   '\u2514\u2534\u252c\u251c\u2500\u253c\u00e3\u00c3\u255a\u2554\u2569\u2566\u2560\u2550\u256c\u00a4\u00f0\u00d0\u00ca\u00cb\u00c8\u0131\u00cd\u00ce\u00cf\u2518\u250c\u2588\u2584\u00a6\u00cc\u2580' +
   '\u00d3\u00df\u00d4\u00d2\u00f5\u00d5\u00b5\u00fe\u00de\u00da\u00db\u00d9\u00fd\u00dd\u00af\u00b4\u00ad\u00b1\u2017\u00be\u00b6\u00a7\u00f7\u00b8\u00b0\u00a8\u00b7\u00b9\u00b3\u00b2\u25a0\u00a0';
@@ -76,10 +86,15 @@ function tipoDeImagen(buf) {
 
 function decodeOut(buf) {
   buf = Buffer.isBuffer(buf) ? buf : Buffer.from(String(buf ?? ''), 'utf8');
-  try { return UTF8_STRICT.decode(buf); } catch {}
+  try {
+    return UTF8_STRICT.decode(buf);
+  } catch {}
   const s = buf.toString('latin1');
   let out = '';
-  for (let i = 0; i < s.length; i++) { const c = s.charCodeAt(i); out += c < 0x80 ? s[i] : CP850[c - 0x80]; }
+  for (let i = 0; i < s.length; i++) {
+    const c = s.charCodeAt(i);
+    out += c < 0x80 ? s[i] : CP850[c - 0x80];
+  }
   return out;
 }
 
@@ -91,13 +106,17 @@ function openUrlAllowed(url) {
   try {
     const p = new URL(String(url || '').trim()).protocol.toLowerCase();
     return p === 'http:' || p === 'https:';
-  } catch { return false; }
+  } catch {
+    return false;
+  }
 }
 
 function run(cmd, opts = {}) {
   return new Promise((resolve) => {
     const timeout = opts.timeout || 60000;
-    let done = false, outChunks = [], errChunks = [];
+    let done = false,
+      outChunks = [],
+      errChunks = [];
     const finish = (code) => {
       if (done) return;
       done = true;
@@ -105,13 +124,21 @@ function run(cmd, opts = {}) {
       resolve({ code, stdout: decodeOut(Buffer.concat(outChunks)), stderr: decodeOut(Buffer.concat(errChunks)) });
     };
     // sin `timeout` de exec: lo gestionamos nosotros para poder matar el árbol completo
-    const child = exec(cmd, { windowsHide: true, maxBuffer: opts.maxBuffer || 16 * 1024 * 1024, cwd: opts.cwd, encoding: 'buffer' }, (err, stdout, stderr) => {
-      if (!outChunks.length) outChunks = [stdout || Buffer.alloc(0)];
-      if (!errChunks.length) errChunks = [stderr && stderr.length ? stderr : Buffer.from((err && err.message) || '')];
-      finish(err ? (err.code ?? 1) : 0);
+    const child = exec(
+      cmd,
+      { windowsHide: true, maxBuffer: opts.maxBuffer || 16 * 1024 * 1024, cwd: opts.cwd, encoding: 'buffer' },
+      (err, stdout, stderr) => {
+        if (!outChunks.length) outChunks = [stdout || Buffer.alloc(0)];
+        if (!errChunks.length) errChunks = [stderr && stderr.length ? stderr : Buffer.from((err && err.message) || '')];
+        finish(err ? (err.code ?? 1) : 0);
+      },
+    );
+    child.stdout?.on('data', (d) => {
+      outChunks.push(d);
     });
-    child.stdout?.on('data', (d) => { outChunks.push(d); });
-    child.stderr?.on('data', (d) => { errChunks.push(d); });
+    child.stderr?.on('data', (d) => {
+      errChunks.push(d);
+    });
     const timer = setTimeout(() => {
       killTree(child);
       // margen para que se cierren los handles; si no, resolvemos igualmente
@@ -136,7 +163,9 @@ function run(cmd, opts = {}) {
 function runProg(file, argv, opts = {}) {
   return new Promise((resolve) => {
     const timeout = opts.timeout || 10000;
-    let done = false, out = [], err = [];
+    let done = false;
+    const out = [],
+      err = [];
     const finish = (code) => {
       if (done) return;
       done = true;
@@ -152,8 +181,16 @@ function runProg(file, argv, opts = {}) {
         windowsVerbatimArguments: opts.verbatim === true,
         stdio: ['ignore', 'pipe', 'pipe'],
       });
-    } catch (e) { resolve({ code: null, stdout: '', stderr: String(e.message) }); return; }
-    const timer = setTimeout(() => { try { killTree(child); } catch {} finish(1); }, timeout);
+    } catch (e) {
+      resolve({ code: null, stdout: '', stderr: String(e.message) });
+      return;
+    }
+    const timer = setTimeout(() => {
+      try {
+        killTree(child);
+      } catch {}
+      finish(1);
+    }, timeout);
     child.on('error', (e) => finish(e && e.code === 'ENOENT' ? null : 1));
     child.stdout.on('data', (d) => out.push(d));
     child.stderr.on('data', (d) => err.push(d));
@@ -163,8 +200,11 @@ function runProg(file, argv, opts = {}) {
 
 /** Primera línea que explica algo (los checkers sacan ruido de contexto alrededor). */
 function lineaDelError(txt) {
-  const lineas = String(txt || '').split(/\r?\n/).map(l => l.trim()).filter(Boolean);
-  const u = lineas.find(l => /error|syntax|unexpected|invalid|unexpected token|not defined/i.test(l));
+  const lineas = String(txt || '')
+    .split(/\r?\n/)
+    .map((l) => l.trim())
+    .filter(Boolean);
+  const u = lineas.find((l) => /error|syntax|unexpected|invalid|unexpected token|not defined/i.test(l));
   return clip(u || lineas[0] || 'no compila', 300);
 }
 
@@ -176,17 +216,27 @@ async function revisarSintaxis(absPath) {
   const c = proyecto.comprobacionSintaxis(absPath);
   if (!c) return null;
   let st;
-  try { st = await fsp.stat(absPath); } catch { return null; }
+  try {
+    st = await fsp.stat(absPath);
+  } catch {
+    return null;
+  }
   if (!st.isFile() || st.size > 1536 * 1024) return null;
   if (c.json) {
-    try { JSON.parse(await fsp.readFile(absPath, 'utf8')); return null; }
-    catch (e) { return `JSON inválido: ${clip(e.message, 200)}`; }
+    try {
+      JSON.parse(await fsp.readFile(absPath, 'utf8'));
+      return null;
+    } catch (e) {
+      return `JSON inválido: ${clip(e.message, 200)}`;
+    }
   }
   let res;
   try {
     const r = mcpTransport.resolveCommand(c.prog, [...c.extraArgs, absPath]);
     res = await runProg(r.file, r.argv, { env: r.env, verbatim: r.verbatim, timeout: 15000 });
-  } catch { return null; }   // no hay ni Node ni el checker: no se puede comprobar
+  } catch {
+    return null;
+  } // no hay ni Node ni el checker: no se puede comprobar
   if (res.code === null || res.code === 0) return null;
   return `${c.etiqueta}: ${lineaDelError(res.stderr || res.stdout)}`;
 }
@@ -207,9 +257,9 @@ async function revisarSintaxis(absPath) {
  *     cuentan y se dicen, pero no se le exigen.
  * --------------------------------------------------------------------------- */
 
-const CHECK_APARTADO = new Set();   // 'id|espacio': no está instalado o no se pudo lanzar
-const CHECK_LENTO = new Map();      // 'id|espacio' -> hasta cuándo no repetirlo (es caro aquí)
-const CHECK_LENTO_MS = 12000;       // a partir de aquí, este comprobador estorba en cada escritura
+const CHECK_APARTADO = new Set(); // 'id|espacio': no está instalado o no se pudo lanzar
+const CHECK_LENTO = new Map(); // 'id|espacio' -> hasta cuándo no repetirlo (es caro aquí)
+const CHECK_LENTO_MS = 12000; // a partir de aquí, este comprobador estorba en cada escritura
 const CHECK_APARTADO_MS = 10 * 60 * 1000;
 const claveCheck = (ws, id) => id + '|' + String(ws || '');
 
@@ -225,7 +275,7 @@ async function lanzarCheck(ws, c, archivos) {
   if (CHECK_APARTADO.has(clave)) return null;
   const hasta = CHECK_LENTO.get(clave);
   if (hasta && Date.now() < hasta) return null;
-  const prog = c.clase === 'py-modulo' ? 'python' : (c.clase === 'node-entrada' ? 'node' : c.prog);
+  const prog = c.clase === 'py-modulo' ? 'python' : c.clase === 'node-entrada' ? 'node' : c.prog;
   const argv = [
     ...(c.clase === 'node-entrada' ? [c.entrada] : []),
     ...(c.clase === 'py-modulo' ? ['-m', c.modulo] : []),
@@ -237,8 +287,14 @@ async function lanzarCheck(ws, c, archivos) {
   try {
     const r = mcpTransport.resolveCommand(prog, argv);
     res = await runProg(r.file, r.argv, { env: r.env, verbatim: r.verbatim, timeout: c.timeoutMs || 20000, cwd: ws });
-  } catch { apartarCheck(ws, c.id); return null; }
-  if (diagnosticos.pareceFalloDeHerramienta(res)) { apartarCheck(ws, c.id); return null; }
+  } catch {
+    apartarCheck(ws, c.id);
+    return null;
+  }
+  if (diagnosticos.pareceFalloDeHerramienta(res)) {
+    apartarCheck(ws, c.id);
+    return null;
+  }
   const ms = Date.now() - t0;
   if (ms > CHECK_LENTO_MS) apartarCheck(ws, c.id, CHECK_APARTADO_MS);
   return res;
@@ -251,22 +307,34 @@ async function lanzarCheck(ws, c, archivos) {
 async function revisarEstatico(ws, archivos) {
   if (!ws) return { texto: '', errores: 0 };
   let checks = [];
-  try { checks = diagnosticos.planPorArchivos(ws, archivos); } catch { return { texto: '', errores: 0 }; }
+  try {
+    checks = diagnosticos.planPorArchivos(ws, archivos);
+  } catch {
+    return { texto: '', errores: 0 };
+  }
   if (!checks.length) return { texto: '', errores: 0 };
   const lineasDe = (abs) => cambios.lineasCambiadas(ws, abs);
   const partes = [];
   let errores = 0;
   for (const c of checks) {
     let res = null;
-    try { res = await lanzarCheck(ws, c, archivos); } catch { res = null; }
+    try {
+      res = await lanzarCheck(ws, c, archivos);
+    } catch {
+      res = null;
+    }
     if (!res) continue;
     const salida = String(res.stdout || '') + (String(res.stderr || '').trim() ? '\n' + String(res.stderr) : '');
     if (!salida.trim()) continue;
     let parsed = { hallazgos: [], sinUbicar: 0 };
-    try { parsed = diagnosticos.parsear(salida, { formato: c.formato, raiz: ws, herramienta: c.etiqueta }); } catch { continue; }
+    try {
+      parsed = diagnosticos.parsear(salida, { formato: c.formato, raiz: ws, herramienta: c.etiqueta });
+    } catch {
+      continue;
+    }
     const clas = diagnosticos.clasificar(parsed.hallazgos, { lineasDe });
     if (!clas.nuevos.length && !clas.preexistentes.length) continue;
-    errores += clas.nuevos.filter(h => h.severidad === 'error').length;
+    errores += clas.nuevos.filter((h) => h.severidad === 'error').length;
     const txt = diagnosticos.resumen(clas, { etiqueta: c.etiqueta, raiz: ws, otrosArchivos: parsed.sinUbicar });
     if (txt) partes.push(txt);
   }
@@ -295,7 +363,8 @@ async function ejecutarHook(plantilla, { ws = '', archivos = [], timeoutMs = 600
      barrera que run_command (comandos.js), adaptada a mensaje de hook. */
   try {
     const clase = comandos.clasificar(comando);
-    if (clase.nivel === 'prohibido') return { ok: false, code: null, texto: comandos.mensajeProhibido(comando), comando, ms: Date.now() - t0 };
+    if (clase.nivel === 'prohibido')
+      return { ok: false, code: null, texto: comandos.mensajeProhibido(comando), comando, ms: Date.now() - t0 };
   } catch {}
   let r = null;
   try {
@@ -336,7 +405,7 @@ function detalleEdicion(etiqueta, texto, r) {
   const cs = (r && r.candidatos) || [];
   if (!cs.length) return `${etiqueta}: ${r.error}. Copia el texto exacto con read_file (respeta espacios y saltos de línea).`;
   if (cs.length > 1) {
-    return `${etiqueta}: ${r.error}; ignorando la sangría aparece en ${cs.length} sitios (líneas ${cs.map(x => x.linea).join(', ')}). Añade más contexto para que sea único.`;
+    return `${etiqueta}: ${r.error}; ignorando la sangría aparece en ${cs.length} sitios (líneas ${cs.map((x) => x.linea).join(', ')}). Añade más contexto para que sea único.`;
   }
   const c = cs[0];
   return [
@@ -372,7 +441,11 @@ async function resultadoEscritura(absPath, okText, { checked = [], workspace = n
   const plantillaHook = (settings && settings.settings && String(settings.settings.hookEditar || '').trim()) || '';
   if (plantillaHook && workspace) {
     let h = null;
-    try { h = await ejecutarHook(plantillaHook, { ws: workspace, archivos }); } catch { h = null; }
+    try {
+      h = await ejecutarHook(plantillaHook, { ws: workspace, archivos });
+    } catch {
+      h = null;
+    }
     if (h) {
       textoHook = hooks.resumen(h, { etiqueta: 'Hook', comando: plantillaHook });
       if (!h.ok) textoHook = '⚠ ' + textoHook + '\n(el archivo queda escrito; si el fallo es del código recién escrito, arréglalo)';
@@ -384,10 +457,16 @@ async function resultadoEscritura(absPath, okText, { checked = [], workspace = n
   const activo = !(settings && settings.settings && settings.settings.diagnosticosEscritura === false);
   if (!activo || !workspace) return conHook(`OK: ${okText}`);
   let est = { texto: '', errores: 0 };
-  try { est = await revisarEstatico(workspace, archivos); } catch { est = { texto: '', errores: 0 }; }
+  try {
+    est = await revisarEstatico(workspace, archivos);
+  } catch {
+    est = { texto: '', errores: 0 };
+  }
   if (!est.texto) return conHook(`OK: ${okText}`);
   if (est.errores) {
-    return conHook(`Error: ${okText}, y la comprobación del proyecto encontró ${est.errores} error(es) en eso:\n${est.texto}\nEl archivo queda escrito: arréglalo antes de seguir con otra cosa.`);
+    return conHook(
+      `Error: ${okText}, y la comprobación del proyecto encontró ${est.errores} error(es) en eso:\n${est.texto}\nEl archivo queda escrito: arréglalo antes de seguir con otra cosa.`,
+    );
   }
   return conHook(`OK: ${okText}\n${est.texto}`);
 }
@@ -397,7 +476,7 @@ const clip = (s, n = 8000) => {
   return s.length > n ? s.slice(0, n) + `\n...[truncado, ${s.length} caracteres]` : s;
 };
 
-const MEDIA_KEYS = { play_pause: 0xB3, next: 0xB0, previous: 0xB1, volume_up: 0xAF, volume_down: 0xAE, mute: 0xAD };
+const MEDIA_KEYS = { play_pause: 0xb3, next: 0xb0, previous: 0xb1, volume_up: 0xaf, volume_down: 0xae, mute: 0xad };
 
 async function sendVK(vk, registerKillable) {
   const ps = `
@@ -410,13 +489,21 @@ Add-Type -Namespace J -Name K -MemberDefinition '[DllImport("user32.dll")] publi
 
 /** ¿Existe y es una carpeta? Para no confundir «vacío» con «no pude leerlo». */
 async function isDir(p) {
-  try { return (await fsp.stat(p)).isDirectory(); } catch { return false; }
+  try {
+    return (await fsp.stat(p)).isDirectory();
+  } catch {
+    return false;
+  }
 }
 
 async function walk(root, depth, maxDepth, out, budget) {
   if (depth > maxDepth || out.length >= budget.count) return;
   let entries;
-  try { entries = await fsp.readdir(root, { withFileTypes: true }); } catch { return; }
+  try {
+    entries = await fsp.readdir(root, { withFileTypes: true });
+  } catch {
+    return;
+  }
   for (const e of entries) {
     if (out.length >= budget.count) return;
     if (['node_modules', '.git', '$RECYCLE.BIN', 'AppData'].includes(e.name)) continue;
@@ -426,7 +513,9 @@ async function walk(root, depth, maxDepth, out, budget) {
       await walk(full, depth + 1, maxDepth, out, budget);
     } else {
       let size = '';
-      try { size = ' (' + Math.round(e.size === undefined ? (fs.statSync(full).size) : e.size) + ' b)'; } catch {}
+      try {
+        size = ' (' + Math.round(e.size === undefined ? fs.statSync(full).size : e.size) + ' b)';
+      } catch {}
       out.push('  '.repeat(depth) + e.name + size);
     }
   }
@@ -438,12 +527,19 @@ async function searchIn(dir, regex, searchContent, out, budget, depth = 0, maxDe
   if (depth > maxDepth) return;
   if (out.length >= budget.count || budget.files >= 20000) return;
   let entries;
-  try { entries = await fsp.readdir(dir, { withFileTypes: true }); } catch { return; }
+  try {
+    entries = await fsp.readdir(dir, { withFileTypes: true });
+  } catch {
+    return;
+  }
   for (const e of entries) {
     if (out.length >= budget.count || budget.files >= 20000) return;
     if (['node_modules', '.git', 'AppData'].includes(e.name)) continue;
     const full = path.join(dir, e.name);
-    if (e.isDirectory()) { await searchIn(full, regex, searchContent, out, budget, depth + 1, maxDepth); continue; }
+    if (e.isDirectory()) {
+      await searchIn(full, regex, searchContent, out, budget, depth + 1, maxDepth);
+      continue;
+    }
     budget.files++;
     if (regex.test(e.name)) out.push(`NOMBRE: ${full}`);
     if (!searchContent || out.length >= budget.count) continue;
@@ -458,7 +554,10 @@ async function searchIn(dir, regex, searchContent, out, budget, depth = 0, maxDe
       const text = await fsp.readFile(full, 'utf8');
       const lines = text.split(/\r?\n/);
       for (let i = 0; i < lines.length; i++) {
-        if (regex.test(lines[i])) { out.push(`${full}:${i + 1}: ${clip(lines[i].trim(), 200)}`); if (out.length >= budget.count) break; }
+        if (regex.test(lines[i])) {
+          out.push(`${full}:${i + 1}: ${clip(lines[i].trim(), 200)}`);
+          if (out.length >= budget.count) break;
+        }
       }
     } catch {}
   }
@@ -494,11 +593,19 @@ async function executeTool(name, args, ctx) {
         importance: Number.isFinite(Number(args.importance)) ? Number(args.importance) : 0.6,
         confidence: Number.isFinite(Number(args.confidence)) ? Number(args.confidence) : 0.8,
       });
-      return m ? `OK: recuerdo guardado (importancia ${m.importance}). Estará disponible en conversaciones futuras.` : 'Error: no pude guardar el recuerdo (texto vacío).';
+      return m
+        ? `OK: recuerdo guardado (importancia ${m.importance}). Estará disponible en conversaciones futuras.`
+        : 'Error: no pude guardar el recuerdo (texto vacío).';
     }
     case 'use_skill': {
       const s = await skills.getSkill(args.name || '');
-      if (!s) return `Error: skill "${args.name}" no encontrada. Skills disponibles: ${(await skills.listSkills()).filter(x => x.enabled).map(x => x.name).join(', ') || '(ninguna)'}`;
+      if (!s)
+        return `Error: skill "${args.name}" no encontrada. Skills disponibles: ${
+          (await skills.listSkills())
+            .filter((x) => x.enabled)
+            .map((x) => x.name)
+            .join(', ') || '(ninguna)'
+        }`;
       /* v2.2: el cuerpo completo se manda UNA vez por turno. Si el modelo la vuelve a
          pedir (pasa en tareas largas: se le olvida que la cargó), ya está en el contexto y
          repetirla son miles de tokens por nada. Se recuerda por turno en el propio agente
@@ -508,7 +615,9 @@ async function executeTool(name, args, ctx) {
       }
       if (ctx.loadedSkills) ctx.loadedSkills.add(s.id);
       // límite declarado de herramientas (informativo para el agente; los permisos reales los decide el usuario en Ajustes)
-      const scope = s.allowTools ? `\n\nHERRAMIENTAS AUTORIZADAS POR ESTA SKILL: ${s.allowTools}. Evita usar otras salvo necesidad justificada.` : '';
+      const scope = s.allowTools
+        ? `\n\nHERRAMIENTAS AUTORIZADAS POR ESTA SKILL: ${s.allowTools}. Evita usar otras salvo necesidad justificada.`
+        : '';
       /* La skill puede venir de un repo ajeno: se entrega como CONTENIDO DE
          TERCEROS delimitado, no como órdenes. Si pide algo que el usuario no
          pidió (comandos, exfiltrar datos, desactivar protecciones), se ignora
@@ -539,8 +648,11 @@ async function executeTool(name, args, ctx) {
       const bloq = bloqueoLectura(p);
       if (bloq) return bloq;
       let st;
-      try { st = await fsp.stat(p); }
-      catch (e) { return `Error: no pude leer ${p} (${e.code || e.message}).`; }
+      try {
+        st = await fsp.stat(p);
+      } catch (e) {
+        return `Error: no pude leer ${p} (${e.code || e.message}).`;
+      }
       if (!st.isFile()) return `Error: ${p} no es un archivo.`;
       // rechaza archivos enormes antes de cargarlos enteros en memoria
       if (st.size > 32 * 1024 * 1024) return `Error: archivo demasiado grande (${(st.size / 1048576).toFixed(1)} MB; el límite es 32 MB).`;
@@ -565,8 +677,11 @@ async function executeTool(name, args, ctx) {
       const bloqV = bloqueoLectura(p);
       if (bloqV) return bloqV;
       let st;
-      try { st = await fsp.stat(p); }
-      catch (e) { return `Error: no pude abrir ${p} (${e.code || e.message}).`; }
+      try {
+        st = await fsp.stat(p);
+      } catch (e) {
+        return `Error: no pude abrir ${p} (${e.code || e.message}).`;
+      }
       if (!st.isFile()) return `Error: ${p} no es un archivo.`;
       // 8 MB: por encima de eso la petición al modelo se dispara (el base64 pesa ~4/3 del
       // archivo) y la mayoría de proveedores la rechaza o la recorta sin avisar
@@ -602,7 +717,7 @@ async function executeTool(name, args, ctx) {
         throw e;
       }
       repomap.invalidar(workspace);
-      busqueda.invalidar(workspace);   // el índice de búsqueda también se queda viejo
+      busqueda.invalidar(workspace); // el índice de búsqueda también se queda viejo
       return await resultadoEscritura(p, `${content.length} bytes escritos en ${p}`, { workspace, settings });
     }
     case 'edit_file': {
@@ -613,8 +728,11 @@ async function executeTool(name, args, ctx) {
       const newStr = String(args.new_string ?? '');
       if (!oldStr) return 'Error: old_string es obligatorio y no puede estar vacío.';
       let buf;
-      try { buf = await fsp.readFile(p); }
-      catch (e) { return `Error: no pude leer ${p} (${e.code === 'ENOENT' ? 'no existe; para crear el archivo usa write_file' : (e.code || e.message)}).`; }
+      try {
+        buf = await fsp.readFile(p);
+      } catch (e) {
+        return `Error: no pude leer ${p} (${e.code === 'ENOENT' ? 'no existe; para crear el archivo usa write_file' : e.code || e.message}).`;
+      }
       if (buf.subarray(0, 8192).includes(0)) return `Error: ${p} es binario (no editable como texto).`;
       const text = buf.toString('utf8');
       // Ida y vuelta: si el fichero no está en UTF-8 (un .txt/.csv guardado en
@@ -635,10 +753,12 @@ async function executeTool(name, args, ctx) {
       cambios.recordar(workspace, p, text);
       await fsp.writeFile(p, r.texto, 'utf8');
       repomap.invalidar(workspace);
-      busqueda.invalidar(workspace);   // el índice de búsqueda también se queda viejo
-      const relato = `${r.veces} reemplazo(s) en ${p}` + (r.modo === 'tolerante'
-        ? ` — el anclaje no coincidía al carácter: aplicado sobre las líneas ${r.linea}-${r.linea + r.lineas - 1} reajustando la sangría al archivo`
-        : '');
+      busqueda.invalidar(workspace); // el índice de búsqueda también se queda viejo
+      const relato =
+        `${r.veces} reemplazo(s) en ${p}` +
+        (r.modo === 'tolerante'
+          ? ` — el anclaje no coincidía al carácter: aplicado sobre las líneas ${r.linea}-${r.linea + r.lineas - 1} reajustando la sangría al archivo`
+          : '');
       return await resultadoEscritura(p, relato, { workspace, settings });
     }
     /* v2.4: mapa del repositorio e índice de símbolos. En un proyecto grande, leer
@@ -677,30 +797,55 @@ async function executeTool(name, args, ctx) {
       for (const c of lista) {
         const p = inWs(c && c.path);
         const bloqP = bloqueoEscritura(p);
-        if (bloqP) { errores.push(`${c && c.path}: ${bloqP}`); continue; }
+        if (bloqP) {
+          errores.push(`${c && c.path}: ${bloqP}`);
+          continue;
+        }
         const oldStr = String((c && c.old_string) ?? '');
         const newStr = String((c && c.new_string) ?? '');
-        if (!oldStr) { errores.push(`${c && c.path}: old_string vacío`); continue; }
+        if (!oldStr) {
+          errores.push(`${c && c.path}: old_string vacío`);
+          continue;
+        }
         let texto;
-        try { texto = await fsp.readFile(p, 'utf8'); }
-        catch (e) { errores.push(`${c.path}: no pude leerlo (${e.code || e.message})`); continue; }
+        try {
+          texto = await fsp.readFile(p, 'utf8');
+        } catch (e) {
+          errores.push(`${c.path}: no pude leerlo (${e.code || e.message})`);
+          continue;
+        }
         // v3.0: el mismo anclaje tolerante que edit_file, por cambio y para todo el parche
         const r = edicion.aplicar(texto, oldStr, newStr, {
           replaceAll: !!c.replace_all,
           tolerar: c.tolerar_espacios === true || args.tolerar_espacios === true,
         });
-        if (!r.ok) { errores.push(detalleEdicion(c.path, texto, r)); continue; }
-        if (planes.some(x => x.p === p)) { errores.push(`${c.path}: dos cambios sobre el mismo archivo en una llamada (junta el texto en uno)`); continue; }
+        if (!r.ok) {
+          errores.push(detalleEdicion(c.path, texto, r));
+          continue;
+        }
+        if (planes.some((x) => x.p === p)) {
+          errores.push(`${c.path}: dos cambios sobre el mismo archivo en una llamada (junta el texto en uno)`);
+          continue;
+        }
         planes.push({ p, antes: texto, despues: r.texto, n: r.veces, modo: r.modo, linea: r.linea, lineas: r.lineas });
       }
       if (errores.length) {
         return `Error: no se ha escrito NADA (el parche se aplica entero o no se aplica):\n- ${errores.join('\n- ')}`;
       }
-      for (const plan of planes) { cambios.recordar(workspace, plan.p, plan.antes); await fsp.writeFile(plan.p, plan.despues, 'utf8'); }
+      for (const plan of planes) {
+        cambios.recordar(workspace, plan.p, plan.antes);
+        await fsp.writeFile(plan.p, plan.despues, 'utf8');
+      }
       repomap.invalidar(workspace);
-      busqueda.invalidar(workspace);   // el índice de búsqueda también se queda viejo
-      const resumen = planes.map(pl => `${path.basename(pl.p)} (${pl.n}${pl.modo === 'tolerante' ? ', sangría reajustada' : ''})`).join(', ');
-      return await resultadoEscritura(planes[0].p, `${planes.length} archivo(s) actualizados: ${resumen}`, { checked: planes.map(x => x.p), workspace, settings });
+      busqueda.invalidar(workspace); // el índice de búsqueda también se queda viejo
+      const resumen = planes
+        .map((pl) => `${path.basename(pl.p)} (${pl.n}${pl.modo === 'tolerante' ? ', sangría reajustada' : ''})`)
+        .join(', ');
+      return await resultadoEscritura(planes[0].p, `${planes.length} archivo(s) actualizados: ${resumen}`, {
+        checked: planes.map((x) => x.p),
+        workspace,
+        settings,
+      });
     }
     case 'list_dir': {
       const root = inWs(args.path);
@@ -720,8 +865,11 @@ async function executeTool(name, args, ctx) {
       const bloqS = bloqueoLectura(root);
       if (bloqS) return bloqS;
       let regex;
-      try { regex = new RegExp(args.pattern, 'i'); }
-      catch { return 'Error: patrón de búsqueda inválido (no es una expresión regular válida). Simplifícalo: "informe", "config.*json", "function\\s+nombre"…'; }
+      try {
+        regex = new RegExp(args.pattern, 'i');
+      } catch {
+        return 'Error: patrón de búsqueda inválido (no es una expresión regular válida). Simplifícalo: "informe", "config.*json", "function\\s+nombre"…';
+      }
       if (!(await isDir(root))) return `Error: no pude buscar en ${root} (no existe, no es una carpeta o no tengo permisos).`;
       const out = [];
       const budget = { count: 60, files: 0 };
@@ -734,7 +882,8 @@ async function executeTool(name, args, ctx) {
       if (!n.trim()) return 'Error: falta el nombre de la aplicación.';
       // `;` separaba un segundo comando que se ejecutaba igual (`start "" "calc"; malware`):
       // antes no estaba en la lista y colaba.
-      if (/["&|^<>%;\r\n]/.test(n)) return 'Error: el nombre de la aplicación no puede contener comillas ni metacaracteres de cmd (" & | ^ < > % ;) ni saltos de línea.';
+      if (/["&|^<>%;\r\n]/.test(n))
+        return 'Error: el nombre de la aplicación no puede contener comillas ni metacaracteres de cmd (" & | ^ < > % ;) ni saltos de línea.';
       const r = await run(`start "" "${n}"`, { timeout: 15000, registerKillable: ctx.registerKillable });
       return r.code === 0 ? `OK: intentando abrir "${n}"` : `Error: ${r.stderr}`;
     }
@@ -761,7 +910,10 @@ async function executeTool(name, args, ctx) {
     }
     case 'clipboard': {
       const { clipboard } = require('electron');
-      if (args.action === 'write') { clipboard.writeText(args.text || ''); return 'OK: portapapeles actualizado'; }
+      if (args.action === 'write') {
+        clipboard.writeText(args.text || '');
+        return 'OK: portapapeles actualizado';
+      }
       return clip(clipboard.readText() || '(vacío)', 4000);
     }
     case 'notify': {
@@ -782,16 +934,21 @@ async function executeTool(name, args, ctx) {
       if (args.action !== 'show_desktop' && args.action !== 'minimize_all') {
         return `Error: acción de ventanas no soportada: ${args.action}. Usa minimize_all o show_desktop.`;
       }
-      const cmd = args.action === 'show_desktop'
-        ? `powershell -NoProfile -Command "(New-Object -ComObject Shell.Application).ToggleDesktop()"`
-        : `powershell -NoProfile -Command "(New-Object -ComObject Shell.Application).MinimizeAll()"`;
+      const cmd =
+        args.action === 'show_desktop'
+          ? `powershell -NoProfile -Command "(New-Object -ComObject Shell.Application).ToggleDesktop()"`
+          : `powershell -NoProfile -Command "(New-Object -ComObject Shell.Application).MinimizeAll()"`;
       await run(cmd, { timeout: 15000, registerKillable: ctx.registerKillable });
       return `OK: ${args.action}`;
     }
     case 'system_info': {
       const nets = os.networkInterfaces();
-      const ips = Object.values(nets).flat().filter(n => n && n.family === 'IPv4' && !n.internal).map(n => n.address);
-      const total = os.totalmem(), free = os.freemem();
+      const ips = Object.values(nets)
+        .flat()
+        .filter((n) => n && n.family === 'IPv4' && !n.internal)
+        .map((n) => n.address);
+      const total = os.totalmem(),
+        free = os.freemem();
       return [
         `SO: ${os.type()} ${os.release()} (${os.arch()})`,
         `Host: ${os.hostname()} | Usuario: ${os.userInfo().username}`,
@@ -799,7 +956,7 @@ async function executeTool(name, args, ctx) {
         `RAM: ${(total / 1e9).toFixed(1)} GB total, ${(free / 1e9).toFixed(1)} GB libres`,
         `Uptime: ${(os.uptime() / 3600).toFixed(1)} h`,
         `IPs: ${ips.join(', ') || 'ninguna'}`,
-        `Escritorio: ${path.join(home, 'Desktop')}`
+        `Escritorio: ${path.join(home, 'Desktop')}`,
       ].join('\n');
     }
     default:
@@ -808,8 +965,18 @@ async function executeTool(name, args, ctx) {
 }
 
 module.exports = {
-  executeTool, openUrlAllowed, ejecutarComandoVerificacion, ejecutarHook, revisarEstatico, revisarSintaxis,
+  executeTool,
+  openUrlAllowed,
+  ejecutarComandoVerificacion,
+  ejecutarHook,
+  revisarEstatico,
+  revisarSintaxis,
   /* Solo para las pruebas: el estado adaptativo (lo que se ha apartado) no debe
      arrastrarse entre casos. */
-  __test: { _resetChecks: () => { CHECK_APARTADO.clear(); CHECK_LENTO.clear(); } },
+  __test: {
+    _resetChecks: () => {
+      CHECK_APARTADO.clear();
+      CHECK_LENTO.clear();
+    },
+  },
 };

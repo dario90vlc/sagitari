@@ -11,17 +11,22 @@
 
 function registerMemoryIpc(ipcMain, { memory, models, habits }) {
   ipcMain.handle('memory:list', () => memory.list());
-  ipcMain.handle('memory:add', (e, item) => memory.add({
-    text: item && item.text,
-    source: 'user',
-    importance: Number((item && item.importance) ?? 0.5),
-    confidence: 0.8,
-  }));
+  ipcMain.handle('memory:add', (e, item) =>
+    memory.add({
+      text: item && item.text,
+      source: 'user',
+      importance: Number((item && item.importance) ?? 0.5),
+      confidence: 0.8,
+    }),
+  );
   ipcMain.handle('memory:update', (e, { id, patch }) => memory.update(String(id), patch || {}));
   ipcMain.handle('memory:remove', (e, id) => memory.remove(String(id)));
   ipcMain.handle('health:get', () => models.summary());
   ipcMain.handle('habits:get', () => habits.stats());
-  ipcMain.handle('habits:reset', () => { habits.reset(); return { ok: true }; });
+  ipcMain.handle('habits:reset', () => {
+    habits.reset();
+    return { ok: true };
+  });
 }
 
 module.exports = { registerMemoryIpc };

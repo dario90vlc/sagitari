@@ -8,6 +8,10 @@
     "start": "electron .",
     "dev": "electron . --dev",
     "smoke": "electron . --smoke",
+    "lint": "eslint .",
+    "lint:fix": "eslint . --fix",
+    "format": "prettier --write .",
+    "format:check": "prettier --check .",
     "uicheck": "node scripts/ui-check.js",
     "navcheck": "node scripts/navegador-check.js",
     "verificar:actualizador": "node scripts/verificar-actualizador.js 3",
@@ -27,7 +31,10 @@
   },
   "devDependencies": {
     "electron": "^44.2.0",
-    "electron-builder": "^26.15.3"
+    "electron-builder": "^26.15.3",
+    "eslint": "^9.39.5",
+    "eslint-config-prettier": "^10.1.8",
+    "prettier": "^3.9.9"
   },
   "build": {
     "appId": "com.sagitari.app",

@@ -26,7 +26,7 @@ function registerMiscIpc(ipcMain, ctx) {
 
   // ---- misc ----
   ipcMain.handle('app:quit', () => app.quit());
-  ipcMain.handle('app:minimize', () => getWin() && getWin().minimize());   // minimizado real: sigue en la barra de tareas
+  ipcMain.handle('app:minimize', () => getWin() && getWin().minimize()); // minimizado real: sigue en la barra de tareas
   ipcMain.handle('app:openExternal', (e, url) => {
     if (typeof url === 'string' && /^https?:\/\//i.test(url)) shell.openExternal(url);
   });
@@ -36,7 +36,9 @@ function registerMiscIpc(ipcMain, ctx) {
     w.isMaximized() ? w.unmaximize() : w.maximize();
   });
   ipcMain.handle('app:openDataDir', async () => {
-    try { await fsp.mkdir(ctx.configDir(), { recursive: true }); } catch {}
+    try {
+      await fsp.mkdir(ctx.configDir(), { recursive: true });
+    } catch {}
     const err = await shell.openPath(ctx.configDir());
     return err ? { ok: false, error: err } : { ok: true, path: ctx.configDir() };
   });
@@ -48,17 +50,28 @@ function registerMiscIpc(ipcMain, ctx) {
     let target = explicit.replace(/^~(?=\/|\\|$)/, app.getPath('home'));
     if (!target) target = app.getPath('desktop');
     let st;
-    try { st = fs.statSync(target); } catch { return { ok: false, error: 'La ruta no existe: ' + target }; }
+    try {
+      st = fs.statSync(target);
+    } catch {
+      return { ok: false, error: 'La ruta no existe: ' + target };
+    }
     if (st.isFile()) {
-      target = path.dirname(target);   // un archivo abre su carpeta contenedora
-      try { st = fs.statSync(target); } catch { return { ok: false, error: 'La ruta no es una carpeta: ' + target }; }
+      target = path.dirname(target); // un archivo abre su carpeta contenedora
+      try {
+        st = fs.statSync(target);
+      } catch {
+        return { ok: false, error: 'La ruta no es una carpeta: ' + target };
+      }
     }
     if (!st.isDirectory()) return { ok: false, error: 'La ruta no es una carpeta: ' + target };
     const err = await shell.openPath(target);
     if (err) return { ok: false, error: err };
     // Proyectos = espacio de trabajo: abrir una carpeta aquí la convierte en la activa
     // (con campo vacío se abre el Escritorio SIN cambiar el espacio configurado)
-    if (explicit) { cfg().settings.workspace = target; saveConfig(); }
+    if (explicit) {
+      cfg().settings.workspace = target;
+      saveConfig();
+    }
     return { ok: true, path: target, workspace: ctx.getWorkspace() };
   });
   ipcMain.handle('shell:pickFolder', async () => {

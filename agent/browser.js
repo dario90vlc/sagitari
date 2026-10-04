@@ -25,20 +25,56 @@ function getJSON(url, timeoutMs = 2500) {
     const req = http.get(url, (res) => {
       let d = '';
       res.on('data', (c) => (d += c));
-      res.on('end', () => { try { resolve(JSON.parse(d)); } catch (e) { reject(e); } });
+      res.on('end', () => {
+        try {
+          resolve(JSON.parse(d));
+        } catch (e) {
+          reject(e);
+        }
+      });
     });
     req.on('error', reject);
-    req.setTimeout(timeoutMs, () => { req.destroy(new Error('timeout')); });
+    req.setTimeout(timeoutMs, () => {
+      req.destroy(new Error('timeout'));
+    });
   });
 }
 
 /* Acciones válidas de browser_control. Se valida ANTES de la autocuración: un
    nombre mal escrito (o alucinado por el modelo) llegaba al `if (!this.ws)` y
    acababa lanzando un Chrome nuevo para luego responder «acción desconocida». */
-const ACTIONS = new Set(['launch', 'profile', 'close', 'navigate', 'new_tab', 'select_tab', 'close_tab',
-  'elements', 'click_index', 'click', 'type', 'press', 'scroll', 'wait', 'content', 'eval', 'screenshot', 'tabs',
+const ACTIONS = new Set([
+  'launch',
+  'profile',
+  'close',
+  'navigate',
+  'new_tab',
+  'select_tab',
+  'close_tab',
+  'elements',
+  'click_index',
+  'click',
+  'type',
+  'press',
+  'scroll',
+  'wait',
+  'content',
+  'eval',
+  'screenshot',
+  'tabs',
   // v2.5 «navegador 2»: actuar como una persona y no a ciegas
-  'hover', 'select', 'check', 'hotkey', 'upload', 'wait_for', 'logs', 'back', 'forward', 'reload', 'dialog']);
+  'hover',
+  'select',
+  'check',
+  'hotkey',
+  'upload',
+  'wait_for',
+  'logs',
+  'back',
+  'forward',
+  'reload',
+  'dialog',
+]);
 
 const sleep = (ms) => new Promise((r) => setTimeout(r, ms));
 
@@ -296,14 +332,20 @@ const HOTKEY_KEYS = {
  * probarlo sin navegador.
  */
 function parseHotkey(spec) {
-  const partes = String(spec || '').split('+').map((s) => s.trim()).filter(Boolean);
+  const partes = String(spec || '')
+    .split('+')
+    .map((s) => s.trim())
+    .filter(Boolean);
   if (!partes.length) return null;
   let modifiers = 0;
   let tecla = null;
   for (const p of partes) {
     const low = p.toLowerCase();
-    if (low in HOTKEY_MODS) { modifiers |= HOTKEY_MODS[low]; continue; }
-    if (tecla) return null;                       // dos teclas no es un atajo
+    if (low in HOTKEY_MODS) {
+      modifiers |= HOTKEY_MODS[low];
+      continue;
+    }
+    if (tecla) return null; // dos teclas no es un atajo
     tecla = low;
   }
   if (!tecla) return null;
@@ -311,8 +353,14 @@ function parseHotkey(spec) {
   if (named) return { modifiers, ...named };
   if (tecla.length === 1) {
     const shift = (modifiers & 8) !== 0;
-    const ch = tecla === 'space' ? ' ' : (shift ? tecla.toUpperCase() : tecla);
-    return { modifiers, vk: ch === ' ' ? 32 : ch.toUpperCase().charCodeAt(0), code: ch === ' ' ? 'Space' : 'Key' + ch.toUpperCase(), key: ch, text: modifiers ? undefined : ch };
+    const ch = tecla === 'space' ? ' ' : shift ? tecla.toUpperCase() : tecla;
+    return {
+      modifiers,
+      vk: ch === ' ' ? 32 : ch.toUpperCase().charCodeAt(0),
+      code: ch === ' ' ? 'Space' : 'Key' + ch.toUpperCase(),
+      key: ch,
+      text: modifiers ? undefined : ch,
+    };
   }
   return null;
 }
@@ -325,24 +373,24 @@ class Browser {
   constructor() {
     this.ws = null;
     this.port = 0;
-    this.activeId = null;      // targetId of the tab every action targets
-    this.profile = profileId('default');  // v1.5: id canónico del perfil activo
+    this.activeId = null; // targetId of the tab every action targets
+    this.profile = profileId('default'); // v1.5: id canónico del perfil activo
     this._id = 0;
     this._pending = new Map();
-    this._events = new Map();   // method -> esperadores de eventos CDP
+    this._events = new Map(); // method -> esperadores de eventos CDP
     this._sessions = new Map(); // targetId -> sessionId (una sesión por pestaña)
-    this.browserPid = null;     // pid del navegador lanzado (para matar el árbol)
+    this.browserPid = null; // pid del navegador lanzado (para matar el árbol)
     // Inventario de `elements()` y de qué ejecución es: sus coordenadas son
     // relativas al viewport de UNA página, así que un inventario viejo o de otra
     // ejecución no puede servir para clicar.
     this._lastElements = null;
     this._invOwner = null;
-    this._invRev = 0;                  // v2.5: revisión del inventario (se dice en la respuesta)
-    this._logs = [];                   // v2.5: consola + errores de red de la pestaña
-    this._dialog = null;               // v2.5: diálogo de la página esperando respuesta
-    this._downloads = [];              // v2.5: descargas vistas (para avisar dónde cayeron)
+    this._invRev = 0; // v2.5: revisión del inventario (se dice en la respuesta)
+    this._logs = []; // v2.5: consola + errores de red de la pestaña
+    this._dialog = null; // v2.5: diálogo de la página esperando respuesta
+    this._downloads = []; // v2.5: descargas vistas (para avisar dónde cayeron)
     this.downloadDir = path.join(os.tmpdir(), 'sagitari-downloads');
-    this._queue = Promise.resolve();   // una acción de navegador a la vez (ver handle)
+    this._queue = Promise.resolve(); // una acción de navegador a la vez (ver handle)
     // carpeta de datos del perfil activo (persistentes: los logins sobreviven)
     this.profileDir = ensureProfileDir('default');
   }
@@ -353,20 +401,26 @@ class Browser {
     const label = String(profile || 'default');
     if (id === this.profile && this.ws) return `OK: ya estás en el perfil «${label}».`;
     if (this.ws) {
-      try { await this.send('Browser.close'); } catch {}
-      try { this.ws.close(); } catch {}
+      try {
+        await this.send('Browser.close');
+      } catch {}
+      try {
+        this.ws.close();
+      } catch {}
       this._rejectPending('Cambiando de perfil.');
     }
     // El estado del navegador anterior se olvida SIEMPRE, haya socket vivo o no:
     // su puerto y su PID no valen para el perfil nuevo. (Antes solo se limpiaban
     // con el socket abierto, así que un cambio de perfil tras un cierre brusco
     // dejaba un PID viejo que kill() podía disparar contra otro proceso.)
-    this.ws = null; this.activeId = null; this.port = 0;
+    this.ws = null;
+    this.activeId = null;
+    this.port = 0;
     this._sessions.clear();
     this._lastElements = null;
     this.browserPid = null;
     this.profile = id;
-    this.profileDir = ensureProfileDir(profile);   // el dir se deriva del nombre original, no del id ya hasheado
+    this.profileDir = ensureProfileDir(profile); // el dir se deriva del nombre original, no del id ya hasheado
     return `OK: perfil activo → «${label}». Se abrirá (con sus propias cookies y sesiones) en el próximo launch.`;
   }
 
@@ -382,13 +436,19 @@ class Browser {
       const raw = fs.readFileSync(path.join(this.profileDir, 'DevToolsActivePort'), 'utf8');
       const n = Number(String(raw).split(/\r?\n/)[0].trim());
       return Number.isInteger(n) && n > 0 && n < 65536 ? n : 0;
-    } catch { return 0; }
+    } catch {
+      return 0;
+    }
   }
 
   async alive() {
     // A debugged browser on our port answers /json quickly.
-    try { const t = await getJSON(`http://127.0.0.1:${this.port}/json`, 1800); return Array.isArray(t) ? t : null; }
-    catch { return null; }
+    try {
+      const t = await getJSON(`http://127.0.0.1:${this.port}/json`, 1800);
+      return Array.isArray(t) ? t : null;
+    } catch {
+      return null;
+    }
   }
 
   async connect() {
@@ -405,8 +465,13 @@ class Browser {
       if (!page) throw new Error('El navegador no tiene pestañas.');
       url = page.webSocketDebuggerUrl;
     }
-    if (this.ws) { try { this.ws.close(); } catch {} this.ws = null; }
-    this._sessions.clear();   // una conexión nueva invalida todas las sesiones CDP cacheadas
+    if (this.ws) {
+      try {
+        this.ws.close();
+      } catch {}
+      this.ws = null;
+    }
+    this._sessions.clear(); // una conexión nueva invalida todas las sesiones CDP cacheadas
     const sock = new WebSocket(url, { maxPayload: 64 * 1024 * 1024 });
     this.ws = sock;
     try {
@@ -414,15 +479,30 @@ class Browser {
         // Con deadline propio: si el extremo acepta el TCP pero no completa el
         // upgrade, 'open' no llega nunca y la herramienta se quedaba «cargando»
         // para siempre (ws solo aplica timeout si se le pasa handshakeTimeout).
-        const timer = setTimeout(() => { cleanup(); rej(new Error('CDP: el navegador no completó la conexión en 15 s.')); }, 15000);
-        const cleanup = () => { clearTimeout(timer); sock.off('open', onOpen); sock.off('error', onErr); };
-        const onOpen = () => { cleanup(); res(); };
-        const onErr = (e) => { cleanup(); rej(e); };
+        const timer = setTimeout(() => {
+          cleanup();
+          rej(new Error('CDP: el navegador no completó la conexión en 15 s.'));
+        }, 15000);
+        const cleanup = () => {
+          clearTimeout(timer);
+          sock.off('open', onOpen);
+          sock.off('error', onErr);
+        };
+        const onOpen = () => {
+          cleanup();
+          res();
+        };
+        const onErr = (e) => {
+          cleanup();
+          rej(e);
+        };
         sock.once('open', onOpen);
         sock.once('error', onErr);
       });
     } catch (e) {
-      try { sock.close(); } catch {}
+      try {
+        sock.close();
+      } catch {}
       if (this.ws === sock) this.ws = null;
       throw e;
     }
@@ -431,7 +511,12 @@ class Browser {
     // el proceso principal de Electron.
     sock.on('error', () => {});
     sock.on('message', (m) => {
-      let msg; try { msg = JSON.parse(m); } catch { return; }
+      let msg;
+      try {
+        msg = JSON.parse(m);
+      } catch {
+        return;
+      }
       if (msg.id && this._pending.has(msg.id)) {
         const { resolve, reject } = this._pending.get(msg.id);
         this._pending.delete(msg.id);
@@ -439,7 +524,9 @@ class Browser {
       } else if (msg.method) {
         // v2.5: consola, errores de red, diálogos y descargas se van acumulando; el
         // modelo los lee con action=logs y los avisos se pegan al resultado que toca
-        try { this._track(msg.method, msg.params); } catch {}
+        try {
+          this._track(msg.method, msg.params);
+        } catch {}
         this._emitEvent(msg.method, msg.params, msg.sessionId);
       }
     });
@@ -462,20 +549,35 @@ class Browser {
       // el temporizador se cancela al resolverse: si no, cada comando CDP dejaba
       // un timer vivo 30 s más (cientos en una sesión de automatización larga)
       let timer = null;
-      const wrap = (fn) => (v) => { clearTimeout(timer); fn(v); };
+      const wrap = (fn) => (v) => {
+        clearTimeout(timer);
+        fn(v);
+      };
       this._pending.set(id, { resolve: wrap(resolve), reject: wrap(reject) });
       const payload = sessionId ? { id, method, params, sessionId } : { id, method, params };
-      try { this.ws.send(JSON.stringify(payload)); }
-      catch (e) { this._pending.delete(id); clearTimeout(timer); return reject(e); }
+      try {
+        this.ws.send(JSON.stringify(payload));
+      } catch (e) {
+        this._pending.delete(id);
+        clearTimeout(timer);
+        return reject(e);
+      }
       const limite = Number(opts.timeoutMs) > 0 ? Number(opts.timeoutMs) : 30000;
-      timer = setTimeout(() => { if (this._pending.has(id)) { this._pending.delete(id); reject(new Error('CDP timeout: ' + method)); } }, limite);
+      timer = setTimeout(() => {
+        if (this._pending.has(id)) {
+          this._pending.delete(id);
+          reject(new Error('CDP timeout: ' + method));
+        }
+      }, limite);
     });
   }
 
   /** Rechaza y vacía todas las peticiones en vuelo (cierre de socket, kill, etc.). */
   _rejectPending(reason) {
     for (const { reject } of this._pending.values()) {
-      try { reject(new Error(reason)); } catch {}
+      try {
+        reject(new Error(reason));
+      } catch {}
     }
     this._pending.clear();
   }
@@ -496,8 +598,18 @@ class Browser {
   waitEvent(method, timeoutMs = 5000, sessionId) {
     return new Promise((resolve) => {
       let set = this._events.get(method);
-      if (!set) { set = new Set(); this._events.set(method, set); }
-      const w = { sessionId, timer: null, resolve: (v) => { this._events.get(method)?.delete(w); resolve(v); } };
+      if (!set) {
+        set = new Set();
+        this._events.set(method, set);
+      }
+      const w = {
+        sessionId,
+        timer: null,
+        resolve: (v) => {
+          this._events.get(method)?.delete(w);
+          resolve(v);
+        },
+      };
       w.timer = setTimeout(() => w.resolve(null), timeoutMs);
       set.add(w);
     });
@@ -518,9 +630,13 @@ class Browser {
     // waitReady() espera Page.loadEventFired: sin esto esa espera era código muerto
     // y el único criterio real era el sondeo de readyState (que puede leer el
     // documento ANTERIOR todavía en 'complete' justo tras navegar).
-    try { await this.send('Page.enable', {}, sessionId); } catch {}
+    try {
+      await this.send('Page.enable', {}, sessionId);
+    } catch {}
     // v2.5: consola y red de la pestaña (para action=logs) y carpeta de descargas
-    try { await this._enableDomains(sessionId); } catch {}
+    try {
+      await this._enableDomains(sessionId);
+    } catch {}
     return sessionId;
   }
 
@@ -537,7 +653,7 @@ class Browser {
     };
     switch (method) {
       case 'Runtime.consoleAPICalled': {
-        const args = (params.args || []).map((a) => (a.value !== undefined ? a.value : (a.description || a.type)));
+        const args = (params.args || []).map((a) => (a.value !== undefined ? a.value : a.description || a.type));
         push(params.type === 'error' ? 'error' : params.type === 'warning' ? 'aviso' : 'consola', args.join(' '));
         break;
       }
@@ -573,18 +689,24 @@ class Browser {
       case 'Browser.downloadProgress':
       case 'Page.downloadProgress': {
         const d = this._downloads[this._downloads.length - 1];
-        if (d) { d.estado = params.state === 'completed' ? 'completada' : params.state || d.estado; if (params.filePath) d.ruta = params.filePath; }
+        if (d) {
+          d.estado = params.state === 'completed' ? 'completada' : params.state || d.estado;
+          if (params.filePath) d.ruta = params.filePath;
+        }
         if (params.state === 'completed') push('descarga', `${d ? d.archivo : 'archivo'} guardada en ${this.downloadDir}`);
         break;
       }
-      default: break;
+      default:
+        break;
     }
   }
 
   /** Dominios que dan contexto (consola, red) y dónde caen las descargas. */
   async _enableDomains(sessionId) {
     for (const m of ['Runtime.enable', 'Log.enable', 'Network.enable']) {
-      try { await this.send(m, {}, sessionId); } catch {}
+      try {
+        await this.send(m, {}, sessionId);
+      } catch {}
     }
     try {
       fs.mkdirSync(this.downloadDir, { recursive: true });
@@ -604,7 +726,9 @@ class Browser {
     const sessionId = this._sessions.get(targetId);
     if (!sessionId) return;
     this._sessions.delete(targetId);
-    try { await this.send('Target.detachFromTarget', { sessionId }); } catch {}
+    try {
+      await this.send('Target.detachFromTarget', { sessionId });
+    } catch {}
   }
 
   // The tab every action operates on: the selected one, or the first alive.
@@ -616,7 +740,7 @@ class Browser {
       const stale = this.activeId;
       page = list[0];
       this.activeId = page.id;
-      if (stale) await this.detach(stale);   // la pestaña activa ya no existe: libera su sesión
+      if (stale) await this.detach(stale); // la pestaña activa ya no existe: libera su sesión
     }
     const sessionId = await this.attach(page.id);
     return { sessionId, target: page };
@@ -626,11 +750,14 @@ class Browser {
 
   async launch(browserArg, url) {
     const want = (browserArg || 'chrome').toLowerCase();
-    fs.mkdirSync(this.profileDir, { recursive: true });   // asegura el perfil activo
+    fs.mkdirSync(this.profileDir, { recursive: true }); // asegura el perfil activo
 
     // 1) Already connected? Just (maybe) navigate — never spawn a second window.
     if (this.ws) {
-      if (url) { await this.currentSession(); return this.navigate(url); }
+      if (url) {
+        await this.currentSession();
+        return this.navigate(url);
+      }
       const n = (await this.pages()).length;
       return `OK: el navegador ya está abierto (${n} pestaña${n === 1 ? '' : 's'}). Usa navigate, new_tab, select_tab…`;
     }
@@ -669,16 +796,28 @@ class Browser {
 
     // 3) Fresh spawn (the only case where a new window appears).
     const find = (b) => {
-      const cands = b === 'edge'
-        ? [process.env['ProgramFiles(x86)'] + '\\Microsoft\\Edge\\Application\\msedge.exe', 'C:\\Program Files\\Microsoft\\Edge\\Application\\msedge.exe']
-        : ['C:\\Program Files\\Google\\Chrome\\Application\\chrome.exe', process.env['ProgramFiles(x86)'] + '\\Google\\Chrome\\Application\\chrome.exe',
-           process.env.LOCALAPPDATA + '\\Google\\Chrome\\Application\\chrome.exe'];
-      for (const c of cands) { if (c && fs.existsSync(c)) return c; }
+      const cands =
+        b === 'edge'
+          ? [
+              process.env['ProgramFiles(x86)'] + '\\Microsoft\\Edge\\Application\\msedge.exe',
+              'C:\\Program Files\\Microsoft\\Edge\\Application\\msedge.exe',
+            ]
+          : [
+              'C:\\Program Files\\Google\\Chrome\\Application\\chrome.exe',
+              process.env['ProgramFiles(x86)'] + '\\Google\\Chrome\\Application\\chrome.exe',
+              process.env.LOCALAPPDATA + '\\Google\\Chrome\\Application\\chrome.exe',
+            ];
+      for (const c of cands) {
+        if (c && fs.existsSync(c)) return c;
+      }
       return null;
     };
     let exe = find(want);
     let used = want;
-    if (!exe) { used = want === 'edge' ? 'chrome' : 'edge'; exe = find(used); }
+    if (!exe) {
+      used = want === 'edge' ? 'chrome' : 'edge';
+      exe = find(used);
+    }
     if (!exe) return 'Error: no encontré Chrome ni Edge instalado en este equipo.';
 
     this.port = 9223 + Math.floor(Math.random() * 500);
@@ -688,8 +827,10 @@ class Browser {
     const args = [
       `--remote-debugging-port=${this.port}`,
       `--user-data-dir=${this.profileDir}`,
-      '--no-first-run', '--no-default-browser-check',
-      '--disable-session-crashed-bubble', '--hide-crash-restore-bubble',
+      '--no-first-run',
+      '--no-default-browser-check',
+      '--disable-session-crashed-bubble',
+      '--hide-crash-restore-bubble',
       /* Estos tres son los que hacen que el navegador se pueda manejar con su ventana
          DETRÁS de la app, que es como se usa de verdad (el usuario está en SAGITARI y el
          navegador trabaja por debajo). Sin ellos Chromium deja de dar frames y de acusar
@@ -704,10 +845,11 @@ class Browser {
          usuario ve, es una optimización; para uno que maneja un agente por debajo, es la
          diferencia entre clicar y quedarse esperando 30 s. */
       '--disable-features=CalculateNativeWinOcclusion',
-      '--start-maximized', target,
+      '--start-maximized',
+      target,
     ];
     const child = spawn(exe, args, { windowsHide: true, stdio: 'ignore' });
-    child.on('error', () => {});   // nunca dejar una excepción no capturada
+    child.on('error', () => {}); // nunca dejar una excepción no capturada
     this.browserPid = child.pid;
     this.activeId = null;
 
@@ -716,7 +858,10 @@ class Browser {
     let ok = false;
     while (Date.now() < spawnDeadline) {
       await sleep(250);
-      if (await this.alive()) { ok = true; break; }
+      if (await this.alive()) {
+        ok = true;
+        break;
+      }
     }
     if (!ok) return 'Error: el navegador no respondió al puerto de depuración.';
     await this.connect();
@@ -724,18 +869,23 @@ class Browser {
     const list = await this.pages();
     if (list.length) {
       this.activeId = list[0].id;
-      if (url) return this.navigate(url);   // navigate ya espera la carga (waitReady)
+      if (url) return this.navigate(url); // navigate ya espera la carga (waitReady)
     }
     return `OK: navegador abierto (${used}, puerto CDP ${this.port})${url ? ', navegando a ' + url : ''}.`;
   }
 
   kill() {
     try {
-      if (this.ws) { this.send('Browser.close').catch(() => {}); this.ws.close(); }
+      if (this.ws) {
+        this.send('Browser.close').catch(() => {});
+        this.ws.close();
+      }
     } catch {}
     // Mata el árbol del proceso lanzado (Chrome abre hijos; taskkill /T los alcanza).
     if (this.browserPid) {
-      try { spawn('taskkill', ['/PID', String(this.browserPid), '/T', '/F'], { windowsHide: true, stdio: 'ignore' }); } catch {}
+      try {
+        spawn('taskkill', ['/PID', String(this.browserPid), '/T', '/F'], { windowsHide: true, stdio: 'ignore' });
+      } catch {}
       this.browserPid = null;
     }
     this.ws = null;
@@ -751,7 +901,10 @@ class Browser {
        PAUSADO: `Runtime.evaluate` no responde hasta que alguien lo contesta y el comando
        moría a los 30 s con un «CDP timeout» que no explicaba nada. Ahora se falla al
        instante diciendo qué pasa y cómo salir. */
-    if (this._dialog) throw new Error(`la página tiene un diálogo abierto («${this._dialog.type}»: ${(this._dialog.message || '').slice(0, 80)}) y está pausada. Contéstalo con action=dialog accept:true|false.`);
+    if (this._dialog)
+      throw new Error(
+        `la página tiene un diálogo abierto («${this._dialog.type}»: ${(this._dialog.message || '').slice(0, 80)}) y está pausada. Contéstalo con action=dialog accept:true|false.`,
+      );
     const r = await this.send('Runtime.evaluate', { expression, returnByValue: true, awaitPromise: true, userGesture: true }, sessionId);
     if (r.exceptionDetails) throw new Error(r.exceptionDetails.exception?.description || 'JS error');
     return r.result?.value;
@@ -761,18 +914,25 @@ class Browser {
   // sondeo corto de readyState. `timeoutMs` es la red de seguridad.
   async waitReady(sessionId, timeoutMs = 10000) {
     // con un diálogo abierto la página está pausada: esperar a que cargue no tiene sentido
-    if (this._dialog) { await sleep(300); return false; }
+    if (this._dialog) {
+      await sleep(300);
+      return false;
+    }
     const deadline = Date.now() + timeoutMs;
     const ev = this.waitEvent('Page.loadEventFired', timeoutMs, sessionId);
     let fired = false;
-    ev.then((v) => { if (v) fired = true; });
+    ev.then((v) => {
+      if (v) fired = true;
+    });
     // Margen para que la navegación se comprometa: recién enviado Page.navigate el
     // documento ANTERIOR sigue en 'complete' y se respondía «OK» sin haber cargado
     // la página nueva (y el siguiente elements/content leían la vieja).
     await sleep(150);
     while (Date.now() < deadline) {
-      if (fired) return true;   // el evento manda: es la carga de la página nueva
-      try { if (await this.evalJs('document.readyState', sessionId) === 'complete') return true; } catch {}
+      if (fired) return true; // el evento manda: es la carga de la página nueva
+      try {
+        if ((await this.evalJs('document.readyState', sessionId)) === 'complete') return true;
+      } catch {}
       await Promise.race([ev, sleep(150)]);
     }
     return false;
@@ -783,9 +943,13 @@ class Browser {
   // acción navega, el documento nuevo se considera listo al completar la carga.
   async settle(sessionId, timeoutMs = 1500, quietMs = 250) {
     // un diálogo abierto pausa la página: no hay mutaciones que observar, solo esperar
-    if (this._dialog) { await sleep(Math.min(400, timeoutMs)); return false; }
+    if (this._dialog) {
+      await sleep(Math.min(400, timeoutMs));
+      return false;
+    }
     try {
-      await this.evalJs(`(() => {
+      await this.evalJs(
+        `(() => {
         if (window.__sagitariObs) return;
         window.__sagitariObs = true;
         window.__sagitariLastMutation = Date.now();
@@ -793,7 +957,9 @@ class Browser {
           new MutationObserver(() => { window.__sagitariLastMutation = Date.now(); })
             .observe(document, { subtree: true, childList: true, attributes: true, characterData: true });
         } catch {}
-      })()`, sessionId);
+      })()`,
+        sessionId,
+      );
     } catch {}
     const deadline = Date.now() + timeoutMs;
     while (Date.now() < deadline) {
@@ -801,7 +967,8 @@ class Browser {
       try {
         const idle = await this.evalJs(
           `document.readyState === 'complete' && (Date.now() - (window.__sagitariLastMutation || 0)) > ${quietMs}`,
-          sessionId);
+          sessionId,
+        );
         if (idle) return true;
       } catch {}
     }
@@ -819,39 +986,60 @@ class Browser {
     }
     if (!/^https?:\/\//i.test(u)) u = 'https://' + u;
     const { sessionId } = await this.currentSession();
-    try { await this.send('Page.navigate', { url: u }, sessionId); } catch (e) {
+    try {
+      await this.send('Page.navigate', { url: u }, sessionId);
+    } catch (e) {
       return 'Error al navegar: ' + e.message;
     }
     const loaded = await this.waitReady(sessionId);
     // el inventario de elements() ya no vale: sus coordenadas son de otra página
     this._lastElements = null;
     let title = '';
-    try { title = (await this.evalJs('document.title', sessionId)) || ''; } catch {}
+    try {
+      title = (await this.evalJs('document.title', sessionId)) || '';
+    } catch {}
     return `OK: en «${title || u}»${loaded ? '' : ' (la página sigue cargando)'}\nURL: ${u}`;
   }
 
   // Captura en JPEG y acotada (máx. 1280 px de ancho, 2400 de alto): un PNG a
   // resolución completa cuesta muchísimos más tokens que un JPEG reducido.
   async screenshot(sessionId, fullPage) {
-    const MAX_SHOT_W = 1280, MAX_SHOT_H = 2400, QUALITY = 60;
-    let x = 0, y = 0, w = 0, h = 0;
+    const MAX_SHOT_W = 1280,
+      MAX_SHOT_H = 2400,
+      QUALITY = 60;
+    let x = 0,
+      y = 0,
+      w = 0,
+      h = 0;
     try {
       const m = await this.send('Page.getLayoutMetrics', {}, sessionId);
       if (fullPage) {
         const c = m.cssContentSize || m.contentSize || {};
-        w = Math.round(c.width || 0); h = Math.round(c.height || 0);
+        w = Math.round(c.width || 0);
+        h = Math.round(c.height || 0);
       } else {
         const v = m.cssVisualViewport || m.visualViewport || {};
-        x = Math.round(v.pageX || 0); y = Math.round(v.pageY || 0);
-        w = Math.round(v.clientWidth || v.width || 0); h = Math.round(v.clientHeight || v.height || 0);
+        x = Math.round(v.pageX || 0);
+        y = Math.round(v.pageY || 0);
+        w = Math.round(v.clientWidth || v.width || 0);
+        h = Math.round(v.clientHeight || v.height || 0);
       }
     } catch {}
-    if (!w || !h) { w = MAX_SHOT_W; h = fullPage ? MAX_SHOT_H : 800; }
+    if (!w || !h) {
+      w = MAX_SHOT_W;
+      h = fullPage ? MAX_SHOT_H : 800;
+    }
     const scale = Math.min(w > MAX_SHOT_W ? MAX_SHOT_W / w : 1, h > MAX_SHOT_H ? MAX_SHOT_H / h : 1);
-    const r = await this.send('Page.captureScreenshot', {
-      format: 'jpeg', quality: QUALITY, captureBeyondViewport: !!fullPage,
-      clip: { x, y, width: w, height: h, scale },
-    }, sessionId);
+    const r = await this.send(
+      'Page.captureScreenshot',
+      {
+        format: 'jpeg',
+        quality: QUALITY,
+        captureBeyondViewport: !!fullPage,
+        clip: { x, y, width: w, height: h, scale },
+      },
+      sessionId,
+    );
     return 'data:image/jpeg;base64,' + r.data;
   }
 
@@ -860,8 +1048,11 @@ class Browser {
   /** Inyecta (una vez por documento) los ayudantes de página. Tras navegar, `window`
       es nuevo y vuelve a inyectarlos solo. */
   async _injectHelpers(sessionId) {
-    try { return await this.evalJs(HELPERS_JS, sessionId); }
-    catch { return null; }
+    try {
+      return await this.evalJs(HELPERS_JS, sessionId);
+    } catch {
+      return null;
+    }
   }
 
   /**
@@ -878,20 +1069,24 @@ class Browser {
       }
       const el = (this._lastElements || [])[Number(want.index)];
       if (!el) return { error: `índice ${want.index} inválido. Ejecuta action=elements para ver los índices actuales.` };
-      const js = await this.evalJs(`(async () => {
+      const js = await this.evalJs(
+        `(async () => {
         const el = window.__sagFind(${JSON.stringify(el.fp)}, ${JSON.stringify(el.name || '')}, ${JSON.stringify(el.role || '')})
           || (${JSON.stringify(el.css || '')} ? window.__sagByCss(${JSON.stringify(el.css || '')}) : null);
         if (!el) return JSON.stringify({ error: 'ese elemento ya no está en la página (quizá cambió al pulsar otra cosa)' });
         window.__sagSel = el;
         return JSON.stringify(await window.__sagPoint(el));
-      })()`, sessionId);
+      })()`,
+        sessionId,
+      );
       return this._parsePoint(js);
     }
     const sel = want.selector ? String(want.selector) : null;
     const txt = want.text ? String(want.text) : null;
     if (!sel && !txt) return { error: 'necesito index, selector o text para saber sobre qué actuar' };
     const nth = Number(want.nth) > 0 ? Number(want.nth) : 1;
-    const js = await this.evalJs(`(async () => {
+    const js = await this.evalJs(
+      `(async () => {
       const norm = (s) => String(s == null ? '' : s).replace(/\\s+/g, ' ').trim();
       const lower = (s) => norm(s).toLowerCase();
       const sel = ${JSON.stringify(sel)};
@@ -919,7 +1114,9 @@ class Browser {
       p.candidatos = cands.length;
       p.candidato = ${nth};
       return JSON.stringify(p);
-    })()`, sessionId);
+    })()`,
+      sessionId,
+    );
     return this._parsePoint(js);
   }
 
@@ -928,7 +1125,9 @@ class Browser {
       const p = typeof raw === 'string' ? JSON.parse(raw) : raw;
       if (!p) return { error: 'no pude localizar el elemento' };
       return p;
-    } catch { return { error: 'no pude localizar el elemento' } };
+    } catch {
+      return { error: 'no pude localizar el elemento' };
+    }
   }
 
   /** Pulsa en las coordenadas frescas y deja que la página reaccione. */
@@ -950,9 +1149,11 @@ class Browser {
        el aviso viaja en el resultado. */
     const corto = { timeoutMs: 2500 };
     const enviar = async (params) => {
-      try { await this.send('Input.dispatchMouseEvent', params, sessionId, corto); return true; }
-      catch (e) {
-        if (/timeout/i.test(String(e.message)) && this._dialog) return true;   // entregado: la página está pausada
+      try {
+        await this.send('Input.dispatchMouseEvent', params, sessionId, corto);
+        return true;
+      } catch (e) {
+        if (/timeout/i.test(String(e.message)) && this._dialog) return true; // entregado: la página está pausada
         throw e;
       }
     };
@@ -981,14 +1182,20 @@ class Browser {
     await this._injectHelpers(sessionId);
     const raw = await this.evalJs(inventoryJs(), sessionId);
     let data;
-    try { data = JSON.parse(raw); } catch { return 'Error: no pude analizar la página.'; }
-    if (!data.elements || !data.elements.length) {
-      return 'Sin elementos interactivos visibles.'
-        + (data.frames ? ` La página tiene ${data.frames} iframe(s) de OTRO origen (no se pueden leer desde aquí).` : '')
-        + ' Prueba action=screenshot (con selector para una zona) o action=content.';
+    try {
+      data = JSON.parse(raw);
+    } catch {
+      return 'Error: no pude analizar la página.';
     }
-    this._lastElements = data.elements;   // índices válidos hasta la próxima acción que cambie la página
-    this._invOwner = ownerId || null;     // …y solo para la ejecución que los pidió
+    if (!data.elements || !data.elements.length) {
+      return (
+        'Sin elementos interactivos visibles.' +
+        (data.frames ? ` La página tiene ${data.frames} iframe(s) de OTRO origen (no se pueden leer desde aquí).` : '') +
+        ' Prueba action=screenshot (con selector para una zona) o action=content.'
+      );
+    }
+    this._lastElements = data.elements; // índices válidos hasta la próxima acción que cambie la página
+    this._invOwner = ownerId || null; // …y solo para la ejecución que los pidió
     this._invRev++;
     const lines = data.elements.map((e, i) => {
       const bits = [`${i}: [${e.role}]`];
@@ -1004,7 +1211,10 @@ class Browser {
       if (e.off) bits.push('[fuera de pantalla]');
       return bits.join(' ');
     });
-    const recorte = data.total > data.elements.length ? ` (mostrando ${data.elements.length} de ${data.total}: usa content, search de la página o un selector más concreto)` : '';
+    const recorte =
+      data.total > data.elements.length
+        ? ` (mostrando ${data.elements.length} de ${data.total}: usa content, search de la página o un selector más concreto)`
+        : '';
     return `Página: ${data.title}\nURL: ${data.url}\nElementos interactivos: ${data.total}${recorte}${data.frames ? `  ·  ${data.frames} iframe(s) de otro origen` : ''}\n${lines.join('\n')}\n\nUsa action=click_index con estos índices (si la página cambió, el clic vuelve a buscar el MISMO elemento por su huella, así que también vale tras un scroll), o action=click con text/selector.`;
   }
 
@@ -1028,7 +1238,7 @@ class Browser {
     if (p.error) return `Error: ${p.error}`;
     const mal = await this._clickAt(p, sessionId, opts);
     if (mal) return `Error: ${mal}`;
-    await this.settle(sessionId, 1200);   // deja reaccionar (menús, modales, navegación)
+    await this.settle(sessionId, 1200); // deja reaccionar (menús, modales, navegación)
     // la página puede haber cambiado: los índices anteriores ya no son fiables
     this._lastElements = null;
     return `OK: clic en ${p.role} «${p.name}» (${p.x},${p.y})${p.estable === false ? ' — el elemento se estaba moviendo, comprueba el resultado' : ''}${opts.force ? ' [forzado]' : ''}`;
@@ -1057,10 +1267,14 @@ class Browser {
       (autocompletado, máscaras, contadores) no ven `insertText` y se quedan a medias. */
   async _typeChar(ch, sessionId) {
     const upper = ch !== ch.toLowerCase() && ch === ch.toUpperCase();
-    const code = /[a-zA-Z]/.test(ch) ? 'Key' + ch.toUpperCase() : (/[0-9]/.test(ch) ? 'Digit' + ch : '');
+    const code = /[a-zA-Z]/.test(ch) ? 'Key' + ch.toUpperCase() : /[0-9]/.test(ch) ? 'Digit' + ch : '';
     const vk = ch === ' ' ? 32 : ch.toUpperCase().charCodeAt(0);
     const mods = upper ? 8 : 0;
-    await this.send('Input.dispatchKeyEvent', { type: 'keyDown', windowsVirtualKeyCode: vk, code, key: ch, text: ch, unmodifiedText: ch, modifiers: mods }, sessionId);
+    await this.send(
+      'Input.dispatchKeyEvent',
+      { type: 'keyDown', windowsVirtualKeyCode: vk, code, key: ch, text: ch, unmodifiedText: ch, modifiers: mods },
+      sessionId,
+    );
     await this.send('Input.dispatchKeyEvent', { type: 'keyUp', windowsVirtualKeyCode: vk, code, key: ch, modifiers: mods }, sessionId);
   }
 
@@ -1074,7 +1288,8 @@ class Browser {
     const { clear = true, submit = false, human = true } = opts || {};
     const p = await this._resolve(want, sessionId, ownerId);
     if (p.error) return `Error: ${p.error}`;
-    const preparado = await this.evalJs(`(() => {
+    const preparado = await this.evalJs(
+      `(() => {
       const el = window.__sagSel;
       if (!el) return 'NO';
       const tag = (el.tagName || '').toLowerCase();
@@ -1093,39 +1308,53 @@ class Browser {
         el.dispatchEvent(new Event('input', { bubbles: true }));
       }
       return 'OK';
-    })()`, sessionId);
+    })()`,
+      sessionId,
+    );
     if (preparado === 'NO') return `Error: ese elemento ya no está en la página. Vuelve a hacer action=elements.`;
-    if (preparado === 'NO_EDITABLE') return `Error: «${p.name}» (${p.role}) no es un campo de texto; para un <select> usa action=select y para una casilla action=check.`;
+    if (preparado === 'NO_EDITABLE')
+      return `Error: «${p.name}» (${p.role}) no es un campo de texto; para un <select> usa action=select y para una casilla action=check.`;
     await sleep(80);
     const str = String(text ?? '');
     if (str) {
       // tecla a tecla en textos cortos (compatible con validaciones en vivo); pegado
       // en textos largos, donde teclear sería lentísimo
-      if (human !== false && str.length <= 400) { for (const ch of str) await this._typeChar(ch, sessionId); }
-      else await this.send('Input.insertText', { text: str }, sessionId);
+      if (human !== false && str.length <= 400) {
+        for (const ch of str) await this._typeChar(ch, sessionId);
+      } else await this.send('Input.insertText', { text: str }, sessionId);
     }
     await sleep(180);
-    const quedo = await this.evalJs(`(() => {
+    const quedo = await this.evalJs(
+      `(() => {
       const el = window.__sagSel; if (!el) return '';
       return String(el.value === undefined ? (el.isContentEditable ? el.innerText : '') : el.value);
-    })()`, sessionId);
+    })()`,
+      sessionId,
+    );
     const recorte = String(quedo || '').length < str.length;
     if (submit) {
-      await this.send('Input.dispatchKeyEvent', { type: 'rawKeyDown', windowsVirtualKeyCode: 13, code: 'Enter', key: 'Enter', text: '\r' }, sessionId);
+      await this.send(
+        'Input.dispatchKeyEvent',
+        { type: 'rawKeyDown', windowsVirtualKeyCode: 13, code: 'Enter', key: 'Enter', text: '\r' },
+        sessionId,
+      );
       await this.send('Input.dispatchKeyEvent', { type: 'keyUp', windowsVirtualKeyCode: 13, code: 'Enter', key: 'Enter' }, sessionId);
       await this.settle(sessionId, 1500);
       await this.waitReady(sessionId, 6000);
-      this._lastElements = null;   // enviar puede haber cambiado la página
+      this._lastElements = null; // enviar puede haber cambiado la página
     }
-    return `OK: escrito en ${p.role} «${p.name}»${submit ? ' y Enter pulsado' : ''}. Valor del campo ahora: «${String(quedo || '').slice(0, 120)}»`
-      + (recorte ? '\nAviso: el campo se quedó con menos texto del enviado (maxlength, máscara o validación en vivo).' : '');
+    return (
+      `OK: escrito en ${p.role} «${p.name}»${submit ? ' y Enter pulsado' : ''}. Valor del campo ahora: «${String(quedo || '').slice(0, 120)}»` +
+      (recorte ? '\nAviso: el campo se quedó con menos texto del enviado (maxlength, máscara o validación en vivo).' : '')
+    );
   }
 
   /** Elegir una opción de un <select> por valor, texto o posición. */
   async selectOption(want, value, sessionId, ownerId) {
     const p = await this._resolve(want, sessionId, ownerId);
     if (p.error) return `Error: ${p.error}`;
-    const raw = await this.evalJs(`(() => {
+    const raw = await this.evalJs(
+      `(() => {
       const el = window.__sagSel; if (!el) return 'NO';
       if ((el.tagName || '').toLowerCase() !== 'select') return 'NO_SELECT';
       const norm = (s) => String(s == null ? '' : s).replace(/\\s+/g, ' ').trim();
@@ -1141,10 +1370,18 @@ class Browser {
       el.dispatchEvent(new Event('input', { bubbles: true }));
       el.dispatchEvent(new Event('change', { bubbles: true }));
       return JSON.stringify({ ok: true, elegido: norm(opt.textContent), valor: el.value, multiple: !!el.multiple });
-    })()`, sessionId);
+    })()`,
+      sessionId,
+    );
     if (raw === 'NO') return 'Error: ese elemento ya no está en la página.';
-    if (raw === 'NO_SELECT') return `Error: «${p.name}» no es un <select> nativo. Si es una lista desplegable de la web, haz clic en ella (action=click) y luego en la opción (action=elements + click_index).`;
-    let r; try { r = JSON.parse(raw); } catch { return 'Error: no pude elegir la opción.'; }
+    if (raw === 'NO_SELECT')
+      return `Error: «${p.name}» no es un <select> nativo. Si es una lista desplegable de la web, haz clic en ella (action=click) y luego en la opción (action=elements + click_index).`;
+    let r;
+    try {
+      r = JSON.parse(raw);
+    } catch {
+      return 'Error: no pude elegir la opción.';
+    }
     if (r.error) return `Error: ${r.error}. Opciones: ${(r.opciones || []).join(' | ')}`;
     await this.settle(sessionId, 600);
     this._lastElements = null;
@@ -1156,7 +1393,8 @@ class Browser {
   async check(want, on, sessionId, ownerId) {
     const p = await this._resolve(want, sessionId, ownerId);
     if (p.error) return `Error: ${p.error}`;
-    const raw = await this.evalJs(`(() => {
+    const raw = await this.evalJs(
+      `(() => {
       const el = window.__sagSel; if (!el) return 'NO';
       const role = (el.getAttribute && el.getAttribute('role')) || '';
       if (typeof el.checked !== 'boolean' && role !== 'checkbox' && role !== 'radio' && role !== 'switch') return 'NO_CHECK';
@@ -1164,10 +1402,17 @@ class Browser {
       const quiero = ${on ? 'true' : 'false'};
       if (antes !== quiero) el.click();
       return JSON.stringify({ antes, ahora: el.checked === true });
-    })()`, sessionId);
+    })()`,
+      sessionId,
+    );
     if (raw === 'NO') return 'Error: ese elemento ya no está en la página.';
     if (raw === 'NO_CHECK') return `Error: «${p.name}» (${p.role}) no es una casilla. Para pulsarlo usa action=click_index.`;
-    let r; try { r = JSON.parse(raw); } catch { return 'Error: no pude cambiar la casilla.'; }
+    let r;
+    try {
+      r = JSON.parse(raw);
+    } catch {
+      return 'Error: no pude cambiar la casilla.';
+    }
     await this.settle(sessionId, 500);
     this._lastElements = null;
     const estado = r.ahora ? 'marcado' : 'sin marcar';
@@ -1200,7 +1445,13 @@ class Browser {
   async upload(want, files, sessionId, ownerId) {
     const lista = (Array.isArray(files) ? files : [files]).filter(Boolean).map((f) => String(f));
     if (!lista.length) return 'Error: dime qué archivo(s) subir en `files`.';
-    const faltan = lista.filter((f) => { try { return !fs.existsSync(f); } catch { return true; } });
+    const faltan = lista.filter((f) => {
+      try {
+        return !fs.existsSync(f);
+      } catch {
+        return true;
+      }
+    });
     if (faltan.length) return `Error: no existe(n): ${faltan.join(', ')}. Usa rutas absolutas.`;
     const p = await this._resolve(want, sessionId, ownerId);
     if (p.error) return `Error: ${p.error}`;
@@ -1233,7 +1484,10 @@ class Browser {
     if (!texto && !selector && !url && !titulo) return 'Error: dime a qué esperar: text, selector, url o title.';
     const dentro = (cond) => (negar ? `!(${cond})` : `(${cond})`);
     const conds = [];
-    if (texto) conds.push(dentro(`(document.body ? document.body.innerText : '').toLowerCase().indexOf(${JSON.stringify(texto.toLowerCase())}) >= 0`));
+    if (texto)
+      conds.push(
+        dentro(`(document.body ? document.body.innerText : '').toLowerCase().indexOf(${JSON.stringify(texto.toLowerCase())}) >= 0`),
+      );
     if (selector) conds.push(dentro(`!!document.querySelector(${JSON.stringify(selector)})`));
     if (url) conds.push(dentro(`location.href.indexOf(${JSON.stringify(url)}) >= 0`));
     if (titulo) conds.push(dentro(`(document.title || '').toLowerCase().indexOf(${JSON.stringify(titulo.toLowerCase())}) >= 0`));
@@ -1241,7 +1495,12 @@ class Browser {
     const t0 = Date.now();
     let visto = false;
     while (Date.now() - t0 < timeout) {
-      try { if (await this.evalJs(expr, sessionId) === true) { visto = true; break; } } catch {}
+      try {
+        if ((await this.evalJs(expr, sessionId)) === true) {
+          visto = true;
+          break;
+        }
+      } catch {}
       await sleep(180);
     }
     if (visto) {
@@ -1255,10 +1514,15 @@ class Browser {
   /** Resumen del estado de la página (para los mensajes de espera y de error). */
   async _pageState(sessionId) {
     try {
-      const raw = await this.evalJs('JSON.stringify({ url: location.href, title: document.title, texto: (document.body ? document.body.innerText : "").replace(/\\s+/g, " ").slice(0, 200) })', sessionId);
+      const raw = await this.evalJs(
+        'JSON.stringify({ url: location.href, title: document.title, texto: (document.body ? document.body.innerText : "").replace(/\\s+/g, " ").slice(0, 200) })',
+        sessionId,
+      );
       const s = JSON.parse(raw);
       return `«${s.title}» — ${s.url} — ${s.texto}`;
-    } catch { return '(no pude leer el estado de la página)'; }
+    } catch {
+      return '(no pude leer el estado de la página)';
+    }
   }
 
   /** Consola, excepciones, errores de red y descargas recientes (depurar la propia web). */
@@ -1267,9 +1531,15 @@ class Browser {
     const desde = args.since ? String(args.since) : null;
     const items = this._logs.filter((l) => !desde || l.t >= desde).slice(-n);
     if (args.clear) this._logs = [];
-    if (!items.length) return 'Sin mensajes de consola ni errores de red desde que se abrió la pestaña.' + (this._downloads.length ? `\nDescargas: ${this._downloads.map((d) => d.archivo + ' (' + d.estado + ')').join(', ')}` : '');
+    if (!items.length)
+      return (
+        'Sin mensajes de consola ni errores de red desde que se abrió la pestaña.' +
+        (this._downloads.length ? `\nDescargas: ${this._downloads.map((d) => d.archivo + ' (' + d.estado + ')').join(', ')}` : '')
+      );
     const lineas = items.map((l) => `[${l.tipo}] ${l.texto}${l.url ? '  ← ' + l.url : ''}`);
-    const descargas = this._downloads.length ? `\nDescargas: ${this._downloads.map((d) => `${d.archivo} (${d.estado})${d.ruta ? ' en ' + d.ruta : ''}`).join('; ')}` : '';
+    const descargas = this._downloads.length
+      ? `\nDescargas: ${this._downloads.map((d) => `${d.archivo} (${d.estado})${d.ruta ? ' en ' + d.ruta : ''}`).join('; ')}`
+      : '';
     return `Últimos ${items.length} mensajes:\n${lineas.join('\n')}${descargas}`;
   }
 
@@ -1287,7 +1557,7 @@ class Browser {
     const loaded = await this.waitReady(sessionId, 10000);
     this._lastElements = null;
     const target = (h.entries || [])[idx] || {};
-    return `OK: ${dir === 'reload' ? 'recargada' : (dir === 'back' ? 'atrás' : 'adelante')}${loaded ? '' : ' (sigue cargando)'}${dir === 'reload' ? '' : ' → ' + (target.title || '') + ' ' + (target.url || '')}`;
+    return `OK: ${dir === 'reload' ? 'recargada' : dir === 'back' ? 'atrás' : 'adelante'}${loaded ? '' : ' (sigue cargando)'}${dir === 'reload' ? '' : ' → ' + (target.title || '') + ' ' + (target.url || '')}`;
   }
 
   /** Contesta a un diálogo de la página (alert/confirm/prompt/beforeunload). */
@@ -1296,7 +1566,11 @@ class Browser {
     const d = this._dialog;
     const accept = args.accept !== false;
     try {
-      await this.send('Page.handleJavaScriptDialog', { accept, promptText: args.text ? String(args.text) : undefined }, await this.sessionIdOf());
+      await this.send(
+        'Page.handleJavaScriptDialog',
+        { accept, promptText: args.text ? String(args.text) : undefined },
+        await this.sessionIdOf(),
+      );
     } catch (e) {
       return 'Error al contestar al diálogo: ' + e.message;
     }
@@ -1325,7 +1599,10 @@ class Browser {
   async handle(args, ownerId) {
     const run = () => this._handle(args, ownerId);
     const next = this._queue.then(run, run);
-    this._queue = next.then(() => {}, () => {});   // un fallo no rompe la cola
+    this._queue = next.then(
+      () => {},
+      () => {},
+    ); // un fallo no rompe la cola
     // v2.5: si hay un diálogo abierto, la página está bloqueada para el resto de
     // acciones: se avisa en el resultado de CUALQUIER acción (menos la que lo cierra)
     const res = await next;
@@ -1349,24 +1626,29 @@ class Browser {
       if (a === 'launch') return await this.launch(args.browser, args.url);
       if (a === 'profile') return await this.switchProfile(args.profile);
       if (a === 'close') {
-        try { await this.send('Browser.close'); } catch {}
+        try {
+          await this.send('Browser.close');
+        } catch {}
         this.kill();
         return 'OK: navegador cerrado.';
       }
       if (!this.ws) {
         // autocuración: si hay una instancia viva en nuestro puerto, reconnecta; si no, lanza
-        if (this.port && (await this.alive())) { await this.connect(); }
-        else return await this.launch(args.browser, args.url);
+        if (this.port && (await this.alive())) {
+          await this.connect();
+        } else return await this.launch(args.browser, args.url);
       }
 
       switch (a) {
-        case 'navigate': return await this.navigate(args.url);
+        case 'navigate':
+          return await this.navigate(args.url);
 
         case 'new_tab': {
           const { targetId } = await this.send('Target.createTarget', { url: args.url || 'about:blank' });
           if (this.activeId && this.activeId !== targetId) await this.detach(this.activeId);
           this.activeId = targetId;
-          this._lastElements = null; this._invOwner = null;   // otra pestaña: otros índices
+          this._lastElements = null;
+          this._invOwner = null; // otra pestaña: otros índices
           if (args.url) await this.waitReady(await this.attach(targetId));
           return `OK: nueva pestaña abierta${args.url ? ' en ' + args.url : ''} y seleccionada.`;
         }
@@ -1379,13 +1661,18 @@ class Browser {
           if (typeof q === 'number' && list[q - 1]) page = list[q - 1];
           else if (typeof q === 'string' && q.trim()) {
             const n = norm(q.toLowerCase());
-            page = list.find(p => p.title && norm(p.title.toLowerCase()).includes(n))
-                || list.find(p => p.url && p.url.toLowerCase().includes(n));
+            page =
+              list.find((p) => p.title && norm(p.title.toLowerCase()).includes(n)) ||
+              list.find((p) => p.url && p.url.toLowerCase().includes(n));
           }
-          if (!page) return 'Error: no encontré esa pestaña («' + q + '»). Abiertas:\n' + list.map((t, i) => `${i + 1}. ${t.title} — ${t.url}`).join('\n');
+          if (!page)
+            return (
+              'Error: no encontré esa pestaña («' + q + '»). Abiertas:\n' + list.map((t, i) => `${i + 1}. ${t.title} — ${t.url}`).join('\n')
+            );
           if (this.activeId && this.activeId !== page.id) await this.detach(this.activeId);
           this.activeId = page.id;
-          this._lastElements = null; this._invOwner = null;   // otra pestaña: otros índices
+          this._lastElements = null;
+          this._invOwner = null; // otra pestaña: otros índices
           return `OK: pestaña activa → «${page.title}» (${page.url}).`;
         }
 
@@ -1394,16 +1681,21 @@ class Browser {
           let id = this.activeId;
           if (typeof args.tab === 'number' && list[args.tab - 1]) id = list[args.tab - 1].id;
           else if (typeof args.tab === 'string' && args.tab.trim()) {
-            const p = list.find(p => (p.title || '').toLowerCase().includes(args.tab.toLowerCase()) || (p.url || '').toLowerCase().includes(args.tab.toLowerCase()));
+            const p = list.find(
+              (p) =>
+                (p.title || '').toLowerCase().includes(args.tab.toLowerCase()) ||
+                (p.url || '').toLowerCase().includes(args.tab.toLowerCase()),
+            );
             if (p) id = p.id;
           }
           if (!id) return 'Error: no hay pestaña que cerrar.';
-          await this.detach(id);   // libera la sesión CDP antes de cerrar el target
+          await this.detach(id); // libera la sesión CDP antes de cerrar el target
           await this.send('Target.closeTarget', { targetId: id });
           if (this.activeId === id) {
             const rest = await this.pages();
             this.activeId = rest.length ? rest[0].id : null;
-            this._lastElements = null; this._invOwner = null;   // otra pestaña: otros índices
+            this._lastElements = null;
+            this._invOwner = null; // otra pestaña: otros índices
           }
           return `OK: pestaña cerrada. Activas: ${(await this.pages()).length}.`;
         }
@@ -1422,43 +1714,96 @@ class Browser {
           return inv;
         }
 
-        case 'click_index': return await this.clickIndex(args.index, await this.sessionIdOf(), ownerId, { force: args.force === true });
+        case 'click_index':
+          return await this.clickIndex(args.index, await this.sessionIdOf(), ownerId, { force: args.force === true });
 
-        case 'click': return await this.findAndClick(args.selector, args.text, await this.sessionIdOf(), ownerId, { nth: args.nth, force: args.force === true });
+        case 'click':
+          return await this.findAndClick(args.selector, args.text, await this.sessionIdOf(), ownerId, {
+            nth: args.nth,
+            force: args.force === true,
+          });
 
-        case 'type': return await this.type(
-          { index: args.index, selector: args.selector, text: args.text, nth: args.nth },
-          args.text, { clear: args.clear !== false, submit: args.submit === true, human: args.human !== false },
-          await this.sessionIdOf(), ownerId);
+        case 'type':
+          return await this.type(
+            { index: args.index, selector: args.selector, text: args.text, nth: args.nth },
+            args.text,
+            { clear: args.clear !== false, submit: args.submit === true, human: args.human !== false },
+            await this.sessionIdOf(),
+            ownerId,
+          );
 
         /* ---- v2.5: acciones nuevas ---- */
-        case 'hover': return await this.hover({ index: args.index, selector: args.selector, text: args.text }, await this.sessionIdOf(), ownerId);
+        case 'hover':
+          return await this.hover({ index: args.index, selector: args.selector, text: args.text }, await this.sessionIdOf(), ownerId);
 
-        case 'select': return await this.selectOption({ index: args.index, selector: args.selector, text: args.text }, args.value !== undefined ? args.value : args.option, await this.sessionIdOf(), ownerId);
+        case 'select':
+          return await this.selectOption(
+            { index: args.index, selector: args.selector, text: args.text },
+            args.value !== undefined ? args.value : args.option,
+            await this.sessionIdOf(),
+            ownerId,
+          );
 
-        case 'check': return await this.check({ index: args.index, selector: args.selector, text: args.text }, args.on !== false && args.checked !== false, await this.sessionIdOf(), ownerId);
+        case 'check':
+          return await this.check(
+            { index: args.index, selector: args.selector, text: args.text },
+            args.on !== false && args.checked !== false,
+            await this.sessionIdOf(),
+            ownerId,
+          );
 
-        case 'hotkey': return await this.hotkey(args.key || args.keys, await this.sessionIdOf());
+        case 'hotkey':
+          return await this.hotkey(args.key || args.keys, await this.sessionIdOf());
 
-        case 'upload': return await this.upload({ index: args.index, selector: args.selector, text: args.text }, args.files || args.file, await this.sessionIdOf(), ownerId);
+        case 'upload':
+          return await this.upload(
+            { index: args.index, selector: args.selector, text: args.text },
+            args.files || args.file,
+            await this.sessionIdOf(),
+            ownerId,
+          );
 
-        case 'wait_for': return await this.waitFor(args, await this.sessionIdOf());
+        case 'wait_for':
+          return await this.waitFor(args, await this.sessionIdOf());
 
-        case 'logs': return this.logs(args);
+        case 'logs':
+          return this.logs(args);
 
-        case 'back': case 'forward': case 'reload': return await this.history(a, await this.sessionIdOf());
+        case 'back':
+        case 'forward':
+        case 'reload':
+          return await this.history(a, await this.sessionIdOf());
 
-        case 'dialog': return await this.dialog(args);
+        case 'dialog':
+          return await this.dialog(args);
 
         case 'press': {
-          const map = { Enter: 13, Tab: 9, Escape: 27, ArrowDown: 40, ArrowUp: 38, ArrowLeft: 37, ArrowRight: 39, Backspace: 8, Delete: 46, PageDown: 34, PageUp: 33, Home: 36, End: 35, Space: 32 };
+          const map = {
+            Enter: 13,
+            Tab: 9,
+            Escape: 27,
+            ArrowDown: 40,
+            ArrowUp: 38,
+            ArrowLeft: 37,
+            ArrowRight: 39,
+            Backspace: 8,
+            Delete: 46,
+            PageDown: 34,
+            PageUp: 33,
+            Home: 36,
+            End: 35,
+            Space: 32,
+          };
           const winCode = map[args.key];
           if (!winCode) return `Error: tecla no soportada: ${args.key}`;
           const def = { windowsVirtualKeyCode: winCode, code: args.key, key: args.key };
           if (args.key === 'Enter') def.text = '\r';
           // sin `text` el navegador no ejecuta la acción de carácter: pulsar Space
           // no insertaba el espacio ni activaba el botón con foco
-          if (args.key === 'Space') { def.key = ' '; def.text = ' '; }
+          if (args.key === 'Space') {
+            def.key = ' ';
+            def.text = ' ';
+          }
           const { sessionId } = await this.currentSession();
           await this.send('Input.dispatchKeyEvent', { type: 'rawKeyDown', ...def }, sessionId);
           await this.send('Input.dispatchKeyEvent', { type: 'keyUp', ...def }, sessionId);
@@ -1469,13 +1814,22 @@ class Browser {
         case 'scroll': {
           const dir = args.direction === 'up' ? -1 : 1;
           const { sessionId } = await this.currentSession();
-          await this.send('Input.dispatchMouseEvent', {
-            type: 'mouseWheel', x: 500, y: 400, deltaX: 0, deltaY: dir * (args.amount || 600)
-          }, sessionId);
+          await this.send(
+            'Input.dispatchMouseEvent',
+            {
+              type: 'mouseWheel',
+              x: 500,
+              y: 400,
+              deltaX: 0,
+              deltaY: dir * (args.amount || 600),
+            },
+            sessionId,
+          );
           await sleep(250);
           // las coordenadas del inventario son relativas al viewport: tras
           // desplazar la página apuntan a otro sitio
-          this._lastElements = null; this._invOwner = null;
+          this._lastElements = null;
+          this._invOwner = null;
           return 'OK: scroll ' + (dir > 0 ? 'abajo' : 'arriba');
         }
 
@@ -1491,7 +1845,9 @@ class Browser {
           const html = args.html === true;
           const expr = campo
             ? `(() => { const el = document.querySelector(${JSON.stringify(String(campo))}); if (!el) return 'NOT_FOUND'; return ${html ? 'el.outerHTML' : 'el.innerText'}; })()`
-            : (html ? `document.documentElement.outerHTML` : `document.body.innerText`);
+            : html
+              ? `document.documentElement.outerHTML`
+              : `document.body.innerText`;
           const txt = await this.evalJs(expr, sessionId);
           if (txt === 'NOT_FOUND') return 'Error: selector no encontrado.';
           const clipped = String(txt).slice(0, 12000);
@@ -1514,12 +1870,24 @@ class Browser {
             if (p.error) return `Error: ${p.error}`;
             const m = await this.send('Page.getLayoutMetrics', {}, sessionId);
             const v = m.cssVisualViewport || m.visualViewport || {};
-            const maxW = 1280, maxH = 1200;
+            const maxW = 1280,
+              maxH = 1200;
             const escala = Math.min(1, maxW / Math.max(1, p.w), maxH / Math.max(1, p.h));
-            const r = await this.send('Page.captureScreenshot', {
-              format: 'jpeg', quality: 70,
-              clip: { x: (v.pageX || 0) + p.x - p.w / 2, y: (v.pageY || 0) + p.y - p.h / 2, width: Math.max(1, p.w), height: Math.max(1, p.h), scale: escala },
-            }, sessionId);
+            const r = await this.send(
+              'Page.captureScreenshot',
+              {
+                format: 'jpeg',
+                quality: 70,
+                clip: {
+                  x: (v.pageX || 0) + p.x - p.w / 2,
+                  y: (v.pageY || 0) + p.y - p.h / 2,
+                  width: Math.max(1, p.w),
+                  height: Math.max(1, p.h),
+                  scale: escala,
+                },
+              },
+              sessionId,
+            );
             return { text: `Captura de «${p.name}» (${p.role}) en «${target.title}».`, images: ['data:image/jpeg;base64,' + r.data] };
           }
           const dataUrl = await this.screenshot(sessionId, args.fullPage === true);
@@ -1555,7 +1923,9 @@ class Browser {
   }
 }
 
-function norm(s) { return (s || '').replace(/\s+/g, ' ').trim(); }
+function norm(s) {
+  return (s || '').replace(/\s+/g, ' ').trim();
+}
 
 module.exports = {
   Browser,

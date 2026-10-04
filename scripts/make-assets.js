@@ -27,15 +27,23 @@ app.whenReady().then(() => {
     const rowMax = [];
     for (let y = 0; y < H; y += 2) {
       let m = 0;
-      for (let x = 0; x < W; x += 4) { const a = A(x, y); if (a > m) m = a; }
+      for (let x = 0; x < W; x += 4) {
+        const a = A(x, y);
+        if (a > m) m = a;
+      }
       rowMax[y] = m;
     }
-    let lastContent = -1, bestGapStart = -1, bestGapLen = 0;
+    let lastContent = -1,
+      bestGapStart = -1,
+      bestGapLen = 0;
     for (let y = 0; y < H; y += 2) {
       if (rowMax[y] > 12) {
         if (lastContent >= 0) {
           const gap = y - lastContent;
-          if (gap > bestGapLen) { bestGapLen = gap; bestGapStart = lastContent; }
+          if (gap > bestGapLen) {
+            bestGapLen = gap;
+            bestGapStart = lastContent;
+          }
         }
         lastContent = y;
       }
@@ -43,12 +51,17 @@ app.whenReady().then(() => {
     const markBottom = bestGapStart >= 0 ? bestGapStart + Math.floor(bestGapLen / 2) : H;
 
     // 2) bounding box of the mark region
-    let minX = W, minY = H, maxX = 0, maxY = 0;
+    let minX = W,
+      minY = H,
+      maxX = 0,
+      maxY = 0;
     for (let y = 0; y < markBottom; y += 2) {
       for (let x = 0; x < W; x += 2) {
         if (A(x, y) > 14) {
-          if (x < minX) minX = x; if (x > maxX) maxX = x;
-          if (y < minY) minY = y; if (y > maxY) maxY = y;
+          if (x < minX) minX = x;
+          if (x > maxX) maxX = x;
+          if (y < minY) minY = y;
+          if (y > maxY) maxY = y;
         }
       }
     }
@@ -56,15 +69,20 @@ app.whenReady().then(() => {
 
     // 3) pad + square-ify + clamp
     const pad = Math.floor((maxX - minX) * 0.03) + 4;
-    let cx = Math.max(0, minX - pad), cy = Math.max(0, minY - pad);
-    let cw = Math.min(W - cx, (maxX - minX) + 2 * pad);
-    let ch = Math.min(H - cy, (maxY - minY) + 2 * pad);
-    if (cw > ch) { cy = Math.max(0, cy - Math.floor((cw - ch) / 2)); ch = Math.min(H - cy, cw); }
-    else { cx = Math.max(0, cx - Math.floor((ch - cw) / 2)); cw = Math.min(W - cx, ch); }
+    let cx = Math.max(0, minX - pad),
+      cy = Math.max(0, minY - pad);
+    let cw = Math.min(W - cx, maxX - minX + 2 * pad);
+    let ch = Math.min(H - cy, maxY - minY + 2 * pad);
+    if (cw > ch) {
+      cy = Math.max(0, cy - Math.floor((cw - ch) / 2));
+      ch = Math.min(H - cy, cw);
+    } else {
+      cx = Math.max(0, cx - Math.floor((ch - cw) / 2));
+      cw = Math.min(W - cx, ch);
+    }
 
     // 4) crop + export
-    const mark = img.crop({ x: cx, y: cy, width: cw, height: ch })
-      .resize({ width: 512, quality: 'best' });
+    const mark = img.crop({ x: cx, y: cy, width: cw, height: ch }).resize({ width: 512, quality: 'best' });
     fs.writeFileSync(path.join(OUT, 'sagitari-mark.png'), mark.toPNG());
 
     // full logo (with wordmark) for splash/branding
@@ -75,7 +93,7 @@ app.whenReady().then(() => {
     //    regla está en scripts/ico.js). Los píxeles se sacan decodificando el PNG
     //    de cada tamaño: toBitmap() devuelve alfa PREMULTIPLICADO y oscurecería
     //    los bordes translúcidos del icono.
-    const entries = DEFAULT_SIZES.map(s => {
+    const entries = DEFAULT_SIZES.map((s) => {
       const dec = decodePNG(mark.resize({ width: s, height: s, quality: 'best' }).toPNG());
       const rgba = dec.ch === 4 ? dec.data : rgbaFrom(dec);
       return { s, data: icoEntry(s, rgba, (size, px) => encodePNG(size, size, px)) };

@@ -27,7 +27,10 @@ function lineas(texto) {
   const n = texto.length;
   while (i <= n) {
     const j = texto.indexOf('\n', i);
-    if (j === -1) { out.push({ start: i, end: n, texto: texto.slice(i) }); break; }
+    if (j === -1) {
+      out.push({ start: i, end: n, texto: texto.slice(i) });
+      break;
+    }
     out.push({ start: i, end: j + 1, texto: texto.slice(i, j) });
     i = j + 1;
   }
@@ -36,7 +39,10 @@ function lineas(texto) {
 
 /** Forma comparable de una línea: sin sangría, sin espacios finales y sin el \r del CRLF. */
 function norm(s) {
-  return String(s).replace(/\r$/, '').replace(/^[ \t]+/, '').replace(/[ \t]+$/, '');
+  return String(s)
+    .replace(/\r$/, '')
+    .replace(/^[ \t]+/, '')
+    .replace(/[ \t]+$/, '');
 }
 
 function sangriaDe(s) {
@@ -64,7 +70,10 @@ function candidatos(texto, busca, limit) {
   for (let i = 0; i + bl.length <= fl.length; i++) {
     let ok = true;
     for (let k = 0; k < bl.length; k++) {
-      if (norm(fl[i + k].texto) !== bl[k]) { ok = false; break; }
+      if (norm(fl[i + k].texto) !== bl[k]) {
+        ok = false;
+        break;
+      }
     }
     if (!ok) continue;
     const ultima = fl[i + bl.length - 1];
@@ -126,14 +135,16 @@ function buscar(texto, busca, opts = {}) {
 function reindentar(nuevo, ancla, sangrArchivo) {
   const nl = String(nuevo).split('\n');
   const al = String(ancla).split('\n');
-  const f = (Array.isArray(sangrArchivo) && sangrArchivo.length) ? sangrArchivo : [''];
-  return nl.map((l, i) => {
-    if (!l.trim()) return l;
-    const a = sangriaDe(al[i] !== undefined ? al[i] : (al[al.length - 1] || ''));
-    const destino = f[i] !== undefined ? f[i] : f[0];
-    const sin = l.startsWith(a) ? l.slice(a.length) : l;
-    return destino + sin;
-  }).join('\n');
+  const f = Array.isArray(sangrArchivo) && sangrArchivo.length ? sangrArchivo : [''];
+  return nl
+    .map((l, i) => {
+      if (!l.trim()) return l;
+      const a = sangriaDe(al[i] !== undefined ? al[i] : al[al.length - 1] || '');
+      const destino = f[i] !== undefined ? f[i] : f[0];
+      const sin = l.startsWith(a) ? l.slice(a.length) : l;
+      return destino + sin;
+    })
+    .join('\n');
 }
 
 /**

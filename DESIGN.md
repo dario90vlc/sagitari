@@ -8,7 +8,7 @@ mate plano dejaba la UI muerta y la Chakra Petch envejecía.
 ## Tokens
 
 - Acento y glow: triplets `--acc-rgb / --acc2-rgb / --acc3-rgb / --glow-rgb /
-  --glow-a/b/c-rgb` + `--glow-str`. Seis paletas en `PALETTES`; fondos derivados
+--glow-a/b/c-rgb` + `--glow-str`. Seis paletas en `PALETTES`; fondos derivados
   con la misma luminancia relativa. Semánticos fijos: `--ok #34d399`,
   `--warn #fbbf24`, `--danger #fb7185`, `--cyan #22d3ee`, `--mag #d946ef`.
 - Modos: ACT `--mode-rgb 52,211,153`, PLAN `167,139,250`, THINK `125,180,255`.

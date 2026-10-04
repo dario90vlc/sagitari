@@ -757,7 +757,8 @@ optional reasoning, a live team board, a day separator, and tool cards that say 
   un `confirm()` y errores de consola —`npm run navcheck`—. / **And the browser tool, against a
   real browser**: 29 checks in a real Chrome with a test page that includes web components,
   iframes, a covered button, an off-screen one, a `confirm()` and console errors — `npm run
-  navcheck`.
+navcheck`.
+
 # SAGITARI 3.1.1
 
 **La voz vuelve a funcionar en la app instalada y en el portable.** En la 3.1.0, los guiones
@@ -915,13 +916,13 @@ agent uses their tools like its own: same catalog, same confirmations, same guar
 
 ## Descargas / Downloads
 
-| Archivo / File | Descripción / Description |
-|---|---|
-| `SAGITARI-Setup-3.1.0.exe` | **Instalador / Installer** (NSIS): accesos directos, desinstalador / shortcuts, uninstaller |
-| `SAGITARI-Portable-3.1.0.exe` | **Portable**: un solo ejecutable, sin instalación / single executable, no install |
-| `Source code (zip/tar.gz)` | Código fuente / Source code |
+| Archivo / File                | Descripción / Description                                                                   |
+| ----------------------------- | ------------------------------------------------------------------------------------------- |
+| `SAGITARI-Setup-3.1.0.exe`    | **Instalador / Installer** (NSIS): accesos directos, desinstalador / shortcuts, uninstaller |
+| `SAGITARI-Portable-3.1.0.exe` | **Portable**: un solo ejecutable, sin instalación / single executable, no install           |
+| `Source code (zip/tar.gz)`    | Código fuente / Source code                                                                 |
 
-> Binario sin firmar: Windows SmartScreen puede avisar en la primera ejecución (*Más información → Ejecutar de todas formas*). La app te dice si la actualización que descarga está firmada o no. Los motores de voz y de dictado locales **no** van dentro del instalador: se descargan a petición desde Ajustes y se pueden borrar. / Unsigned binary: SmartScreen may warn on first run (*More info → Run anyway*). The app tells you whether the update it downloads is signed. The local voice and dictation engines are **not** bundled in the installer: they are downloaded on demand from Settings and can be removed.
+> Binario sin firmar: Windows SmartScreen puede avisar en la primera ejecución (_Más información → Ejecutar de todas formas_). La app te dice si la actualización que descarga está firmada o no. Los motores de voz y de dictado locales **no** van dentro del instalador: se descargan a petición desde Ajustes y se pueden borrar. / Unsigned binary: SmartScreen may warn on first run (_More info → Run anyway_). The app tells you whether the update it downloads is signed. The local voice and dictation engines are **not** bundled in the installer: they are downloaded on demand from Settings and can be removed.
 
 # SAGITARI 3.0.1
 
@@ -942,13 +943,13 @@ error and a Retry button, and long tasks stay recoverable if the model stops sen
 
 ## Descargas / Downloads
 
-| Archivo / File | Descripción / Description |
-|---|---|
-| `SAGITARI-Setup-3.0.1.exe` | **Instalador / Installer** (NSIS): accesos directos, desinstalador / shortcuts, uninstaller |
-| `SAGITARI-Portable-3.0.1.exe` | **Portable**: un solo ejecutable, sin instalación / single executable, no install |
-| `Source code (zip/tar.gz)` | Código fuente / Source code |
+| Archivo / File                | Descripción / Description                                                                   |
+| ----------------------------- | ------------------------------------------------------------------------------------------- |
+| `SAGITARI-Setup-3.0.1.exe`    | **Instalador / Installer** (NSIS): accesos directos, desinstalador / shortcuts, uninstaller |
+| `SAGITARI-Portable-3.0.1.exe` | **Portable**: un solo ejecutable, sin instalación / single executable, no install           |
+| `Source code (zip/tar.gz)`    | Código fuente / Source code                                                                 |
 
-> Binario sin firmar: Windows SmartScreen puede avisar en la primera ejecución (*Más información → Ejecutar de todas formas*). La app te dice si la actualización que descarga está firmada o no. / Unsigned binary: SmartScreen may warn on first run (*More info → Run anyway*). The app tells you whether the update it downloads is signed.
+> Binario sin firmar: Windows SmartScreen puede avisar en la primera ejecución (_Más información → Ejecutar de todas formas_). La app te dice si la actualización que descarga está firmada o no. / Unsigned binary: SmartScreen may warn on first run (_More info → Run anyway_). The app tells you whether the update it downloads is signed.
 
 # SAGITARI 3.0.0
 
@@ -966,13 +967,13 @@ browser becoming unusable after a hard exit.
 
 ## Descargas / Downloads
 
-| Archivo / File | Descripción / Description |
-|---|---|
-| `SAGITARI-Setup-3.0.0.exe` | **Instalador / Installer** (NSIS): accesos directos, desinstalador / shortcuts, uninstaller |
-| `SAGITARI-Portable-3.0.0.exe` | **Portable**: un solo ejecutable, sin instalación / single executable, no install |
-| `Source code (zip/tar.gz)` | Código fuente / Source code |
+| Archivo / File                | Descripción / Description                                                                   |
+| ----------------------------- | ------------------------------------------------------------------------------------------- |
+| `SAGITARI-Setup-3.0.0.exe`    | **Instalador / Installer** (NSIS): accesos directos, desinstalador / shortcuts, uninstaller |
+| `SAGITARI-Portable-3.0.0.exe` | **Portable**: un solo ejecutable, sin instalación / single executable, no install           |
+| `Source code (zip/tar.gz)`    | Código fuente / Source code                                                                 |
 
-> Binario sin firmar: Windows SmartScreen puede avisar en la primera ejecución (*Más información → Ejecutar de todas formas*). La app te dice si la actualización que descarga está firmada o no. / Unsigned binary: SmartScreen may warn on first run (*More info → Run anyway*). The app tells you whether the update it downloads is signed.
+> Binario sin firmar: Windows SmartScreen puede avisar en la primera ejecución (_Más información → Ejecutar de todas formas_). La app te dice si la actualización que descarga está firmada o no. / Unsigned binary: SmartScreen may warn on first run (_More info → Run anyway_). The app tells you whether the update it downloads is signed.
 
 ## Seguridad / Security
 

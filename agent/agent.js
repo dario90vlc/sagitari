@@ -1,16 +1,15 @@
 'use strict';
 
 const os = require('os');
-const fs = require('fs');
 const path = require('path');
 const { allToolDefs } = require('./tools');
 const cambios = require('./cambios');
 const proyecto = require('./proyecto');
 const repomap = require('./repomap');
 const { executeTool, ejecutarComandoVerificacion, ejecutarHook } = require('./executors');
-const diagnosticos = require('./diagnosticos');   // v2.5: hallazgos del proyecto y comprobación de cierre
-const contexto = require('./contexto');           // v2.5: presupuesto de contexto (y qué hacer cuando no cabe)
-const hooks = require('./hooks');                 // v2.5: tus comandos enganchados al agente
+const diagnosticos = require('./diagnosticos'); // v2.5: hallazgos del proyecto y comprobación de cierre
+const contexto = require('./contexto'); // v2.5: presupuesto de contexto (y qué hacer cuando no cabe)
+const hooks = require('./hooks'); // v2.5: tus comandos enganchados al agente
 const instrucciones = require('./instrucciones'); // v2.5: SAGITARI.md / AGENTS.md del proyecto
 const skills = require('./skills');
 const memory = require('./memory');
@@ -18,12 +17,12 @@ const checkpoints = require('./checkpoints');
 const { Guardrails } = require('./guardrails');
 const runlog = require('./runlog');
 const subagents = require('./subagents');
-const todos = require('./todos');           // v2.6: lista de tareas viva (todo_write)
-const arboles = require('./arboles');       // v3.0: árboles de trabajo por subagente
+const todos = require('./todos'); // v2.6: lista de tareas viva (todo_write)
+const arboles = require('./arboles'); // v3.0: árboles de trabajo por subagente
 const models = require('./models');
 const habits = require('./habits');
-const opencode = require('./opencode');   // identificación de sesión (OpenCode Go/Zen)
-const { recursos, paraHerramienta } = require('./recursos');   // v2.5: bloqueo por recurso (navegador, disco, terminal)
+const opencode = require('./opencode'); // identificación de sesión (OpenCode Go/Zen)
+const { recursos, paraHerramienta } = require('./recursos'); // v2.5: bloqueo por recurso (navegador, disco, terminal)
 const protocols = require('./protocols'); // multi-formato: OpenAI / Anthropic / Responses
 
 function systemPrompt() {
@@ -87,9 +86,24 @@ FORMATO
 }
 
 const MODE_PROFILES = {
-  think: { temperature: 0.7, maxSteps: 20, planFirst: false, note: 'Piensas antes de actuar: razona paso a paso en tu respuesta final, explora alternativas, sé meticuloso.' },
-  plan:  { temperature: 0.35, maxSteps: 20, planFirst: true,  note: 'PRIMERO presenta un PLAN numerado breve (3-6 pasos) y luego ejecútalo con herramientas, paso a paso.' },
-  act:   { temperature: 0.25, maxSteps: 12, planFirst: false, note: 'Actúa directo y eficiente: no anuncies cada paso, ejecuta y reporta. El informe final se escribe igual de completo (ver CÓMO ESCRIBES).' }
+  think: {
+    temperature: 0.7,
+    maxSteps: 20,
+    planFirst: false,
+    note: 'Piensas antes de actuar: razona paso a paso en tu respuesta final, explora alternativas, sé meticuloso.',
+  },
+  plan: {
+    temperature: 0.35,
+    maxSteps: 20,
+    planFirst: true,
+    note: 'PRIMERO presenta un PLAN numerado breve (3-6 pasos) y luego ejecútalo con herramientas, paso a paso.',
+  },
+  act: {
+    temperature: 0.25,
+    maxSteps: 12,
+    planFirst: false,
+    note: 'Actúa directo y eficiente: no anuncies cada paso, ejecuta y reporta. El informe final se escribe igual de completo (ver CÓMO ESCRIBES).',
+  },
 };
 
 /* ---------- integridad del historial ---------- */
@@ -118,11 +132,11 @@ function trimHistory(history, max = MAX_HISTORY) {
  */
 function payloadMessages(history) {
   const out = [];
-  const pending = new Set();   // tool_call_id esperando su respuesta
+  const pending = new Set(); // tool_call_id esperando su respuesta
   for (let i = 0; i < history.length; i++) {
     const h = history[i];
     if (h.role === 'tool') {
-      if (!pending.has(h.tool_call_id)) continue;   // huérfano: se descarta
+      if (!pending.has(h.tool_call_id)) continue; // huérfano: se descarta
       pending.delete(h.tool_call_id);
       out.push({ role: 'tool', tool_call_id: h.tool_call_id, ...(h.name ? { name: h.name } : {}), content: h.content });
       continue;
@@ -130,8 +144,11 @@ function payloadMessages(history) {
     if (h.role === 'assistant' && h.tool_calls && h.tool_calls.length) {
       const answered = new Set();
       for (let j = i + 1; j < history.length && history[j].role === 'tool'; j++) answered.add(history[j].tool_call_id);
-      const calls = h.tool_calls.filter(tc => answered.has(tc.id));
-      if (!calls.length) { if (h.content) out.push({ role: 'assistant', content: h.content }); continue; }
+      const calls = h.tool_calls.filter((tc) => answered.has(tc.id));
+      if (!calls.length) {
+        if (h.content) out.push({ role: 'assistant', content: h.content });
+        continue;
+      }
       const msg = { role: 'assistant', content: h.content || '', tool_calls: calls };
       if (!msg.content) delete msg.content;
       out.push(msg);
@@ -169,61 +186,78 @@ class Agent {
 
   constructor(opts) {
     this.fetchFn = opts.fetchFn || fetch;
-    this.emit = opts.emit;               // (event) => void  (to renderer)
+    this.emit = opts.emit; // (event) => void  (to renderer)
     this.screenshotFn = opts.screenshotFn;
     this.browser = opts.browser;
-    this.mcp = opts.mcp || null;         // gestor de servidores MCP (Tools del usuario)
-    this.history = [];                   // [{role, content, tool_calls?, tool_call_id?, name?, images?}]
+    this.mcp = opts.mcp || null; // gestor de servidores MCP (Tools del usuario)
+    this.history = []; // [{role, content, tool_calls?, tool_call_id?, name?, images?}]
     this.busy = false;
     this.abort = null;
-    this.stopRequested = false;          // el usuario pulsó Detener en esta conversación
-    this.pauseRequested = false;         // pausa solicitada (checkpoint + stop limpio)
-    this.runningTool = null;             // { stop() } de la herramienta en ejecución (la última: compatibilidad)
+    this.stopRequested = false; // el usuario pulsó Detener en esta conversación
+    this.pauseRequested = false; // pausa solicitada (checkpoint + stop limpio)
+    this.runningTool = null; // { stop() } de la herramienta en ejecución (la última: compatibilidad)
     /* v2.5: varias herramientas del MISMO mensaje pueden correr a la vez (el modelo
        pide tres lecturas o dos delegaciones de golpe). Aquí van todas las killables
        para que Detener mate las que estén en vuelo, no solo una. */
-    this.runningTools = new Map();       // callId -> { stop() }
-    this.subagents = new Set();          // subagentes en curso (varios, si van en paralelo)
-    this._currentRequest = '';           // petición del usuario del turno (criterio de reserva)
-    this._plegado = [];                  // intercambios antiguos plegados (resumen rodante)
-    this._transcript = [];               // narración del turno (los subagentes no pasan por el init de chat)
+    this.runningTools = new Map(); // callId -> { stop() }
+    this.subagents = new Set(); // subagentes en curso (varios, si van en paralelo)
+    this._currentRequest = ''; // petición del usuario del turno (criterio de reserva)
+    this._plegado = []; // intercambios antiguos plegados (resumen rodante)
+    this._transcript = []; // narración del turno (los subagentes no pasan por el init de chat)
     this._resumen = '';
-    this.toolsFired = new Map();         // name -> {count, lastAt}
+    this.toolsFired = new Map(); // name -> {count, lastAt}
     // v2.1: memoria del run para orquestar (se reinicia en cada _run)
-    this._delegations = [];              // [{agent, task, status, result}] subtareas ya hechas por el equipo
-    this._verified = false;              // alguna verificación delegada dio OK
-    this._writes = 0;                    // archivos escritos/editados en este run
-    this._cmds = 0;                      // comandos ejecutados con éxito
-    this._toolSeq = 0;                   // orden de las herramientas del run
+    this._delegations = []; // [{agent, task, status, result}] subtareas ya hechas por el equipo
+    this._verified = false; // alguna verificación delegada dio OK
+    this._writes = 0; // archivos escritos/editados en este run
+    this._cmds = 0; // comandos ejecutados con éxito
+    this._toolSeq = 0; // orden de las herramientas del run
     this._lastWriteSeq = -1;
     this._lastCmdSeq = -1;
-    this._gateUsed = false;              // la verificación de cierre solo puede pedirse una vez
-    this._reviewed = false;              // la revisión del cambio también, una por turno
-    this._cierreAuto = false;            // v2.5: la comprobación del proyecto (pruebas) ya se hizo
-    this._avisadoCtx = false;            // v2.5: ya se avisó de que el contexto va apretado
-    this._intentosArreglo = 0;           // v2.5: vueltas de «falló → arréglalo → repito» (0 y no undefined:
-                                         // `undefined++` es NaN, y `NaN >= tope` siempre es falso)
-    this._lastCmd = '';                  // v2.5: última orden del modelo (para no repetir sus pruebas)
-    this._skillsLoaded = new Set();      // ids de skills ya cargadas en este turno (su cuerpo no se repite)
-    this.todos = [];                     // v2.6: lista de tareas viva (todo_write), del turno y de la conversación
-    this.guardrails = new Guardrails(opts.guardrailsPolicy || {});   // límites + permisos
-    this._llmTimeoutMs = null;           // ms sin datos del proveedor antes de cortar (null = default)
-    this.pendingConfirm = null;          // {resolve, call} mientras el usuario decide
-    this.currentRun = null;              // checkpoint de la tarea en curso (checkpoints.js)
-    this.meta = { model: null, tokensIn: 0, tokensOut: 0, llmCalls: 0, toolCalls: 0, startedAt: null, lastLatencyMs: null, lastError: null, costUsd: 0, paused: false };
+    this._gateUsed = false; // la verificación de cierre solo puede pedirse una vez
+    this._reviewed = false; // la revisión del cambio también, una por turno
+    this._cierreAuto = false; // v2.5: la comprobación del proyecto (pruebas) ya se hizo
+    this._avisadoCtx = false; // v2.5: ya se avisó de que el contexto va apretado
+    this._intentosArreglo = 0; // v2.5: vueltas de «falló → arréglalo → repito» (0 y no undefined:
+    // `undefined++` es NaN, y `NaN >= tope` siempre es falso)
+    this._lastCmd = ''; // v2.5: última orden del modelo (para no repetir sus pruebas)
+    this._skillsLoaded = new Set(); // ids de skills ya cargadas en este turno (su cuerpo no se repite)
+    this.todos = []; // v2.6: lista de tareas viva (todo_write), del turno y de la conversación
+    this.guardrails = new Guardrails(opts.guardrailsPolicy || {}); // límites + permisos
+    this._llmTimeoutMs = null; // ms sin datos del proveedor antes de cortar (null = default)
+    this.pendingConfirm = null; // {resolve, call} mientras el usuario decide
+    this.currentRun = null; // checkpoint de la tarea en curso (checkpoints.js)
+    this.meta = {
+      model: null,
+      tokensIn: 0,
+      tokensOut: 0,
+      llmCalls: 0,
+      toolCalls: 0,
+      startedAt: null,
+      lastLatencyMs: null,
+      lastError: null,
+      costUsd: 0,
+      paused: false,
+    };
     // ID de sesión que viaja en x-opencode-session (OpenCode Go lo exige): estable
     // por conversación para que el proveedor enrute y cachee bien el prompt.
     this.sessionId = opencode.newSessionId();
   }
 
-  setPolicy(policy) { this.guardrails.setPolicy(policy); }
+  setPolicy(policy) {
+    this.guardrails.setPolicy(policy);
+  }
 
   /** Ata la identidad de sesión a una conversación (misma conv → misma sesión). */
   useSession(convId) {
     const nuevo = opencode.sessionFor(convId);
     // al cambiar de conversación el resumen plegado de la anterior no vale para nada
     // (y contarlo sería peor que no tenerlo)
-    if (nuevo !== this.sessionId) { this._resumen = ''; this._plegado = []; this.todos = []; }
+    if (nuevo !== this.sessionId) {
+      this._resumen = '';
+      this._plegado = [];
+      this.todos = [];
+    }
     this.sessionId = nuevo;
   }
 
@@ -238,14 +272,18 @@ class Agent {
      Es EXTRACTIVO a propósito: no cuesta una llamada al modelo, no añade latencia al
      turno y no falla. Un resumen redactado por el modelo es una mejora posible, pero no
      puede ser el único camino: si falla, la conversación se queda sin memoria. */
-  static MAX_PLEGADO = 12;                // intercambios que caben en el resumen
-  static MAX_PLEGADO_CHARS = 2600;        // tope duro del bloque
-  static MAX_IMAGENES = 3;                // imágenes que siguen viajando en el turno
+  static MAX_PLEGADO = 12; // intercambios que caben en el resumen
+  static MAX_PLEGADO_CHARS = 2600; // tope duro del bloque
+  static MAX_IMAGENES = 3; // imágenes que siguen viajando en el turno
 
   /** Pliega los mensajes que se van a descartar en el resumen del turno. */
   _plegarResumen(msgs) {
-    const texto = (c) => typeof c === 'string' ? c : (Array.isArray(c) ? ((c.find(x => x.type === 'text') || {}).text || '') : '');
-    const limpio = (s, n) => String(s || '').replace(/\s+/g, ' ').trim().slice(0, n);
+    const texto = (c) => (typeof c === 'string' ? c : Array.isArray(c) ? (c.find((x) => x.type === 'text') || {}).text || '' : '');
+    const limpio = (s, n) =>
+      String(s || '')
+        .replace(/\s+/g, ' ')
+        .trim()
+        .slice(0, n);
     const lineas = [];
     let actual = null;
     for (const m of msgs) {
@@ -253,7 +291,7 @@ class Agent {
         if (actual) lineas.push(actual);
         actual = { pide: limpio(texto(m.content), 220), hizo: '' };
       } else if (m.role === 'assistant' && actual && !m.tool_calls) {
-        actual.hizo = limpio(texto(m.content), 260);   // la conclusión del turno
+        actual.hizo = limpio(texto(m.content), 260); // la conclusión del turno
       }
     }
     if (actual && actual.pide) lineas.push(actual);
@@ -262,10 +300,11 @@ class Agent {
   }
 
   _renderResumen() {
-    const l = (this._plegado || []).filter(e => e && e.pide);
+    const l = (this._plegado || []).filter((e) => e && e.pide);
     if (!l.length) return '';
-    const cab = 'RESUMEN DE LA CONVERSACIÓN (turnos antiguos que ya no viajan completos; es CONTEXTO: no lo repitas ni lo cuentes como si acabara de pasar):';
-    const cuerpo = l.map(e => `- pidió: ${e.pide}${e.hizo ? ` → quedó en: ${e.hizo}` : ''}`).join('\n');
+    const cab =
+      'RESUMEN DE LA CONVERSACIÓN (turnos antiguos que ya no viajan completos; es CONTEXTO: no lo repitas ni lo cuentes como si acabara de pasar):';
+    const cuerpo = l.map((e) => `- pidió: ${e.pide}${e.hizo ? ` → quedó en: ${e.hizo}` : ''}`).join('\n');
     const total = cab + '\n' + cuerpo;
     return total.length > Agent.MAX_PLEGADO_CHARS ? total.slice(0, Agent.MAX_PLEGADO_CHARS) + '…' : total;
   }
@@ -312,9 +351,13 @@ class Agent {
     });
   }
 
-  getMeta() { return { ...this.meta, busy: this.busy }; }
+  getMeta() {
+    return { ...this.meta, busy: this.busy };
+  }
 
-  isBusy() { return this.busy; }
+  isBusy() {
+    return this.busy;
+  }
   getToolsFired() {
     return [...this.toolsFired.entries()].map(([name, v]) => ({ name, count: v.count, lastAt: v.lastAt }));
   }
@@ -331,21 +374,28 @@ class Agent {
     if (!this.busy) return { ok: false, error: 'No hay tarea en curso.' };
     // Un turno conversacional no genera checkpoint: no hay nada que reanudar,
     // pero el botón debe responder — lo tratamos como una parada limpia.
-    if (!this.currentRun) { this.stop(); return { ok: true, note: 'sin tarea guardable: detenido' }; }
+    if (!this.currentRun) {
+      this.stop();
+      return { ok: true, note: 'sin tarea guardable: detenido' };
+    }
     this.pauseRequested = true;
     this.emit({ type: 'status', text: 'Pausando tarea — guardando checkpoint…' });
     if (this.abort) this.abort.abort();
     this._killRunning();
     return { ok: true };
-  }  /** (v1.3) La reanudación vive en el TaskManager: agent/tasks.js orquesta
+  } /** (v1.3) La reanudación vive en el TaskManager: agent/tasks.js orquesta
       la cola, la concurrencia y agentes dedicados por tarea. */
-  get currentRunId() { return this.currentRun ? this.currentRun.runId : null; }
-
+  get currentRunId() {
+    return this.currentRun ? this.currentRun.runId : null;
+  }
 
   /* ============ bucle principal ============ */
 
   async chat(userText, settings, imageDataUrl, opts = {}) {
-    if (this.busy && !opts.background) { this.emit({ type: 'error', message: 'SAGITARI está ocupado terminando la tarea anterior.' }); return; }
+    if (this.busy && !opts.background) {
+      this.emit({ type: 'error', message: 'SAGITARI está ocupado terminando la tarea anterior.' });
+      return;
+    }
     this.busy = true;
     this.stopRequested = false;
     this.pauseRequested = false;
@@ -354,7 +404,7 @@ class Agent {
     // en cada intento de modelo (y las rellamadas internas los conservan).
     this._mode = MODE_PROFILES[settings.settings?.mode] || MODE_PROFILES.act;
     this._llmTimeoutMs = Number(settings.settings?.llmTimeoutMs);
-    if (!Number.isFinite(this._llmTimeoutMs) || this._llmTimeoutMs < 0) this._llmTimeoutMs = null;   // 0 = sin límite
+    if (!Number.isFinite(this._llmTimeoutMs) || this._llmTimeoutMs < 0) this._llmTimeoutMs = null; // 0 = sin límite
     const controller = new AbortController();
     this.abort = controller;
     try {
@@ -389,10 +439,16 @@ class Agent {
    * Si el mensaje llevaba una imagen, la conserva.
    */
   async retry(settings, opts = {}) {
-    if (this.busy) { this.emit({ type: 'error', message: 'Espera a que termine la ejecución actual para regenerar.' }); return { ok: false }; }
+    if (this.busy) {
+      this.emit({ type: 'error', message: 'Espera a que termine la ejecución actual para regenerar.' });
+      return { ok: false };
+    }
     let idx = -1;
     for (let i = this.history.length - 1; i >= 0; i--) {
-      if (this.history[i].role === 'user') { idx = i; break; }
+      if (this.history[i].role === 'user') {
+        idx = i;
+        break;
+      }
     }
     if (idx < 0) {
       this.emit({ type: 'error', message: 'No hay ninguna petición que regenerar en esta conversación.' });
@@ -400,19 +456,29 @@ class Agent {
     }
     const last = this.history[idx];
     const parts = Array.isArray(last.content) ? last.content : null;
-    const text = parts ? ((parts.find(c => c.type === 'text') || {}).text || '') : last.content;
+    const text = parts ? (parts.find((c) => c.type === 'text') || {}).text || '' : last.content;
     // conserva TODAS las imágenes del turno, no solo la primera
-    const images = parts ? parts.filter(c => c.type === 'image_url').map(c => (c.image_url || {}).url).filter(Boolean) : [];
+    const images = parts
+      ? parts
+          .filter((c) => c.type === 'image_url')
+          .map((c) => (c.image_url || {}).url)
+          .filter(Boolean)
+      : [];
 
     this.history = this.history.slice(0, idx);
     this.toolsFired.clear();
     // la tarea abierta se descarta: el reintento empieza de cero con su propio run
     if (this.currentRun && !this.currentRun.closed) {
-      try { checkpoints.cancel(this.currentRun); } catch {}
+      try {
+        checkpoints.cancel(this.currentRun);
+      } catch {}
     }
     this.currentRun = null;
     runlog.log({ agent: 'sagitari', event: 'retry', kept: this.history.length });
-    await this.chat(text, settings, images[0] || undefined, { ...opts, attachments: images.slice(1).map(u => ({ kind: 'image', dataUrl: u })) });
+    await this.chat(text, settings, images[0] || undefined, {
+      ...opts,
+      attachments: images.slice(1).map((u) => ({ kind: 'image', dataUrl: u })),
+    });
     return { ok: true, text };
   }
 
@@ -422,12 +488,24 @@ class Agent {
   _killRunning() {
     const killables = [this.runningTool, ...this.runningTools.values()];
     for (const k of killables) {
-      if (k && typeof k.stop === 'function') { try { k.stop(); } catch {} }
+      if (k && typeof k.stop === 'function') {
+        try {
+          k.stop();
+        } catch {}
+      }
     }
     this.runningTools.clear();
-    for (const sub of this.subagents) { try { sub.stop(); } catch {} }
+    for (const sub of this.subagents) {
+      try {
+        sub.stop();
+      } catch {}
+    }
     this.subagents.clear();
-    if (this.subagent) { try { this.subagent.stop(); } catch {} }
+    if (this.subagent) {
+      try {
+        this.subagent.stop();
+      } catch {}
+    }
   }
 
   // Detener de verdad: aborta el fetch del modelo Y mata el comando/herramienta
@@ -440,7 +518,9 @@ class Agent {
     if (this.pendingConfirm) {
       const pc = this.pendingConfirm;
       this.pendingConfirm = null;
-      try { pc.resolve(false); } catch {}
+      try {
+        pc.resolve(false);
+      } catch {}
     }
     if (this.abort) this.abort.abort();
     this._killRunning();
@@ -455,7 +535,7 @@ class Agent {
     const mode = this._mode || MODE_PROFILES[settings.settings?.mode] || MODE_PROFILES.act;
     this._mode = mode;
     this._llmTimeoutMs = Number(settings.settings?.llmTimeoutMs);
-    if (!Number.isFinite(this._llmTimeoutMs) || this._llmTimeoutMs < 0) this._llmTimeoutMs = null;   // 0 = sin límite
+    if (!Number.isFinite(this._llmTimeoutMs) || this._llmTimeoutMs < 0) this._llmTimeoutMs = null; // 0 = sin límite
     this.meta.model = cfg.model || this.meta.model;
     this.meta.startedAt = Date.now();
     this.meta.lastError = null;
@@ -482,11 +562,11 @@ class Agent {
     this._lastCmdSeq = -1;
     this._gateUsed = false;
     this._reviewed = false;
-    this._cierreAuto = false;            // v2.5: comprobación del proyecto una vez por turno
-    this._intentosArreglo = 0;           // v2.5: vueltas de «falló → arréglalo → repito»
-    this._avisadoCtx = false;            // v2.5: aviso de contexto apretado, una vez por turno
+    this._cierreAuto = false; // v2.5: comprobación del proyecto una vez por turno
+    this._intentosArreglo = 0; // v2.5: vueltas de «falló → arréglalo → repito»
+    this._avisadoCtx = false; // v2.5: aviso de contexto apretado, una vez por turno
     this._lastCmd = '';
-    this._transcript = [];               // narración del turno, ronda a ronda (va en assistant_done)
+    this._transcript = []; // narración del turno, ronda a ronda (va en assistant_done)
     this._skillsLoaded = new Set();
 
     // ---- checkpoint: persistir la tarea si es suficientemente larga ----
@@ -495,8 +575,12 @@ class Agent {
     if (!task) {
       const existing = this.currentRun;
       if (existing && !existing.closed && Date.parse(existing.updatedAt) > Date.now() - 30 * 60000) {
-        task = existing;                       // continúa la tarea abierta reciente
-      } else if (userText && userText.length >= 12 && /\b(tarea|investiga|busca|crea|genera|prepara|automatiza|analiza|organiza|compara|informe|lista|descarga)\b/i.test(userText)) {
+        task = existing; // continúa la tarea abierta reciente
+      } else if (
+        userText &&
+        userText.length >= 12 &&
+        /\b(tarea|investiga|busca|crea|genera|prepara|automatiza|analiza|organiza|compara|informe|lista|descarga)\b/i.test(userText)
+      ) {
         task = checkpoints.newRun({ goal: userText.slice(0, 300), mode: settings.settings?.mode || 'act' });
         checkpoints.save(task);
       }
@@ -504,7 +588,12 @@ class Agent {
     this.currentRun = task;
     if (task && !task.closed) {
       runlog.log({ agent: 'sagitari', task: task.runId, event: 'run_start', mode: settings.settings?.mode || 'act', model: cfg.model });
-      checkpoints.record(task, { step: 'UNDERSTAND', tool: null, ok: true, summary: userText ? String(userText).slice(0, 160) : (isResume ? 'reanudada' : '') });
+      checkpoints.record(task, {
+        step: 'UNDERSTAND',
+        tool: null,
+        ok: true,
+        summary: userText ? String(userText).slice(0, 160) : isResume ? 'reanudada' : '',
+      });
     } else {
       runlog.log({ agent: 'sagitari', task: runId, event: 'run_start', mode: settings.settings?.mode || 'act', model: cfg.model });
     }
@@ -513,14 +602,20 @@ class Agent {
     // ---- adjuntos: TODAS las imágenes van como partes multimodales (la primera
     // por imageDataUrl, las demás en opts.attachments); el texto de documentos ya
     // llega inline dentro de userText (lo compone el proceso principal) ----
-    const extraImgs = (opts.attachments || []).filter(a => a && a.kind === 'image' && a.dataUrl).map(a => a.dataUrl);
+    const extraImgs = (opts.attachments || []).filter((a) => a && a.kind === 'image' && a.dataUrl).map((a) => a.dataUrl);
     const imgUrls = [imageDataUrl, ...extraImgs].filter(Boolean);
     const content = imgUrls.length
-      ? [{ type: 'text', text: userText || (imgUrls.length > 1 ? 'Analiza estas imágenes' : 'Analiza esta imagen') },
-         ...imgUrls.map(u => ({ type: 'image_url', image_url: { url: u } }))]
+      ? [
+          { type: 'text', text: userText || (imgUrls.length > 1 ? 'Analiza estas imágenes' : 'Analiza esta imagen') },
+          ...imgUrls.map((u) => ({ type: 'image_url', image_url: { url: u } })),
+        ]
       : userText;
     // conversación nueva (o historial vaciado al borrarla): el resumen anterior no vale
-    if (!this.history.length) { this._resumen = ''; this._plegado = []; this.todos = []; }
+    if (!this.history.length) {
+      this._resumen = '';
+      this._plegado = [];
+      this.todos = [];
+    }
     cambios.olvidar((settings.settings && settings.settings.workspace) || path.join(os.homedir(), 'Desktop', 'Sagitari'));
     this._currentRequest = userText || '';
     this.history.push({ role: 'user', content });
@@ -531,15 +626,19 @@ class Agent {
 
     const ws = (settings.settings && settings.settings.workspace) || path.join(os.homedir(), 'Desktop', 'Sagitari');
     // ---- memoria relevante: solo la que aplica a esta conversación ----
-    const recent = this.history.slice(-6).map(h => (typeof h.content === 'string' ? h.content : (h.content?.find(c => c.type === 'text')?.text) || '')).join(' ');
+    const recent = this.history
+      .slice(-6)
+      .map((h) => (typeof h.content === 'string' ? h.content : h.content?.find((c) => c.type === 'text')?.text || ''))
+      .join(' ');
     const memSens = Number(settings.settings?.memSensitivity ?? 2);
     const mems = memory.relevantMemories(recent, { limit: 30, minScore: [0, 0.3, 0.45, 0.65][Math.max(0, Math.min(3, memSens))] });
-    const memBlock = mems.map(m => `- ${m.mem.text}`).join('\n') || '(vacía)';
+    const memBlock = mems.map((m) => `- ${m.mem.text}`).join('\n') || '(vacía)';
     // v1.7: skills sugeridas automáticamente según la tarea
     let skillsHint = '';
     try {
       const suggested = await skills.suggestSkillsFor(recent);
-      if (suggested.length) skillsHint = `\n- SKILLS SUGERIDAS para esta petición (llama a use_skill): ${suggested.map(s => s.name).join(', ')}.`;
+      if (suggested.length)
+        skillsHint = `\n- SKILLS SUGERIDAS para esta petición (llama a use_skill): ${suggested.map((s) => s.name).join(', ')}.`;
     } catch {}
     // v2.0: perfil de hábitos observados del usuario
     const habitsBlock = habits.profile();
@@ -549,36 +648,59 @@ class Agent {
        sugeridas). Los proveedores con caché de prompt reutilizan el prefijo idéntico: antes
        la memoria —que cambia en cada turno— iba casi al principio y rompía el caché desde
        la décima línea. */
-    const dinamico = `\n\nMEMORIA del usuario — recuerdos relevantes para esta conversación (úsalos si aplican, no los cites):\n${memBlock}`
-      + '\n- Para guardar algo importante que el usuario te pida recordar (preferencias, datos, decisiones), usa la herramienta remember.'
-      + '\n- Si la petición es conversacional (saludo, pregunta), responde directamente sin herramientas.'
-      + (skillsHint || '')
-      + (habitsBlock ? `\n\nPERFIL DEL USUARIO (hábitos observados — adáptate a ellos):\n${habitsBlock}` : '');
-    const sys = systemPrompt()
-      + `\n\nESPACIO DE TRABAJO: ${ws}`
-      + '\n- Es la carpeta por defecto para crear/modificar archivos; las rutas relativas resuelven aquí.'
-      + '\n- Solo toques otras ubicaciones si el usuario lo pide explícitamente (ruta absoluta).'
+    const dinamico =
+      `\n\nMEMORIA del usuario — recuerdos relevantes para esta conversación (úsalos si aplican, no los cites):\n${memBlock}` +
+      '\n- Para guardar algo importante que el usuario te pida recordar (preferencias, datos, decisiones), usa la herramienta remember.' +
+      '\n- Si la petición es conversacional (saludo, pregunta), responde directamente sin herramientas.' +
+      (skillsHint || '') +
+      (habitsBlock ? `\n\nPERFIL DEL USUARIO (hábitos observados — adáptate a ellos):\n${habitsBlock}` : '');
+    const sys =
+      systemPrompt() +
+      `\n\nESPACIO DE TRABAJO: ${ws}` +
+      '\n- Es la carpeta por defecto para crear/modificar archivos; las rutas relativas resuelven aquí.' +
+      '\n- Solo toques otras ubicaciones si el usuario lo pide explícitamente (ruta absoluta).' +
       // v2.5: las reglas de la casa (SAGITARI.md / AGENTS.md). Van las primeras del bloque
       // estable y marcadas como obligatorias: el usuario manda sobre las costumbres del modelo.
-      + (() => { try { const b = instrucciones.bloquePrompt(ws); return b ? '\n\n' + b : ''; } catch { return ''; } })()
+      (() => {
+        try {
+          const b = instrucciones.bloquePrompt(ws);
+          return b ? '\n\n' + b : '';
+        } catch {
+          return '';
+        }
+      })() +
       // v2.4: lo que se sabe del proyecto (comandos que EXISTEN) y su mapa si es grande.
       // Van en el bloque estable: cambian poco y así el prefijo sigue siendo cacheable.
-      + (() => { try { const b = proyecto.bloquePrompt(ws); return b ? '\n\n' + b : ''; } catch { return ''; } })()
+      (() => {
+        try {
+          const b = proyecto.bloquePrompt(ws);
+          return b ? '\n\n' + b : '';
+        } catch {
+          return '';
+        }
+      })() +
       // El mapa se recalcula cada 2 minutos o al escribir (executors.invalidar): recorrer
       // el árbol en cada turno sería un tirón en el hilo principal sin ganar nada.
-      + (() => { try { const b = repomap.bloquePrompt(ws, { ttlMs: 120000 }); return b ? '\n\n' + b : ''; } catch { return ''; } })()
-      + `\n\nMODO ACTUAL (${settings.settings?.mode || 'act'}): ${mode.note}`
-      + (mode.planFirst ? '\nFormato del plan: una línea por paso, empieza tu respuesta con "PLAN:" y numera los pasos.' : '')
-      + (settings.settings?.verifyGate === false
-          ? '\n\nVERIFICACIÓN DE CIERRE: desactivada por el usuario (no hace falta que delegues en verification para cerrar).'
-          : '\n\nVERIFICACIÓN DE CIERRE: activa. Si has modificado archivos o ejecutado cambios, antes de dar la tarea por terminada comprueba el RESULTADO (leer lo escrito, volver a ejecutarlo, o delegar en verification) y dilo en tu cierre.')
-      + (settings.settings?.reviewGate === false
-          ? '\n\nREVISIÓN DEL CAMBIO: desactivada por el usuario.'
-          : '\n\nREVISIÓN DEL CAMBIO: activa. Tu código pasa por una revisión automática antes de cerrar; si te devuelve un hallazgo BLOQUEANTE, arréglalo en el mismo turno.')
+      (() => {
+        try {
+          const b = repomap.bloquePrompt(ws, { ttlMs: 120000 });
+          return b ? '\n\n' + b : '';
+        } catch {
+          return '';
+        }
+      })() +
+      `\n\nMODO ACTUAL (${settings.settings?.mode || 'act'}): ${mode.note}` +
+      (mode.planFirst ? '\nFormato del plan: una línea por paso, empieza tu respuesta con "PLAN:" y numera los pasos.' : '') +
+      (settings.settings?.verifyGate === false
+        ? '\n\nVERIFICACIÓN DE CIERRE: desactivada por el usuario (no hace falta que delegues en verification para cerrar).'
+        : '\n\nVERIFICACIÓN DE CIERRE: activa. Si has modificado archivos o ejecutado cambios, antes de dar la tarea por terminada comprueba el RESULTADO (leer lo escrito, volver a ejecutarlo, o delegar en verification) y dilo en tu cierre.') +
+      (settings.settings?.reviewGate === false
+        ? '\n\nREVISIÓN DEL CAMBIO: desactivada por el usuario.'
+        : '\n\nREVISIÓN DEL CAMBIO: activa. Tu código pasa por una revisión automática antes de cerrar; si te devuelve un hallazgo BLOQUEANTE, arréglalo en el mismo turno.') +
       // v2.6: la lista de tareas viva va en CADA paso (bloque volátil): es lo que el
       // modelo conserva aunque el historial se recorte. Vacía si no hay lista.
-      + (this.todos.length ? '\n\n' + todos.bloquePrompt(this.todos) : '')
-      + dinamico;
+      (this.todos.length ? '\n\n' + todos.bloquePrompt(this.todos) : '') +
+      dinamico;
     // el resumen de lo plegado abre el contexto (mensaje de usuario: los proveedores no
     // aceptan un segundo system a mitad de conversación)
     const messages = [
@@ -597,22 +719,32 @@ class Agent {
       this._ctxUso = ctx0.uso;
       const nota = contexto.notaPresupuesto(ctx0);
       if (nota && messages[0]) messages[0] = { ...messages[0], content: String(messages[0].content) + '\n\n' + nota };
-      runlog.log({ agent: 'sagitari', task: taskId, event: 'context', uso: Math.round(ctx0.uso * 100) / 100, tokens: ctx0.total, ventana: ctx0.ventana, estado: ctx0.estado });
+      runlog.log({
+        agent: 'sagitari',
+        task: taskId,
+        event: 'context',
+        uso: Math.round(ctx0.uso * 100) / 100,
+        tokens: ctx0.total,
+        ventana: ctx0.ventana,
+        estado: ctx0.estado,
+      });
     } catch {}
 
     // ---- v1.6: router + cadena de fallback ----
     const { category, chain } = this._chainFor(settings, userText, { hasImage: !!imageDataUrl });
-    runlog.log({ agent: 'sagitari', task: taskId, event: 'model_route', category, chain: chain.map(c => c.model) });
+    runlog.log({ agent: 'sagitari', task: taskId, event: 'model_route', category, chain: chain.map((c) => c.model) });
 
     // el modo viaja con el arranque: la UI lo necesita para estampar el turno y
     // pintar el estado en vivo sin volver a preguntar por la configuración
     this.emit({ type: 'busy', busy: true, mode: (settings.settings && settings.settings.mode) || 'act', model: cfg.model });
     return await this._loop(messages, chain, signal, {
       settings,
-      tools: null,                        // catálogo completo (los subagentes filtran)
+      tools: null, // catálogo completo (los subagentes filtran)
       history: true,
-      account: true,                      // hábitos, runlog, checkpoints y verificación de cierre
-      task, taskId, runStart,
+      account: true, // hábitos, runlog, checkpoints y verificación de cierre
+      task,
+      taskId,
+      runStart,
       onStatus: (text) => this.emit({ type: 'status', text }),
       visionAllowsImages: cfg.vision !== false,
       background: !!opts.background,
@@ -640,7 +772,7 @@ class Agent {
   async _loop(messages, chain, signal, p = {}) {
     const settings = p.settings;
     const task = p.task || null;
-    const taskId = p.taskId || ('r' + Date.now().toString(36));
+    const taskId = p.taskId || 'r' + Date.now().toString(36);
     const runStart = p.runStart || Date.now();
     const onStatus = p.onStatus || null;
     let assistantSaidSomething = false;
@@ -653,11 +785,24 @@ class Agent {
         this.emit({ type: 'guardrail', reason: stepCheck.reason });
         if (p.account) {
           runlog.log({ agent: 'sagitari', task: taskId, event: 'guardrail_stop', reason: stepCheck.reason });
-          if (task && !task.closed) { checkpoints.interrupt(task); task.closed = true; }
-          this._pushAssistant(assistantSaidSomething ? { role: 'assistant', content: 'Me he detenido al llegar al límite de seguridad de este turno (' + stepCheck.reason + '). Lo que alcancé a hacer está en las herramientas de arriba; dime si lo retomo o si prefieres otro enfoque.' } : null);
+          if (task && !task.closed) {
+            checkpoints.interrupt(task);
+            task.closed = true;
+          }
+          this._pushAssistant(
+            assistantSaidSomething
+              ? {
+                  role: 'assistant',
+                  content:
+                    'Me he detenido al llegar al límite de seguridad de este turno (' +
+                    stepCheck.reason +
+                    '). Lo que alcancé a hacer está en las herramientas de arriba; dime si lo retomo o si prefieres otro enfoque.',
+                }
+              : null,
+          );
           return;
         }
-        break;   // subagente: corta y entrega lo que tenga
+        break; // subagente: corta y entrega lo que tenga
       }
       if (signal.aborted) {
         if (p.account) {
@@ -673,11 +818,15 @@ class Agent {
             // la ejecución abandona el run: ninguna vuelta posterior debe reutilizarlo
             task.closed = true;
           }
-          this._pushAssistant(assistantSaidSomething ? { role: 'assistant', content: 'Detenido a tu petición. Lo que ya estaba hecho queda en las herramientas de arriba.' } : null);
+          this._pushAssistant(
+            assistantSaidSomething
+              ? { role: 'assistant', content: 'Detenido a tu petición. Lo que ya estaba hecho queda en las herramientas de arriba.' }
+              : null,
+          );
           this.emit({ type: 'stopped' });
           return;
         }
-        break;   // subagente detenido: entrega lo que tenga
+        break; // subagente detenido: entrega lo que tenga
       }
       /* v2.5 — presupuesto de contexto, en CADA paso. Un turno largo acumula volcados de
          archivos y salidas de comandos, y son justo lo que ya no hace falta volver a
@@ -690,9 +839,25 @@ class Agent {
         if (ctx.estado === 'apretado') {
           const rec = contexto.recortarMensajes(messages, toolsOverride || allToolDefs(), chain[0] || {});
           if (rec.quitados) {
-            messages = rec.messages;   // solo el request: el historial sigue entero
-            runlog.log({ agent: 'sagitari', task: taskId, event: 'context_trim', bloques: rec.quitados, tokensLiberados: rec.tokensLiberados, uso: Math.round(ctx.uso * 100) / 100 });
-            if (onStatus && p.account) onStatus('Contexto al ' + Math.round(ctx.uso * 100) + '%: se sueltan ' + rec.quitados + ' bloque(s) antiguos del envío (~' + rec.tokensLiberados + ' tokens)');
+            messages = rec.messages; // solo el request: el historial sigue entero
+            runlog.log({
+              agent: 'sagitari',
+              task: taskId,
+              event: 'context_trim',
+              bloques: rec.quitados,
+              tokensLiberados: rec.tokensLiberados,
+              uso: Math.round(ctx.uso * 100) / 100,
+            });
+            if (onStatus && p.account)
+              onStatus(
+                'Contexto al ' +
+                  Math.round(ctx.uso * 100) +
+                  '%: se sueltan ' +
+                  rec.quitados +
+                  ' bloque(s) antiguos del envío (~' +
+                  rec.tokensLiberados +
+                  ' tokens)',
+              );
           }
         }
         if (ctx.estado === 'apretado' && p.account && !this._avisadoCtx) {
@@ -721,14 +886,34 @@ class Agent {
         this.meta.tokensOut += res.usage.completion_tokens || 0;
         // el modelo que REALMENTE responde: la cadena puede haber saltado (y el coste
         // se tarifa con ese, no con el que se pedía)
-        runlog.log({ agent: 'sagitari', task: taskId, event: 'llm', model: this.guardrails.model, durationMs: this.meta.lastLatencyMs, tokens: res.usage });
-        const tok = this.guardrails.addTokens((res.usage.total_tokens || 0), res.usage);
+        runlog.log({
+          agent: 'sagitari',
+          task: taskId,
+          event: 'llm',
+          model: this.guardrails.model,
+          durationMs: this.meta.lastLatencyMs,
+          tokens: res.usage,
+        });
+        const tok = this.guardrails.addTokens(res.usage.total_tokens || 0, res.usage);
         this.meta.costUsd = this.guardrails.getCost();
         if (!tok.ok) {
           this.emit({ type: 'guardrail', reason: tok.reason });
           if (p.account) {
-            if (task && !task.closed) { checkpoints.interrupt(task); task.closed = true; }
-            this._pushAssistant(assistantSaidSomething ? { role: 'assistant', content: 'Me he detenido al agotar el límite de tokens del turno (' + tok.reason + '). Puedes subir el límite en Ajustes ▸ Guardarraíles, o pedirme que continúe desde aquí.' } : null);
+            if (task && !task.closed) {
+              checkpoints.interrupt(task);
+              task.closed = true;
+            }
+            this._pushAssistant(
+              assistantSaidSomething
+                ? {
+                    role: 'assistant',
+                    content:
+                      'Me he detenido al agotar el límite de tokens del turno (' +
+                      tok.reason +
+                      '). Puedes subir el límite en Ajustes ▸ Guardarraíles, o pedirme que continúe desde aquí.',
+                  }
+                : null,
+            );
             return;
           }
           break;
@@ -761,8 +946,19 @@ class Agent {
         this.emit({ type: 'guardrail', reason: stall.reason });
         if (p.account) {
           runlog.log({ agent: 'sagitari', task: taskId, event: 'stall_detected' });
-          if (task && !task.closed) { checkpoints.interrupt(task); task.closed = true; }
-          this._pushAssistant(assistantSaidSomething ? { role: 'assistant', content: 'Me he detenido porque llevaba varios pasos sin avanzar de verdad —repitiendo lo mismo sin que cambiara nada— y he preferido cortar antes de gastar el turno en el mismo bucle. Dime si lo retomo por otro camino y sigo desde aquí.' } : null);
+          if (task && !task.closed) {
+            checkpoints.interrupt(task);
+            task.closed = true;
+          }
+          this._pushAssistant(
+            assistantSaidSomething
+              ? {
+                  role: 'assistant',
+                  content:
+                    'Me he detenido porque llevaba varios pasos sin avanzar de verdad —repitiendo lo mismo sin que cambiara nada— y he preferido cortar antes de gastar el turno en el mismo bucle. Dime si lo retomo por otro camino y sigo desde aquí.',
+                }
+              : null,
+          );
           return;
         }
         break;
@@ -800,13 +996,18 @@ class Agent {
            consultan en orden ANTES de lanzar nada, así que un tope o un bucle detectado
            cortan también lo que todavía no ha salido; y Detener mata TODO lo que esté en
            vuelo, no solo la última. */
-        const envueltos = await this._runToolCalls(res.toolCalls, {
-          signal, settings,
-          tools: p.tools,                       // null = catálogo completo
-          noDelegate: !p.account,               // un subagente no vuelve a delegar
-          task: p.account ? task : null,        // el checkpoint es del orquestador
-          onStatus,
-        }, Number(p.parallelTools) || Agent.MAX_PARALELO);
+        const envueltos = await this._runToolCalls(
+          res.toolCalls,
+          {
+            signal,
+            settings,
+            tools: p.tools, // null = catálogo completo
+            noDelegate: !p.account, // un subagente no vuelve a delegar
+            task: p.account ? task : null, // el checkpoint es del orquestador
+            onStatus,
+          },
+          Number(p.parallelTools) || Agent.MAX_PARALELO,
+        );
 
         /* Se procesan EN ORDEN (aunque hayan terminado en otro): el historial y el
            feed del chat cuentan la misma historia que el modelo pidió, y el orden de
@@ -822,10 +1023,15 @@ class Agent {
           }
           const toolT0 = envuelto.t0;
           const r = envuelto.r;
-          if (!r) continue;   // abortada a mitad: se cierra como no ejecutada
+          if (!r) continue; // abortada a mitad: se cierra como no ejecutada
           const guardar = (text, modelContent) => {
             answered.add(tc.id);
-            messages.push({ role: 'tool', tool_call_id: tc.id, name: tc.function.name, content: modelContent === undefined ? text : modelContent });
+            messages.push({
+              role: 'tool',
+              tool_call_id: tc.id,
+              name: tc.function.name,
+              content: modelContent === undefined ? text : modelContent,
+            });
             if (p.history) this.history.push({ role: 'tool', tool_call_id: tc.id, name: tc.function.name, content: text });
             recortarImagenesViejas();
           };
@@ -836,10 +1042,12 @@ class Agent {
              quedan como texto: el modelo ya las describió y no las necesita otra vez. */
           const recortarImagenesViejas = () => {
             if (!p.visionAllowsImages) return;
-            const conImagen = messages.filter(m => m.role === 'tool' && Array.isArray(m.content) && m.content.some(c => c.type === 'image_url'));
+            const conImagen = messages.filter(
+              (m) => m.role === 'tool' && Array.isArray(m.content) && m.content.some((c) => c.type === 'image_url'),
+            );
             while (conImagen.length > Agent.MAX_IMAGENES) {
               const m = conImagen.shift();
-              const txt = (m.content.find(c => c.type === 'text') || {}).text || '';
+              const txt = (m.content.find((c) => c.type === 'text') || {}).text || '';
               m.content = `${txt}\n(la imagen de este resultado ya no se adjunta: solo viajan las ${Agent.MAX_IMAGENES} últimas del turno)`;
             }
           };
@@ -856,37 +1064,65 @@ class Agent {
             closePendingCalls('(no ejecutada: bucle detectado)');
             if (p.account) {
               runlog.log({ agent: 'sagitari', task: taskId, event: 'loop_detected', tool: tc.function.name, pattern: r.pattern });
-              if (task && !task.closed) { checkpoints.interrupt(task); task.closed = true; }
-              this._pushAssistant(assistantSaidSomething ? { role: 'assistant', content: 'Me he detenido porque he detectado que repetía la misma acción en bucle (' + (r.pattern || 'acción repetida') + ') sin avanzar. Lo hecho hasta aquí queda arriba; dime si lo retomo con otro enfoque.' } : null);
+              if (task && !task.closed) {
+                checkpoints.interrupt(task);
+                task.closed = true;
+              }
+              this._pushAssistant(
+                assistantSaidSomething
+                  ? {
+                      role: 'assistant',
+                      content:
+                        'Me he detenido porque he detectado que repetía la misma acción en bucle (' +
+                        (r.pattern || 'acción repetida') +
+                        ') sin avanzar. Lo hecho hasta aquí queda arriba; dime si lo retomo con otro enfoque.',
+                    }
+                  : null,
+              );
               return;
             }
             break;
           }
-          if (r.action === 'aborted') { closePendingCalls('(no ejecutada: ejecución detenida)'); break; }
+          if (r.action === 'aborted') {
+            closePendingCalls('(no ejecutada: ejecución detenida)');
+            break;
+          }
           if (r.action !== 'ok') {
             // rechazada sin ejecutar (argumentos ilegibles, herramienta fuera de
             // alcance o desconocida, o denegada): se responde y el turno continúa
             if (r.action === 'denied' && r.reason === 'user' && p.account) {
-              try { habits.observe('confirm', { approved: false, tool: tc.function.name }); } catch {}
+              try {
+                habits.observe('confirm', { approved: false, tool: tc.function.name });
+              } catch {}
             }
             guardar(r.text);
             this.emit({
-              type: 'tool_result', name: tc.function.name, ok: false, durationMs: Date.now() - toolT0,
-              result: (r.action === 'denied' && r.reason === 'user') ? 'Denegado por el usuario' : String(r.text).slice(0, 1200),
+              type: 'tool_result',
+              name: tc.function.name,
+              ok: false,
+              durationMs: Date.now() - toolT0,
+              result: r.action === 'denied' && r.reason === 'user' ? 'Denegado por el usuario' : String(r.text).slice(0, 1200),
             });
             continue;
           }
 
-          if (r.confirmed && p.account) { try { habits.observe('confirm', { approved: true, tool: tc.function.name }); } catch {} }
+          if (r.confirmed && p.account) {
+            try {
+              habits.observe('confirm', { approved: true, tool: tc.function.name });
+            } catch {}
+          }
           const { text, images, failed } = r;
           if (p.account) {
             // ---- v2.1: traza de mutaciones del run (base del cierre verificado)
             this._toolSeq++;
             if (!failed) {
               const tname = tc.function.name;
-              if (tname === 'write_file' || tname === 'edit_file' || tname === 'apply_patch') { this._writes++; this._lastWriteSeq = this._toolSeq; }
-              else if (tname === 'run_command') {
-                this._cmds++; this._lastCmdSeq = this._toolSeq;
+              if (tname === 'write_file' || tname === 'edit_file' || tname === 'apply_patch') {
+                this._writes++;
+                this._lastWriteSeq = this._toolSeq;
+              } else if (tname === 'run_command') {
+                this._cmds++;
+                this._lastCmdSeq = this._toolSeq;
                 // v2.5: qué orden fue, para no volver a lanzar la misma comprobación
                 // que el propio modelo ya ejecutó después de su última escritura
                 this._lastCmd = String((r.args && r.args.command) || '');
@@ -895,10 +1131,16 @@ class Agent {
             // v2.0: observar hábitos del usuario (hechos de uso, no conversación).
             // Se observan los args YA redactados: la memoria persiste en disco
             // igual que el runlog y no debe guardar contraseñas ni claves.
-            try { habits.observe('tool', { name: tc.function.name, args: runlog.redactToolArgs(tc.function.name, r.args) }); } catch {}
+            try {
+              habits.observe('tool', { name: tc.function.name, args: runlog.redactToolArgs(tc.function.name, r.args) });
+            } catch {}
             runlog.log({
-              agent: 'sagitari', task: taskId, event: 'tool', tool: tc.function.name,
-              args: r.args, durationMs: Date.now() - toolT0,
+              agent: 'sagitari',
+              task: taskId,
+              event: 'tool',
+              tool: tc.function.name,
+              args: r.args,
+              durationMs: Date.now() - toolT0,
               success: !failed,
               error: failed ? String(text).slice(0, 200) : undefined,
             });
@@ -912,18 +1154,30 @@ class Agent {
             // fallida y «Reanudar» lanzaba una segunda ejecución del mismo run.
             // Un fallo de herramienta se anota; el cierre lo deciden los finales.
             if (failed) {
-              task.lastError = { step: 'EXECUTE', tool: tc.function.name, message: String(text).slice(0, 500), ts: new Date().toISOString() };
+              task.lastError = {
+                step: 'EXECUTE',
+                tool: tc.function.name,
+                message: String(text).slice(0, 500),
+                ts: new Date().toISOString(),
+              };
               checkpoints.save(task);
             }
           }
           // Feed vision inputs (screenshots) back to the model when supported
-          const toolContent = images && p.visionAllowsImages
-            ? [{ type: 'text', text }, ...images.map(u => ({ type: 'image_url', image_url: { url: u } }))]
-            : text;
+          const toolContent =
+            images && p.visionAllowsImages
+              ? [{ type: 'text', text }, ...images.map((u) => ({ type: 'image_url', image_url: { url: u } }))]
+              : text;
           guardar(text, toolContent);
           // v2.0: la tarjeta del chat muestra el resultado completo posible, su
           // duración real y si falló, para que ver y entender sea lo mismo
-          this.emit({ type: 'tool_result', name: tc.function.name, result: String(text).slice(0, 1200), ok: !failed, durationMs: Date.now() - toolT0 });
+          this.emit({
+            type: 'tool_result',
+            name: tc.function.name,
+            result: String(text).slice(0, 1200),
+            ok: !failed,
+            durationMs: Date.now() - toolT0,
+          });
           assistantSaidSomething = true;
         }
         // toda tool_call necesita su respuesta por id, aunque no se haya llegado a lanzar
@@ -939,7 +1193,7 @@ class Agent {
          vuelve a intentarlo, hasta el tope de intentos de Ajustes. Es el ciclo «prueba
          que falla → arreglo → repito» corriendo solo, en vez de depender de que el
          modelo se acuerde de comprobar lo que acaba de escribir. */
-      if (p.account && await this._chequeoCierre({ settings, signal, messages, res })) continue;
+      if (p.account && (await this._chequeoCierre({ settings, signal, messages, res }))) continue;
 
       /* ---- v2.4: PUERTA DE CIERRE (revisión del CAMBIO + cierre verificado).
 
@@ -961,11 +1215,15 @@ class Agent {
           if (dif) {
             runlog.log({ agent: 'sagitari', task: taskId, event: 'review_gate', writes: this._writes, chars: dif.length });
             instrucciones.push(REVIEW_GATE_PROMPT);
-            const informe = await this._delegate(subagents.SUBAGENTS.review, {
-              task: 'Revisa el CAMBIO de este turno: dime solo lo que está mal, lo que falta o lo que va a doler. Nada de estilo si el proyecto no lo pide.',
-              context: `Petición del usuario: ${String(this._currentRequest || '').slice(0, 600)}\n\nDIFF DEL TURNO:\n${dif}`,
-              expect: 'Hallazgos numerados con severidad y ruta, o un OK explícito si no hay nada bloqueante.',
-            }, { settings, signal, screenshotFn: this.screenshotFn, browser: this.browser });
+            const informe = await this._delegate(
+              subagents.SUBAGENTS.review,
+              {
+                task: 'Revisa el CAMBIO de este turno: dime solo lo que está mal, lo que falta o lo que va a doler. Nada de estilo si el proyecto no lo pide.',
+                context: `Petición del usuario: ${String(this._currentRequest || '').slice(0, 600)}\n\nDIFF DEL TURNO:\n${dif}`,
+                expect: 'Hallazgos numerados con severidad y ruta, o un OK explícito si no hay nada bloqueante.',
+              },
+              { settings, signal, screenshotFn: this.screenshotFn, browser: this.browser },
+            );
             informes.push(`REVISIÓN DEL CAMBIO (sobre lo que se ha escrito):\n${informe}`);
           }
         }
@@ -975,8 +1233,12 @@ class Agent {
           instrucciones.push(VERIFY_GATE_PROMPT);
         }
         if (instrucciones.length) {
-          const texto = puertaRev && puertaVer ? 'Revisando el cambio y verificando el resultado antes de cerrar…'
-            : (puertaRev ? 'Revisando el cambio antes de cerrar…' : 'Verificando el resultado antes de cerrar…');
+          const texto =
+            puertaRev && puertaVer
+              ? 'Revisando el cambio y verificando el resultado antes de cerrar…'
+              : puertaRev
+                ? 'Revisando el cambio antes de cerrar…'
+                : 'Verificando el resultado antes de cerrar…';
           this.emit({ type: 'status', text: texto });
           // lo que el modelo ya respondió se conserva: la ronda extra no repite la respuesta
           this.history.push({ role: 'assistant', content: res.text });
@@ -987,11 +1249,20 @@ class Agent {
       }
 
       // Final text answer — un subagente la entrega a su orquestador
-      if (p.onFinal) { p.onFinal(res.text); return; }
+      if (p.onFinal) {
+        p.onFinal(res.text);
+        return;
+      }
 
       // Final text answer — cierre del protocolo VERIFY → DONE
       this.history.push({ role: 'assistant', content: res.text });
-      runlog.log({ agent: 'sagitari', task: taskId, event: 'run_end', durationMs: Date.now() - runStart, tokens: { prompt_tokens: this.meta.tokensIn, completion_tokens: this.meta.tokensOut } });
+      runlog.log({
+        agent: 'sagitari',
+        task: taskId,
+        event: 'run_end',
+        durationMs: Date.now() - runStart,
+        tokens: { prompt_tokens: this.meta.tokensIn, completion_tokens: this.meta.tokensOut },
+      });
       if (task && !task.closed) {
         checkpoints.complete(task, res.text);
         task.closed = true;
@@ -1005,10 +1276,15 @@ class Agent {
         try {
           const wsUndo = (settings.settings && settings.settings.workspace) || path.join(os.homedir(), 'Desktop', 'Sagitari');
           const plan = cambios.planDeshacer(wsUndo);
-          if (plan.length) this.emit({ type: 'can_undo', files: plan.slice(0, 24).map(x => x.ruta) });
+          if (plan.length) this.emit({ type: 'can_undo', files: plan.slice(0, 24).map((x) => x.ruta) });
         } catch {}
       }
-      this.emit({ type: 'assistant_done', text: res.text, transcript: this.transcriptFull(), runId: p.background ? (task && task.runId) : undefined });
+      this.emit({
+        type: 'assistant_done',
+        text: res.text,
+        transcript: this.transcriptFull(),
+        runId: p.background ? task && task.runId : undefined,
+      });
       return;
     }
 
@@ -1016,24 +1292,33 @@ class Agent {
     // que dijo (antes lo hacía el bucle propio con este mismo criterio), y así el
     // orquestador recibe un PARTIAL honesto en vez de un vacío.
     if (p.onFinal) {
-      const lastAssistant = [...messages].reverse().find(m => m.role === 'assistant' && m.content);
+      const lastAssistant = [...messages].reverse().find((m) => m.role === 'assistant' && m.content);
       p.onFinal(lastAssistant ? String(lastAssistant.content) : '');
     }
   }
 
-  _pushAssistant(msg) { if (msg) { this.history.push(msg); this.emit({ type: 'assistant_done', text: msg.content, transcript: this.transcriptFull() }); } }
+  _pushAssistant(msg) {
+    if (msg) {
+      this.history.push(msg);
+      this.emit({ type: 'assistant_done', text: msg.content, transcript: this.transcriptFull() });
+    }
+  }
 
   /** Narración completa del turno para guardar y repintar (con tope). */
-  transcriptFull() { return recortarTranscripcion((this._transcript || []).join('\n\n')); }
+  transcriptFull() {
+    return recortarTranscripcion((this._transcript || []).join('\n\n'));
+  }
 
   /* ============ v1.4: delegación en subagentes ============ */
 
-  static CONFIRM_ROUTES = new Map();   // cid -> Agent (confirmaciones de subagentes)
+  static CONFIRM_ROUTES = new Map(); // cid -> Agent (confirmaciones de subagentes)
   static routeConfirm(cid, approved) {
     const a = Agent.CONFIRM_ROUTES.get(cid);
     if (!a) return false;
     Agent.CONFIRM_ROUTES.delete(cid);
-    try { a.resolveConfirm(cid, approved); } catch {}
+    try {
+      a.resolveConfirm(cid, approved);
+    } catch {}
     return true;
   }
 
@@ -1049,7 +1334,10 @@ class Agent {
     let parar = false;
     const worker = async () => {
       for (;;) {
-        if (parar || ctx.signal.aborted) { parar = true; return; }
+        if (parar || ctx.signal.aborted) {
+          parar = true;
+          return;
+        }
         const i = siguiente++;
         if (i >= calls.length) return;
         const t0 = Date.now();
@@ -1088,8 +1376,11 @@ class Agent {
     const name = tc.function.name;
     let args = {};
     let argsError = null;
-    try { args = JSON.parse(tc.function.arguments || '{}'); }
-    catch { argsError = 'Error: los argumentos de la herramienta no son JSON válido. Reenvía la llamada con argumentos correctos (objeto JSON).'; }
+    try {
+      args = JSON.parse(tc.function.arguments || '{}');
+    } catch {
+      argsError = 'Error: los argumentos de la herramienta no son JSON válido. Reenvía la llamada con argumentos correctos (objeto JSON).';
+    }
     // Un JSON válido que no es objeto (p. ej. "null") pasaba el parse y reventaba
     // más abajo leyendo args.path: el turno se caía con un TypeError en vez de
     // responderle al modelo que reenvíe la llamada.
@@ -1112,15 +1403,18 @@ class Agent {
     if (argsError) return { action: 'bad-args', text: argsError, failed: true, args };
     // Alcance: los subagentes solo usan sus herramientas… y una herramienta
     // inexistente (alucinada) no debe llegar a pedir permiso al usuario
-    if (tools && !tools.some(d => d.function && d.function.name === name)) {
+    if (tools && !tools.some((d) => d.function && d.function.name === name)) {
       return {
-        action: 'not-allowed', failed: true, args,
-        text: ctx.noDelegate && name === 'delegate'
-          ? 'Error: un subagente no puede delegar a otro.'
-          : `Error: la herramienta «${name}» no está disponible para este subagente. Solo puedes usar: ${tools.map(d => d.function.name).join(', ')}.`,
+        action: 'not-allowed',
+        failed: true,
+        args,
+        text:
+          ctx.noDelegate && name === 'delegate'
+            ? 'Error: un subagente no puede delegar a otro.'
+            : `Error: la herramienta «${name}» no está disponible para este subagente. Solo puedes usar: ${tools.map((d) => d.function.name).join(', ')}.`,
       };
     }
-    if (!tools && !allToolDefs().some(d => d.function && d.function.name === name)) {
+    if (!tools && !allToolDefs().some((d) => d.function && d.function.name === name)) {
       return { action: 'unknown', failed: true, args, text: `Error: herramienta desconocida «${name}».` };
     }
 
@@ -1146,9 +1440,13 @@ class Agent {
       const cid = newConfirmId('c');
       Agent.CONFIRM_ROUTES.set(cid, this);
       this.emit({
-        type: 'confirm_request', id: cid, tool: name,
-        description: decision.description, summary: decision.summary, sensitive: decision.sensitive,
-        runId: (task && !task.closed) ? task.runId : undefined,
+        type: 'confirm_request',
+        id: cid,
+        tool: name,
+        description: decision.description,
+        summary: decision.summary,
+        sensitive: decision.sensitive,
+        runId: task && !task.closed ? task.runId : undefined,
       });
       const approved = await this._awaitConfirm(cid, signal);
       Agent.CONFIRM_ROUTES.delete(cid);
@@ -1156,7 +1454,10 @@ class Agent {
       if (signal.aborted) return { action: 'aborted', args };
       if (!approved) {
         return {
-          action: 'denied', reason: 'user', failed: true, args,
+          action: 'denied',
+          reason: 'user',
+          failed: true,
+          args,
           text: 'El usuario DENEGÓ esta acción. No la repitas; continúa con la tarea por otra vía o pregunta qué prefiere hacer.',
         };
       }
@@ -1164,7 +1465,7 @@ class Agent {
       this.guardrails.approve(decision.signature);
     }
 
-    const callKey = ctx.callId || ('call-' + (++Agent._callSeq));
+    const callKey = ctx.callId || 'call-' + ++Agent._callSeq;
     let result;
     let abortada = false;
     try {
@@ -1176,10 +1477,15 @@ class Agent {
            se mata, pero la que estaba en la COLA no puede ejecutarse después de la
            parada (el navegador es uno: hasta dos clics encolados salían tras Detener
            porque el semáforo no sabe nada del abort). */
-        if (signal && signal.aborted) { abortada = true; return ''; }
+        if (signal && signal.aborted) {
+          abortada = true;
+          return '';
+        }
         return this._executeToolCall(name, args, { settings, signal, task, onStatus, callKey });
       });
-    } catch (e) { result = 'Error: ' + e.message; }
+    } catch (e) {
+      result = 'Error: ' + e.message;
+    }
     this.runningTools.delete(callKey);
     if (abortada) return { action: 'aborted', args };
     this.runningTools.delete(callKey);
@@ -1207,7 +1513,10 @@ class Agent {
           // el evento lleva el motivo EN HUMANO (va a un aviso de la interfaz); la
           // instrucción —«no lances más subagentes, termina tú»— es para el modelo y
           // viaja en el resultado de la herramienta, que es quien tiene que obedecerla
-          this.emit({ type: 'guardrail', reason: `Tope de subagentes de este turno alcanzado: SAGITARI continúa la tarea con lo que ya tiene.` });
+          this.emit({
+            type: 'guardrail',
+            reason: `Tope de subagentes de este turno alcanzado: SAGITARI continúa la tarea con lo que ya tiene.`,
+          });
           result = `Error: ${cupo.reason}`;
         } else {
           result = spec
@@ -1236,13 +1545,18 @@ class Agent {
           home: os.homedir(),
           workspace: (settings.settings && settings.settings.workspace) || path.join(os.homedir(), 'Desktop', 'Sagitari'),
           // por llamada (no una sola): con varias en vuelo, Detener mata TODAS
-          registerKillable: (k) => { this.runningTools.set(callKey, k); this.runningTool = k; },
-          ownerId: this.sessionId,   // quién pide la acción (el navegador lo usa para no cruzar inventarios)
-          mcp: this.mcp,             // servidores MCP del usuario (herramientas mcp__*)
-          loadedSkills: this._skillsLoaded,   // v2.2: skills ya cargadas en este turno
+          registerKillable: (k) => {
+            this.runningTools.set(callKey, k);
+            this.runningTool = k;
+          },
+          ownerId: this.sessionId, // quién pide la acción (el navegador lo usa para no cruzar inventarios)
+          mcp: this.mcp, // servidores MCP del usuario (herramientas mcp__*)
+          loadedSkills: this._skillsLoaded, // v2.2: skills ya cargadas en este turno
         });
       }
-    } catch (e) { result = 'Error: ' + e.message; }
+    } catch (e) {
+      result = 'Error: ' + e.message;
+    }
     return result;
   }
 
@@ -1270,10 +1584,17 @@ class Agent {
     // v2.5: tu hook de cierre (Ajustes ▸ Agente). Manda: si falla, el turno no cierra.
     const plantillaHook = String(policy.hookCerrar || '').trim();
     let plan = null;
-    try { plan = diagnosticos.planCierre(proyecto.perfil(ws)); } catch { plan = null; }
-    if (!plan && !plantillaHook) { this._cierreAuto = true; return false; }   // no hay nada que ejecutar
+    try {
+      plan = diagnosticos.planCierre(proyecto.perfil(ws));
+    } catch {
+      plan = null;
+    }
+    if (!plan && !plantillaHook) {
+      this._cierreAuto = true;
+      return false;
+    } // no hay nada que ejecutar
     if (!plantillaHook && this._lastCmdSeq > this._lastWriteSeq && this._lastCmd.includes(plan.comando)) {
-      this._cierreAuto = true;   // el modelo ya lo comprobó él mismo después de escribir
+      this._cierreAuto = true; // el modelo ya lo comprobó él mismo después de escribir
       return false;
     }
     /* OJO: `_cierreAuto` NO se marca aquí. Si se marcara al empezar, tras devolver el
@@ -1290,50 +1611,92 @@ class Agent {
     if (plantillaHook) {
       this.emit({ type: 'status', text: etiqueta + ': ejecutando tu hook «' + plantillaHook + '»…' });
       let h = null;
-      try { h = await ejecutarHook(plantillaHook, { ws, archivos: cambios.archivosTocados(ws), timeoutMs: 180000, registerKillable: (k) => { this.runningTools.set('cierre', k); this.runningTool = k; } }); }
-      catch (e) { h = { ok: false, code: null, texto: String((e && e.message) || e), comando: plantillaHook }; }
-      finally { this.runningTools.delete('cierre'); }
+      try {
+        h = await ejecutarHook(plantillaHook, {
+          ws,
+          archivos: cambios.archivosTocados(ws),
+          timeoutMs: 180000,
+          registerKillable: (k) => {
+            this.runningTools.set('cierre', k);
+            this.runningTool = k;
+          },
+        });
+      } catch (e) {
+        h = { ok: false, code: null, texto: String((e && e.message) || e), comando: plantillaHook };
+      } finally {
+        this.runningTools.delete('cierre');
+      }
       if (signal && signal.aborted) return false;
-      r = { code: h.ok ? 0 : (h.code === undefined ? null : h.code), stdout: h.texto, stderr: '' };
+      r = { code: h.ok ? 0 : h.code === undefined ? null : h.code, stdout: h.texto, stderr: '' };
       texto = hooks.resumen(h, { etiqueta, comando: plantillaHook });
       comando = h.comando || plantillaHook;
-      if (h.ok && plan) { r = null; comando = plan.comando; texto = ''; }   // el hook pasó: sigue la comprobación del proyecto
-      else if (h.ok) { this._verified = true; this._cierreAuto = true;
+      if (h.ok && plan) {
+        r = null;
+        comando = plan.comando;
+        texto = '';
+      } // el hook pasó: sigue la comprobación del proyecto
+      else if (h.ok) {
+        this._verified = true;
+        this._cierreAuto = true;
         runlog.log({ agent: 'sagitari', event: 'close_check', check: 'hook', command: comando, ok: true, durationMs: Date.now() - t0 });
         this.emit({ type: 'tool_result', name: etiqueta, ok: true, durationMs: Date.now() - t0, result: hooks.recortar(texto, 1200) });
-        return false; }
+        return false;
+      }
     }
     if (!r) {
       this.emit({ type: 'status', text: etiqueta + ': ejecutando «' + plan.comando + '»…' });
       try {
         r = await ejecutarComandoVerificacion(plan.comando, {
-          cwd: ws, timeoutMs: plan.timeoutMs,
-          registerKillable: (k) => { this.runningTools.set('cierre', k); this.runningTool = k; },
+          cwd: ws,
+          timeoutMs: plan.timeoutMs,
+          registerKillable: (k) => {
+            this.runningTools.set('cierre', k);
+            this.runningTool = k;
+          },
         });
-      } catch (e) { r = { code: null, stdout: '', stderr: String((e && e.message) || e) }; }
-      finally { this.runningTools.delete('cierre'); }
+      } catch (e) {
+        r = { code: null, stdout: '', stderr: String((e && e.message) || e) };
+      } finally {
+        this.runningTools.delete('cierre');
+      }
       if (signal && signal.aborted) return false;
       texto = diagnosticos.resumenEjecucion(r, { etiqueta, comando: plan.comando });
     }
     const ok = r.code === 0;
     runlog.log({
-      agent: 'sagitari', task: this.currentRun ? this.currentRun.runId : undefined, event: 'close_check',
-      check: plan ? plan.id : 'hook', command: comando, ok, code: r.code, durationMs: Date.now() - t0,
+      agent: 'sagitari',
+      task: this.currentRun ? this.currentRun.runId : undefined,
+      event: 'close_check',
+      check: plan ? plan.id : 'hook',
+      command: comando,
+      ok,
+      code: r.code,
+      durationMs: Date.now() - t0,
     });
     // La tarjeta del chat lo enseña como una herramienta más: el usuario ve QUÉ se ejecutó
     // y qué salió, en vez de tener que creerse un «verificado».
     this.emit({ type: 'tool_result', name: etiqueta, ok, durationMs: Date.now() - t0, result: String(texto).slice(0, 1200) });
-    if (ok) { this._verified = true; this._cierreAuto = true; return false; }
+    if (ok) {
+      this._verified = true;
+      this._cierreAuto = true;
+      return false;
+    }
     const intentos = Math.max(0, Math.min(5, Number(policy.intentosArreglo ?? 2)));
     if (this._intentosArreglo >= intentos) {
       this._cierreAuto = true;
       // Sin vueltas: se cierra igual (el fallo ya está a la vista) pero queda dicho.
-      this.emit({ type: 'status', text: etiqueta + ': sigue fallando tras ' + this._intentosArreglo + ' intento(s); cierro y te lo dejo a la vista' });
+      this.emit({
+        type: 'status',
+        text: etiqueta + ': sigue fallando tras ' + this._intentosArreglo + ' intento(s); cierro y te lo dejo a la vista',
+      });
       return false;
     }
     this._intentosArreglo++;
     runlog.log({ agent: 'sagitari', event: 'close_check_retry', check: plan ? plan.id : 'hook', attempt: this._intentosArreglo });
-    this.emit({ type: 'status', text: etiqueta + ': ha fallado; se lo devuelvo al modelo para que lo arregle (' + this._intentosArreglo + '/' + intentos + ')' });
+    this.emit({
+      type: 'status',
+      text: etiqueta + ': ha fallado; se lo devuelvo al modelo para que lo arregle (' + this._intentosArreglo + '/' + intentos + ')',
+    });
     this.history.push({ role: 'assistant', content: res.text });
     messages.push({ role: 'assistant', content: res.text });
     messages.push({ role: 'user', content: CIERRE_FALLO_PROMPT(etiqueta) + '\n\n' + texto });
@@ -1358,7 +1721,7 @@ class Agent {
     const policy = (settings && settings.settings) || {};
     if (policy.reviewGate === false) return false;
     const ws = policy.workspace || path.join(os.homedir(), 'Desktop', 'Sagitari');
-    return cambios.hay(ws);   // si no hay diff guardado, no hay nada que revisar
+    return cambios.hay(ws); // si no hay diff guardado, no hay nada que revisar
   }
 
   _needsVerification(settings) {
@@ -1368,7 +1731,7 @@ class Agent {
     const touched = this._writes >= 2 || (this._writes >= 1 && this._cmds >= 1);
     if (!touched) return false;
     if (this._verified) return false;
-    if (this._lastCmdSeq > this._lastWriteSeq) return false;   // ya se comprobó ejecutando
+    if (this._lastCmdSeq > this._lastWriteSeq) return false; // ya se comprobó ejecutando
     return true;
   }
 
@@ -1403,7 +1766,11 @@ class Agent {
     let arbol = null;
     const escribeElArbol = ['write_file', 'edit_file', 'apply_patch'].some((t) => spec.allowTools.includes(t));
     if (escribeElArbol && ctx.settings.settings && ctx.settings.settings.arbolesAislados !== false) {
-      try { arbol = await arboles.crear(ws); } catch { arbol = null; }
+      try {
+        arbol = await arboles.crear(ws);
+      } catch {
+        arbol = null;
+      }
       if (arbol) {
         this.emit({ type: 'status', text: `🌳 ${spec.name}: en un árbol aislado (sus cambios vuelven verificados)` });
         runlog.log({ agent: 'sagitari', event: 'arbol_crear', subagent: spec.key, id: arbol.id });
@@ -1417,23 +1784,31 @@ class Agent {
     // v2.2: el tablero del chat necesita saber que EMPIEZA una delegación (no solo que
     // acaba): quién, qué y con qué criterio, en vivo.
     this.emit({
-      type: 'delegate_start', subagent: spec.key, task: taskText, expect, reserve: reserva,
-      runId: (this.currentRun && !this.currentRun.closed) ? this.currentRun.runId : undefined,
+      type: 'delegate_start',
+      subagent: spec.key,
+      task: taskText,
+      expect,
+      reserve: reserva,
+      runId: this.currentRun && !this.currentRun.closed ? this.currentRun.runId : undefined,
     });
     const sub = new Agent({
       fetchFn: this.fetchFn,
-      emit: (e) => { try { this.emit({ ...e, subagent: spec.key }); } catch {} },
+      emit: (e) => {
+        try {
+          this.emit({ ...e, subagent: spec.key });
+        } catch {}
+      },
       screenshotFn: ctx.screenshotFn,
       browser: ctx.browser,
-      mcp: this.mcp,   // aunque su catálogo filtrado no incluya MCP, el ejecutor necesita el gestor
+      mcp: this.mcp, // aunque su catálogo filtrado no incluya MCP, el ejecutor necesita el gestor
       guardrailsPolicy: {
         ...((ctx.settings && ctx.settings.security) || {}),
         guardrails: { ...((ctx.settings && ctx.settings.security && ctx.settings.security.guardrails) || {}), maxSteps: spec.maxSteps },
       },
     });
     const signal = (this.abort && this.abort.signal) || new AbortController().signal;
-    this.subagent = sub;              // para que Detener/Pausar maten también su comando en curso
-    this.subagents.add(sub);          // …y si van varios en paralelo, todos
+    this.subagent = sub; // para que Detener/Pausar maten también su comando en curso
+    this.subagents.add(sub); // …y si van varios en paralelo, todos
     this.emit({ type: 'status', text: `${spec.emoji} ${spec.name}: ${taskText.slice(0, 80)}` });
     // ---- skills del agente: índice de SU especialidad + las que encajan con esta
     // subtarea (antes las skills solo existían en el hilo principal)
@@ -1441,7 +1816,7 @@ class Agent {
     let suggested = [];
     try {
       skillsIndex = skills.promptIndexSync(spec.key);
-      suggested = (await skills.suggestSkillsFor(`${taskText} ${context}`, { agent: spec.key, limit: 2 })).map(s => s.name);
+      suggested = (await skills.suggestSkillsFor(`${taskText} ${context}`, { agent: spec.key, limit: 2 })).map((s) => s.name);
     } catch {}
     const brief = subagents.buildSubagentBrief({
       task: taskText,
@@ -1459,10 +1834,12 @@ class Agent {
         brief,
         subagents.toolDefsFor(spec.key),
         signal,
-        (text) => { finalText = text; },
+        (text) => {
+          finalText = text;
+        },
         // v2.2: enrutado por especialidad (si el usuario lo activó) — el verificador y el
         // archivador no necesitan el modelo más caro para leer y comprobar
-        { category: spec.category, elegirPorCategoria: ctx.settings.settings?.agentRouting === true }
+        { category: spec.category, elegirPorCategoria: ctx.settings.settings?.agentRouting === true },
       );
     } catch (e) {
       return `RESULT: delegación fallida (${e.message})\nSTATUS: FAILED`;
@@ -1491,15 +1868,24 @@ class Agent {
         fusion = await arboles.fusionar(arbol, {
           // las pre-imágenes se registran ANTES de aplicar: así la fusión se puede
           // deshacer como cualquier otro cambio del turno
-          preparar: (rels) => { for (const rel of rels) { try { cambios.recordar(ws, path.join(ws, rel)); } catch {} } },
+          preparar: (rels) => {
+            for (const rel of rels) {
+              try {
+                cambios.recordar(ws, path.join(ws, rel));
+              } catch {}
+            }
+          },
         });
       } catch (e) {
         fusion = { ok: false, archivos: [], conflicto: String((e && e.message) || e) };
       }
       await arboles.descartar(arbol, { conservar: !!(fusion && !fusion.ok && !fusion.vacio) });
       runlog.log({
-        agent: 'sagitari', event: 'arbol_fusionar', subagent: spec.key,
-        ok: !!(fusion && fusion.ok), archivos: ((fusion && fusion.archivos) || []).length,
+        agent: 'sagitari',
+        event: 'arbol_fusionar',
+        subagent: spec.key,
+        ok: !!(fusion && fusion.ok),
+        archivos: ((fusion && fusion.archivos) || []).length,
         conflicto: fusion && fusion.conflicto ? String(fusion.conflicto).slice(0, 200) : undefined,
       });
       if (fusion && fusion.ok && fusion.vacio) this.emit({ type: 'status', text: `${spec.name} terminó sin dejar cambios` });
@@ -1512,18 +1898,37 @@ class Agent {
     // v2.4: si el propio modelo pidió la revisión, la puerta del cierre no la repite
     if (spec.key === 'review') this._reviewed = true;
     this._delegations.push({ agent: spec.key, task: taskText, status: parsed.status, result: parsed.result });
-    runlog.log({ agent: 'sagitari', event: 'delegate', subagent: spec.key, status: parsed.status, durationMs: Date.now() - t0, task: taskText.slice(0, 120) });
+    runlog.log({
+      agent: 'sagitari',
+      event: 'delegate',
+      subagent: spec.key,
+      status: parsed.status,
+      durationMs: Date.now() - t0,
+      task: taskText.slice(0, 120),
+    });
     // el cierre viaja con lo que el subagente aportó (resultado, detalles y la
     // evidencia): la tarjeta del chat puede entonces enseñarlo tal cual
     this.emit({
-      type: 'delegate_done', subagent: spec.key, status: parsed.status,
+      type: 'delegate_done',
+      subagent: spec.key,
+      status: parsed.status,
       // `task` viaja también para que la interfaz cierre la MISMA fila que abrió al
       // empezar (evento delegate_start) en vez de buscar por agente
       task: taskText,
-      result: parsed.result, details: parsed.details, evidence: parsed.evidence,
+      result: parsed.result,
+      details: parsed.details,
+      evidence: parsed.evidence,
       durationMs: Date.now() - t0,
       // v3.0: qué volvió del árbol aislado (la tarjeta del chat lo puede enseñar)
-      fusion: fusion ? { ok: !!fusion.ok, vacio: !!fusion.vacio, archivos: fusion.archivos || [], conflicto: fusion.conflicto || null, dir: arbol && arbol.conservado ? arbol.dir : null } : undefined,
+      fusion: fusion
+        ? {
+            ok: !!fusion.ok,
+            vacio: !!fusion.vacio,
+            archivos: fusion.archivos || [],
+            conflicto: fusion.conflicto || null,
+            dir: arbol && arbol.conservado ? arbol.dir : null,
+          }
+        : undefined,
     });
     const evidence = parsed.evidence ? `\nEVIDENCIA: ${parsed.evidence}` : '';
     const board = subagents.formatDelegationBoard(this._delegations);
@@ -1531,9 +1936,11 @@ class Agent {
        trabajo como hecho — es justo el error que esto viene a evitar. */
     let notaFusion = '';
     if (arbol && fusion) {
-      if (fusion.ok && !fusion.vacio) notaFusion = `\nFUSIÓN: aplicados ${fusion.archivos.length} archivo(s) al proyecto del usuario desde el árbol aislado${fusion.archivos.length ? ': ' + fusion.archivos.slice(0, 10).join(', ') : ''}.`;
+      if (fusion.ok && !fusion.vacio)
+        notaFusion = `\nFUSIÓN: aplicados ${fusion.archivos.length} archivo(s) al proyecto del usuario desde el árbol aislado${fusion.archivos.length ? ': ' + fusion.archivos.slice(0, 10).join(', ') : ''}.`;
       else if (fusion.ok) notaFusion = '\nFUSIÓN: el subagente terminó sin cambiar archivos.';
-      else notaFusion = `\nFUSIÓN CON CONFLICTO: sus cambios NO se aplicaron al proyecto del usuario (${fusion.conflicto}). Dilo tal cual; no lo presentes como hecho. El árbol queda en ${arbol.dir} por si hay que mirarlo.`;
+      else
+        notaFusion = `\nFUSIÓN CON CONFLICTO: sus cambios NO se aplicaron al proyecto del usuario (${fusion.conflicto}). Dilo tal cual; no lo presentes como hecho. El árbol queda en ${arbol.dir} por si hay que mirarlo.`;
     }
     return `RESULTADO DE ${spec.name} (${parsed.status}):\n${parsed.result}${parsed.details ? '\nDETALLES: ' + parsed.details : ''}${evidence}${notaFusion}${board ? `\n\nTABLERO DE ESTE TURNO (subagentes ya usados):\n${board}` : ''}`;
   }
@@ -1552,22 +1959,27 @@ class Agent {
     // esto, delegar ignoraba el ajuste (300 s o «sin límite») y cortaba a los 120 s
     // por defecto, con un error que contradecía lo que dice Ajustes.
     this._llmTimeoutMs = Number(settings.settings?.llmTimeoutMs);
-    if (!Number.isFinite(this._llmTimeoutMs) || this._llmTimeoutMs < 0) this._llmTimeoutMs = null;   // 0 = sin límite
+    if (!Number.isFinite(this._llmTimeoutMs) || this._llmTimeoutMs < 0) this._llmTimeoutMs = null; // 0 = sin límite
     this.guardrails.model = cfg.model;
     this.guardrails.beginRun();
     this._skillsLoaded = new Set();
-    const messages = [{ role: 'system', content: sys }, { role: 'user', content: userText }];
+    const messages = [
+      { role: 'system', content: sys },
+      { role: 'user', content: userText },
+    ];
     // v2.2: cadena de modelos TAMBIÉN aquí. Antes el subagente iba directo al modelo
     // activo: un 500 o un timeout del proveedor tiraba la delegación entera (30 pasos de
     // trabajo a la basura) mientras el hilo principal habría seguido con el secundario.
     const { chain } = this._chainFor(settings, userText, opts);
     await this._loop(messages, chain, signal, {
       settings,
-      tools,                  // catálogo filtrado del subagente
+      tools, // catálogo filtrado del subagente
       history: false,
-      account: false,         // sin hábitos, checkpoints ni cierre verificado: es trabajo interno
-      task: null, taskId: null, runStart: null,
-      onStatus: null,         // los pasos del subagente los resume el orquestador
+      account: false, // sin hábitos, checkpoints ni cierre verificado: es trabajo interno
+      task: null,
+      taskId: null,
+      runStart: null,
+      onStatus: null, // los pasos del subagente los resume el orquestador
       onFinal: onFinalText,
       visionAllowsImages: cfg.vision !== false,
       background: false,
@@ -1610,7 +2022,13 @@ class Agent {
       } catch (e) {
         lastErr = e;
         models.record(entry.model, { ok: false, durationMs: Date.now() - t0, error: e.message, fallbackFrom: true });
-        runlog.log({ agent: 'sagitari', event: 'model_fallback', model: entry.model, role: entry.role, error: String(e.message).slice(0, 150) });
+        runlog.log({
+          agent: 'sagitari',
+          event: 'model_fallback',
+          model: entry.model,
+          role: entry.role,
+          error: String(e.message).slice(0, 150),
+        });
         if (signal.aborted) throw e;
         this.emit({ type: 'status', text: `Modelo «${entry.model}» no disponible — probando el siguiente…` });
       }
@@ -1626,25 +2044,39 @@ class Agent {
    */
   _chainFor(settings, text, opts = {}) {
     const cfg = this.activeConfig(settings);
-    const primary = { providerId: cfg.providerId, name: cfg.name, baseUrl: cfg.baseUrl, apiKey: cfg.apiKey, model: cfg.model, role: 'primary' };
+    const primary = {
+      providerId: cfg.providerId,
+      name: cfg.name,
+      baseUrl: cfg.baseUrl,
+      apiKey: cfg.apiKey,
+      model: cfg.model,
+      role: 'primary',
+    };
     const category = opts.category || models.classify(text, { hasImage: !!opts.hasImage });
     let chain = settings.settings?.modelRouting === false ? [primary] : models.fallbackChain(settings, category);
     if (!chain.length) chain = [primary];
     /* v2.5: caché de prompt del proveedor. Viaja en cada entrada de la cadena para que el
        protocolo sepa si puede marcar los puntos de corte (y para poder apagarlo en Ajustes:
        hay proveedores compatibles que rechazan el campo). */
-    chain = chain.map(c => ({ ...c, cachePrompt: settings.settings?.promptCache !== false }));
+    chain = chain.map((c) => ({ ...c, cachePrompt: settings.settings?.promptCache !== false }));
     /* v2.2: modelo por agente (opcional, `agentRouting`). El modelo ELEGIDO por el usuario
        manda siempre en el chat —hubo una queja legítima cuando el router lo cambiaba en
        silencio—; esto solo afecta a los subagentes, y solo si el usuario lo activa: al que
        verifica o al que archiva le vale el modelo barato del proveedor. Se busca en la
        lista REAL del proveedor del modelo activo; si no hay lista, no se toca nada. */
     if (opts.elegirPorCategoria && chain.length) {
-      const prov = (settings.providers || []).find(p => p.id === (settings.active || {}).providerId);
-      const lista = (prov && Array.isArray(prov.models)) ? prov.models : [];
+      const prov = (settings.providers || []).find((p) => p.id === (settings.active || {}).providerId);
+      const lista = prov && Array.isArray(prov.models) ? prov.models : [];
       const elegido = lista.length ? models.pickModelFor(lista, category) : null;
       if (elegido && elegido !== chain[0].model) {
-        chain = [{ ...chain[0], model: elegido, format: protocols.detectFormat({ baseUrl: chain[0].baseUrl, providerId: chain[0].providerId, model: elegido }) }, ...chain.slice(1)];
+        chain = [
+          {
+            ...chain[0],
+            model: elegido,
+            format: protocols.detectFormat({ baseUrl: chain[0].baseUrl, providerId: chain[0].providerId, model: elegido }),
+          },
+          ...chain.slice(1),
+        ];
       }
     }
     return { cfg, category, chain };
@@ -1671,7 +2103,7 @@ class Agent {
         signal,
         onText: (text) => this.emit({ type: 'delta', text }),
         onThinking: verRazon ? (text) => this.emit({ type: 'thinking_delta', text }) : undefined,
-      }
+      },
     );
   }
 }
@@ -1687,7 +2119,9 @@ const REVIEW_GATE_PROMPT = `ANTES DE CERRAR: has modificado archivos en este tur
 4. No repitas lo que ya dijiste; añade lo que cambia, con una frase por hallazgo: qué era, qué hiciste y cómo quedó. Si no había nada que arreglar, dilo con una frase entera («Lo he revisado y no hay nada que cambiar») — nunca respondas solo «sin hallazgos».`;
 
 /** Instrucción del ciclo automático: la comprobación del proyecto ha fallado de verdad. */
-const CIERRE_FALLO_PROMPT = (etiqueta) => `ANTES DE CERRAR: has modificado archivos y «${etiqueta}» del proyecto ha FALLADO con lo que hay ahora en disco. La salida real va abajo.
+const CIERRE_FALLO_PROMPT = (
+  etiqueta,
+) => `ANTES DE CERRAR: has modificado archivos y «${etiqueta}» del proyecto ha FALLADO con lo que hay ahora en disco. La salida real va abajo.
 1. Arréglalo con herramientas: el que no pasa es el código, no la comprobación. Nada de tocar la comprobación para que pase.
 2. Vuelve a ejecutarla y mira la salida; si ya no puedes (falta algo del entorno), dilo tal cual.
 3. NO repitas lo que ya dijiste. Cierra con una frase entera de cierre: «Lo he verificado: <qué ejecutaste y qué salió>».`;
@@ -1700,23 +2134,40 @@ const VERIFY_GATE_PROMPT = `ANTES DE CERRAR: has modificado archivos o ejecutado
 function statusFor(name, args) {
   if (String(name).startsWith('mcp__')) return 'MCP · ' + (args._mcp ? args._mcp.toolName : name.slice(5));
   switch (name) {
-    case 'run_command': return 'Terminal — ' + (args.command || '').slice(0, 90);
-    case 'read_file': return 'Leyendo ' + args.path;
-    case 'write_file': return 'Escribiendo ' + args.path;
-    case 'edit_file': return 'Editando ' + args.path;
-    case 'list_dir': return 'Explorando ' + args.path;
-    case 'search_files': return 'Buscando «' + args.pattern + '»';
-    case 'open_app': return 'Abriendo ' + args.name;
-    case 'open_url': return 'Abriendo ' + args.url;
-    case 'browser_control': return 'Navegador · ' + (args.action || '') + (args.url ? ' → ' + args.url : '');
-    case 'screenshot': return 'Capturando pantalla';
-    case 'clipboard': return 'Portapapeles · ' + args.action;
-    case 'notify': return 'Enviando notificación';
-    case 'media_control': return 'Multimedia · ' + args.action;
-    case 'window_manage': return 'Ventanas · ' + args.action;
-    case 'system_info': return 'Leyendo información del sistema';
-    case 'todo_write': return 'Actualizando la lista de tareas';
-    default: return name;
+    case 'run_command':
+      return 'Terminal — ' + (args.command || '').slice(0, 90);
+    case 'read_file':
+      return 'Leyendo ' + args.path;
+    case 'write_file':
+      return 'Escribiendo ' + args.path;
+    case 'edit_file':
+      return 'Editando ' + args.path;
+    case 'list_dir':
+      return 'Explorando ' + args.path;
+    case 'search_files':
+      return 'Buscando «' + args.pattern + '»';
+    case 'open_app':
+      return 'Abriendo ' + args.name;
+    case 'open_url':
+      return 'Abriendo ' + args.url;
+    case 'browser_control':
+      return 'Navegador · ' + (args.action || '') + (args.url ? ' → ' + args.url : '');
+    case 'screenshot':
+      return 'Capturando pantalla';
+    case 'clipboard':
+      return 'Portapapeles · ' + args.action;
+    case 'notify':
+      return 'Enviando notificación';
+    case 'media_control':
+      return 'Multimedia · ' + args.action;
+    case 'window_manage':
+      return 'Ventanas · ' + args.action;
+    case 'system_info':
+      return 'Leyendo información del sistema';
+    case 'todo_write':
+      return 'Actualizando la lista de tareas';
+    default:
+      return name;
   }
 }
 

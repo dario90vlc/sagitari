@@ -9,7 +9,7 @@ app.whenReady().then(() => {
   const { width: W, height: H } = img.getSize();
   console.log('size=' + W + 'x' + H + ' scaleFactor=' + img.getScaleFactor());
   const buf = img.toBitmap();
-  console.log('bufBytes=' + buf.length + ' expected=' + (W * H * 4));
+  console.log('bufBytes=' + buf.length + ' expected=' + W * H * 4);
   const A = (x, y) => buf[(y * W + x) * 4 + 3];
   console.log('alpha samples:');
   console.log('  corner(2,2)=' + A(2, 2));

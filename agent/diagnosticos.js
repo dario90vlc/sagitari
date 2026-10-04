@@ -34,14 +34,28 @@ const path = require('path');
  * --------------------------------------------------------------------------- */
 
 function hay(dir, rel) {
-  try { return fs.existsSync(path.join(dir, rel)); } catch { return false; }
+  try {
+    return fs.existsSync(path.join(dir, rel));
+  } catch {
+    return false;
+  }
 }
 
 /** ¿Hay config de ESLint en la raíz o algún package con el binario del proyecto? */
 function eslintDisponible(ws) {
   if (hay(ws, path.join('node_modules', 'eslint', 'bin', 'eslint.js'))) return true;
-  return ['eslint.config.js', 'eslint.config.mjs', 'eslint.config.cjs', 'eslint.config.ts',
-    '.eslintrc.js', '.eslintrc.cjs', '.eslintrc.mjs', '.eslintrc.json', '.eslintrc.yml', '.eslintrc'].some(f => hay(ws, f));
+  return [
+    'eslint.config.js',
+    'eslint.config.mjs',
+    'eslint.config.cjs',
+    'eslint.config.ts',
+    '.eslintrc.js',
+    '.eslintrc.cjs',
+    '.eslintrc.mjs',
+    '.eslintrc.json',
+    '.eslintrc.yml',
+    '.eslintrc',
+  ].some((f) => hay(ws, f));
 }
 
 const EXT_JS = ['.js', '.mjs', '.cjs', '.jsx', '.ts', '.tsx', '.vue', '.svelte', '.astro'];
@@ -64,14 +78,17 @@ function planPorArchivos(workspace, archivos = []) {
   const ws = String(workspace || '');
   if (!ws) return out;
   const lista = (Array.isArray(archivos) ? archivos : [archivos]).filter(Boolean).map(String);
-  const exts = new Set(lista.map(a => path.extname(a).toLowerCase()));
+  const exts = new Set(lista.map((a) => path.extname(a).toLowerCase()));
 
   /* ---- ESLint (JS/TS): el binario del proyecto, invocado con el Node del equipo ----
      Se llama al JS de ESLint, no al .cmd: así no hace falta shell y una ruta con
      espacios o acentos llega intacta. */
-  if (EXT_JS.some(e => exts.has(e)) && eslintDisponible(ws)) {
+  if (EXT_JS.some((e) => exts.has(e)) && eslintDisponible(ws)) {
     out.push({
-      id: 'eslint', etiqueta: 'ESLint', formato: 'eslint', clase: 'node-entrada',
+      id: 'eslint',
+      etiqueta: 'ESLint',
+      formato: 'eslint',
+      clase: 'node-entrada',
       entrada: path.join('node_modules', 'eslint', 'bin', 'eslint.js'),
       args: ['--format', 'json', '--no-color', '--no-error-on-unmatched-pattern'],
       timeoutMs: 25000,
@@ -79,24 +96,56 @@ function planPorArchivos(workspace, archivos = []) {
   }
 
   /* ---- Python: ruff (binario), flake8 y mypy (módulo). Solo si el proyecto lo declara. */
-  if (EXT_PY.some(e => exts.has(e))) {
+  if (EXT_PY.some((e) => exts.has(e))) {
     const decl = () => {
       const pistas = ['requirements.txt', 'requirements-dev.txt', 'pyproject.toml', 'setup.cfg', 'dev-requirements.txt'];
-      return pistas.map(f => { try { return fs.readFileSync(path.join(ws, f), 'utf8'); } catch { return ''; } }).join('\n');
+      return pistas
+        .map((f) => {
+          try {
+            return fs.readFileSync(path.join(ws, f), 'utf8');
+          } catch {
+            return '';
+          }
+        })
+        .join('\n');
     };
     const texto = decl();
     if (hay(ws, 'ruff.toml') || hay(ws, '.ruff.toml') || /\bruff\b/.test(texto)) {
-      out.push({ id: 'ruff', etiqueta: 'Ruff', formato: 'ruff', clase: 'comando', prog: 'ruff', args: ['check', '--output-format', 'concise', '--quiet'], timeoutMs: 20000 });
+      out.push({
+        id: 'ruff',
+        etiqueta: 'Ruff',
+        formato: 'ruff',
+        clase: 'comando',
+        prog: 'ruff',
+        args: ['check', '--output-format', 'concise', '--quiet'],
+        timeoutMs: 20000,
+      });
     }
     if (hay(ws, '.flake8') || /(^|\n)\s*flake8\b/.test(texto)) {
-      out.push({ id: 'flake8', etiqueta: 'Flake8', formato: 'ruff', clase: 'py-modulo', modulo: 'flake8', args: ['--format', '%(path)s:%(row)d:%(col)d: %(code)s %(text)s'], timeoutMs: 20000 });
+      out.push({
+        id: 'flake8',
+        etiqueta: 'Flake8',
+        formato: 'ruff',
+        clase: 'py-modulo',
+        modulo: 'flake8',
+        args: ['--format', '%(path)s:%(row)d:%(col)d: %(code)s %(text)s'],
+        timeoutMs: 20000,
+      });
     }
     if (/mypy/.test(texto) || hay(ws, 'mypy.ini')) {
-      out.push({ id: 'mypy', etiqueta: 'Mypy', formato: 'mypy', clase: 'py-modulo', modulo: 'mypy', args: ['--no-color-output', '--no-error-summary', '--show-error-codes'], timeoutMs: 30000 });
+      out.push({
+        id: 'mypy',
+        etiqueta: 'Mypy',
+        formato: 'mypy',
+        clase: 'py-modulo',
+        modulo: 'mypy',
+        args: ['--no-color-output', '--no-error-summary', '--show-error-codes'],
+        timeoutMs: 30000,
+      });
     }
   }
 
-  return out.map(c => ({ ...c, args: c.args.slice() }));
+  return out.map((c) => ({ ...c, args: c.args.slice() }));
 }
 
 /**
@@ -111,8 +160,11 @@ function planCierre(perfil) {
   if (!p.tests && !p.build) return null;
   if (p.tests) return { id: 'pruebas', etiqueta: 'Pruebas del proyecto', comando: p.tests, formato: 'pruebas', timeoutMs: 300000 };
   return {
-    id: 'compilacion', etiqueta: 'Compilación / tipos', comando: p.build,
-    formato: /\btsc\b/.test(String(p.build)) ? 'tsc' : 'generico', timeoutMs: 240000,
+    id: 'compilacion',
+    etiqueta: 'Compilación / tipos',
+    comando: p.build,
+    formato: /\btsc\b/.test(String(p.build)) ? 'tsc' : 'generico',
+    timeoutMs: 240000,
   };
 }
 
@@ -120,20 +172,27 @@ function planCierre(perfil) {
  *  Parsear la salida REAL de cada herramienta
  * --------------------------------------------------------------------------- */
 
-const clip = (s, n) => { s = String(s == null ? '' : s); return s.length > n ? s.slice(0, n) + '…' : s; };
+const clip = (s, n) => {
+  s = String(s == null ? '' : s);
+  return s.length > n ? s.slice(0, n) + '…' : s;
+};
 
 /** Resuelve una ruta del diagnóstico contra la raíz; null si está fuera del proyecto. */
 function aAbsoluta(raiz, p) {
-  const s = String(p || '').trim().replace(/^["']|["']$/g, '');
+  const s = String(p || '')
+    .trim()
+    .replace(/^["']|["']$/g, '');
   if (!s) return null;
   const abs = path.isAbsolute(s) ? path.normalize(s) : path.resolve(raiz || '.', s);
   if (!raiz) return abs;
-  const r = path.normalize(raiz).replace(/[\\/]+$/, '').toLowerCase();
+  const r = path
+    .normalize(raiz)
+    .replace(/[\\/]+$/, '')
+    .toLowerCase();
   return abs.toLowerCase().startsWith(r) ? abs : null;
 }
 
 /** Clave de comparación de rutas (Windows no distingue mayúsculas). */
-const clave = (p) => path.normalize(String(p || '')).replace(/[\\/]+$/, '').toLowerCase();
 
 const SEV = (s) => (/^(error|err|e)$/i.test(String(s)) ? 'error' : 'aviso');
 
@@ -157,7 +216,10 @@ function parsear(texto, { formato = 'generico', raiz = '', herramienta = null } 
   let sinUbicar = 0;
   const push = (archivo, linea, columna, sev, codigo, mensaje) => {
     const abs = aAbsoluta(raiz, archivo);
-    if (!abs) { sinUbicar++; return; }
+    if (!abs) {
+      sinUbicar++;
+      return;
+    }
     hallazgos.push({
       archivo: abs,
       linea: Number(linea) || null,
@@ -174,7 +236,9 @@ function parsear(texto, { formato = 'generico', raiz = '', herramienta = null } 
     try {
       const ini = src.indexOf('[');
       datos = JSON.parse(src.slice(ini >= 0 ? ini : 0));
-    } catch { datos = null; }
+    } catch {
+      datos = null;
+    }
     if (Array.isArray(datos)) {
       for (const archivo of datos) {
         for (const m of (archivo && archivo.messages) || []) {
@@ -219,7 +283,10 @@ function parsear(texto, { formato = 'generico', raiz = '', herramienta = null } 
       if (!cab) continue;
       for (let j = i + 1; j < Math.min(i + 4, lineas.length); j++) {
         const ubi = lineas[j].match(/^\s*-->\s+(.+?):(\d+):(\d+)/);
-        if (ubi) { push(ubi[1], ubi[2], ubi[3], cab[1], cab[3], cab[4]); break; }
+        if (ubi) {
+          push(ubi[1], ubi[2], ubi[3], cab[1], cab[3], cab[4]);
+          break;
+        }
       }
     }
     if (hallazgos.length || sinUbicar) return { hallazgos, sinUbicar };
@@ -235,7 +302,7 @@ function parsear(texto, { formato = 'generico', raiz = '', herramienta = null } 
     const m = linea.match(/^\s*(?:at\s+)?(.+?):(\d+):(?:(\d+):)?\s*(.*)$/);
     if (!m) continue;
     if (/^(error|warning|info|note|npm|node|file|path|File|Traceback)/i.test(m[1])) continue;
-    if (!/\.[A-Za-z0-9]{1,8}$/.test(m[1].trim())) continue;   // tiene que parecer un archivo
+    if (!/\.[A-Za-z0-9]{1,8}$/.test(m[1].trim())) continue; // tiene que parecer un archivo
     push(m[1], m[2], m[3], /error|fail/i.test(m[4]) ? 'error' : 'aviso', null, m[4] || '(sin detalle)');
   }
   return { hallazgos, sinUbicar };
@@ -252,10 +319,12 @@ function parsear(texto, { formato = 'generico', raiz = '', herramienta = null } 
  */
 function pareceFalloDeHerramienta(res) {
   const r = res || {};
-  if (r.code === null) return true;                        // no se pudo ni lanzar
-  if (r.code === 127 || r.code === 9009) return true;      // «command not found» / «no se reconoce»
+  if (r.code === null) return true; // no se pudo ni lanzar
+  if (r.code === 127 || r.code === 9009) return true; // «command not found» / «no se reconoce»
   const txt = String(r.stderr || '') + '\n' + String(r.stdout || '');
-  return /No module named|is not recognized as an internal|no se reconoce como un comando|command not found|Cannot find module|ENOENT/i.test(txt);
+  return /No module named|is not recognized as an internal|no se reconoce como un comando|command not found|Cannot find module|ENOENT/i.test(
+    txt,
+  );
 }
 
 /* --------------------------------------------------------------------------- *
@@ -277,7 +346,11 @@ function clasificar(hallazgos, opts = {}) {
   const preexistentes = [];
   for (const h of hallazgos || []) {
     let cambiadas = null;
-    try { cambiadas = lineasDe(h.archivo); } catch { cambiadas = null; }
+    try {
+      cambiadas = lineasDe(h.archivo);
+    } catch {
+      cambiadas = null;
+    }
     const nuevo = !cambiadas || !h.linea || cambiadas.has(h.linea);
     (nuevo ? nuevos : preexistentes).push(h);
   }
@@ -289,7 +362,7 @@ function clasificar(hallazgos, opts = {}) {
  * --------------------------------------------------------------------------- */
 
 const orden = { error: 0, aviso: 1 };
-const porGravedad = (a, b) => (orden[a.severidad] - orden[b.severidad]) || ((a.linea || 0) - (b.linea || 0));
+const porGravedad = (a, b) => orden[a.severidad] - orden[b.severidad] || (a.linea || 0) - (b.linea || 0);
 
 function lineaHallazgo(h, raiz) {
   const rel = raiz ? path.relative(raiz, h.archivo).replace(/\\/g, '/') : h.archivo;
@@ -304,21 +377,24 @@ function lineaHallazgo(h, raiz) {
 function resumen(clasificados, { etiqueta = 'Comprobación', raiz = '', maxLineas = 8, otrosArchivos = 0 } = {}) {
   const nuevos = (clasificados && clasificados.nuevos) || [];
   const viejos = (clasificados && clasificados.preexistentes) || [];
-  const errs = nuevos.filter(h => h.severidad === 'error').length;
+  const errs = nuevos.filter((h) => h.severidad === 'error').length;
   const avisos = nuevos.length - errs;
   if (!nuevos.length && !viejos.length && !otrosArchivos) return '';
   const cab = `${etiqueta}: ${errs} error(es)${avisos ? `, ${avisos} aviso(s)` : ''} en lo que has tocado`;
   const partes = [cab + ':'];
   for (const h of nuevos.slice().sort(porGravedad).slice(0, maxLineas)) partes.push(lineaHallazgo(h, raiz));
   if (nuevos.length > maxLineas) partes.push(`… (y ${nuevos.length - maxLineas} más)`);
-  if (viejos.length) partes.push(`(además, ${viejos.length} hallazgo(s) en líneas que NO has tocado: ya estaban ahí, no los arregles salvo que el usuario lo pida)`);
+  if (viejos.length)
+    partes.push(
+      `(además, ${viejos.length} hallazgo(s) en líneas que NO has tocado: ya estaban ahí, no los arregles salvo que el usuario lo pida)`,
+    );
   if (otrosArchivos) partes.push(`(y ${otrosArchivos} hallazgo(s) en otros archivos del proyecto)`);
   return partes.join('\n');
 }
 
 /** Hay errores NUEVOS que el agente tiene que atender para no dar el paso por bueno. */
 function hayErroresNuevos(clasificados) {
-  return !!clasificados && (clasificados.nuevos || []).some(h => h.severidad === 'error');
+  return !!clasificados && (clasificados.nuevos || []).some((h) => h.severidad === 'error');
 }
 
 /* --------------------------------------------------------------------------- *
@@ -337,13 +413,23 @@ function resumenEjecucion(res, { etiqueta = 'Comprobación', comando = '', maxCh
   const ok = r.code === 0;
   const cab = `${etiqueta} (${comando || 'comando'}) → ${ok ? 'OK' : 'FALLÓ'}${r.code == null ? '' : ' (código ' + r.code + ')'}`;
   if (ok) return cab;
-  const lineas = salida.split(/\r?\n/).filter(l => l.trim());
-  const interesantes = lineas.filter(l => /(^|\s)(FAIL|FAILED|ERROR|Error|error|✕|×|✗|Expected|Received|AssertionError|Traceback|passed|failed|Tests?:)/.test(l));
+  const lineas = salida.split(/\r?\n/).filter((l) => l.trim());
+  const interesantes = lineas.filter((l) =>
+    /(^|\s)(FAIL|FAILED|ERROR|Error|error|✕|×|✗|Expected|Received|AssertionError|Traceback|passed|failed|Tests?:)/.test(l),
+  );
   const cuerpo = (interesantes.length >= 3 ? interesantes : lineas).slice(-60).join('\n');
   return `${cab}\n${clip(cuerpo, maxChars)}`;
 }
 
 module.exports = {
-  planPorArchivos, planCierre, parsear, clasificar, resumen, resumenEjecucion,
-  hayErroresNuevos, pareceFalloDeHerramienta, eslintDisponible, aAbsoluta,
+  planPorArchivos,
+  planCierre,
+  parsear,
+  clasificar,
+  resumen,
+  resumenEjecucion,
+  hayErroresNuevos,
+  pareceFalloDeHerramienta,
+  eslintDisponible,
+  aAbsoluta,
 };

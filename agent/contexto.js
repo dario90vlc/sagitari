@@ -57,13 +57,12 @@ function medir(messages = [], tools = []) {
   let caracteres = 0;
   for (const m of messages) {
     if (typeof m.content === 'string') caracteres += m.content.length;
-    else if (Array.isArray(m.content)) for (const p of m.content) caracteres += (typeof p.text === 'string' ? p.text.length : 0) + (p.image_url ? 2000 : 0);
+    else if (Array.isArray(m.content))
+      for (const p of m.content) caracteres += (typeof p.text === 'string' ? p.text.length : 0) + (p.image_url ? 2000 : 0);
     if (m.tool_calls) caracteres += JSON.stringify(m.tool_calls).length;
-    caracteres += 40;   // sobrecarga del envoltorio del mensaje
+    caracteres += 40; // sobrecarga del envoltorio del mensaje
   }
-  const herramientas = tools && tools.length
-    ? estimarTokens(tools.map(t => t.function || t))
-    : 0;
+  const herramientas = tools && tools.length ? estimarTokens(tools.map((t) => t.function || t)) : 0;
   const mensajes = Math.ceil(caracteres / CHARS_POR_TOKEN);
   return { mensajes, herramientas, total: mensajes + herramientas, caracteres };
 }
@@ -80,7 +79,7 @@ function presupuesto({ messages = [], tools = [], cfg = {}, reservaSalida = 0 } 
   const m = medir(messages, tools);
   const ocupado = m.total + reserva;
   const uso = ocupado / ventana;
-  const estado = uso >= 0.85 ? 'apretado' : (uso >= 0.6 ? 'ajustado' : 'hola');
+  const estado = uso >= 0.85 ? 'apretado' : uso >= 0.6 ? 'ajustado' : 'hola';
   return { ...m, total: m.total, ventana, uso, estado, reserva, libre: Math.max(0, ventana - ocupado) };
 }
 
@@ -90,8 +89,10 @@ function presupuesto({ messages = [], tools = [], cfg = {}, reservaSalida = 0 } 
  */
 function notaPresupuesto(p) {
   if (!p || (p.estado !== 'apretado' && p.estado !== 'ajustado')) return '';
-  const base = 'PRESUPUESTO DE CONTEXTO: queda poco sitio en esta conversación (' +
-    Math.round(p.uso * 100) + '% de la ventana ocupada). Trabaja en pasos cortos, lee solo los ' +
+  const base =
+    'PRESUPUESTO DE CONTEXTO: queda poco sitio en esta conversación (' +
+    Math.round(p.uso * 100) +
+    '% de la ventana ocupada). Trabaja en pasos cortos, lee solo los ' +
     'tramos que necesitas (por rangos de líneas, no el archivo entero), y no repitas en tu ' +
     'respuesta lo que ya está en el contexto';
   return p.estado === 'apretado'
@@ -107,8 +108,11 @@ function notaPresupuesto(p) {
 function enBloques(messages) {
   const bloques = [];
   for (const m of messages) {
-    if (m.role === 'system') { bloques.push([m]); continue; }
-    if (m.role === 'tool' && bloques.length && bloques[bloques.length - 1].some(x => x.role !== 'system' && x.role !== 'user')) {
+    if (m.role === 'system') {
+      bloques.push([m]);
+      continue;
+    }
+    if (m.role === 'tool' && bloques.length && bloques[bloques.length - 1].some((x) => x.role !== 'system' && x.role !== 'user')) {
       bloques[bloques.length - 1].push(m);
       continue;
     }
@@ -129,7 +133,7 @@ function enBloques(messages) {
  */
 function recortarMensajes(messages = [], tools = [], cfg = {}, { objetivo = 0.75, minimo = 6 } = {}) {
   const antes = medir(messages, tools).total;
-  let bloques = enBloques(messages);
+  const bloques = enBloques(messages);
   const ventana = ventanaDe(cfg);
   const tope = Math.max(8000, ventana * objetivo - (Number(cfg.maxTokens) || 4096) - medir([], tools).total);
   let quitados = 0;
@@ -140,7 +144,10 @@ function recortarMensajes(messages = [], tools = [], cfg = {}, { objetivo = 0.75
     bloques.splice(i, 1);
     quitados++;
     // tras soltar, la conversación no puede empezar por algo que no sea del usuario
-    while (bloques[i] && bloques[i][0].role !== 'user') { bloques.splice(i, 1); quitados++; }
+    while (bloques[i] && bloques[i][0].role !== 'user') {
+      bloques.splice(i, 1);
+      quitados++;
+    }
   }
   if (!quitados) return { messages, quitados: 0, tokensLiberados: 0 };
   return { messages: bloques.flat(), quitados, tokensLiberados: Math.max(0, antes - medir(bloques.flat(), tools).total) };

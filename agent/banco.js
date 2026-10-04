@@ -33,7 +33,7 @@ const os = require('os');
 const path = require('path');
 
 const DIR_POR_DEFECTO = path.join(__dirname, '..', 'bench', 'tareas');
-const MAX_SALIDA = 4000;   // lo que se guarda de la salida de una comprobación
+const MAX_SALIDA = 4000; // lo que se guarda de la salida de una comprobación
 
 /* --------------------------------------------------------------------------- *
  *  Leer tareas
@@ -48,14 +48,18 @@ const MAX_SALIDA = 4000;   // lo que se guarda de la salida de una comprobación
 function leerTarea(dir) {
   const f = path.join(dir, 'tarea.json');
   let json = null;
-  try { json = JSON.parse(fs.readFileSync(f, 'utf8')); }
-  catch (e) { return { ok: false, error: 'no se pudo leer tarea.json: ' + ((e && e.message) || e) }; }
+  try {
+    json = JSON.parse(fs.readFileSync(f, 'utf8'));
+  } catch (e) {
+    return { ok: false, error: 'no se pudo leer tarea.json: ' + ((e && e.message) || e) };
+  }
   const nombre = String(json.nombre || path.basename(dir)).trim();
   const objetivo = String(json.objetivo || '').trim();
   if (!objetivo) return { ok: false, error: nombre + ': falta «objetivo» (es lo que se le pide al agente)' };
-  const espera = Array.isArray(json.espera) ? json.espera.filter(e => e && (e.archivo || e.ruta)) : [];
+  const espera = Array.isArray(json.espera) ? json.espera.filter((e) => e && (e.archivo || e.ruta)) : [];
   const comprobar = json.comprobar ? String(json.comprobar).trim() : '';
-  if (!espera.length && !comprobar) return { ok: false, error: nombre + ': sin «espera» ni «comprobar» no hay forma de saber si está bien' };
+  if (!espera.length && !comprobar)
+    return { ok: false, error: nombre + ': sin «espera» ni «comprobar» no hay forma de saber si está bien' };
   return {
     ok: true,
     tarea: {
@@ -64,7 +68,7 @@ function leerTarea(dir) {
       inicio: path.join(dir, 'inicio'),
       objetivo,
       comprobar,
-      espera: espera.map(e => ({
+      espera: espera.map((e) => ({
         archivo: String(e.archivo || e.ruta),
         existe: e.existe === undefined ? undefined : !!e.existe,
         contiene: e.contiene === undefined ? undefined : String(e.contiene),
@@ -85,11 +89,18 @@ function tareas(dir = DIR_POR_DEFECTO, { filtro = null } = {}) {
   const out = [];
   const malas = [];
   let entradas = [];
-  try { entradas = fs.readdirSync(dir, { withFileTypes: true }); } catch { return { ok: [], malas: [] }; }
+  try {
+    entradas = fs.readdirSync(dir, { withFileTypes: true });
+  } catch {
+    return { ok: [], malas: [] };
+  }
   for (const e of entradas) {
     if (!e.isDirectory()) continue;
     const r = leerTarea(path.join(dir, e.name));
-    if (!r.ok) { malas.push({ nombre: e.name, error: r.error }); continue; }
+    if (!r.ok) {
+      malas.push({ nombre: e.name, error: r.error });
+      continue;
+    }
     if (filtro && !new RegExp(String(filtro), 'i').test(r.tarea.nombre)) continue;
     out.push(r.tarea);
   }
@@ -114,14 +125,25 @@ function revisarEsperas(workspace, espera, antes = {}) {
       if (existe) fallos.push(e.archivo + ': no debería existir y existe');
       continue;
     }
-    if (e.existe === true && !existe) { fallos.push(e.archivo + ': no se creó'); continue; }
+    if (e.existe === true && !existe) {
+      fallos.push(e.archivo + ': no se creó');
+      continue;
+    }
     if (!existe) {
       // sin `existe` explícito, se sobreentiende que hay que leerlo
-      if (e.contiene || e.noContiene || e.sinCambios) { fallos.push(e.archivo + ': no existe'); continue; }
+      if (e.contiene || e.noContiene || e.sinCambios) {
+        fallos.push(e.archivo + ': no existe');
+        continue;
+      }
       continue;
     }
     let texto = '';
-    try { texto = fs.readFileSync(abs, 'utf8'); } catch { fallos.push(e.archivo + ': no se pudo leer'); continue; }
+    try {
+      texto = fs.readFileSync(abs, 'utf8');
+    } catch {
+      fallos.push(e.archivo + ': no se pudo leer');
+      continue;
+    }
     if (e.contiene && !texto.includes(e.contiene)) fallos.push(e.archivo + ': no contiene «' + e.contiene + '»');
     if (e.noContiene && texto.includes(e.noContiene)) fallos.push(e.archivo + ': contiene «' + e.noContiene + '» y no debería');
     // `sinCambios` compara con el punto de partida: es la forma de comprobar que se
@@ -143,10 +165,16 @@ function leerInicio(dirInicio) {
     for (const e of fs.readdirSync(abs, { withFileTypes: true })) {
       const r = rel ? path.join(rel, e.name) : e.name;
       if (e.isDirectory()) rec(r);
-      else { try { out[r.replace(/\\/g, '/')] = fs.readFileSync(path.join(dirInicio, r), 'utf8'); } catch {} }
+      else {
+        try {
+          out[r.replace(/\\/g, '/')] = fs.readFileSync(path.join(dirInicio, r), 'utf8');
+        } catch {}
+      }
     }
   };
-  try { rec(''); } catch {}
+  try {
+    rec('');
+  } catch {}
   return out;
 }
 
@@ -166,7 +194,8 @@ function juzgar({ esperas = { ok: true, fallos: [] }, comprobacion = null, error
     motivos.push('no se llegó a ejecutar «' + tarea.comprobar + '»');
   }
   if (tarea.pasosMax && pasos > tarea.pasosMax) motivos.push('se pasó del tope de pasos (' + pasos + ' > ' + tarea.pasosMax + ')');
-  if (tarea.tiempoMaxMs && ms > tarea.tiempoMaxMs) motivos.push('se pasó del tiempo máximo (' + Math.round(ms / 1000) + ' s > ' + Math.round(tarea.tiempoMaxMs / 1000) + ' s)');
+  if (tarea.tiempoMaxMs && ms > tarea.tiempoMaxMs)
+    motivos.push('se pasó del tiempo máximo (' + Math.round(ms / 1000) + ' s > ' + Math.round(tarea.tiempoMaxMs / 1000) + ' s)');
   return { pasa: motivos.length === 0, motivos };
 }
 
@@ -184,11 +213,13 @@ function juzgar({ esperas = { ok: true, fallos: [] }, comprobacion = null, error
  *          conservar?: boolean, baseTemporal?: string}} opts
  */
 async function correrTarea(tarea, opts = {}) {
-  const { agent = null, settings = {}, signal = null, emit = () => {}, conservar = false, baseTemporal = null } = opts;
+  const { agent = null, settings = {}, emit = () => {}, conservar = false, baseTemporal = null } = opts;
   const tmp = fs.mkdtempSync(path.join(baseTemporal || os.tmpdir(), 'sagi-banco-' + tarea.nombre.replace(/[^\w.-]+/g, '_') + '-'));
   const ws = path.join(tmp, 'trabajo');
   fs.mkdirSync(ws, { recursive: true });
-  try { if (fs.existsSync(tarea.inicio)) fs.cpSync(tarea.inicio, ws, { recursive: true }); } catch {}
+  try {
+    if (fs.existsSync(tarea.inicio)) fs.cpSync(tarea.inicio, ws, { recursive: true });
+  } catch {}
   const antes = leerInicio(tarea.inicio);
 
   const ajustes = {
@@ -199,11 +230,19 @@ async function correrTarea(tarea, opts = {}) {
   const t0 = Date.now();
   let error = null;
   let meta = null;
-  if (!agent) { error = 'no se pasó ningún agente al banco'; }
-  else {
-    try { await agent.chat(tarea.objetivo, ajustes); }
-    catch (e) { error = String((e && e.message) || e); }
-    try { meta = agent.getMeta ? agent.getMeta() : null; } catch { meta = null; }
+  if (!agent) {
+    error = 'no se pasó ningún agente al banco';
+  } else {
+    try {
+      await agent.chat(tarea.objetivo, ajustes);
+    } catch (e) {
+      error = String((e && e.message) || e);
+    }
+    try {
+      meta = agent.getMeta ? agent.getMeta() : null;
+    } catch {
+      meta = null;
+    }
   }
   const ms = Date.now() - t0;
 
@@ -224,7 +263,7 @@ async function correrTarea(tarea, opts = {}) {
   }
 
   const esperas = revisarEsperas(ws, tarea.espera, antes);
-  const pasos = meta ? (meta.toolCalls || 0) : 0;
+  const pasos = meta ? meta.toolCalls || 0 : 0;
   const v = juzgar({ esperas, comprobacion, error, ms, pasos, tarea });
   const resultado = {
     nombre: tarea.nombre,
@@ -234,15 +273,19 @@ async function correrTarea(tarea, opts = {}) {
     ms,
     pasos,
     tokens: meta ? (meta.tokensIn || 0) + (meta.tokensOut || 0) : 0,
-    costeUsd: meta ? (meta.costUsd || 0) : 0,
-    llamadasModelo: meta ? (meta.llmCalls || 0) : 0,
+    costeUsd: meta ? meta.costUsd || 0 : 0,
+    llamadasModelo: meta ? meta.llmCalls || 0 : 0,
     herramientas: agent && agent.getToolsFired ? agent.getToolsFired() : [],
     comprobacion,
     espacio: ws,
     conservado: false,
   };
   if (!resultado.pasa || conservar) resultado.conservado = true;
-  else { try { fs.rmSync(tmp, { recursive: true, force: true }); } catch {} }
+  else {
+    try {
+      fs.rmSync(tmp, { recursive: true, force: true });
+    } catch {}
+  }
   resultado.espacio = resultado.conservado ? ws : '(borrado al pasar)';
   emit({ type: 'banco_tarea', ...resultado });
   return resultado;
@@ -262,19 +305,29 @@ async function correrTodo(opts = {}) {
   const resultados = [];
   for (const t of lista) {
     let agent = null;
-    try { agent = nuevoAgente ? await nuevoAgente(t) : null; }
-    catch (e) { agent = null; }
+    try {
+      agent = nuevoAgente ? await nuevoAgente(t) : null;
+    } catch (e) {
+      agent = null;
+    }
     resultados.push(await correrTarea(t, { agent, settings, conservar }));
   }
   const resumen = {
     tareas: resultados.length,
-    pasaron: resultados.filter(r => r.pasa).length,
+    pasaron: resultados.filter((r) => r.pasa).length,
     ms: resultados.reduce((a, r) => a + r.ms, 0),
     tokens: resultados.reduce((a, r) => a + r.tokens, 0),
     costeUsd: resultados.reduce((a, r) => a + r.costeUsd, 0),
     pasos: resultados.reduce((a, r) => a + r.pasos, 0),
   };
-  return { cuando: new Date().toISOString(), etiqueta, modelo: (settings.active && settings.active.model) || null, resumen, resultados, malas };
+  return {
+    cuando: new Date().toISOString(),
+    etiqueta,
+    modelo: (settings.active && settings.active.model) || null,
+    resumen,
+    resultados,
+    malas,
+  };
 }
 
 /**
@@ -284,17 +337,25 @@ async function correrTodo(opts = {}) {
  * bloquear nada.
  */
 function comparar(reporte, base) {
-  const prev = new Map(((base && base.resultados) || []).map(r => [r.nombre, r]));
-  const ahora = new Map((reporte.resultados || []).map(r => [r.nombre, r]));
-  const regresiones = [], mejoras = [], nuevos = [], faltantes = [], avisos = [];
+  const prev = new Map(((base && base.resultados) || []).map((r) => [r.nombre, r]));
+  const ahora = new Map((reporte.resultados || []).map((r) => [r.nombre, r]));
+  const regresiones = [],
+    mejoras = [],
+    nuevos = [],
+    faltantes = [],
+    avisos = [];
   for (const [nombre, r] of ahora) {
     const b = prev.get(nombre);
-    if (!b) { nuevos.push({ nombre, pasa: r.pasa }); continue; }
+    if (!b) {
+      nuevos.push({ nombre, pasa: r.pasa });
+      continue;
+    }
     if (b.pasa && !r.pasa) regresiones.push({ nombre, antes: 'pasaba', ahora: 'falla', motivos: r.motivos });
     else if (!b.pasa && r.pasa) mejoras.push({ nombre });
     else if (b.pasa && r.pasa) {
       // pasaba y pasa: pero, ¿a qué precio? Un aviso no bloquea, solo informa.
-      const t = r.ms / Math.max(1, b.ms), tok = r.tokens / Math.max(1, b.tokens);
+      const t = r.ms / Math.max(1, b.ms),
+        tok = r.tokens / Math.max(1, b.tokens);
       if (t > 1.6 || tok > 1.6) avisos.push({ nombre, ms: r.ms, antesMs: b.ms, tokens: r.tokens, antesTokens: b.tokens });
     }
   }
@@ -304,17 +365,25 @@ function comparar(reporte, base) {
 
 /** Línea base en disco (la de `bench/linea-base.json`). */
 function leerBase(archivo) {
-  try { return JSON.parse(fs.readFileSync(archivo, 'utf8')); } catch { return null; }
+  try {
+    return JSON.parse(fs.readFileSync(archivo, 'utf8'));
+  } catch {
+    return null;
+  }
 }
 function guardarBase(archivo, reporte) {
   fs.mkdirSync(path.dirname(archivo), { recursive: true });
-  fs.writeFileSync(archivo, JSON.stringify({ cuando: reporte.cuando, modelo: reporte.modelo, resumen: reporte.resumen, resultados: reporte.resultados }, null, 2) + '\n');
+  fs.writeFileSync(
+    archivo,
+    JSON.stringify({ cuando: reporte.cuando, modelo: reporte.modelo, resumen: reporte.resumen, resultados: reporte.resultados }, null, 2) +
+      '\n',
+  );
   return archivo;
 }
 
 /** Tabla legible para la consola (lo que ve quien lanza el banco a mano). */
 function tabla(reporte) {
-  const filas = (reporte.resultados || []).map(r => [
+  const filas = (reporte.resultados || []).map((r) => [
     r.pasa ? 'OK  ' : 'FALLA',
     r.nombre,
     (r.ms / 1000).toFixed(1) + 's',
@@ -322,17 +391,27 @@ function tabla(reporte) {
     String(r.tokens),
     r.costeUsd ? '$' + r.costeUsd.toFixed(4) : '',
   ]);
-  const ancho = (i) => Math.max(...filas.map(f => f[i].length), 4);
-  const lineas = filas.map(f => `  ${f[0]}  ${f[1].padEnd(ancho(1))}  ${f[2].padStart(7)}  ${f[3].padStart(5)} paso(s)  ${f[4].padStart(7)} tok  ${f[5]}`);
+  const ancho = (i) => Math.max(...filas.map((f) => f[i].length), 4);
+  const lineas = filas.map(
+    (f) => `  ${f[0]}  ${f[1].padEnd(ancho(1))}  ${f[2].padStart(7)}  ${f[3].padStart(5)} paso(s)  ${f[4].padStart(7)} tok  ${f[5]}`,
+  );
   const s = reporte.resumen || {};
   const cab = `BANCO DE TAREAS${reporte.modelo ? ' · ' + reporte.modelo : ''} · ${s.pasaron || 0}/${s.tareas || 0} pasaron · ${((s.ms || 0) / 1000).toFixed(1)}s · ${s.tokens || 0} tokens`;
-  const fallos = (reporte.resultados || []).filter(r => !r.pasa)
-    .map(r => '    - ' + r.nombre + ': ' + r.motivos.join('; '));
+  const fallos = (reporte.resultados || []).filter((r) => !r.pasa).map((r) => '    - ' + r.nombre + ': ' + r.motivos.join('; '));
   return [cab, ...lineas, ...(fallos.length ? ['  Motivos:', ...fallos] : [])].join('\n');
 }
 
 module.exports = {
   DIR_POR_DEFECTO,
-  leerTarea, tareas, leerInicio, revisarEsperas, juzgar,
-  correrTarea, correrTodo, comparar, leerBase, guardarBase, tabla,
+  leerTarea,
+  tareas,
+  leerInicio,
+  revisarEsperas,
+  juzgar,
+  correrTarea,
+  correrTodo,
+  comparar,
+  leerBase,
+  guardarBase,
+  tabla,
 };

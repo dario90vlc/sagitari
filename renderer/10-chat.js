@@ -1,6 +1,11 @@
 /* SAGITARI renderer — 10-chat.js (antes app.js 1-1339): utilidades, burbujas del chat, tarjetas de herramienta, traza y equipo
    Script clásico: comparte el scope global con los demás 1x-*.js.
    El orden de carga en index.html preserva el orden original. */
+/* global renderTools, initAboutPanel */
+/* renderTools está en 40-vistas.js e initAboutPanel en 30-ajustes.js (scope compartido) */
+/* exported showEmpty, lastTurnLabel, setChatStatus, ensureThinkBlock, scheduleThinkRender,
+   completeToolCard, delegationCard, restaurarTraza, equipoChip, equipoCierra,
+   mostrarDeshacer, toolChip, todosCard, pinImage, listening */
 'use strict';
 
 const $ = (s) => document.querySelector(s);
@@ -11,18 +16,20 @@ const ic = (n, c) => window.SAGI_ICONS.icon(n, c);
 testearlas de verdad desde Node. */
 const K = window.ChatKit;
 
-let CFG = { providers: [], active: null, settings: {}, presets: [] };
-let busy = false;
+const CFG = { providers: [], active: null, settings: {}, presets: [] };
+const busy = false;
 let pendingAssistant = null;
-let listening = false;
-let mode = 'act';
-let currentRunMode = 'act';   // modo con el que se lanzó el turno en curso
-let lastAssistantEl = null;   // último bloque de respuesta (para regenerar/copiar)
-let pendingTurn = null;       // estado del turno: grupo de herramientas, plan…
-let lastTurnSummary = '';     // resumen del último turno («3 herramientas · 1,4 s»)
+var listening = false;
+const mode = 'act';
+let currentRunMode = 'act'; // modo con el que se lanzó el turno en curso
+let lastAssistantEl = null; // último bloque de respuesta (para regenerar/copiar)
+let pendingTurn = null; // estado del turno: grupo de herramientas, plan…
+let lastTurnSummary = ''; // resumen del último turno («3 herramientas · 1,4 s»)
 
 // ============ icon injection ============
-$$('[data-i]').forEach(el => { el.innerHTML = ic(el.dataset.i); });
+$$('[data-i]').forEach((el) => {
+  el.innerHTML = ic(el.dataset.i);
+});
 
 // ============ red de seguridad del renderer ============
 /* Un error de script aquí dejaba la interfaz muda: la ventana sigue abierta
@@ -33,8 +40,12 @@ window.__errores = [];
 function reportarError(origen, detalle) {
   const msg = String((detalle && (detalle.message || (detalle.reason && detalle.reason.message))) || detalle || 'desconocido');
   window.__errores.push(origen + ': ' + msg);
-  try { feed('Fallo en la interfaz — ' + msg.slice(0, 80), 'err'); } catch {}
-  try { showToast('La interfaz encontró un problema: ' + msg.slice(0, 120)); } catch {}
+  try {
+    feed('Fallo en la interfaz — ' + msg.slice(0, 80), 'err');
+  } catch {}
+  try {
+    showToast('La interfaz encontró un problema: ' + msg.slice(0, 120));
+  } catch {}
   try {
     const b = ensureAssistantBubble();
     b.innerHTML = `<span class="errmsg">${ic('alert')} Fallo en la interfaz: ${esc(msg)}</span>`;
@@ -49,18 +60,19 @@ window.addEventListener('error', (e) => {
 window.addEventListener('unhandledrejection', (e) => reportarError('promesa', e.reason));
 
 // ============ routing ============
-$$('.navitem').forEach(b => b.addEventListener('click', () => goto(b.dataset.view)));
+$$('.navitem').forEach((b) => b.addEventListener('click', () => goto(b.dataset.view)));
 function goto(view, opts) {
   // una vista inexistente (Alt+0, un data-view roto…) dejaba TODAS las
   // secciones ocultas: la app se quedaba en blanco. Sin destino, no se toca nada.
   const target = document.getElementById('view-' + view);
   if (!target) return;
-  $$('.navitem').forEach(b => {
+  $$('.navitem').forEach((b) => {
     const on = b.dataset.view === view;
     b.classList.toggle('on', on);
-    if (on) b.setAttribute('aria-current', 'page'); else b.removeAttribute('aria-current');
+    if (on) b.setAttribute('aria-current', 'page');
+    else b.removeAttribute('aria-current');
   });
-  $$('.view').forEach(v => v.classList.toggle('on', v.id === 'view-' + view));
+  $$('.view').forEach((v) => v.classList.toggle('on', v.id === 'view-' + view));
   // la vista activa queda marcada en la carcasa: el rail lateral solo se pinta
   // donde aporta (chat y agentes); en el resto de vistas está vacío
   const shell = $('#app');
@@ -69,18 +81,35 @@ function goto(view, opts) {
   else if (opts && opts.focus) {
     // cambio de vista por atajo: el foco caía a <body>; se lleva al título de la vista
     const h = target.querySelector('h2');
-    if (h) { h.setAttribute('tabindex', '-1'); h.focus(); }
+    if (h) {
+      h.setAttribute('tabindex', '-1');
+      h.focus();
+    }
   }
   if (view === 'memory') renderMemory();
   if (view === 'tasks') renderTasks();
   if (view === 'tools') renderTools();
   if (view === 'mcp') renderMcp();
-  if (view === 'agents') { renderToolTray(); renderHealth(); renderHabits(); }
-  if (view === 'skills') { renderMarket(); renderSkills(); }
-  if (view === 'projects') window.sagitari.workspaceGet().then(w => { $('#projPath').value = w; });
+  if (view === 'agents') {
+    renderToolTray();
+    renderHealth();
+    renderHabits();
+  }
+  if (view === 'skills') {
+    renderMarket();
+    renderSkills();
+  }
+  if (view === 'projects')
+    window.sagitari.workspaceGet().then((w) => {
+      $('#projPath').value = w;
+    });
   if (view === 'history') renderHistory();
-  if (view === 'settings') { showSetTab(setTabName); initDataPanel(); initAboutPanel(); }
-  polishSwitches();   // los interruptores creados dinámicamente también deben ser accesibles
+  if (view === 'settings') {
+    showSetTab(setTabName);
+    initDataPanel();
+    initAboutPanel();
+  }
+  polishSwitches(); // los interruptores creados dinámicamente también deben ser accesibles
   syncChatBadge();
   setSideActive();
 }
@@ -101,10 +130,14 @@ function applyCompact(on) {
   b.title = (on ? 'Expandir' : 'Compactar') + ' la barra lateral (Alt+B)';
   b.setAttribute('aria-label', on ? 'Expandir barra lateral' : 'Compactar barra lateral');
   b.setAttribute('aria-pressed', on ? 'true' : 'false');
-  try { localStorage.setItem('sagi.sideCompact', on ? '1' : '0'); } catch {}
+  try {
+    localStorage.setItem('sagi.sideCompact', on ? '1' : '0');
+  } catch {}
 }
 $('#sideToggle').onclick = () => applyCompact(!$('#app').classList.contains('compact'));
-try { if (localStorage.getItem('sagi.sideCompact') === '1') applyCompact(true); } catch {}
+try {
+  if (localStorage.getItem('sagi.sideCompact') === '1') applyCompact(true);
+} catch {}
 
 /** Badge del sidebar: `dot` → puntito pulsante (actividad); si no, contador numérico. */
 function setBadge(sel, value, opts) {
@@ -139,15 +172,15 @@ function setSideActive() {
   sm.title = `Modo ${m.label} — ${m.desc} (Alt+M)`;
 }
 
-let sideBadgeErr = false;   // evita repetir el aviso en cada sondeo
+let sideBadgeErr = false; // evita repetir el aviso en cada sondeo
 async function refreshSidebar() {
-  if (document.hidden) return;   // sin ventana visible no hay nada que pintar
+  if (document.hidden) return; // sin ventana visible no hay nada que pintar
   syncChatBadge();
   try {
     const tasks = await window.sagitari.tasksList();
     const live = ['running', 'pending', 'scheduled', 'paused', 'interrupted'];
-    const n = tasks.filter(t => live.includes(t.status)).length;
-    setBadge('#nbTasks', n, { hot: tasks.some(t => t.status === 'running') });
+    const n = tasks.filter((t) => live.includes(t.status)).length;
+    setBadge('#nbTasks', n, { hot: tasks.some((t) => t.status === 'running') });
     const mem = await window.sagitari.memoryList();
     setBadge('#nbMemory', mem.length);
     const sk = await window.sagitari.skillsList();
@@ -171,7 +204,11 @@ window.addEventListener('keydown', (e) => {
   if (!e.altKey || e.ctrlKey || e.shiftKey) return;
   // escribiendo en un campo, Alt+N pertenece a la edición: no cambia de vista
   if (esCampoDeTexto(e.target)) return;
-  if (e.key === 'b' || e.key === 'B') { e.preventDefault(); $('#sideToggle').click(); return; }
+  if (e.key === 'b' || e.key === 'B') {
+    e.preventDefault();
+    $('#sideToggle').click();
+    return;
+  }
   // Alt+0 no tiene vista asignada: VIEW_HOTKEY sólo llega hasta Alt+9
   if (/^[1-9]$/.test(e.key)) {
     e.preventDefault();
@@ -185,7 +222,7 @@ window.addEventListener('keydown', (e) => {
    COMILLAS también se escapan: sin esto, un argumento de herramienta con una
    comilla rompía el atributo (title="…") y permitía inyectar manejadores. */
 function esc(s) {
-  return String(s).replace(/[&<>"']/g, c => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' }[c]));
+  return String(s).replace(/[&<>"']/g, (c) => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' })[c]);
 }
 
 /* --- saneado previo a la inserción ---
@@ -194,14 +231,68 @@ function esc(s) {
    imágenes no disparan ninguna petición y <style>/<base>/<link> no se aplican),
    se descarta todo lo que no esté en la whitelist y cualquier src/href que no
    sea data: o http(s):. */
-const OK_TAGS = new Set(['P', 'BR', 'UL', 'OL', 'LI', 'CODE', 'PRE', 'BLOCKQUOTE',
-  'H1', 'H2', 'H3', 'H4', 'H5', 'H6', 'TABLE', 'THEAD', 'TBODY', 'TR', 'TH', 'TD',
-  'A', 'STRONG', 'EM', 'DEL', 'HR', 'SPAN', 'DIV']);
+const OK_TAGS = new Set([
+  'P',
+  'BR',
+  'UL',
+  'OL',
+  'LI',
+  'CODE',
+  'PRE',
+  'BLOCKQUOTE',
+  'H1',
+  'H2',
+  'H3',
+  'H4',
+  'H5',
+  'H6',
+  'TABLE',
+  'THEAD',
+  'TBODY',
+  'TR',
+  'TH',
+  'TD',
+  'A',
+  'STRONG',
+  'EM',
+  'DEL',
+  'HR',
+  'SPAN',
+  'DIV',
+]);
 // etiquetas que se ELIMINAN con su contenido: nunca se muestran ni se conservan
-const DROP_TAGS = new Set(['SCRIPT', 'STYLE', 'BASE', 'LINK', 'META', 'TITLE', 'HEAD',
-  'IFRAME', 'FRAME', 'FRAMESET', 'NOSCRIPT', 'TEMPLATE', 'OBJECT', 'EMBED', 'APPLET',
-  'SVG', 'MATH', 'CANVAS', 'VIDEO', 'AUDIO', 'SOURCE', 'TRACK', 'FORM', 'INPUT',
-  'BUTTON', 'SELECT', 'TEXTAREA', 'OPTION', 'LABEL', 'MARQUEE']);
+const DROP_TAGS = new Set([
+  'SCRIPT',
+  'STYLE',
+  'BASE',
+  'LINK',
+  'META',
+  'TITLE',
+  'HEAD',
+  'IFRAME',
+  'FRAME',
+  'FRAMESET',
+  'NOSCRIPT',
+  'TEMPLATE',
+  'OBJECT',
+  'EMBED',
+  'APPLET',
+  'SVG',
+  'MATH',
+  'CANVAS',
+  'VIDEO',
+  'AUDIO',
+  'SOURCE',
+  'TRACK',
+  'FORM',
+  'INPUT',
+  'BUTTON',
+  'SELECT',
+  'TEXTAREA',
+  'OPTION',
+  'LABEL',
+  'MARQUEE',
+]);
 // atributos sin valor ejecutable que marked sí genera (presentación/tablas)
 const OK_ATTRS = new Set(['class', 'title', 'alt', 'colspan', 'rowspan', 'align', 'start']);
 
@@ -212,7 +303,7 @@ function safeUrl(v) {
 
 function cleanNode(node) {
   if (node.nodeType === 3) return document.createTextNode(node.nodeValue);
-  if (node.nodeType !== 1) return document.createDocumentFragment();   // comentarios, etc.
+  if (node.nodeType !== 1) return document.createDocumentFragment(); // comentarios, etc.
   const tag = node.tagName.toUpperCase();
   if (DROP_TAGS.has(tag)) return document.createDocumentFragment();
   if (!OK_TAGS.has(tag)) {
@@ -270,7 +361,7 @@ function fmt(text) {
  * así que aquí sólo se marca el botón.
  */
 function enhanceCode(root) {
-  root.querySelectorAll('pre > code').forEach(code => {
+  root.querySelectorAll('pre > code').forEach((code) => {
     const pre = code.parentElement;
     if (!pre || pre.parentElement.classList.contains('codeblock')) return;
     const cls = String(code.className || '').match(/language-([\w+#-]+)/);
@@ -279,8 +370,8 @@ function enhanceCode(root) {
     wrap.className = 'codeblock';
     const head = document.createElement('div');
     head.className = 'codeblock-head';
-    head.innerHTML = `<span>${esc(lang || 'código')}</span>`
-      + `<button class="cb-copy" data-copy title="Copiar código">${ic('copy')}</button>`;
+    head.innerHTML =
+      `<span>${esc(lang || 'código')}</span>` + `<button class="cb-copy" data-copy title="Copiar código">${ic('copy')}</button>`;
     pre.parentNode.insertBefore(wrap, pre);
     wrap.append(head, pre);
   });
@@ -317,7 +408,11 @@ msgs.addEventListener('scroll', () => {
   pinned = msgs.scrollHeight - msgs.scrollTop - msgs.clientHeight < 70;
   jumpDownBtn.hidden = pinned;
 });
-jumpDownBtn.onclick = () => { pinned = true; jumpDownBtn.hidden = true; scroll(true); };
+jumpDownBtn.onclick = () => {
+  pinned = true;
+  jumpDownBtn.hidden = true;
+  scroll(true);
+};
 function scroll(force) {
   if (force || pinned) msgs.scrollTop = msgs.scrollHeight;
 }
@@ -326,12 +421,16 @@ function scroll(force) {
    si el usuario venía siguiendo el stream (pinned). */
 function pinImage(img) {
   if (!img) return;
-  const fix = () => { if (pinned) scroll(); };
+  const fix = () => {
+    if (pinned) scroll();
+  };
   img.addEventListener('load', fix);
   img.addEventListener('error', fix);
 }
 if (window.ResizeObserver) {
-  new ResizeObserver(() => { if (pinned) scroll(); }).observe(msgs);
+  new ResizeObserver(() => {
+    if (pinned) scroll();
+  }).observe(msgs);
 }
 function nowClock(ts) {
   return new Date(ts || Date.now()).toLocaleTimeString('es', { hour: '2-digit', minute: '2-digit' });
@@ -362,8 +461,12 @@ function dayStamp(ts) {
   return d;
 }
 /** El estado vacío desaparece en cuanto hay una sola burbuja. */
-function hideEmpty() { if (chatEmpty) chatEmpty.hidden = true; }
-function showEmpty() { if (chatEmpty) chatEmpty.hidden = false; }
+function hideEmpty() {
+  if (chatEmpty) chatEmpty.hidden = true;
+}
+function showEmpty() {
+  if (chatEmpty) chatEmpty.hidden = false;
+}
 
 /** Chip con el modo que produjo un turno: ACT / PLAN / THINK. */
 function modeBadge(m) {
@@ -379,7 +482,9 @@ function applyModeTheme(m) {
 }
 
 /** Resumen legible del último turno, para la barra de estado y el feed. */
-function lastTurnLabel() { return lastTurnSummary; }
+function lastTurnLabel() {
+  return lastTurnSummary;
+}
 
 /** Barra de estado en vivo junto al título: qué está haciendo y en qué modo. */
 function setChatStatus(text, kind) {
@@ -400,17 +505,26 @@ function setChatStatus(text, kind) {
 /** Copia al portapapeles avisando por toast (los tres puntos de la UI). */
 async function copyText(text, okMsg) {
   const s = String(text === null || text === undefined ? '' : text);
-  if (!s.trim()) { showToast('No hay nada que copiar'); return false; }
+  if (!s.trim()) {
+    showToast('No hay nada que copiar');
+    return false;
+  }
   try {
     if (navigator.clipboard && navigator.clipboard.writeText) await navigator.clipboard.writeText(s);
     else {
       const ta = document.createElement('textarea');
-      ta.value = s; document.body.appendChild(ta); ta.select();
-      document.execCommand('copy'); ta.remove();
+      ta.value = s;
+      document.body.appendChild(ta);
+      ta.select();
+      document.execCommand('copy');
+      ta.remove();
     }
     showToast(okMsg || 'Copiado al portapapeles');
     return true;
-  } catch { showToast('No se pudo copiar'); return false; }
+  } catch {
+    showToast('No se pudo copiar');
+    return false;
+  }
 }
 
 /**
@@ -437,9 +551,10 @@ function bubble(role, opts) {
   col.className = 'msg-col';
   const head = document.createElement('div');
   head.className = 'msg-head';
-  head.innerHTML = `<span class="msg-who">${esc(role === 'user' ? (CFG.settings.userName || 'Tú') : 'Sagitari')}</span>`
-    + (o.mode && role === 'user' ? modeBadge(o.mode) : '')
-    + `<span class="msg-ts">${nowClock(o.ts)}</span>`;
+  head.innerHTML =
+    `<span class="msg-who">${esc(role === 'user' ? CFG.settings.userName || 'Tú' : 'Sagitari')}</span>` +
+    (o.mode && role === 'user' ? modeBadge(o.mode) : '') +
+    `<span class="msg-ts">${nowClock(o.ts)}</span>`;
   const body = document.createElement('div');
   body.className = 'msg-body';
   const b = document.createElement('div');
@@ -467,14 +582,16 @@ function msgActions(holder, text, opts) {
   };
   // copiar SIEMPRE el texto visible ya renderizado (igual que «Copiar toda la
   // conversación»): copiar el markdown crudo daba **negritas** y vallas
-  row.appendChild(mk('copy', 'Copiar este mensaje', () => {
-    const bub = holder.querySelector('.bubble') || holder;
-    // el razonamiento es interno: al copiar el mensaje se copia la respuesta, no
-    // lo que el modelo pensó por el camino (el bloque tiene su propio botón)
-    const copia = bub.cloneNode(true);
-    copia.querySelectorAll('.thinkblock').forEach(x => x.remove());
-    copyText(copia.innerText, 'Mensaje copiado');
-  }));
+  row.appendChild(
+    mk('copy', 'Copiar este mensaje', () => {
+      const bub = holder.querySelector('.bubble') || holder;
+      // el razonamiento es interno: al copiar el mensaje se copia la respuesta, no
+      // lo que el modelo pensó por el camino (el bloque tiene su propio botón)
+      const copia = bub.cloneNode(true);
+      copia.querySelectorAll('.thinkblock').forEach((x) => x.remove());
+      copyText(copia.innerText, 'Mensaje copiado');
+    }),
+  );
   if (o.retry) row.appendChild(mk('refresh', 'Regenerar esta respuesta', regenerate));
   if (o.speak) row.appendChild(mk('volume', 'Leer en voz alta', () => speak(text)));
   holder.appendChild(row);
@@ -485,7 +602,7 @@ function msgActions(holder, text, opts) {
 function refreshMsgActions() {
   const all = msgs.querySelectorAll('.msg.ai');
   all.forEach((m, i) => {
-    m.querySelectorAll('[data-retry]').forEach(b => b.remove());
+    m.querySelectorAll('[data-retry]').forEach((b) => b.remove());
     const row = m.querySelector('.msg-actions');
     if (row && i === all.length - 1) {
       const btn = document.createElement('button');
@@ -500,7 +617,10 @@ function refreshMsgActions() {
 }
 
 async function regenerate() {
-  if (busy) { showToast('Espera a que termine la ejecución actual'); return; }
+  if (busy) {
+    showToast('Espera a que termine la ejecución actual');
+    return;
+  }
   const last = lastAssistantEl;
   const msgEl = last ? last.closest('.msg') : null;
   const parent = msgEl ? msgEl.parentNode : null;
@@ -509,8 +629,11 @@ async function regenerate() {
   lastAssistantEl = null;
   showToast('Regenerando respuesta…');
   let r;
-  try { r = await window.sagitari.retryChat(); }
-  catch (e) { r = { ok: false, error: (e && e.message) || e }; }
+  try {
+    r = await window.sagitari.retryChat();
+  } catch (e) {
+    r = { ok: false, error: (e && e.message) || e };
+  }
   if (!r || r.ok === false) {
     // el reintento no salió: la respuesta sigue en el historial, así que se
     // devuelve a la vista en su sitio en lugar de dejarla desaparecer
@@ -531,11 +654,17 @@ function ensureAssistantBubble() {
     currentRunMode = currentRunMode || mode;
     pendingAssistant = bubble('ai');
     pendingTurn = {
-      mode: currentRunMode, group: null, body: null, cards: [],
-      tools: 0, totalMs: 0, plan: null, planIdx: 0,
-      team: null,   // v2.2: tablero del equipo (delegaciones en vivo)
-      think: null,  // v2.3: bloque de razonamiento (Ajustes ▸ Agente)
-      fails: 0,     // herramientas que fallaron (la cabecera del grupo lo enseña)
+      mode: currentRunMode,
+      group: null,
+      body: null,
+      cards: [],
+      tools: 0,
+      totalMs: 0,
+      plan: null,
+      planIdx: 0,
+      team: null, // v2.2: tablero del equipo (delegaciones en vivo)
+      think: null, // v2.3: bloque de razonamiento (Ajustes ▸ Agente)
+      fails: 0, // herramientas que fallaron (la cabecera del grupo lo enseña)
     };
   }
   return pendingAssistant;
@@ -555,23 +684,34 @@ function buildToolGroup() {
   head.setAttribute('role', 'button');
   head.setAttribute('tabindex', '0');
   head.setAttribute('aria-expanded', 'true');
-  head.innerHTML = `<span class="tg-ic">${ic('tools')}</span><b class="tg-title">Herramientas</b>`
-    + `<span class="tg-fails" hidden></span>`
-    + `<span class="tg-meta"></span><span class="tg-chev">${ic('chevron')}</span>`;
+  head.innerHTML =
+    `<span class="tg-ic">${ic('tools')}</span><b class="tg-title">Herramientas</b>` +
+    `<span class="tg-fails" hidden></span>` +
+    `<span class="tg-meta"></span><span class="tg-chev">${ic('chevron')}</span>`;
   const body = document.createElement('div');
   body.className = 'tgroup-body';
   const toggle = () => {
     const open = g.classList.toggle('open');
     g.classList.toggle('closed', !open);
     head.setAttribute('aria-expanded', open ? 'true' : 'false');
-    g._tocado = true;   // el usuario decide: el cierre automático ya no lo pisa
+    g._tocado = true; // el usuario decide: el cierre automático ya no lo pisa
   };
   head.onclick = toggle;
   head.addEventListener('keydown', (e) => {
-    if (e.key === 'Enter' || e.key === ' ') { e.preventDefault(); toggle(); }
+    if (e.key === 'Enter' || e.key === ' ') {
+      e.preventDefault();
+      toggle();
+    }
   });
   g.append(head, body);
-  return { el: g, body, head, title: head.querySelector('.tg-title'), meta: head.querySelector('.tg-meta'), fails: head.querySelector('.tg-fails') };
+  return {
+    el: g,
+    body,
+    head,
+    title: head.querySelector('.tg-title'),
+    meta: head.querySelector('.tg-meta'),
+    fails: head.querySelector('.tg-fails'),
+  };
 }
 
 function ensureToolGroup() {
@@ -591,8 +731,8 @@ function refreshToolGroup() {
   /* Meta: mientras quedan tarjetas abiertas se dice cuántas hay EN CURSO (antes solo
      cabía «en curso…», y con doce herramientas no decía cuánto faltaba); al cerrarse
      todas, el tiempo total acumulado. */
-  const enCurso = pendingTurn.cards.filter(c => c.classList.contains('run')).length;
-  g.meta.textContent = enCurso ? enCurso + ' en curso' : (pendingTurn.totalMs ? K.fmtDuration(pendingTurn.totalMs) : '');
+  const enCurso = pendingTurn.cards.filter((c) => c.classList.contains('run')).length;
+  g.meta.textContent = enCurso ? enCurso + ' en curso' : pendingTurn.totalMs ? K.fmtDuration(pendingTurn.totalMs) : '';
   /* Y si algo falló, la cabecera lo dice: con el grupo plegado, un fallo dentro era
      invisible hasta abrirlo a mano. */
   const fallos = pendingTurn.fails || 0;
@@ -628,14 +768,23 @@ function primeraLineaUtil(texto, max = 130) {
   const lineas = String(texto || '')
     .replace(/```[\s\S]*?```/g, ' ')
     .split(/\r?\n/)
-    .map(l => l.replace(/^[\s>*#\-•]+/, '').replace(/\*\*/g, '').trim())
-    .filter(l => l.length >= 18);
+    .map((l) =>
+      l
+        .replace(/^[\s>*#\-•]+/, '')
+        .replace(/\*\*/g, '')
+        .trim(),
+    )
+    .filter((l) => l.length >= 18);
   const t = lineas[0] || '';
   return t.length > max ? t.slice(0, max - 1).trimEnd() + '…' : t;
 }
 
 /** Cuántas líneas tiene el razonamiento (dato barato que da idea de su profundidad). */
-function nLineas(texto) { return String(texto || '').split(/\r?\n/).filter(l => l.trim()).length; }
+function nLineas(texto) {
+  return String(texto || '')
+    .split(/\r?\n/)
+    .filter((l) => l.trim()).length;
+}
 
 /* Reloj del razonamiento: mientras el modelo piensa, la cabecera dice cuánto lleva. Sin
    esto, un modelo que se toma 40 s en razonar parece colgado. El resumen plegado y el
@@ -662,7 +811,7 @@ function metaRazonamiento(d) {
     // plegado: manda el resumen. Es lo que permite seguir el hilo sin abrir cada bloque.
     const g = primeraLineaUtil(d._texto);
     el.classList.toggle('gist', !!g);
-    el.textContent = g || ('pensó ' + K.fmtDuration(d._ms || 0));
+    el.textContent = g || 'pensó ' + K.fmtDuration(d._ms || 0);
     return;
   }
   el.classList.remove('gist');
@@ -673,7 +822,12 @@ function relojRazonamiento(d) {
   if (thinkTimer) return;
   thinkTimer = setInterval(() => {
     const t = thinkVivo;
-    if (!t || !t.isConnected || t._terminado) { clearInterval(thinkTimer); thinkTimer = 0; thinkVivo = null; return; }
+    if (!t || !t.isConnected || t._terminado) {
+      clearInterval(thinkTimer);
+      thinkTimer = 0;
+      thinkVivo = null;
+      return;
+    }
     metaRazonamiento(t);
   }, 250);
 }
@@ -683,26 +837,36 @@ function relojRazonamiento(d) {
 function buildThinkBlock() {
   const d = document.createElement('div');
   d.className = 'thinkblock open';
-  d.innerHTML = '<div class="think-head" role="button" tabindex="0" aria-expanded="true">'
-    + `<span class="th-ic">${ic('brain')}</span><b>Razonamiento</b>`
-    + '<span class="th-meta">pensando…</span>'
-    + `<button class="th-copy" title="Copiar el razonamiento">${ic('copy')}</button>`
-    + `<span class="th-chev">${ic('chevron')}</span></div>`
-    + '<div class="think-body"></div>';
+  d.innerHTML =
+    '<div class="think-head" role="button" tabindex="0" aria-expanded="true">' +
+    `<span class="th-ic">${ic('brain')}</span><b>Razonamiento</b>` +
+    '<span class="th-meta">pensando…</span>' +
+    `<button class="th-copy" title="Copiar el razonamiento">${ic('copy')}</button>` +
+    `<span class="th-chev">${ic('chevron')}</span></div>` +
+    '<div class="think-body"></div>';
   const head = d.querySelector('.think-head');
   d._inicio = Date.now();
   const toggle = () => {
     const open = d.classList.toggle('open');
     d.classList.toggle('closed', !open);
     head.setAttribute('aria-expanded', open ? 'true' : 'false');
-    d._tocado = true;   // si el usuario lo abre, ya no se cierra solo
-    metaRazonamiento(d);   // plegado enseña el resumen; abierto, la duración y las líneas
+    d._tocado = true; // si el usuario lo abre, ya no se cierra solo
+    metaRazonamiento(d); // plegado enseña el resumen; abierto, la duración y las líneas
   };
-  head.onclick = (e) => { if (e.target.closest('.th-copy')) return; toggle(); };
+  head.onclick = (e) => {
+    if (e.target.closest('.th-copy')) return;
+    toggle();
+  };
   head.addEventListener('keydown', (e) => {
-    if (e.key === 'Enter' || e.key === ' ') { e.preventDefault(); toggle(); }
+    if (e.key === 'Enter' || e.key === ' ') {
+      e.preventDefault();
+      toggle();
+    }
   });
-  d.querySelector('.th-copy').onclick = (e) => { e.stopPropagation(); copyText(d._texto || '', 'Razonamiento copiado'); };
+  d.querySelector('.th-copy').onclick = (e) => {
+    e.stopPropagation();
+    copyText(d._texto || '', 'Razonamiento copiado');
+  };
   return d;
 }
 
@@ -788,7 +952,10 @@ function buildToolCard(ev) {
   };
   tchead.onclick = toggleCard;
   tchead.addEventListener('keydown', (e) => {
-    if (e.key === 'Enter' || e.key === ' ') { e.preventDefault(); toggleCard(); }
+    if (e.key === 'Enter' || e.key === ' ') {
+      e.preventDefault();
+      toggleCard();
+    }
   });
   return card;
 }
@@ -802,7 +969,10 @@ function toolCard(ev) {
   /* Reloj de la tarjeta: mientras corre, cuenta. Un comando que tarda 40 s sin decir
      nada se lee como «se ha colgado»; con el tiempo en marcha, se lee como trabajo. */
   card._tick = setInterval(() => {
-    if (!card.isConnected || !card.classList.contains('run')) { clearInterval(card._tick); return; }
+    if (!card.isConnected || !card.classList.contains('run')) {
+      clearInterval(card._tick);
+      return;
+    }
     const el = card.querySelector('.tcard-time');
     if (el) el.textContent = segundosUI(Date.now() - (card._t0 || Date.now()));
   }, 400);
@@ -820,7 +990,7 @@ function toolCard(ev) {
  * tarjeta de un turno viejo tiene que verse EXACTAMENTE igual que la del turno vivo.
  */
 function pintarResultadoTarjeta(card, ev) {
-  const ok = (ev.ok !== undefined && ev.ok !== null) ? !!ev.ok : !K.looksFailed(ev.result);
+  const ok = ev.ok !== undefined && ev.ok !== null ? !!ev.ok : !K.looksFailed(ev.result);
   const ms = Number(ev.durationMs) || 0;
   card.classList.remove('run');
   card.classList.add(ok ? 'done' : 'err');
@@ -835,7 +1005,11 @@ function pintarResultadoTarjeta(card, ev) {
     if (head && !head.querySelector('.tcard-note')) {
       const note = document.createElement('span');
       note.className = 'tcard-note';
-      const linea = String(ev.result || '').split(/\r?\n/).map(s => s.trim()).find(Boolean) || 'falló sin decir por qué';
+      const linea =
+        String(ev.result || '')
+          .split(/\r?\n/)
+          .map((s) => s.trim())
+          .find(Boolean) || 'falló sin decir por qué';
       note.textContent = linea.replace(/^Error:\s*/i, '').slice(0, 160);
       note.title = String(ev.result || '').slice(0, 2000);
       head.insertBefore(note, head.querySelector('.tcard-time'));
@@ -848,9 +1022,13 @@ function pintarResultadoTarjeta(card, ev) {
   wrap.dataset.result = '1';
   const salida = String(ev.result || '');
   const cuantas = salida ? salida.split(/\r?\n/).length : 0;
-  wrap.innerHTML = `<div class="tb-label">RESULTADO${cuantas > 1 ? ' · ' + cuantas + ' líneas' : ''}<button class="tcard-copy" title="Copiar resultado">${ic('copy')}</button></div>`
-    + `<pre>${esc(K.clip(salida, 1200)) || '(sin salida)'}</pre>`;
-  wrap.querySelector('.tcard-copy').onclick = (e) => { e.stopPropagation(); copyText(ev.result, 'Resultado copiado'); };
+  wrap.innerHTML =
+    `<div class="tb-label">RESULTADO${cuantas > 1 ? ' · ' + cuantas + ' líneas' : ''}<button class="tcard-copy" title="Copiar resultado">${ic('copy')}</button></div>` +
+    `<pre>${esc(K.clip(salida, 1200)) || '(sin salida)'}</pre>`;
+  wrap.querySelector('.tcard-copy').onclick = (e) => {
+    e.stopPropagation();
+    copyText(ev.result, 'Resultado copiado');
+  };
   body.appendChild(wrap);
   return { ok, took };
 }
@@ -861,9 +1039,15 @@ function completeToolCard(ev) {
   let card = null;
   for (let i = pendingTurn.cards.length - 1; i >= 0; i--) {
     const c = pendingTurn.cards[i];
-    if (c.dataset.tool === ev.name && c.classList.contains('run')) { card = c; break; }
+    if (c.dataset.tool === ev.name && c.classList.contains('run')) {
+      card = c;
+      break;
+    }
   }
-  if (!card) { toolCard({ name: ev.name, args: {} }); card = pendingTurn.cards[pendingTurn.cards.length - 1]; }
+  if (!card) {
+    toolCard({ name: ev.name, args: {} });
+    card = pendingTurn.cards[pendingTurn.cards.length - 1];
+  }
   const { ok, took } = pintarResultadoTarjeta(card, ev);
   if (!ok) pendingTurn.fails = (pendingTurn.fails || 0) + 1;
   pendingTurn.totalMs += took;
@@ -886,23 +1070,24 @@ function buildDelegationCard(ev) {
   const fallo = estado === 'FAILED';
   const parcial = estado === 'PARTIAL';
   const card = document.createElement('div');
-  card.className = 'tcard dcard ' + (fallo ? 'err' : (parcial ? 'part' : 'done'));
-  if (ev.subagent) card.dataset.delegate = String(ev.subagent);   // nunca `dataset.tool`: no es una herramienta
-  const etiqueta = fallo ? 'FALLÓ' : (parcial ? 'PARCIAL' : 'OK');
+  card.className = 'tcard dcard ' + (fallo ? 'err' : parcial ? 'part' : 'done');
+  if (ev.subagent) card.dataset.delegate = String(ev.subagent); // nunca `dataset.tool`: no es una herramienta
+  const etiqueta = fallo ? 'FALLÓ' : parcial ? 'PARCIAL' : 'OK';
   card.innerHTML = `
     <div class="tcard-head">
       <span class="tcard-ic">${ic(fallo ? 'alert' : 'check')}</span>
       <span class="tcard-name">${esc(sub.label)}</span>
-      <span class="dcard-status ${fallo ? 'fail' : (parcial ? 'part' : 'ok')}" title="Estado del subagente">${esc(etiqueta)}</span>
+      <span class="dcard-status ${fallo ? 'fail' : parcial ? 'part' : 'ok'}" title="Estado del subagente">${esc(etiqueta)}</span>
       <span class="tcard-args" title="${esc(String(ev.result || ''))}">${esc(K.clip(String(ev.result || ''), 110))}</span>
       <span class="tcard-time">${ev.durationMs ? esc(K.fmtDuration(Number(ev.durationMs))) : ''}</span>
       <span class="tcard-chev">${ic('chevron')}</span>
     </div>
     <div class="tcard-body"></div>`;
   const body = card.querySelector('.tcard-body');
-  body.innerHTML = `<div class="tb-label">RESULTADO</div><pre>${esc(String(ev.result || '(sin resumen)'))}</pre>`
-    + (ev.details ? `<div class="tb-label">DETALLES</div><pre>${esc(String(ev.details))}</pre>` : '')
-    + (ev.evidence ? `<div class="tb-label">EVIDENCIA</div><pre>${esc(String(ev.evidence))}</pre>` : '');
+  body.innerHTML =
+    `<div class="tb-label">RESULTADO</div><pre>${esc(String(ev.result || '(sin resumen)'))}</pre>` +
+    (ev.details ? `<div class="tb-label">DETALLES</div><pre>${esc(String(ev.details))}</pre>` : '') +
+    (ev.evidence ? `<div class="tb-label">EVIDENCIA</div><pre>${esc(String(ev.evidence))}</pre>` : '');
   const head = card.querySelector('.tcard-head');
   head.setAttribute('role', 'button');
   head.setAttribute('tabindex', '0');
@@ -913,7 +1098,10 @@ function buildDelegationCard(ev) {
   };
   head.onclick = toggle;
   head.addEventListener('keydown', (e) => {
-    if (e.key === 'Enter' || e.key === ' ') { e.preventDefault(); toggle(); }
+    if (e.key === 'Enter' || e.key === ' ') {
+      e.preventDefault();
+      toggle();
+    }
   });
   return card;
 }
@@ -924,7 +1112,7 @@ function delegationCard(ev) {
   const group = ensureToolGroup();
   const card = buildDelegationCard(ev);
   group.body.appendChild(card);
-  pendingTurn.cards.push(card);   // el turno la limpia igual que las demás
+  pendingTurn.cards.push(card); // el turno la limpia igual que las demás
   scroll();
   return card;
 }
@@ -937,8 +1125,8 @@ function delegationCard(ev) {
    compacto por turno y aquí se reconstruye el MISMO bloque plegable del turno vivo, ya
    terminado y sin relojes: los relojes de un turno cerrado serían mentira. */
 function restaurarTraza(bubbleEl, trace, html) {
-  const tools = (trace && Array.isArray(trace.tools)) ? trace.tools : [];
-  const think = (trace && trace.think && trace.think.text) ? trace.think : null;
+  const tools = trace && Array.isArray(trace.tools) ? trace.tools : [];
+  const think = trace && trace.think && trace.think.text ? trace.think : null;
   if (think) {
     const d = buildThinkBlock();
     d._texto = String(think.text);
@@ -967,9 +1155,15 @@ function restaurarTraza(bubbleEl, trace, html) {
       const card = buildToolCard({ name: t.name, args: t.args || {}, subagent: t.subagent });
       /* Sin `ok` la herramienta empezó y el turno se cortó antes de su resultado: se dice
          tal cual, en vez de pintarle un check verde que nunca ocurrió. */
-      const r = t.ok === undefined
-        ? pintarResultadoTarjeta(card, { name: t.name, ok: false, durationMs: t.ms, result: 'Esta herramienta no llegó a devolver su resultado: el turno se cortó antes.' })
-        : pintarResultadoTarjeta(card, { name: t.name, ok: t.ok, result: t.result, durationMs: t.ms });
+      const r =
+        t.ok === undefined
+          ? pintarResultadoTarjeta(card, {
+              name: t.name,
+              ok: false,
+              durationMs: t.ms,
+              result: 'Esta herramienta no llegó a devolver su resultado: el turno se cortó antes.',
+            })
+          : pintarResultadoTarjeta(card, { name: t.name, ok: t.ok, result: t.result, durationMs: t.ms });
       if (!r.ok) fallos++;
       total += r.took;
       grp.body.appendChild(card);
@@ -1000,7 +1194,10 @@ function restaurarTraza(bubbleEl, trace, html) {
    está haciendo cada subagente sin esperar al cierre del turno. */
 function etiquetaEquipo(ev) {
   const who = (K.subagent(ev.subagent) || {}).label || 'Subagente';
-  const tarea = String(ev.task || '').replace(/\s+/g, ' ').trim().slice(0, 40);
+  const tarea = String(ev.task || '')
+    .replace(/\s+/g, ' ')
+    .trim()
+    .slice(0, 40);
   return who + (tarea ? ' · ' + tarea : '');
 }
 
@@ -1014,8 +1211,9 @@ function ensureTeamBoard() {
     head.setAttribute('role', 'button');
     head.setAttribute('tabindex', '0');
     head.setAttribute('aria-expanded', 'true');
-    head.innerHTML = `<span class="tg-ic">${ic('agents')}</span><b class="tg-title">Equipo</b>`
-      + `<span class="tg-meta"></span><span class="tg-chev">${ic('chevron')}</span>`;
+    head.innerHTML =
+      `<span class="tg-ic">${ic('agents')}</span><b class="tg-title">Equipo</b>` +
+      `<span class="tg-meta"></span><span class="tg-chev">${ic('chevron')}</span>`;
     const body = document.createElement('div');
     body.className = 'tgroup-body';
     const toggle = () => {
@@ -1025,7 +1223,10 @@ function ensureTeamBoard() {
     };
     head.onclick = toggle;
     head.addEventListener('keydown', (e) => {
-      if (e.key === 'Enter' || e.key === ' ') { e.preventDefault(); toggle(); }
+      if (e.key === 'Enter' || e.key === ' ') {
+        e.preventDefault();
+        toggle();
+      }
     });
     g.append(head, body);
     // el tablero va ARRIBA del grupo de herramientas: es el resumen, no el detalle
@@ -1039,7 +1240,7 @@ function ensureTeamBoard() {
 function equipoEnMarcha() {
   const t = pendingTurn && pendingTurn.team;
   if (!t) return 0;
-  return t.chips.filter(c => !c.cerrado).length;
+  return t.chips.filter((c) => !c.cerrado).length;
 }
 
 function equipoChip(ev) {
@@ -1060,10 +1261,11 @@ function equipoCierra(ev) {
   const estado = String(ev.status || 'OK').toUpperCase();
   // se cierra la fila que abrió ESTA subtarea; si no la encuentra (el turno se recortó),
   // cae a la primera abierta de ese agente y, en último caso, a la primera abierta
-  const abiertas = pendingTurn.team.chips.filter(c => !c.cerrado);
-  const chip = abiertas.find(c => c.subagent === String(ev.subagent || '') && c.el.title.startsWith(etiquetaEquipo(ev)))
-    || abiertas.find(c => c.subagent === String(ev.subagent || ''))
-    || abiertas[0];
+  const abiertas = pendingTurn.team.chips.filter((c) => !c.cerrado);
+  const chip =
+    abiertas.find((c) => c.subagent === String(ev.subagent || '') && c.el.title.startsWith(etiquetaEquipo(ev))) ||
+    abiertas.find((c) => c.subagent === String(ev.subagent || '')) ||
+    abiertas[0];
   if (!chip) return;
   chip.cerrado = true;
   chip.el.classList.remove('run');
@@ -1088,38 +1290,45 @@ function mostrarDeshacer(archivos) {
   const txt = $('#undoText');
   if (txt) {
     const muestra = lista.slice(0, 3).join(', ') + (lista.length > 3 ? '…' : '');
-    txt.textContent = lista.length === 1
-      ? 'Se ha cambiado 1 archivo (' + muestra + ').'
-      : 'Se han cambiado ' + lista.length + ' archivos (' + muestra + ').';
+    txt.textContent =
+      lista.length === 1
+        ? 'Se ha cambiado 1 archivo (' + muestra + ').'
+        : 'Se han cambiado ' + lista.length + ' archivos (' + muestra + ').';
   }
   bar.hidden = false;
 }
 
-function ocultarDeshacer() { const bar = $('#undoBar'); if (bar) bar.hidden = true; }
+function ocultarDeshacer() {
+  const bar = $('#undoBar');
+  if (bar) bar.hidden = true;
+}
 
-if ($('#undoBtn')) $('#undoBtn').onclick = async (e) => {
-  const btn = e.currentTarget;
-  if (btn.disabled) return;
-  btn.disabled = true;
-  try {
-    const r = await window.sagitari.undoChanges();
-    if (!r || r.ok === false) {
-      // si el motor dice que ya no hay nada que deshacer, el botón no debe quedarse ahí
-      if (r && /no hay ningún cambio/.test(String(r.error || ''))) ocultarDeshacer();
-      showToast('No se pudo deshacer: ' + ((r && r.error) || 'error desconocido'));
-      return;
+if ($('#undoBtn'))
+  $('#undoBtn').onclick = async (e) => {
+    const btn = e.currentTarget;
+    if (btn.disabled) return;
+    btn.disabled = true;
+    try {
+      const r = await window.sagitari.undoChanges();
+      if (!r || r.ok === false) {
+        // si el motor dice que ya no hay nada que deshacer, el botón no debe quedarse ahí
+        if (r && /no hay ningún cambio/.test(String(r.error || ''))) ocultarDeshacer();
+        showToast('No se pudo deshacer: ' + ((r && r.error) || 'error desconocido'));
+        return;
+      }
+      ocultarDeshacer();
+      const partes = [];
+      if (r.restaurados) partes.push(r.restaurados + ' restaurado(s)');
+      if (r.borrados) partes.push(r.borrados + ' borrado(s)');
+      if (r.fallos) partes.push(r.fallos + ' sin poder tocar (no se pudo leer su contenido antes)');
+      showToast('Cambios del turno deshechos: ' + (partes.join(', ') || 'no había nada'));
+      feed('Cambio del turno deshecho', 'blu');
+    } catch (err) {
+      showToast('No se pudo deshacer: ' + ((err && err.message) || err));
+    } finally {
+      btn.disabled = false;
     }
-    ocultarDeshacer();
-    const partes = [];
-    if (r.restaurados) partes.push(r.restaurados + ' restaurado(s)');
-    if (r.borrados) partes.push(r.borrados + ' borrado(s)');
-    if (r.fallos) partes.push(r.fallos + ' sin poder tocar (no se pudo leer su contenido antes)');
-    showToast('Cambios del turno deshechos: ' + (partes.join(', ') || 'no había nada') );
-    feed('Cambio del turno deshecho', 'blu');
-  } catch (err) {
-    showToast('No se pudo deshacer: ' + ((err && err.message) || err));
-  } finally { btn.disabled = false; }
-};
+  };
 
 function toolChip(text, state) {
   const b = ensureAssistantBubble();
@@ -1141,8 +1350,11 @@ function toolChip(text, state) {
 function renderPlanCard(container, steps, before, prev) {
   const card = document.createElement('div');
   card.className = 'plancard';
-  card.innerHTML = `<div class="plancard-head">${ic('map')}<b>PLAN</b><span class="pl-count"></span></div>`
-    + '<ol>' + steps.map(s => `<li data-step="${s.n}"><span class="pl-n">${s.n}</span><span>${esc(s.text)}</span></li>`).join('') + '</ol>';
+  card.innerHTML =
+    `<div class="plancard-head">${ic('map')}<b>PLAN</b><span class="pl-count"></span></div>` +
+    '<ol>' +
+    steps.map((s) => `<li data-step="${s.n}"><span class="pl-n">${s.n}</span><span>${esc(s.text)}</span></li>`).join('') +
+    '</ol>';
   if (before) container.insertBefore(card, before);
   else container.appendChild(card);
   const count = card.querySelector('.pl-count');
@@ -1150,7 +1362,7 @@ function renderPlanCard(container, steps, before, prev) {
   /* Al repintar la tarjeta (el plan creció tras el último delta) se conservan los
      pasos ya cumplidos: si no, volvían a aparecer pendientes y el contador se
      reiniciaba a 0. */
-  const done = Math.max(0, Math.min(prev ? (prev.done || 0) : 0, items.length));
+  const done = Math.max(0, Math.min(prev ? prev.done || 0 : 0, items.length));
   for (let i = 0; i < done; i++) items[i].classList.add('done');
   count.textContent = done ? `${done}/${items.length} pasos` : `${steps.length} pasos`;
   return {
@@ -1184,24 +1396,31 @@ function advancePlan() {
    se pinta el estado REAL que guardó el agente. Cada actualización repinta la tarjeta
    en su sitio, conservando la posición que ya tenía en el turno. */
 function todoStatusMeta(status) {
-  return status === 'completed' ? { cls: 'done', icn: 'check' }
-    : status === 'in_progress' ? { cls: 'now', icn: 'play' }
-    : { cls: '', icn: '' };
+  return status === 'completed'
+    ? { cls: 'done', icn: 'check' }
+    : status === 'in_progress'
+      ? { cls: 'now', icn: 'play' }
+      : { cls: '', icn: '' };
 }
 function todoCount(todos) {
-  const done = todos.filter(t => t && t.status === 'completed').length;
+  const done = todos.filter((t) => t && t.status === 'completed').length;
   return done ? done + '/' + todos.length + ' pasos' : todos.length + ' pasos';
 }
 function buildTodoCard(todos) {
   const card = document.createElement('div');
   card.className = 'plancard todocard';
-  card.innerHTML = `<div class="plancard-head">${ic('list')}<b>TAREAS</b><span class="pl-count">${esc(todoCount(todos))}</span></div>`
-    + '<ol>' + todos.map(t => {
-      const m = todoStatusMeta(t && t.status);
-      // mientras se hace, se enseña en presente (activeForm) si el modelo lo dio
-      const txt = (t && t.status === 'in_progress' && t.activeForm) ? t.activeForm : (t && t.content) || '';
-      return `<li class="${m.cls}"><span class="pl-n">${m.icn ? ic(m.icn) : ''}</span><span>${esc(txt)}</span></li>`;
-    }).join('') + '</ol>';
+  card.innerHTML =
+    `<div class="plancard-head">${ic('list')}<b>TAREAS</b><span class="pl-count">${esc(todoCount(todos))}</span></div>` +
+    '<ol>' +
+    todos
+      .map((t) => {
+        const m = todoStatusMeta(t && t.status);
+        // mientras se hace, se enseña en presente (activeForm) si el modelo lo dio
+        const txt = t && t.status === 'in_progress' && t.activeForm ? t.activeForm : (t && t.content) || '';
+        return `<li class="${m.cls}"><span class="pl-n">${m.icn ? ic(m.icn) : ''}</span><span>${esc(txt)}</span></li>`;
+      })
+      .join('') +
+    '</ol>';
   return card;
 }
 function todosCard(ev) {
@@ -1251,7 +1470,7 @@ function closePendingCards(failed) {
     pendingTurn.team.meta.textContent = failed ? 'interrumpido' : 'detenido';
   }
   for (const card of pendingTurn.cards) {
-    if (!card.classList.contains('run')) continue;   // ya tenía su resultado
+    if (!card.classList.contains('run')) continue; // ya tenía su resultado
     card.classList.remove('run');
     card.classList.add(failed ? 'err' : 'cancelled');
     const mark = card.querySelector('.tcard-ic');
@@ -1260,8 +1479,9 @@ function closePendingCards(failed) {
     if (body && !body.querySelector('[data-result]')) {
       const wrap = document.createElement('div');
       wrap.dataset.result = '1';
-      wrap.innerHTML = `<div class="tb-label">${failed ? 'ERROR' : 'CANCELADO'}</div>`
-        + `<pre>${failed ? 'La ejecución falló antes de recibir el resultado.' : 'Detenido por el usuario antes de recibir el resultado.'}</pre>`;
+      wrap.innerHTML =
+        `<div class="tb-label">${failed ? 'ERROR' : 'CANCELADO'}</div>` +
+        `<pre>${failed ? 'La ejecución falló antes de recibir el resultado.' : 'Detenido por el usuario antes de recibir el resultado.'}</pre>`;
       body.appendChild(wrap);
     }
   }
@@ -1270,7 +1490,7 @@ function closePendingCards(failed) {
 }
 
 function finishAssistant(finalText, opts) {
-  cancelStreamRender();   // un frame pendiente repintaría el stream ya cerrado
+  cancelStreamRender(); // un frame pendiente repintaría el stream ya cerrado
   if (!pendingAssistant) return;
   const o = opts || {};
   const holder = pendingAssistant;
@@ -1293,10 +1513,9 @@ function finishAssistant(finalText, opts) {
   const shown = ((holder._frozenText || '') + '\n\n' + (holder._openText || '')).trim();
   const fin = String(finalText || '').trim();
   const runMode0 = (pendingTurn && pendingTurn.mode) || mode;
-  const planConTarjeta = runMode0 === 'plan' && !!((pendingTurn && pendingTurn.plan));
+  const planConTarjeta = runMode0 === 'plan' && !!(pendingTurn && pendingTurn.plan);
   // lo que se ofrece para copiar/leer: la historia completa, no solo el cierre
-  const narrativa = planConTarjeta ? finalText
-    : ((shown && fin && !shown.endsWith(fin)) ? shown + '\n\n' + finalText : (shown || finalText));
+  const narrativa = planConTarjeta ? finalText : shown && fin && !shown.endsWith(fin) ? shown + '\n\n' + finalText : shown || finalText;
   if (planConTarjeta) {
     if (stream) stream.remove();
   } else if (stream) {
@@ -1309,8 +1528,7 @@ function finishAssistant(finalText, opts) {
          sí están, que se pintan en el evento). Sin esto, en oculto la respuesta
          quedaba sin su último tramo. */
       if (!(stream.textContent || '').trim()) stream.innerHTML = fmt(holder._openText);
-    }
-    else stream.remove();
+    } else stream.remove();
   } else if (!planConTarjeta && holder._openText) {
     // Sin elemento porque ningún frame llegó a crearlo (ventana oculta): el
     // tramo abierto se pinta entero de una vez, en su sitio (al final).
@@ -1320,34 +1538,34 @@ function finishAssistant(finalText, opts) {
     holder.appendChild(s);
   }
   holder._openEl = null;
-  const keptText = finalText ? '' : (o.interrupted ? (planConTarjeta ? acc : shown) : '');
+  const keptText = finalText ? '' : o.interrupted ? (planConTarjeta ? acc : shown) : '';
   if (finalText && planConTarjeta) {
-  if (finalText) {
-    const runMode = (pendingTurn && pendingTurn.mode) || mode;
-    const parsed = K.parsePlan(finalText);
-    if (runMode === 'plan' && parsed.steps.length) {
-      const current = pendingTurn && pendingTurn.plan;
-      if (!current) {
-        // la respuesta trae el plan entero: se pinta ahora
-        pendingTurn.plan = renderPlanCard(holder, parsed.steps);
-        pendingTurn.plan.next();
-      } else if (parsed.steps.length > current.total) {
-        // el plan creció tras el último delta: se repinta completo, en su sitio,
-        // conservando los pasos ya cumplidos (prev = tarjeta anterior)
-        pendingTurn.plan = renderPlanCard(holder, parsed.steps, current.el, current);
-        pendingTurn.plan.next();
-        current.el.remove();
+    if (finalText) {
+      const runMode = (pendingTurn && pendingTurn.mode) || mode;
+      const parsed = K.parsePlan(finalText);
+      if (runMode === 'plan' && parsed.steps.length) {
+        const current = pendingTurn && pendingTurn.plan;
+        if (!current) {
+          // la respuesta trae el plan entero: se pinta ahora
+          pendingTurn.plan = renderPlanCard(holder, parsed.steps);
+          pendingTurn.plan.next();
+        } else if (parsed.steps.length > current.total) {
+          // el plan creció tras el último delta: se repinta completo, en su sitio,
+          // conservando los pasos ya cumplidos (prev = tarjeta anterior)
+          pendingTurn.plan = renderPlanCard(holder, parsed.steps, current.el, current);
+          pendingTurn.plan.next();
+          current.el.remove();
+        }
+      }
+      // El texto se recorta solo cuando el plan se pinta como tarjeta (modo PLAN): en
+      // ACT/THINK el prompt también pide planes, y ahí desaparecían de la respuesta.
+      const text = runMode === 'plan' && parsed.steps.length ? parsed.body || '' : finalText;
+      if (text) {
+        const div = document.createElement('div');
+        div.innerHTML = fmt(text);
+        holder.appendChild(div);
       }
     }
-    // El texto se recorta solo cuando el plan se pinta como tarjeta (modo PLAN): en
-    // ACT/THINK el prompt también pide planes, y ahí desaparecían de la respuesta.
-    const text = (runMode === 'plan' && parsed.steps.length) ? (parsed.body || '') : finalText;
-    if (text) {
-      const div = document.createElement('div');
-      div.innerHTML = fmt(text);
-      holder.appendChild(div);
-    }
-  }
   } else if (finalText) {
     // La narración ya está en su sitio (tramos congelados + tramo abierto): solo
     // se añade el cierre si aporta algo nuevo. Antes se borraba todo y se
@@ -1391,7 +1609,7 @@ function finishAssistant(finalText, opts) {
   if (said) msgActions(holder.closest('.msg-body') || holder, said, { speak: true });
   lastAssistantEl = holder;
   refreshMsgActions();
-  pendingAssistant = null; pendingTurn = null;
+  pendingAssistant = null;
+  pendingTurn = null;
   scroll(true);
 }
-

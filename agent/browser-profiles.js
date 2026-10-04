@@ -25,7 +25,11 @@ function shortHash(s) {
     colapsen al mismo id y compartan --user-data-dir. */
 function profileId(profile) {
   const raw = String(profile || 'default');
-  const slug = raw.toLowerCase().replace(/[^\w.-]+/g, '_').slice(0, 32) || 'default';
+  const slug =
+    raw
+      .toLowerCase()
+      .replace(/[^\w.-]+/g, '_')
+      .slice(0, 32) || 'default';
   return `${slug}-${shortHash(raw)}`;
 }
 
@@ -36,7 +40,13 @@ function profileDirFor(profile) {
 
 /* Nombre de carpeta que usaban las versiones anteriores al hash. */
 function legacyDirFor(profile) {
-  return path.join(PROFILE_BASE, String(profile || 'default').toLowerCase().replace(/[^\w.-]+/g, '_').slice(0, 40) || 'default');
+  return path.join(
+    PROFILE_BASE,
+    String(profile || 'default')
+      .toLowerCase()
+      .replace(/[^\w.-]+/g, '_')
+      .slice(0, 40) || 'default',
+  );
 }
 
 /**
@@ -55,4 +65,15 @@ function ensureProfileDir(profile) {
   return dir;
 }
 
-module.exports = { PROFILE_BASE, profileDirFor, profileId, ensureProfileDir, legacyDirFor, __test: { _resetForTests: (dir) => { PROFILE_BASE = dir || PROFILE_BASE_DEFAULT; } } };
+module.exports = {
+  PROFILE_BASE,
+  profileDirFor,
+  profileId,
+  ensureProfileDir,
+  legacyDirFor,
+  __test: {
+    _resetForTests: (dir) => {
+      PROFILE_BASE = dir || PROFILE_BASE_DEFAULT;
+    },
+  },
+};

@@ -24,26 +24,40 @@
    ============================================================================ */
 
 const LIMITES = {
-  navegador: 1,     // una instancia, un clic a la vez
-  disco: 1,         // una escritura a la vez
-  terminal: 2,      // dos comandos a la vez: útil y sin ahogar el equipo
-  escritorio: 1,    // capturas, ventanas, multimedia: acciones globales del sistema
-  mcp: 2,           // servidores MCP del usuario: no se sabe si aguantan concurrencia
-  general: 4,       // lo demás (memoria, skills, notificaciones…)
+  navegador: 1, // una instancia, un clic a la vez
+  disco: 1, // una escritura a la vez
+  terminal: 2, // dos comandos a la vez: útil y sin ahogar el equipo
+  escritorio: 1, // capturas, ventanas, multimedia: acciones globales del sistema
+  mcp: 2, // servidores MCP del usuario: no se sabe si aguantan concurrencia
+  general: 4, // lo demás (memoria, skills, notificaciones…)
 };
 
 /* Herramienta → recursos que necesita. Lo que no toca nada compartido va vacío:
    así no se encola por gusto. */
 const POR_HERRAMIENTA = {
   browser_control: ['navegador'],
-  write_file: ['disco'], edit_file: ['disco'], apply_patch: ['disco'],
+  write_file: ['disco'],
+  edit_file: ['disco'],
+  apply_patch: ['disco'],
   run_command: ['terminal'],
-  open_app: ['escritorio'], window_manage: ['escritorio'],
-  media_control: ['escritorio'], screenshot: ['escritorio'], clipboard: ['escritorio'],
+  open_app: ['escritorio'],
+  window_manage: ['escritorio'],
+  media_control: ['escritorio'],
+  screenshot: ['escritorio'],
+  clipboard: ['escritorio'],
   delegate: [],
-  read_file: [], view_image: [], list_dir: [], search_files: [],
-  repo_map: [], find_symbol: [], content: [],
-  remember: [], use_skill: [], system_info: [], notify: [], todo_write: [],
+  read_file: [],
+  view_image: [],
+  list_dir: [],
+  search_files: [],
+  repo_map: [],
+  find_symbol: [],
+  content: [],
+  remember: [],
+  use_skill: [],
+  system_info: [],
+  notify: [],
+  todo_write: [],
 };
 
 /** Recursos que necesita una llamada. MCP es un mundo aparte (herramientas del usuario). */
@@ -59,9 +73,9 @@ function paraHerramienta(name, args = {}) {
 class Recursos {
   constructor(limites = {}) {
     this.limites = { ...LIMITES, ...limites };
-    this.enUso = new Map();     // recurso -> cuántos lo tienen
-    this.esperas = [];          // [{ lista, resolve }] en orden de llegada (FIFO)
-    this.concedidos = 0;        // contador de servicios prestados (para los tests y el panel)
+    this.enUso = new Map(); // recurso -> cuántos lo tienen
+    this.esperas = []; // [{ lista, resolve }] en orden de llegada (FIFO)
+    this.concedidos = 0; // contador de servicios prestados (para los tests y el panel)
   }
 
   configurar(limites = {}) {
@@ -81,7 +95,8 @@ class Recursos {
   _soltar(lista) {
     for (const n of lista) {
       const v = (this.enUso.get(n) || 0) - 1;
-      if (v <= 0) this.enUso.delete(n); else this.enUso.set(n, v);
+      if (v <= 0) this.enUso.delete(n);
+      else this.enUso.set(n, v);
     }
     this._despertar();
   }
@@ -111,13 +126,20 @@ class Recursos {
       this.concedidos++;
       return () => this._soltar(lista);
     }
-    return new Promise((resolve) => { this.esperas.push({ lista, resolve }); this._despertar(); });
+    return new Promise((resolve) => {
+      this.esperas.push({ lista, resolve });
+      this._despertar();
+    });
   }
 
   /** Ejecuta `fn` con los recursos tomados y los suelta pase lo que pase. */
   async con(nombres, fn) {
     const soltar = await this.adquirir(nombres);
-    try { return await fn(); } finally { soltar(); }
+    try {
+      return await fn();
+    } finally {
+      soltar();
+    }
   }
 
   /** Estado legible (panel de diagnóstico y tests). */

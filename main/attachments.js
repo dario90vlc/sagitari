@@ -10,16 +10,95 @@
 
 const path = require('path');
 
-const MAX_ATTACH_CHARS = 120000;   // ~30k tokens: margen sobrado, techo real
+const MAX_ATTACH_CHARS = 120000; // ~30k tokens: margen sobrado, techo real
 const MAX_FILE_BYTES = 25 * 1024 * 1024;
 /* Un fichero sin extensión conocida y pequeño se intenta leer como texto */
 const PROBE_AS_TEXT_BYTES = 512 * 1024;
 
-const TEXT_EXTS = new Set(['.txt', '.md', '.markdown', '.json', '.csv', '.tsv', '.log', '.xml', '.yml', '.yaml', '.ini', '.cfg', '.env', '.js', '.mjs', '.cjs', '.ts', '.tsx', '.jsx', '.py', '.rb', '.go', '.rs', '.java', '.kt', '.c', '.cpp', '.h', '.cs', '.php', '.sh', '.bat', '.ps1', '.sql', '.html', '.htm', '.css', '.scss', '.vue', '.svelte', '.tex', '.rtf', '.srt', '.vtt']);
+const TEXT_EXTS = new Set([
+  '.txt',
+  '.md',
+  '.markdown',
+  '.json',
+  '.csv',
+  '.tsv',
+  '.log',
+  '.xml',
+  '.yml',
+  '.yaml',
+  '.ini',
+  '.cfg',
+  '.env',
+  '.js',
+  '.mjs',
+  '.cjs',
+  '.ts',
+  '.tsx',
+  '.jsx',
+  '.py',
+  '.rb',
+  '.go',
+  '.rs',
+  '.java',
+  '.kt',
+  '.c',
+  '.cpp',
+  '.h',
+  '.cs',
+  '.php',
+  '.sh',
+  '.bat',
+  '.ps1',
+  '.sql',
+  '.html',
+  '.htm',
+  '.css',
+  '.scss',
+  '.vue',
+  '.svelte',
+  '.tex',
+  '.rtf',
+  '.srt',
+  '.vtt',
+]);
 const IMG_EXTS = new Set(['.png', '.jpg', '.jpeg', '.gif', '.webp', '.bmp', '.svg']);
 /* Extensiones claramente binarias: ni intentamos leerlas como texto. Ojo: si se
    anuncia texto y luego sale binario, se degrada a 'binary' con aviso. */
-const BINARY_EXTS = new Set(['.exe', '.dll', '.zip', '.rar', '.7z', '.gz', '.tar', '.bin', '.dat', '.db', '.sqlite', '.pdf', '.doc', '.docx', '.xls', '.xlsx', '.ppt', '.pptx', '.epub', '.iso', '.img', '.woff', '.woff2', '.ttf', '.otf', '.mp3', '.mp4', '.avi', '.mkv', '.mov', '.wav', '.psd', '.ai']);
+const BINARY_EXTS = new Set([
+  '.exe',
+  '.dll',
+  '.zip',
+  '.rar',
+  '.7z',
+  '.gz',
+  '.tar',
+  '.bin',
+  '.dat',
+  '.db',
+  '.sqlite',
+  '.pdf',
+  '.doc',
+  '.docx',
+  '.xls',
+  '.xlsx',
+  '.ppt',
+  '.pptx',
+  '.epub',
+  '.iso',
+  '.img',
+  '.woff',
+  '.woff2',
+  '.ttf',
+  '.otf',
+  '.mp3',
+  '.mp4',
+  '.avi',
+  '.mkv',
+  '.mov',
+  '.wav',
+  '.psd',
+  '.ai',
+]);
 
 const extOf = (name) => path.extname(String(name || '')).toLowerCase();
 
@@ -28,7 +107,7 @@ function kindOf(name, size) {
   const ext = extOf(name);
   if (IMG_EXTS.has(ext)) return 'image';
   if (TEXT_EXTS.has(ext)) return 'text';
-  return (Number(size) < PROBE_AS_TEXT_BYTES && !BINARY_EXTS.has(ext)) ? 'text' : 'binary';
+  return Number(size) < PROBE_AS_TEXT_BYTES && !BINARY_EXTS.has(ext) ? 'text' : 'binary';
 }
 
 /** MIME de una imagen por su extensión (las que acepta IMG_EXTS). */
@@ -45,8 +124,12 @@ function mimeOf(name) {
 function textOf(buf, name) {
   const ext = extOf(name);
   let text = Buffer.isBuffer(buf) ? buf.toString('utf8') : String(buf || '');
+  // Busca caracteres no imprimibles a propósito: los adjuntos de texto pueden traer
+  // caracteres de control que rompen el renderizado del chat.
+  // eslint-disable-next-line no-control-regex
   text = text.replace(/\u0000/g, '').trim();
   if (ext === '.srt' || ext === '.vtt') text = text.replace(/^\d+\s*$/gm, '').replace(/-->\s*/g, ' → ');
+  // eslint-disable-next-line no-control-regex
   const printable = text.replace(/[^\x09\x0A\x0D\x20-\x7E\u00A0-\uFFFF]/g, '');
   if (printable.length < Math.max(40, text.length * 0.55)) return null;
   return text;
@@ -73,7 +156,17 @@ function insideDir(file, dir) {
 }
 
 module.exports = {
-  MAX_ATTACH_CHARS, MAX_FILE_BYTES, PROBE_AS_TEXT_BYTES,
-  TEXT_EXTS, IMG_EXTS, BINARY_EXTS,
-  extOf, kindOf, mimeOf, textOf, blockFor, blocksFor, insideDir,
+  MAX_ATTACH_CHARS,
+  MAX_FILE_BYTES,
+  PROBE_AS_TEXT_BYTES,
+  TEXT_EXTS,
+  IMG_EXTS,
+  BINARY_EXTS,
+  extOf,
+  kindOf,
+  mimeOf,
+  textOf,
+  blockFor,
+  blocksFor,
+  insideDir,
 };

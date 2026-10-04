@@ -1,756 +1,1353 @@
-<!DOCTYPE html>
+<!doctype html>
 <html lang="es">
-<head>
-<meta charset="UTF-8" />
-<meta http-equiv="Content-Security-Policy" content="default-src 'self' data: blob:; style-src 'self' 'unsafe-inline'; font-src 'self'; script-src 'self' blob:" />
-<link rel="stylesheet" href="styles.css" />
-<link rel="stylesheet" href="liquid-glass.css" />
-<title>SAGITARI</title>
-</head>
-<body>
-<div class="shell" id="shell">
-  <!-- capa del aura: dentro va el anillo que respira; el desenfoque lo lleva la capa de fuera -->
-  <span class="glow" aria-hidden="true"><span class="glowRing"></span><span class="glowFlow halo-a"></span><span class="glowFlow halo-b"></span><span class="glowFlow halo-c"></span></span>
+  <head>
+    <meta charset="UTF-8" />
+    <meta
+      http-equiv="Content-Security-Policy"
+      content="default-src 'self' data: blob:; style-src 'self' 'unsafe-inline'; font-src 'self'; script-src 'self' blob:"
+    />
+    <link rel="stylesheet" href="styles.css" />
+    <link rel="stylesheet" href="liquid-glass.css" />
+    <title>SAGITARI</title>
+  </head>
+  <body>
+    <div class="shell" id="shell">
+      <!-- capa del aura: dentro va el anillo que respira; el desenfoque lo lleva la capa de fuera -->
+      <span class="glow" aria-hidden="true"
+        ><span class="glowRing"></span><span class="glowFlow halo-a"></span><span class="glowFlow halo-b"></span
+        ><span class="glowFlow halo-c"></span
+      ></span>
 
-  <!-- Titlebar: franja de arrastre a todo el ancho. Los botones son DESCENDIENTES
+      <!-- Titlebar: franja de arrastre a todo el ancho. Los botones son DESCENDIENTES
        del área drag, por lo que su no-drag sí anula la región (regla Electron). -->
-  <div class="titlebar">
-    <div class="winstrip">
-      <button class="wb" id="btnMin" title="Minimizar"><i data-i="minimize"></i></button>
-      <button class="wb" id="btnMax" title="Maximizar"><i data-i="maximize"></i></button>
-      <button class="wb wb-close" id="btnClose" title="Cerrar Sagitari"><i data-i="close"></i></button>
-    </div>
-  </div>
-
-  <div class="app" id="app" data-view="chat">
-
-    <!-- ===== Sidebar ===== -->
-    <aside class="side" id="side">
-      <div class="brand drag">
-        <div class="brandlogo"><img src="assets/sagitari-sidebar.png" alt="SAGITARI" draggable="false" /></div>
-        <button class="sidecollapse" id="sideToggle" title="Compactar la barra lateral (Alt+B)" aria-label="Compactar barra lateral"><i data-i="panel"></i></button>
+      <div class="titlebar">
+        <div class="winstrip">
+          <button class="wb" id="btnMin" title="Minimizar"><i data-i="minimize"></i></button>
+          <button class="wb" id="btnMax" title="Maximizar"><i data-i="maximize"></i></button>
+          <button class="wb wb-close" id="btnClose" title="Cerrar Sagitari"><i data-i="close"></i></button>
+        </div>
       </div>
 
-      <nav class="nav" id="sideNav">
-        <div class="navgroup" data-label="Principal">
-          <button class="navitem on" data-view="chat" title="Chat (Alt+1)"><span class="ni"><i data-i="chat"></i></span><span class="nl">Chat</span><span class="nb live" id="nbChat" hidden></span></button>
-        </div>
+      <div class="app" id="app" data-view="chat">
+        <!-- ===== Sidebar ===== -->
+        <aside class="side" id="side">
+          <div class="brand drag">
+            <div class="brandlogo"><img src="assets/sagitari-sidebar.png" alt="SAGITARI" draggable="false" /></div>
+            <button class="sidecollapse" id="sideToggle" title="Compactar la barra lateral (Alt+B)" aria-label="Compactar barra lateral">
+              <i data-i="panel"></i>
+            </button>
+          </div>
 
-        <div class="navgroup" data-label="Trabajo">
-          <button class="navitem" data-view="tasks" title="Tareas (Alt+2)"><span class="ni"><i data-i="list"></i></span><span class="nl">Tareas</span><span class="nb" id="nbTasks" hidden>0</span></button>
-          <button class="navitem" data-view="projects" title="Espacio de trabajo (Alt+3)"><span class="ni"><i data-i="projects"></i></span><span class="nl">Espacio de trabajo</span></button>
-          <button class="navitem" data-view="agents" title="Agentes (Alt+4)"><span class="ni"><i data-i="agents"></i></span><span class="nl">Agentes</span></button>
-        </div>
+          <nav class="nav" id="sideNav">
+            <div class="navgroup" data-label="Principal">
+              <button class="navitem on" data-view="chat" title="Chat (Alt+1)">
+                <span class="ni"><i data-i="chat"></i></span><span class="nl">Chat</span><span class="nb live" id="nbChat" hidden></span>
+              </button>
+            </div>
 
-        <div class="navgroup" data-label="Conocimiento">
-          <button class="navitem" data-view="memory" title="Memoria (Alt+5)"><span class="ni"><i data-i="memory"></i></span><span class="nl">Memoria</span><span class="nb" id="nbMemory" hidden>0</span></button>
-          <button class="navitem" data-view="skills" title="Skills (Alt+6)"><span class="ni"><i data-i="zap"></i></span><span class="nl">Skills</span><span class="nb" id="nbSkills" hidden>0</span></button>
-          <button class="navitem" data-view="mcp" title="Servidores MCP"><span class="ni"><i data-i="bolt"></i></span><span class="nl">MCP</span></button>
-          <button class="navitem" data-view="tools" title="Herramientas (Alt+7)"><span class="ni"><i data-i="tools"></i></span><span class="nl">Herramientas</span></button>
-        </div>
+            <div class="navgroup" data-label="Trabajo">
+              <button class="navitem" data-view="tasks" title="Tareas (Alt+2)">
+                <span class="ni"><i data-i="list"></i></span><span class="nl">Tareas</span><span class="nb" id="nbTasks" hidden>0</span>
+              </button>
+              <button class="navitem" data-view="projects" title="Espacio de trabajo (Alt+3)">
+                <span class="ni"><i data-i="projects"></i></span><span class="nl">Espacio de trabajo</span>
+              </button>
+              <button class="navitem" data-view="agents" title="Agentes (Alt+4)">
+                <span class="ni"><i data-i="agents"></i></span><span class="nl">Agentes</span>
+              </button>
+            </div>
 
-        <div class="navgroup" data-label="Sistema">
-          <button class="navitem" data-view="history" title="Historial (Alt+8)"><span class="ni"><i data-i="history"></i></span><span class="nl">Historial</span></button>
-          <button class="navitem" data-view="settings" title="Ajustes (Alt+9)"><span class="ni"><i data-i="settings"></i></span><span class="nl">Ajustes</span><span class="nb" id="nbUpdate" hidden>1</span></button>
-        </div>
-      </nav>
+            <div class="navgroup" data-label="Conocimiento">
+              <button class="navitem" data-view="memory" title="Memoria (Alt+5)">
+                <span class="ni"><i data-i="memory"></i></span><span class="nl">Memoria</span><span class="nb" id="nbMemory" hidden>0</span>
+              </button>
+              <button class="navitem" data-view="skills" title="Skills (Alt+6)">
+                <span class="ni"><i data-i="zap"></i></span><span class="nl">Skills</span><span class="nb" id="nbSkills" hidden>0</span>
+              </button>
+              <button class="navitem" data-view="mcp" title="Servidores MCP">
+                <span class="ni"><i data-i="bolt"></i></span><span class="nl">MCP</span>
+              </button>
+              <button class="navitem" data-view="tools" title="Herramientas (Alt+7)">
+                <span class="ni"><i data-i="tools"></i></span><span class="nl">Herramientas</span>
+              </button>
+            </div>
 
-      <div class="sidefoot">
-        <!-- La píldora ya no dicta un estado («Conectado», «Con errores»): enseña
+            <div class="navgroup" data-label="Sistema">
+              <button class="navitem" data-view="history" title="Historial (Alt+8)">
+                <span class="ni"><i data-i="history"></i></span><span class="nl">Historial</span>
+              </button>
+              <button class="navitem" data-view="settings" title="Ajustes (Alt+9)">
+                <span class="ni"><i data-i="settings"></i></span><span class="nl">Ajustes</span
+                ><span class="nb" id="nbUpdate" hidden>1</span>
+              </button>
+            </div>
+          </nav>
+
+          <div class="sidefoot">
+            <!-- La píldora ya no dicta un estado («Conectado», «Con errores»): enseña
              qué modelo está en uso y abre la lista de los que ofrece tu API, para
              cambiar sin pasar por Ajustes. -->
-        <div class="ssel">
-          <button class="side-status" id="sideStatusBtn" title="Cambiar de modelo" aria-haspopup="listbox" aria-expanded="false">
-            <span class="ss-col">
-              <b id="stModel">sin modelo</b>
-              <small id="stProv">sin proveedor</small>
-            </span>
-            <span class="ss-caret" aria-hidden="true">▾</span>
-          </button>
-          <div class="modelmenu" id="modelMenu" role="listbox" aria-label="Modelos disponibles" hidden></div>
-        </div>
-        <button class="side-mode act" id="sideModeBtn" title="Cambiar de modo (Alt+M)"><span class="dot ok"></span><span id="sideModeLabel">ACT</span></button>
-      </div>
-    </aside>
-
-    <!-- ===== Main ===== -->
-    <main class="main">
-      <!-- CHAT -->
-      <section class="view on" id="view-chat" data-mode="act">
-        <h1 class="sr-only" id="chatRootTitle">Nueva conversación</h1>
-        <div class="viewhead chathead">
-          <div class="ch-left">
-            <h2 id="chatTitle">Nueva conversación</h2>
-            <div class="ch-status" id="chatStatus" hidden>
-              <span class="dot" id="chatStatusDot"></span>
-              <span class="ch-mode" id="chatStatusMode">ACT</span>
-              <span class="ch-txt" id="chatStatusText"></span>
+            <div class="ssel">
+              <button class="side-status" id="sideStatusBtn" title="Cambiar de modelo" aria-haspopup="listbox" aria-expanded="false">
+                <span class="ss-col">
+                  <b id="stModel">sin modelo</b>
+                  <small id="stProv">sin proveedor</small>
+                </span>
+                <span class="ss-caret" aria-hidden="true">▾</span>
+              </button>
+              <div class="modelmenu" id="modelMenu" role="listbox" aria-label="Modelos disponibles" hidden></div>
             </div>
+            <button class="side-mode act" id="sideModeBtn" title="Cambiar de modo (Alt+M)">
+              <span class="dot ok"></span><span id="sideModeLabel">ACT</span>
+            </button>
           </div>
-          <div class="vh-actions">
-            <button class="btn ghost sq" id="btnCopyConv" title="Copiar toda la conversación"><i data-i="copy"></i></button>
-            <button class="btn" id="btnClear">Nueva conversación</button>
-            <button class="btn ghost" id="btnGoHistory">Historial</button>
-          </div>
-        </div>
-        <div id="confirmBar" class="confirmbar" hidden>
-          <span class="cb-dot"></span>
-          <div class="cb-txt">
-            <b id="confirmTitle">Confirmación requerida</b>
-            <small id="confirmDetail"></small>
-          </div>
-          <div class="btnrow" style="margin:0">
-            <!-- El permiso NO se concede por defecto: el botón con peso es el
+        </aside>
+
+        <!-- ===== Main ===== -->
+        <main class="main">
+          <!-- CHAT -->
+          <section class="view on" id="view-chat" data-mode="act">
+            <h1 class="sr-only" id="chatRootTitle">Nueva conversación</h1>
+            <div class="viewhead chathead">
+              <div class="ch-left">
+                <h2 id="chatTitle">Nueva conversación</h2>
+                <div class="ch-status" id="chatStatus" hidden>
+                  <span class="dot" id="chatStatusDot"></span>
+                  <span class="ch-mode" id="chatStatusMode">ACT</span>
+                  <span class="ch-txt" id="chatStatusText"></span>
+                </div>
+              </div>
+              <div class="vh-actions">
+                <button class="btn ghost sq" id="btnCopyConv" title="Copiar toda la conversación"><i data-i="copy"></i></button>
+                <button class="btn" id="btnClear">Nueva conversación</button>
+                <button class="btn ghost" id="btnGoHistory">Historial</button>
+              </div>
+            </div>
+            <div id="confirmBar" class="confirmbar" hidden>
+              <span class="cb-dot"></span>
+              <div class="cb-txt">
+                <b id="confirmTitle">Confirmación requerida</b>
+                <small id="confirmDetail"></small>
+              </div>
+              <div class="btnrow" style="margin: 0">
+                <!-- El permiso NO se concede por defecto: el botón con peso es el
                  que deniega y el foco no entra en la barra. Ejecutar en tu PC
                  exige un clic deliberado, no un Enter al vuelo. -->
-            <button class="btn ghost" id="confirmOk">Permitir</button>
-            <button class="btn primary" id="confirmNo">Denegar</button>
-          </div>
-        </div>
-        <div id="chatWrap">
-          <!-- el estado vacío va FUERA de #messages: esa capa se vacía con
+                <button class="btn ghost" id="confirmOk">Permitir</button>
+                <button class="btn primary" id="confirmNo">Denegar</button>
+              </div>
+            </div>
+            <div id="chatWrap">
+              <!-- el estado vacío va FUERA de #messages: esa capa se vacía con
                innerHTML en cada conversación nueva y se lo llevaría por delante -->
-          <div class="msgs-area" id="msgsArea">
-            <div id="messages" role="log" aria-live="polite" aria-relevant="additions text" aria-label="Conversación"></div>
-            <div class="chat-empty" id="chatEmpty">
-              <div class="ce-inner">
-                <div class="ce-mark"><i data-i="spark"></i></div>
-                <b class="ce-title">¿Por dónde empezamos?</b>
-                <div class="ce-sub">Escribe abajo, adjunta una captura con el clip, o empieza por una idea:</div>
-                <div class="ce-hints">
-                  <button class="ce-hint" data-fill="Organiza los archivos de mi escritorio por tipo y fecha">Organiza mi escritorio</button>
-                  <button class="ce-hint" data-fill="Investiga esto en la web, compara las opciones y prepárame un informe">Investiga y compara</button>
-                  <button class="ce-hint" data-fill="Revisa este proyecto y dime qué se puede mejorar">Revisa un proyecto</button>
+              <div class="msgs-area" id="msgsArea">
+                <div id="messages" role="log" aria-live="polite" aria-relevant="additions text" aria-label="Conversación"></div>
+                <div class="chat-empty" id="chatEmpty">
+                  <div class="ce-inner">
+                    <div class="ce-mark"><i data-i="spark"></i></div>
+                    <b class="ce-title">¿Por dónde empezamos?</b>
+                    <div class="ce-sub">Escribe abajo, adjunta una captura con el clip, o empieza por una idea:</div>
+                    <div class="ce-hints">
+                      <button class="ce-hint" data-fill="Organiza los archivos de mi escritorio por tipo y fecha">
+                        Organiza mi escritorio
+                      </button>
+                      <button class="ce-hint" data-fill="Investiga esto en la web, compara las opciones y prepárame un informe">
+                        Investiga y compara
+                      </button>
+                      <button class="ce-hint" data-fill="Revisa este proyecto y dime qué se puede mejorar">Revisa un proyecto</button>
+                    </div>
+                    <div class="ce-modes" id="ceModes"></div>
+                  </div>
                 </div>
-                <div class="ce-modes" id="ceModes"></div>
+              </div>
+              <button class="jumpdown" id="jumpDown" hidden title="Ir al final de la conversación" aria-label="Ir al final">
+                <i data-i="arrowDown"></i>
+              </button>
+              <footer class="chatfoot">
+                <div id="skillMenu" class="skillmenu" hidden></div>
+                <div class="composer slim" id="composer">
+                  <div id="undoBar" class="btnrow" hidden style="align-items: center; gap: 10px">
+                    <span class="subnote" id="undoText" style="margin: 0"></span>
+                    <button class="btn ghost" id="undoBtn">Deshacer el cambio</button>
+                  </div>
+                  <div id="attachStrip" class="attachstrip" hidden></div>
+                  <div class="compline">
+                    <div class="modeseg" id="modeSeg" title="Modo del agente (Alt+M para cambiar)"></div>
+                    <textarea
+                      id="chatInput"
+                      aria-label="Mensaje para Sagitari"
+                      rows="1"
+                      placeholder="Escribe a Sagitari… (/ para usar una skill)"
+                    ></textarea>
+                    <button
+                      class="cbtn"
+                      id="chatAttach"
+                      title="Adjuntar archivos, documentos o imágenes"
+                      aria-label="Adjuntar archivos, documentos o imágenes"
+                    >
+                      <i data-i="clip"></i>
+                    </button>
+                    <button class="cbtn" id="chatMic" title="Dictado por voz" aria-label="Dictado por voz" aria-pressed="false">
+                      <i data-i="mic"></i>
+                    </button>
+                    <button class="cbtn" id="chatPause" title="Pausar la tarea (guarda el punto de control)" aria-label="Pausar tarea">
+                      <i data-i="pause"></i>
+                    </button>
+                    <button class="cbtn send" id="chatSend" title="Enviar" aria-label="Enviar"><i data-i="send"></i></button>
+                  </div>
+                </div>
+                <div id="devMeta" class="devmeta" hidden></div>
+                <div class="hintbar"><span id="modeLabel">Modo Act</span><span id="chatModelLabel"></span></div>
+              </footer>
+            </div>
+          </section>
+
+          <!-- HISTORY -->
+          <section class="view" id="view-history">
+            <h1 class="sr-only">Historial</h1>
+            <div class="viewhead">
+              <h2>Historial</h2>
+              <div class="vh-actions">
+                <input type="search" id="histSearch" aria-label="Buscar en el historial" placeholder="Buscar conversaciones…" />
+                <button class="btn" id="histNew">Nueva conversación</button>
               </div>
             </div>
-          </div>
-          <button class="jumpdown" id="jumpDown" hidden title="Ir al final de la conversación" aria-label="Ir al final"><i data-i="arrowDown"></i></button>
-          <footer class="chatfoot">
-            <div id="skillMenu" class="skillmenu" hidden></div>
-          <div class="composer slim" id="composer">
-            <div id="undoBar" class="btnrow" hidden style="align-items:center;gap:10px">
-              <span class="subnote" id="undoText" style="margin:0"></span>
-              <button class="btn ghost" id="undoBtn">Deshacer el cambio</button>
+            <div id="histList" class="histlist"></div>
+          </section>
+
+          <!-- AGENTS -->
+          <section class="view" id="view-agents">
+            <h1 class="sr-only">Agentes</h1>
+            <div class="viewhead"><h2>Agentes</h2></div>
+            <div class="agents-grid">
+              <div class="acard" id="agentCard-researcher">
+                <div class="aic a-b"><i data-i="search"></i></div>
+                <div><b>Investigador</b><small>Busca, lee y sintetiza información</small></div>
+                <span class="adot"></span>
+              </div>
+              <div class="acard" id="agentCard-coder">
+                <div class="aic a-p"><i data-i="code"></i></div>
+                <div><b>Programador</b><small>Escribe y ejecuta código</small></div>
+                <span class="adot"></span>
+              </div>
+              <div class="acard" id="agentCard-analyst">
+                <div class="aic a-b2"><i data-i="chart"></i></div>
+                <div><b>Analista</b><small>Procesa datos y capturas</small></div>
+                <span class="adot"></span>
+              </div>
+              <div class="acard" id="agentCard-navigator">
+                <div class="aic a-c"><i data-i="compass"></i></div>
+                <div><b>Navegador</b><small>Controla Chrome y Edge por ti</small></div>
+                <span class="adot"></span>
+              </div>
+              <div class="acard" id="agentCard-file">
+                <div class="aic a-y"><i data-i="folder"></i></div>
+                <div><b>Archivador</b><small>Gestiona archivos y carpetas</small></div>
+                <span class="adot"></span>
+              </div>
+              <div class="acard" id="agentCard-ops">
+                <div class="aic a-p2"><i data-i="terminal"></i></div>
+                <div><b>Operador</b><small>Comandos, apps y multimedia</small></div>
+                <span class="adot"></span>
+              </div>
             </div>
-            <div id="attachStrip" class="attachstrip" hidden></div>
-            <div class="compline">
-            <div class="modeseg" id="modeSeg" title="Modo del agente (Alt+M para cambiar)"></div>
-            <textarea id="chatInput" aria-label="Mensaje para Sagitari" rows="1" placeholder="Escribe a Sagitari… (/ para usar una skill)"></textarea>
-            <button class="cbtn" id="chatAttach" title="Adjuntar archivos, documentos o imágenes" aria-label="Adjuntar archivos, documentos o imágenes"><i data-i="clip"></i></button>
-            <button class="cbtn" id="chatMic" title="Dictado por voz" aria-label="Dictado por voz" aria-pressed="false"><i data-i="mic"></i></button>
-            <button class="cbtn" id="chatPause" title="Pausar la tarea (guarda el punto de control)" aria-label="Pausar tarea"><i data-i="pause"></i></button>
-            <button class="cbtn send" id="chatSend" title="Enviar" aria-label="Enviar"><i data-i="send"></i></button>
+            <div class="tooltray">
+              <div class="tt-head">ACTIVIDAD DE HERRAMIENTAS · SESIÓN ACTUAL</div>
+              <div id="toolTrayList" class="tt-list"></div>
             </div>
-          </div>
-            <div id="devMeta" class="devmeta" hidden></div>
-            <div class="hintbar"><span id="modeLabel">Modo Act</span><span id="chatModelLabel"></span></div>
-          </footer>
-        </div>
-      </section>
-
-      <!-- HISTORY -->
-      <section class="view" id="view-history">
-        <h1 class="sr-only">Historial</h1>
-        <div class="viewhead">
-          <h2>Historial</h2>
-          <div class="vh-actions"><button class="btn" id="histNew">Nueva conversación</button></div>
-        </div>
-        <div id="histList" class="histlist"></div>
-      </section>
-
-      <!-- AGENTS -->
-      <section class="view" id="view-agents">
-        <h1 class="sr-only">Agentes</h1>
-        <div class="viewhead"><h2>Agentes</h2></div>
-        <div class="agents-grid">
-          <div class="acard" id="agentCard-researcher"><div class="aic a-b"><i data-i="search"></i></div><div><b>Investigador</b><small>Busca, lee y sintetiza información</small></div><span class="adot"></span></div>
-          <div class="acard" id="agentCard-coder"><div class="aic a-p"><i data-i="code"></i></div><div><b>Programador</b><small>Escribe y ejecuta código</small></div><span class="adot"></span></div>
-          <div class="acard" id="agentCard-analyst"><div class="aic a-b2"><i data-i="chart"></i></div><div><b>Analista</b><small>Procesa datos y capturas</small></div><span class="adot"></span></div>
-          <div class="acard" id="agentCard-navigator"><div class="aic a-c"><i data-i="compass"></i></div><div><b>Navegador</b><small>Controla Chrome y Edge por ti</small></div><span class="adot"></span></div>
-          <div class="acard" id="agentCard-file"><div class="aic a-y"><i data-i="folder"></i></div><div><b>Archivador</b><small>Gestiona archivos y carpetas</small></div><span class="adot"></span></div>
-          <div class="acard" id="agentCard-ops"><div class="aic a-p2"><i data-i="terminal"></i></div><div><b>Operador</b><small>Comandos, apps y multimedia</small></div><span class="adot"></span></div>
-        </div>
-        <div class="tooltray">
-          <div class="tt-head">ACTIVIDAD DE HERRAMIENTAS · SESIÓN ACTUAL</div>
-          <div id="toolTrayList" class="tt-list"></div>
-        </div>
-        <div class="tooltray" style="margin-top:18px">
-          <div class="tt-head">SALUD DE LOS MODELOS</div>
-          <div id="healthList" class="tt-list"></div>
-        </div>
-        <div class="tooltray" style="margin-top:18px;margin-bottom:24px">
-          <div class="tt-head">HÁBITOS OBSERVADOS · v2.0 APRENDIZAJE</div>
-          <div id="habitsList" class="tt-list"></div>
-        </div>
-      </section>
-
-      <!-- TASKS (v1.3: cola en segundo plano, programadas, pausa/cancelar) -->
-      <section class="view" id="view-tasks">
-        <h1 class="sr-only">Tareas</h1>
-        <div class="viewhead"><h2>Tareas</h2>
-          <div class="vh-actions"><button class="btn ghost" id="tasksRefresh">Actualizar</button></div>
-        </div>
-        <div class="tooltray" style="max-width:860px;margin-bottom:14px">
-          <div class="tt-head">NUEVA TAREA EN SEGUNDO PLANO</div>
-          <div class="btnrow">
-            <input type="text" id="taskGoal" aria-label="Objetivo de la tarea" placeholder="Objetivo: busca esto y compara precios…" style="flex:3;min-width:220px" />
-            <select id="taskMode" aria-label="Modo de la tarea" style="width:110px">
-              <option value="act">Act</option>
-              <option value="plan">Plan</option>
-              <option value="think">Think</option>
-            </select>
-            <button class="btn primary" id="taskCreate"><span class="bi"><i data-i="zap"></i></span> Lanzar</button>
-          </div>
-          <div class="btnrow" style="margin-top:8px">
-            <input type="datetime-local" id="taskWhen" aria-label="Fecha y hora de la tarea" style="width:210px" />
-            <button class="btn ghost" id="taskSchedule"><span class="bi"><i data-i="history"></i></span> Programar</button>
-            <span class="saving" id="taskMsg"></span>
-          </div>
-          <div class="subnote">Las tareas en segundo plano usan su propio agente: puedes seguir chateando mientras trabajan. Se te notificará al terminar. Máx. simultáneas configurable en Ajustes.</div>
-        </div>
-        <p class="subnote" style="margin-top:0;margin-bottom:14px">Cada tarea larga guarda un punto de control con su último paso completado. Puedes pausar, reanudar donde se quedó (también tras cerrar la app) y ver qué paso falló y por qué.</p>
-        <div id="tasksList" class="histlist"></div>
-      </section>
-
-      <!-- PROJECTS -->
-      <section class="view" id="view-projects">
-        <h1 class="sr-only">Espacio de trabajo</h1>
-        <div class="viewhead"><h2>Espacio de trabajo</h2></div>
-        <div class="projwrap">
-          <div class="field"><label for="projPath">ESPACIO DE TRABAJO ACTIVO</label>
-            <input type="text" id="projPath" placeholder="C:\Users\tu-usuario\Desktop\mi-proyecto" />
-          </div>
-          <button class="btn" id="projOpen"><span class="bi"><i data-i="external"></i></span> Abrir y trabajar aquí</button>
-          <button class="btn ghost" id="projPick">Elegir carpeta…</button>
-          <div class="saving" id="projMsg"></div>
-          <div class="subnote">Esta es la carpeta donde Sagitari crea y modifica archivos, y donde ejecuta comandos por defecto. Pídele cosas como «crea un script» sin rutas absolutas: aterrizarán aquí. Elegir o abrir una carpeta la convierte en el espacio activo.</div>
-        </div>
-      </section>
-
-      <!-- MCP (sección propia: los servidores son las herramientas «de fuera», al lado de las nativas) -->
-      <section class="view" id="view-mcp">
-        <h1 class="sr-only">Servidores MCP</h1>
-        <div class="viewhead"><h2>Servidores MCP</h2></div>
-        <div class="setcard">
-          <div class="sc-head"><b>Servidores MCP</b><span class="sc-hint">Conecta herramientas externas (GitHub, Notion, tu propio servidor…) y el agente las usará como las de casa.</span></div>
-          <div class="swrow srow" data-keys="mcp servidores activar conectar herramientas externas apagar">
-            <span class="st"><b>Activar servidores MCP</b><small>Apagado, el agente no ve ninguna herramienta MCP.</small></span>
-            <div class="sw on" id="mcpGlobal" role="switch" tabindex="0" aria-label="Activar servidores MCP"></div>
-          </div>
-          <div id="mcpList" class="mcplist"></div>
-          <div class="srow" data-keys="mcp anadir servidor pegar json exportar mcpServers">
-            <div class="btnrow">
-              <button class="btn" id="mcpNew"><span class="bi"><i data-i="plus"></i></span> Añadir servidor</button>
-              <button class="btn ghost" id="mcpPaste">Pegar JSON de mcpServers</button>
-              <button class="btn ghost" id="mcpExportBtn">Exportar</button>
+            <div class="tooltray" style="margin-top: 18px">
+              <div class="tt-head">SALUD DE LOS MODELOS</div>
+              <div id="healthList" class="tt-list"></div>
             </div>
-            <div id="mcpPasteBox" hidden>
-              <textarea id="mcpPasteText" rows="5" placeholder='{"mcpServers": { "github": { "command": "npx", "args": ["-y", "@modelcontextprotocol/server-github"] } }}' spellcheck="false"></textarea>
+            <div class="tooltray" style="margin-top: 18px; margin-bottom: 24px">
+              <div class="tt-head">HÁBITOS OBSERVADOS · v2.0 APRENDIZAJE</div>
+              <div id="habitsList" class="tt-list"></div>
+            </div>
+          </section>
+
+          <!-- TASKS (v1.3: cola en segundo plano, programadas, pausa/cancelar) -->
+          <section class="view" id="view-tasks">
+            <h1 class="sr-only">Tareas</h1>
+            <div class="viewhead">
+              <h2>Tareas</h2>
+              <div class="vh-actions"><button class="btn ghost" id="tasksRefresh">Actualizar</button></div>
+            </div>
+            <div class="tooltray" style="max-width: 860px; margin-bottom: 14px">
+              <div class="tt-head">NUEVA TAREA EN SEGUNDO PLANO</div>
               <div class="btnrow">
-                <button class="btn" id="mcpPasteGo">Importar</button>
-                <button class="btn ghost" id="mcpPasteCancel">Cancelar</button>
+                <input
+                  type="text"
+                  id="taskGoal"
+                  aria-label="Objetivo de la tarea"
+                  placeholder="Objetivo: busca esto y compara precios…"
+                  style="flex: 3; min-width: 220px"
+                />
+                <select id="taskMode" aria-label="Modo de la tarea" style="width: 110px">
+                  <option value="act">Act</option>
+                  <option value="plan">Plan</option>
+                  <option value="think">Think</option>
+                </select>
+                <button class="btn primary" id="taskCreate">
+                  <span class="bi"><i data-i="zap"></i></span> Lanzar
+                </button>
+              </div>
+              <div class="btnrow" style="margin-top: 8px">
+                <input type="datetime-local" id="taskWhen" aria-label="Fecha y hora de la tarea" style="width: 210px" />
+                <button class="btn ghost" id="taskSchedule">
+                  <span class="bi"><i data-i="history"></i></span> Programar
+                </button>
+                <span class="saving" id="taskMsg"></span>
+              </div>
+              <div class="subnote">
+                Las tareas en segundo plano usan su propio agente: puedes seguir chateando mientras trabajan. Se te notificará al terminar.
+                Máx. simultáneas configurable en Ajustes.
               </div>
             </div>
-          </div>
-          <div class="subnote" id="mcpMsg"></div>
-        </div>
+            <p class="subnote" style="margin-top: 0; margin-bottom: 14px">
+              Cada tarea larga guarda un punto de control con su último paso completado. Puedes pausar, reanudar donde se quedó (también
+              tras cerrar la app) y ver qué paso falló y por qué.
+            </p>
+            <div id="tasksList" class="histlist"></div>
+          </section>
 
-        <div class="setcard" id="mcpFormCard">
-          <div class="sc-head"><b id="mcpFormTitle">Nuevo servidor</b><span class="sc-hint">Las variables de entorno y las cabeceras se guardan cifradas con el almacén de Windows.</span></div>
-          <div class="field srow" data-keys="mcp identificador nombre id"><label for="mcpId">IDENTIFICADOR</label><input type="text" id="mcpId" placeholder="github" spellcheck="false" /></div>
-          <div class="field srow" data-keys="mcp nombre visible etiqueta"><label for="mcpName">NOMBRE</label><input type="text" id="mcpName" placeholder="GitHub" /></div>
-          <div class="field srow" data-keys="mcp tipo transporte local remoto comando url"><label for="mcpTransport">TIPO</label>
-            <select id="mcpTransport"><option value="stdio">Comando local</option><option value="http">URL remota</option></select>
-          </div>
-          <div id="mcpStdioRows">
-            <div class="field srow" data-keys="mcp comando ejecutable npx node"><label for="mcpCommand">COMANDO</label><input type="text" id="mcpCommand" placeholder="npx" spellcheck="false" /></div>
-            <div class="field srow" data-keys="mcp argumentos args"><label for="mcpArgs">ARGUMENTOS</label><input type="text" id="mcpArgs" placeholder="-y @modelcontextprotocol/server-github" spellcheck="false" /></div>
-            <div class="field srow" data-keys="mcp variables entorno env token secreto"><label for="mcpEnv">VARIABLES DE ENTORNO</label><textarea id="mcpEnv" rows="3" placeholder="GITHUB_TOKEN=ghp_… (una por línea)"></textarea></div>
-          </div>
-          <div id="mcpHttpRows" hidden>
-            <div class="field srow" data-keys="mcp url direccion remota endpoint"><label for="mcpUrl">URL</label><input type="text" id="mcpUrl" placeholder="https://mcp.ejemplo.com/mcp" spellcheck="false" /></div>
-            <div class="field srow" data-keys="mcp cabeceras headers autorizacion token"><label for="mcpHeaders">CABECERAS</label><textarea id="mcpHeaders" rows="3" placeholder="Authorization=Bearer … (una por línea)"></textarea></div>
-          </div>
-          <div class="field srow" data-keys="mcp permiso nivel bloquear permitir preguntar servidor"><label for="mcpLevel">PERMISO DEL SERVIDOR</label>
-            <select id="mcpLevel"><option value="default">Por defecto (preguntar antes)</option><option value="safe">Permitir siempre</option><option value="confirm">Preguntar antes</option><option value="restricted">Bloqueado</option></select>
-          </div>
-          <div class="field srow" data-keys="mcp herramientas permitir allow lista"><label for="mcpAllow">HERRAMIENTAS A PERMITIR (vacío = todas)</label><input type="text" id="mcpAllow" placeholder="create_issue, list_issues" spellcheck="false" /></div>
-          <div class="field srow" data-keys="mcp herramientas bloquear deny lista"><label for="mcpDeny">HERRAMIENTAS A BLOQUEAR</label><input type="text" id="mcpDeny" placeholder="delete_repository" spellcheck="false" /></div>
-          <div class="srow" data-keys="mcp guardar probar cancelar eliminar">
-            <div class="btnrow">
-              <button class="btn" id="mcpSave"><span class="bi"><i data-i="check"></i></span> Guardar y probar</button>
-              <button class="btn ghost" id="mcpCancel">Cancelar</button>
-              <button class="btn ghost" id="mcpFormDelete" hidden>Eliminar</button>
+          <!-- PROJECTS -->
+          <section class="view" id="view-projects">
+            <h1 class="sr-only">Espacio de trabajo</h1>
+            <div class="viewhead"><h2>Espacio de trabajo</h2></div>
+            <div class="projwrap">
+              <div class="field">
+                <label for="projPath">ESPACIO DE TRABAJO ACTIVO</label>
+                <input type="text" id="projPath" placeholder="C:\Users\tu-usuario\Desktop\mi-proyecto" />
+              </div>
+              <button class="btn" id="projOpen">
+                <span class="bi"><i data-i="external"></i></span> Abrir y trabajar aquí
+              </button>
+              <button class="btn ghost" id="projPick">Elegir carpeta…</button>
+              <div class="saving" id="projMsg"></div>
+              <div class="subnote">
+                La carpeta donde Sagitari crea y modifica archivos. Pídele «crea un script» sin rutas: aterrizan aquí. Elegir o abrir una
+                carpeta la convierte en el espacio activo.
+              </div>
             </div>
-          </div>
-        </div>
-      </section>
+          </section>
 
-      <!-- TOOLS -->
-      <section class="view" id="view-tools">
-        <h1 class="sr-only">Herramientas</h1>
-        <div class="viewhead"><h2>Herramientas</h2></div>
-        <div class="toolsgrid" id="toolsGrid"></div>
-      </section>
-
-      <!-- MEMORY -->
-      <section class="view" id="view-memory">
-        <h1 class="sr-only">Memoria</h1>
-        <div class="viewhead">
-          <h2>Memoria</h2>
-          <div class="vh-actions">
-            <input type="text" id="memInput" aria-label="Añade algo que Sagitari debe recordar" placeholder="Añade algo que Sagitari debe recordar…" />
-            <button class="btn" id="memAdd"><span class="bi"><i data-i="plus"></i></span> Añadir</button>
-          </div>
-        </div>
-        <div id="memList" class="memlist"></div>
-      </section>
-
-      <!-- SKILLS -->
-      <section class="view" id="view-skills">
-        <h1 class="sr-only">Skills</h1>
-        <div class="viewhead">
-          <h2>Skills</h2>
-          <div class="vh-actions">
-            <input type="text" id="skillImportInput" aria-label="Repositorio de GitHub (owner/repo) con SKILL.md" placeholder="owner/repo de GitHub con SKILL.md…" />
-            <button class="btn" id="skillImportBtn"><span class="bi"><i data-i="download"></i></span> Importar</button>
-            <button class="btn ghost" id="skillsFolderBtn"><span class="bi"><i data-i="folder"></i></span> Carpeta</button>
-          </div>
-        </div>
-        <p class="subnote" style="margin-top:-6px;margin-bottom:14px">Las skills son instrucciones especializadas (SKILL.md) que Sagitari carga solo cuando la tarea lo necesita: sin coste en tokens hasta que aplican. Importa packs desde GitHub (owner/repo), crea las tuyas o edita la carpeta directamente.</p>
-        <div id="skillsList" class="memlist"></div>
-        <div class="tooltray" style="margin-top:18px;max-width:860px">
-          <div class="tt-head">CATÁLOGO DE PACKS · LISTOS PARA INSTALAR</div>
-          <div class="btnrow">
-            <input type="text" id="marketQuery" aria-label="Buscar packs de skills en GitHub" placeholder="Buscar packs en GitHub: blender, wordpress, excel…" style="flex:1;min-width:180px" />
-            <button class="btn ghost" id="marketSearchBtn"><span class="bi"><i data-i="search"></i></span> Buscar</button>
-            <button class="btn ghost" id="skillsUpdateAllBtn"><span class="bi"><i data-i="history"></i></span> Actualizar todas</button>
-          </div>
-          <div id="marketList" class="memlist" style="margin-top:10px"></div>
-          <span class="saving" id="marketMsg"></span>
-        </div>
-        <div class="tooltray" style="margin-top:18px;max-width:860px">
-          <div class="tt-head">CREAR SKILL</div>
-          <div class="btnrow">
-            <input type="text" id="skillNewName" aria-label="Nombre de la skill" placeholder="nombre-ejemplo" style="flex:1;min-width:160px" />
-            <input type="text" id="skillNewDesc" aria-label="Qué hace la skill y cuándo usarla" placeholder="Qué hace y cuándo usarla" style="flex:2;min-width:240px" />
-          </div>
-          <textarea id="skillNewBody" aria-label="Instrucciones que seguirá Sagitari (markdown)" rows="5" placeholder="Instrucciones que seguirá Sagitari… (markdown)"></textarea>
-          <div class="btnrow" style="margin-top:8px">
-            <button class="btn primary" id="skillCreateBtn"><span class="bi"><i data-i="plus"></i></span> Crear skill</button>
-            <span class="saving" id="skillMsg"></span>
-          </div>
-        </div>
-      </section>
-
-      <!-- SETTINGS -->
-      <section class="view" id="view-settings">
-        <h1 class="sr-only">Ajustes</h1>
-        <div class="viewhead">
-          <h2>Ajustes</h2>
-          <div class="vh-actions">
-            <input type="search" id="setSearch" aria-label="Buscar en ajustes" placeholder="Buscar en ajustes…" />
-          </div>
-        </div>
-
-        <!-- estado del modelo activo: de un vistazo -->
-        <div class="activecard" id="activeCard">
-          <div class="ac-ic"><i data-i="spark"></i></div>
-          <div class="ac-main">
-            <b id="activeModelName">Sin modelo activo</b>
-            <small id="activeModelMeta">Elige un proveedor y activa un modelo para empezar.</small>
-          </div>
-          <span class="ac-badge off" id="activeModelBadge">sin activar</span>
-        </div>
-
-        <div class="settabs" id="setTabs">
-          <button class="settab on" data-set="model"><i data-i="spark"></i> Modelo</button>
-          <button class="settab" data-set="prefs"><i data-i="gear"></i> Preferencias</button>
-          <button class="settab" data-set="security"><i data-i="key"></i> Seguridad</button>
-          <button class="settab" data-set="agent"><i data-i="agents"></i> Agente</button>
-          <button class="settab" data-set="data"><i data-i="history"></i> Datos y atajos</button>
-          <button class="settab" data-set="about"><i data-i="spark"></i> Acerca de</button>
-        </div>
-
-        <div class="setwrap" id="setWrap">
-          <!-- ===== MODELO ===== -->
-          <div class="setpanel on" data-panel="model">
+          <!-- MCP (sección propia: los servidores son las herramientas «de fuera», al lado de las nativas) -->
+          <section class="view" id="view-mcp">
+            <h1 class="sr-only">Servidores MCP</h1>
+            <div class="viewhead"><h2>Servidores MCP</h2></div>
             <div class="setcard">
-              <div class="sc-head"><b>Proveedor y modelo</b><span class="sc-hint">La API que usará Sagitari</span></div>
-              <div class="field srow" data-keys="preset proveedor api plantilla"><label for="presetSel">PRESET</label>
-                <select id="presetSel"></select>
-                <div class="subnote" id="presetHint"></div>
+              <div class="sc-head">
+                <b>Servidores MCP</b
+                ><span class="sc-hint"
+                  >Conecta herramientas externas (GitHub, Notion, tu propio servidor…) y el agente las usará como las de casa.</span
+                >
               </div>
-              <div class="grid2">
-                <div class="field srow" data-keys="nombre proveedor etiqueta"><label for="pName">NOMBRE</label><input type="text" id="pName" /></div>
-                <div class="field srow" data-keys="formato api protocolo endpoint anthropic responses openai"><label for="apiFormat">FORMATO DE API</label>
-                  <select id="apiFormat">
-                    <option value="auto">Automático (detectar)</option>
-                    <option value="openai">OpenAI — /chat/completions</option>
-                    <option value="anthropic">Anthropic — /messages</option>
-                    <option value="responses">OpenAI Responses — /responses</option>
-                  </select>
-                </div>
+              <div class="swrow srow" data-keys="mcp servidores activar conectar herramientas externas apagar">
+                <span class="st"><b>Activar servidores MCP</b><small>Apagado, el agente no ve ninguna herramienta MCP.</small></span>
+                <div class="sw on" id="mcpGlobal" role="switch" tabindex="0" aria-label="Activar servidores MCP"></div>
               </div>
-              <div class="field srow" data-keys="base url endpoint servidor direccion"><label for="pUrl">BASE URL</label><input type="text" id="pUrl" placeholder="https://…/v1" /></div>
-              <div class="field srow" data-keys="api key token clave secreta"><label for="pKey">API KEY</label>
-                <div class="keyrow">
-                  <input type="password" id="pKey" placeholder="sk-… (vacío para Ollama o LM Studio)" />
-                  <button class="btn ghost sq" id="apiKeyReveal" type="button" title="Mostrar u ocultar la clave"><i data-i="eye"></i></button>
-                </div>
-                <div class="subnote">Se guarda en tu equipo, dentro de la carpeta de datos de Sagitari.</div>
-              </div>
-              <div class="srow" data-keys="detectar modelos guardar proveedor">
+              <div id="mcpList" class="mcplist"></div>
+              <div class="srow" data-keys="mcp anadir servidor pegar json exportar mcpServers">
                 <div class="btnrow">
-                  <button class="btn" id="btnDetect"><span class="bi"><i data-i="search"></i></span> Detectar modelos</button>
-                  <button class="btn" id="btnSaveProv"><span class="bi"><i data-i="save"></i></span> Guardar proveedor</button>
+                  <button class="btn" id="mcpNew">
+                    <span class="bi"><i data-i="plus"></i></span> Añadir servidor
+                  </button>
+                  <button class="btn ghost" id="mcpPaste">Pegar JSON de mcpServers</button>
+                  <button class="btn ghost" id="mcpExportBtn">Exportar</button>
+                </div>
+                <div id="mcpPasteBox" hidden>
+                  <textarea
+                    id="mcpPasteText"
+                    rows="5"
+                    placeholder='{"mcpServers": { "github": { "command": "npx", "args": ["-y", "@modelcontextprotocol/server-github"] } }}'
+                    spellcheck="false"
+                  ></textarea>
+                  <div class="btnrow">
+                    <button class="btn" id="mcpPasteGo">Importar</button>
+                    <button class="btn ghost" id="mcpPasteCancel">Cancelar</button>
+                  </div>
                 </div>
               </div>
-              <div class="field srow" data-keys="modelo model id elegir"><label for="modelSel">MODELO</label><select id="modelSel"><option value="">— detecta modelos primero —</option></select></div>
-              <div class="srow" data-keys="formato endpoint protocolo"><div class="subnote" id="formatHint">El formato «Automático» deduce el endpoint por proveedor y modelo: en OpenCode Go, los Qwen y MiniMax usan /messages y Grok o GPT-Luna usan /responses.</div></div>
-              <div class="srow" data-keys="activar modelo usar">
-                <div class="btnrow"><button class="btn primary" id="btnActivate"><span class="bi"><i data-i="play"></i></span> Activar este modelo</button></div>
+              <div class="subnote" id="mcpMsg"></div>
+            </div>
+
+            <div class="setcard" id="mcpFormCard">
+              <div class="sc-head">
+                <b id="mcpFormTitle">Nuevo servidor</b
+                ><span class="sc-hint">Las variables de entorno y las cabeceras se guardan cifradas con el almacén de Windows.</span>
               </div>
-              <div class="saving" id="saveMsg"></div>
-            </div>
-
-            <div class="setcard">
-              <div class="sc-head"><b>Proveedores guardados</b><span class="sc-hint">Reutiliza una configuración con un clic</span></div>
-              <div class="provlist"><div id="provList"></div></div>
-            </div>
-          </div>
-          <!-- ===== PREFERENCIAS ===== -->
-          <div class="setpanel" data-panel="prefs">
-            <div class="setcard">
-              <div class="sc-head"><b>Personal</b><span class="sc-hint">Tu identidad y el comportamiento visual</span></div>
-              <div class="swrow srow" data-keys="nombre usuario como te llamas identidad"><span class="st"><b>Tu nombre</b><small>Sagitari lo usa para dirigirse a ti.</small></span>
-                <input type="text" id="setUserName" aria-label="Tu nombre" style="width:160px" /></div>
-              <div class="swrow srow" data-keys="glow resplandor bordes luz ambiental"><span class="st"><b>Glow ambiental en los bordes</b><small>El marco se ilumina cuando el agente piensa, trabaja o te habla.</small></span>
-                <div class="sw on" id="swGlow" aria-label="Glow ambiental en los bordes"></div></div>
-              <div class="swrow srow" data-keys="voz tts leer hablar respuestas"><span class="st"><b>Leer en voz alta (TTS)</b><small>Sagitari pronuncia sus respuestas.</small></span>
-                <div class="sw on" id="swTts" aria-label="Leer en voz alta (TTS)"></div></div>
-              <div class="swrow srow" data-keys="idioma voz dictado reconocimiento"><span class="st"><b>Idioma de voz</b><small>Para el dictado y la lectura en voz alta.</small></span>
-                <select id="voiceLang" aria-label="Idioma de voz" style="width:200px">
-                  <option value="es-ES">Español (España)</option>
-                  <option value="es-MX">Español (México)</option>
-                  <option value="es-AR">Español (Argentina)</option>
-                  <option value="en-US">English (US)</option>
-                  <option value="en-GB">English (UK)</option>
-                </select></div>
-              <div class="swrow srow" data-keys="voz altavoz voz del sistema leer"><span class="st"><b>Voz de la lectura</b><small>Cuál de las voces instaladas usa SAGITARI.</small></span>
-                <select id="ttsVoice" aria-label="Voz de la lectura" style="width:240px"></select></div>
-              <div class="swrow srow" data-keys="piper voz local natural ligera offline instalar"><span class="st"><b>Voz local de alta calidad (Piper)</b><small>Neuronal, 100% local y ligera (≈80 MB). Se usa sola cuando está instalada; si no, Windows.</small></span>
-                <div style="display:flex;flex-direction:column;gap:6px;align-items:flex-end">
-                  <button class="wb" id="btnInstalarPiper" title="Instalar la voz local" style="min-width:150px">Instalar voz</button>
-                  <small id="lblPiperEstado" style="max-width:260px;text-align:right;opacity:.75">no instalada — se usa la voz de Windows</small>
-                </div></div>
-              <div class="swrow srow" data-keys="velocidad voz ritmo leer"><span class="st"><b>Velocidad de la voz</b><small>De más lenta a más rápida.</small></span>
-                <input type="range" id="ttsRate" min="-40" max="40" step="5" class="glowslider" aria-label="Velocidad de la voz"></div>
-              <div class="swrow srow" data-keys="avisos voz leer todo permisos"><span class="st"><b>Leer también los avisos</b><small>Permisos, errores y avisos cortos, además de la respuesta.</small></span>
-                <div class="sw" id="swAvisos" aria-label="Leer también los avisos"></div></div>
-              <div class="swrow srow" data-keys="motor clasico dictado escucha reconocimiento micro sordo oye"><span class="st"><b>Motor de escucha clásico</b><small>Si al dictar no se escribe nada aunque el orbe se mueva, enciéndelo: usa el reconocedor clásico de Windows, que por donde escucha es distinto del moderno.</small></span>
-                <div class="sw" id="swSttClasico" aria-label="Motor de escucha clásico"></div></div>                <div class="swrow srow" data-keys="whisper dictado local transcribir preciso inteligencia artificial offline"><span class="st"><b>Dictado local (Whisper)</b><small>Transcripción de alta precisión, 100% local y sin internet, con transcripción en vivo mientras hablas. Instala el motor (≈190 MB) y SAGITARI lo usará automáticamente para entender mucho mejor lo que dices.</small></span>
-                <div style="display:flex;flex-direction:column;gap:6px;align-items:flex-end">
-                  <button class="wb" id="btnInstalarWhisper" title="Instalar el motor de dictado local" style="min-width:150px">Instalar motor</button>
-                  <small id="lblWhisperEstado" style="max-width:260px;text-align:right;opacity:.75">no instalado — se usa el motor de Windows</small>
-                </div></div>
-          </div>
-
-          <div class="setcard">
-            <div class="sc-head"><b>Apariencia</b><span class="sc-hint">Color de la interfaz y del resplandor</span></div>
-            <div class="themerow" data-keys="color tema apariencia acento interfaz"><span class="st"><b>Color de la interfaz</b><small>Teñe bordes, menús, botones y detalles de toda la app.</small></span>
-              <span class="colordot" id="dotUiColor"></span>
-              <select id="uiColor" aria-label="Color de la interfaz" style="width:150px">
-                <option value="violet">Violeta</option>
-                <option value="magenta">Magenta</option>
-                <option value="cyan">Cian</option>
-                <option value="emerald">Esmeralda</option>
-                <option value="amber">Ámbar</option>
-                <option value="ice">Hielo</option>
-                <option value="aurora">Aurora</option>
-              </select></div>
-            <div class="themerow" data-keys="color glow resplandor luz"><span class="st"><b>Color del glow</b><small>El tono de la luz del marco, puede diferir del tema.</small></span>
-              <span class="colordot glow" id="dotGlowColor"></span>
-              <select id="glowColor" aria-label="Color del glow" style="width:150px">
-                <option value="match">Igual que la interfaz</option>
-                <option value="violet">Violeta</option>
-                <option value="magenta">Magenta</option>
-                <option value="cyan">Cian</option>
-                <option value="emerald">Esmeralda</option>
-                <option value="amber">Ámbar</option>
-                <option value="ice">Hielo</option>
-                <option value="aurora">Aurora</option>
-              </select></div>
-            <div class="themerow" data-keys="intensidad glow resplandor fuerza brillo"><span class="st"><b>Intensidad del glow</b><small id="glowStrengthLabel">Equilibrado</small></span>
-              <div style="text-align:right">
-                <input type="range" min="0.4" max="1.4" step="0.05" class="glowslider" id="glowStrength" aria-label="Intensidad del glow" />
-                <div class="glowlabels"><span id="lblSuave">Suave</span><span id="lblEq">Equilibrado</span><span id="lblInt">Intenso</span></div>
-              </div></div>
-            <div class="themerow" data-keys="vidrio glass transparencia tintado claro opaco"><span class="st"><b>Vidrio: de ultra claro a tintado</b><small id="glassTintLabel">Equilibrado</small></span>
-              <div style="text-align:right">
-                <input type="range" min="0.4" max="1.3" step="0.05" class="glowslider" id="glassTint" aria-label="Transparencia del vidrio" />
-                <div class="glowlabels"><span id="lblGlassClaro">Ultra claro</span><span id="lblGlassEq">Equilibrado</span><span id="lblGlassTint">Tintado</span></div>
-              </div></div>
-            </div>
-
-            <div class="setcard">
-              <div class="sc-head"><b>Espacio de trabajo</b><span class="sc-hint">Dónde trabaja el agente con tus archivos</span></div>
-              <div class="srow" data-keys="espacio trabajo carpeta workspace proyectos ruta">
-                <div class="btnrow" style="margin:0">
-                  <input type="text" id="wsPath" aria-label="Ruta del espacio de trabajo" readonly style="flex:1;min-width:200px" />
-                  <button class="btn" id="wsPick"><span class="bi"><i data-i="folder"></i></span> Elegir…</button>
+              <div class="field srow" data-keys="mcp identificador nombre id">
+                <label for="mcpId">IDENTIFICADOR</label><input type="text" id="mcpId" placeholder="github" spellcheck="false" />
+              </div>
+              <div class="field srow" data-keys="mcp nombre visible etiqueta">
+                <label for="mcpName">NOMBRE</label><input type="text" id="mcpName" placeholder="GitHub" />
+              </div>
+              <div class="field srow" data-keys="mcp tipo transporte local remoto comando url">
+                <label for="mcpTransport">TIPO</label>
+                <select id="mcpTransport">
+                  <option value="stdio">Comando local</option>
+                  <option value="http">URL remota</option>
+                </select>
+              </div>
+              <div id="mcpStdioRows">
+                <div class="field srow" data-keys="mcp comando ejecutable npx node">
+                  <label for="mcpCommand">COMANDO</label><input type="text" id="mcpCommand" placeholder="npx" spellcheck="false" />
                 </div>
-                <div class="subnote">Carpeta donde Sagitari crea y modifica archivos, y donde se ejecutan los comandos. Las rutas relativas («informe.md») aterrizan aquí.</div>
-              </div>
-            </div>
-
-            <div class="setcard">
-              <div class="sc-head"><b>Atajos de teclado</b><span class="sc-hint">Disponibles en toda la app</span></div>
-              <div class="swrow srow" data-keys="atajo mostrar ocultar ventana ctrl alt s"><span class="st"><b>Mostrar u ocultar la ventana</b></span><span class="kbdrow"><kbd class="kbd">Ctrl</kbd><kbd class="kbd">Alt</kbd><kbd class="kbd">S</kbd></span></div>
-              <div class="swrow srow" data-keys="atajo traer al frente primer plano ventana alt shift s"><span class="st"><b>Traer la ventana al frente</b></span><span class="kbdrow"><kbd class="kbd">Alt</kbd><kbd class="kbd">Shift</kbd><kbd class="kbd">S</kbd></span></div>
-              <div class="swrow srow" data-keys="atajo pulso glow resplandor"><span class="st"><b>Pulso de resplandor</b></span><span class="kbdrow"><kbd class="kbd">Ctrl</kbd><kbd class="kbd">Shift</kbd><kbd class="kbd">G</kbd></span></div>
-              <div class="swrow srow" data-keys="atajo modo act plan think agente"><span class="st"><b>Cambiar de modo (Act / Plan / Think)</b></span><span class="kbdrow"><kbd class="kbd">Alt</kbd><kbd class="kbd">M</kbd></span></div>
-            </div>
-          </div>
-
-          <!-- ===== SEGURIDAD ===== -->
-          <div class="setpanel" data-panel="security">
-            <div class="setcard">
-              <div class="sc-head"><b>Permisos por herramienta</b><span class="sc-hint">Qué puede hacer el agente sin preguntarte</span></div>
-              <div class="srow" data-keys="permisos herramienta permitir siempre seguro confirmar preguntar bloqueado terminal archivos"><div id="permList"></div></div>
-              <div class="srow" data-keys="restablecer permisos recomendados defecto">
-                <div class="btnrow" style="margin:10px 0 0">
-                  <button class="btn ghost" id="secResetPerms"><span class="bi"><i data-i="history"></i></span> Restablecer permisos recomendados</button>
+                <div class="field srow" data-keys="mcp argumentos args">
+                  <label for="mcpArgs">ARGUMENTOS</label
+                  ><input type="text" id="mcpArgs" placeholder="-y @modelcontextprotocol/server-github" spellcheck="false" />
                 </div>
-                <div class="subnote">«Por defecto» usa el nivel recomendado de cada herramienta (aparece indicado en cada fila). «Permitir siempre» se ejecuta sin preguntar · «Preguntar antes» pide permiso en cada uso · «Bloqueado» la impide por completo.</div>
-              </div>
-            </div>
-
-            <div class="setcard">
-              <div class="sc-head"><b>Límites de ejecución</b><span class="sc-hint">Frenos de seguridad de cada tarea</span></div>
-              <div class="grid2">
-                <div class="field srow" data-keys="pasos maximos limite steps"><label for="grSteps">PASOS MÁXIMOS (0 = sin límite)</label><input type="number" id="grSteps" min="0" /></div>
-                <div class="field srow" data-keys="herramientas maximas limite llamadas tools"><label for="grToolCalls">LLAMADAS A HERRAMIENTAS (0 = sin límite)</label><input type="number" id="grToolCalls" min="0" /></div>
-                <div class="field srow" data-keys="minutos tiempo maximo duracion"><label for="grMinutes">MINUTOS MÁXIMOS (0 = sin límite)</label><input type="number" id="grMinutes" min="0" /></div>
-                <div class="field srow" data-keys="tokens limite consumo"><label for="grTokens">TOKENS MÁXIMOS (0 = sin límite)</label><input type="number" id="grTokens" min="0" /></div>
-                <div class="field srow" data-keys="coste dinero dolares presupuesto gasto"><label for="grCost">COSTE MÁXIMO $ (0 = sin límite)</label><input type="number" id="grCost" min="0" step="0.1" /></div>
-                <div class="field srow" data-keys="timeout sin respuesta silencio espera datos modelo"><label for="grLlmTimeout">SIN RESPUESTA DEL MODELO, SEGUNDOS (0 = sin límite)</label><input type="number" id="grLlmTimeout" min="0" step="30" /></div>
-              </div>
-              <div class="subnote">Al alcanzar cualquiera de estos límites la ejecución se detiene y queda como tarea recuperable desde el panel Tareas.</div>
-            </div>
-
-            <div class="setcard">
-              <div class="sc-head"><b>Protección anti-bucles</b><span class="sc-hint">Que el agente no se quede dando vueltas</span></div>
-              <div class="grid2">
-                <div class="field srow" data-keys="repeticiones bucle loop identicas"><label for="grLoop">REPETICIONES DE UNA ACCIÓN = BUCLE</label><input type="number" id="grLoop" min="2" /></div>
-                <div class="field srow" data-keys="pasos sin progreso estancado stall"><label for="grStall">PASOS SIN PROGRESO (0 = sin límite)</label><input type="number" id="grStall" min="0" /></div>
-              </div>
-              <div class="srow">
-                <div class="btnrow" style="margin:6px 0 0">
-                  <button class="btn ghost" id="secResetGuardrails"><span class="bi"><i data-i="history"></i></span> Restablecer límites recomendados</button>
-                </div>
-                <div class="subnote">Si el agente repite la misma acción sin avanzar, Sagitari detiene la ejecución sola para proteger el sistema.</div>
-              </div>
-            </div>
-          </div>
-
-          <!-- ===== AGENTE ===== -->
-          <div class="setpanel" data-panel="agent">
-            <div class="setcard">
-              <div class="sc-head"><b>Memoria</b><span class="sc-hint">Cuánta memoria entra en cada conversación</span></div>
-              <div class="swrow srow" data-keys="memoria sensibilidad relevancia recuerdos contexto"><span class="st"><b>Sensibilidad de relevancia (0-3)</b><small>0 = entran más recuerdos · 3 = solo coincidencias muy claras.</small></span>
-                <input type="number" id="memSens" aria-label="Sensibilidad de relevancia (0-3)" min="0" max="3" step="1" style="width:80px" /></div>
-              <div class="subnote">La memoria irrelevante no se inyecta en el contexto: solo lo que encaja con lo que estás pidiendo.</div>
-            </div>
-
-            <div class="setcard">
-              <div class="sc-head"><b>Tareas en segundo plano</b><span class="sc-hint">Sagitari puede trabajar mientras sigues hablando</span></div>
-              <div class="swrow srow" data-keys="tareas simultaneas concurrencia background paralelo"><span class="st"><b>Tareas simultáneas (1-4)</b><small>Cuántas tareas puede ejecutar a la vez.</small></span>
-                <input type="number" id="setMaxTasks" aria-label="Tareas simultáneas (1-4)" min="1" max="4" style="width:80px" /></div>
-              <div class="swrow srow" data-keys="recuperar tareas interrumpidas arrancar reanudar"><span class="st"><b>Recuperar tareas interrumpidas al arrancar</b><small>Si cierras la app con tareas a medias, se reanudan solas.</small></span>
-                <div class="sw on" id="swAutoResume" aria-label="Recuperar tareas interrumpidas al arrancar"></div></div>
-            </div>
-
-            <div class="setcard">
-              <div class="sc-head"><b>Delegación y verificación</b><span class="sc-hint">Cómo reparte el trabajo y cómo comprueba que quedó bien</span></div>
-              <div class="swrow srow" data-keys="modelo por agente subagentes ahorro coste barato enrutado"><span class="st"><b>Modelo por agente</b><small>Deja que los subagentes que sólo leen, mueven archivos o miran capturas usen el modelo más ligero de tu proveedor; el que verifica y el chat siguen con el que elegiste.</small></span>
-                <div class="sw" id="swAgenteModelo" aria-label="Modelo por agente"></div></div>
-              <div class="swrow srow" data-keys="verificar comprobar resultado cierre calidad subagentes evidencia"><span class="st"><b>Verificación antes de cerrar</b><small>Cuando una tarea cambia archivos, SAGITARI comprueba el resultado (o lo delega en su agente de verificación) antes de dártela por hecha. Apágalo si prefieres respuestas más rápidas.</small></span>
-                <div class="sw" id="swVerificar" aria-label="Verificación antes de cerrar"></div></div>
-              <div class="swrow srow" data-keys="revisar revision codigo diff cambio revisor calidad"><span class="st"><b>Revisar el cambio antes de cerrar</b><small>Cuando una tarea modifica archivos, un agente de revisión lee el diff antes de dártelo por hecho y busca lo que está mal: contratos rotos, casos límite, restos del nombre viejo. Si encuentra algo bloqueante, SAGITARI lo arregla en el mismo turno. Apágalo si prefieres respuestas más rápidas.</small></span>
-                <div class="sw" id="swRevisar" aria-label="Revisar el cambio antes de cerrar"></div></div>
-              <div class="swrow srow" data-keys="diagnosticos escribir comprobar lint errores proyecto tipos eslint ruff mypy"><span class="st"><b>Comprobar el proyecto al escribir</b><small>Cada vez que SAGITARI escribe un archivo, pasa los comprobadores del proyecto (ESLint, Ruff, Flake8, Mypy) sobre las líneas que ha cambiado y el fallo vuelve al instante, en el mismo paso. Lo que ya estaba mal en el archivo no cuenta como suyo. Apágalo si prefieres que escribir no ejecute nada.</small></span>
-                <div class="sw" id="swDiagnosticos" aria-label="Comprobar el proyecto al escribir"></div></div>
-              <div class="swrow srow" data-keys="pruebas test cierre ejecutar verificar npm test compilacion"><span class="st"><b>Ejecutar las pruebas al cerrar</b><small>Antes de darte el turno por terminado, SAGITARI ejecuta el comando de pruebas del proyecto —o su compilación si no hay pruebas— y mira la salida de verdad. Si falla, se le devuelve el fallo y lo arregla: el turno no cierra en verde con algo roto.</small></span>
-                <div class="sw" id="swCierre" aria-label="Ejecutar las pruebas al cerrar"></div></div>
-              <div class="swrow srow" data-keys="aislamiento arboles subagentes paralelo git worktree conflicto fusion"><span class="st"><b>Aislar a los subagentes que escriben</b><small>Los especialistas que escriben código trabajan en su propio árbol de git y sus cambios vuelven al proyecto como un parche comprobado antes de aplicarse: dos agentes a la vez dejan de pisarse. Si algo no encaja, no se aplica nada y te lo dice. Necesita que el proyecto sea un repositorio git; sin git trabaja como siempre. Apágalo para que escriban directamente sobre tus archivos.</small></span>
-                <div class="sw" id="swArboles" aria-label="Aislar a los subagentes que escriben"></div></div>
-              <div class="swrow srow" data-keys="cache prompt contexto ahorro coste rapido tokens proveedor"><span class="st"><b>Aprovechar el caché de prompt</b><small>El prompt de cada paso (herramientas, mapa del proyecto, reglas y conversación) se guarda en el proveedor y se relee a una fracción del precio, con la misma respuesta. Se apaga solo si usas un proveedor compatible que no entienda el campo y te rechace las peticiones.</small></span>
-                <div class="sw" id="swCache" aria-label="Aprovechar el caché de prompt"></div></div>
-              <div class="grid2">
-                <div class="field srow" data-keys="subagentes delegaciones limite equipo tope"><label for="grDelegations">SUBAGENTES POR TURNO (0 = sin tope)</label><input type="number" id="grDelegations" min="0" /></div>
-                <div class="field srow" data-keys="paralelo simultaneo concurrencia herramientas rapidez"><label for="parTools">HERRAMIENTAS EN PARALELO (1-4)</label><input type="number" id="parTools" min="1" max="4" /></div>
-              </div>
-              <div class="grid2">
-                <div class="field srow" data-keys="intentos arreglo fallo pruebas reintentos vueltas"><label for="verAttempts">INTENTOS DE ARREGLAR UN FALLO (0-5)</label><input type="number" id="verAttempts" min="0" max="5" /></div>
-              </div>
-              <div class="subnote">Varias órdenes del mismo mensaje se ejecutan a la vez cuando no chocan: el navegador es uno solo, la escritura en disco va en cola y la terminal admite dos comandos. Con 1, todo va en orden.</div>
-              <div class="subnote">Cada subagente tiene su propio presupuesto de pasos, así que sin este tope un turno largo acaba en una cadena de delegaciones. Al alcanzarlo, SAGITARI no se detiene: termina la tarea con lo que ya tiene.</div>
-            </div>
-
-            <div class="setcard">
-              <div class="sc-head"><b>Reglas del proyecto y hooks</b><span class="sc-hint">Cómo se comporta dentro de tus repositorios</span></div>
-              <div class="srow" data-keys="sagitari md agents md reglas instrucciones convenciones proyecto estilo">
-                <div class="subnote" style="margin-top:0">Si el proyecto tiene un <b>SAGITARI.md</b> o un <b>AGENTS.md</b> en su raíz (o en <b>.sagitari/</b>), sus reglas se leen siempre, antes de tocar nada: convenciones, qué no tocar, cómo se llama cada cosa. Valen también para los subagentes. En la carpeta de datos puedes tener un <b>AGENTS.md</b> con las tuyas, para todos los proyectos a la vez.</div>
-                <div id="instrList" class="instrlist"></div>
-                <div class="btnrow" style="margin:12px 0 0">
-                  <button class="btn ghost" id="instrReload"><span class="bi"><i data-i="refresh"></i></span> Comprobar</button>
-                  <button class="btn ghost" id="instrCreate"><span class="bi"><i data-i="plus"></i></span> Crear SAGITARI.md</button>
+                <div class="field srow" data-keys="mcp variables entorno env token secreto">
+                  <label for="mcpEnv">VARIABLES DE ENTORNO</label
+                  ><textarea id="mcpEnv" rows="3" placeholder="GITHUB_TOKEN=ghp_… (una por línea)"></textarea>
                 </div>
               </div>
-              <div class="field srow" data-keys="hook editar escribir formatear prettier lint fix comando automatico">
-                <label for="hookEditar">HOOK TRAS ESCRIBIR UN ARCHIVO (OPCIONAL)</label>
-                <input type="text" id="hookEditar" placeholder="npx prettier --write {{file}}" spellcheck="false" />
-                <div class="subnote">Se ejecuta después de escribir y su salida se le enseña al modelo. Marcadores: <b>{{file}}</b> (el archivo), <b>{{files}}</b> (todos los de ese paso), <b>{{dir}}</b> (el espacio de trabajo); se ponen entre comillas solos.</div>
+              <div id="mcpHttpRows" hidden>
+                <div class="field srow" data-keys="mcp url direccion remota endpoint">
+                  <label for="mcpUrl">URL</label
+                  ><input type="text" id="mcpUrl" placeholder="https://mcp.ejemplo.com/mcp" spellcheck="false" />
+                </div>
+                <div class="field srow" data-keys="mcp cabeceras headers autorizacion token">
+                  <label for="mcpHeaders">CABECERAS</label
+                  ><textarea id="mcpHeaders" rows="3" placeholder="Authorization=Bearer … (una por línea)"></textarea>
+                </div>
               </div>
-              <div class="field srow" data-keys="hook cerrar pruebas lint comprobar comando final">
-                <label for="hookCerrar">HOOK ANTES DE CERRAR EL TURNO (OPCIONAL)</label>
-                <input type="text" id="hookCerrar" placeholder="npm run lint" spellcheck="false" />
-                <div class="subnote">Se ejecuta antes de dar el turno por terminado. Si falla, el turno no cierra: SAGITARI lee la salida y lo arregla, igual que con las pruebas del proyecto.</div>
+              <div class="field srow" data-keys="mcp permiso nivel bloquear permitir preguntar servidor">
+                <label for="mcpLevel">PERMISO DEL SERVIDOR</label>
+                <select id="mcpLevel">
+                  <option value="default">Por defecto (preguntar antes)</option>
+                  <option value="safe">Permitir siempre</option>
+                  <option value="confirm">Preguntar antes</option>
+                  <option value="restricted">Bloqueado</option>
+                </select>
               </div>
-            </div>
-
-            <div class="setcard">
-              <div class="sc-head"><b>Conversación</b><span class="sc-hint">Qué se ve de lo que Sagitari piensa por dentro</span></div>
-              <div class="swrow srow" data-keys="razonamiento thinking pensar proceso interno razonar"><span class="st"><b>Mostrar el razonamiento del modelo</b><small>Los modelos que razonan (Claude, la serie o y GPT-5, DeepSeek R1…) enseñan su proceso antes de responder. Aparece plegado encima de la respuesta y se pliega solo al empezar a contestar. Nunca se lee en voz alta. Puede costar tokens extra en algunos proveedores.</small></span>
-                <div class="sw" id="swThinking" aria-label="Mostrar el razonamiento del modelo"></div></div>
-            </div>
-
-            <div class="setcard">
-              <div class="sc-head"><b>Diagnóstico</b><span class="sc-hint">Para depurar el comportamiento del agente</span></div>
-              <div class="swrow srow" data-keys="modo desarrollador metricas debug tokens latencia coste"><span class="st"><b>Modo desarrollador</b><small>Muestra métricas en vivo (tokens, latencia, coste) bajo el chat.</small></span>
-                <div class="sw" id="devModeSw" aria-label="Modo desarrollador"></div></div>
-            </div>
-          </div>
-
-          <!-- ===== DATOS ===== -->
-          <div class="setpanel" data-panel="data">
-            <div class="setcard">
-              <div class="sc-head"><b>Hábitos aprendidos</b><span class="sc-hint">Lo que Sagitari ha deducido de cómo trabajas</span></div>
-              <div class="srow" data-keys="habitos aprendizaje preferencias reiniciar borrar">
-                <div class="subnote" style="margin-top:0">Apps y webs que usas, comandos frecuentes, carpetas y tu modo preferido. Nada de esto sale de tu equipo.</div>
-                <div id="habitsPreview" class="habitprev"></div>
-                <div class="btnrow" style="margin:12px 0 0">
-                  <button class="btn ghost danger" id="habitsResetBtn"><span class="bi"><i data-i="trash"></i></span> Reiniciar hábitos aprendidos</button>
+              <div class="field srow" data-keys="mcp herramientas permitir allow lista">
+                <label for="mcpAllow">HERRAMIENTAS A PERMITIR (vacío = todas)</label
+                ><input type="text" id="mcpAllow" placeholder="create_issue, list_issues" spellcheck="false" />
+              </div>
+              <div class="field srow" data-keys="mcp herramientas bloquear deny lista">
+                <label for="mcpDeny">HERRAMIENTAS A BLOQUEAR</label
+                ><input type="text" id="mcpDeny" placeholder="delete_repository" spellcheck="false" />
+              </div>
+              <div class="srow" data-keys="mcp guardar probar cancelar eliminar">
+                <div class="btnrow">
+                  <button class="btn" id="mcpSave">
+                    <span class="bi"><i data-i="check"></i></span> Guardar y probar
+                  </button>
+                  <button class="btn ghost" id="mcpCancel">Cancelar</button>
+                  <button class="btn ghost" id="mcpFormDelete" hidden>Eliminar</button>
                 </div>
               </div>
             </div>
+          </section>
 
-            <div class="setcard">
-              <div class="sc-head"><b>Carpeta de datos</b><span class="sc-hint">Configuración, memoria, skills y tareas</span></div>
-              <div class="swrow srow" data-keys="carpeta datos copia seguridad ruta backup abrir"><span class="st"><b>Ubicación</b><small id="dataDirPath">—</small></span>
-                <button class="btn ghost" id="openDataDirBtn"><span class="bi"><i data-i="external"></i></span> Abrir</button></div>
-              <div class="subnote">Copia esta carpeta para respaldar tu configuración, tu memoria y tus skills.</div>
+          <!-- TOOLS -->
+          <section class="view" id="view-tools">
+            <h1 class="sr-only">Herramientas</h1>
+            <div class="viewhead"><h2>Herramientas</h2></div>
+            <div class="toolsgrid" id="toolsGrid"></div>
+          </section>
+
+          <!-- MEMORY -->
+          <section class="view" id="view-memory">
+            <h1 class="sr-only">Memoria</h1>
+            <div class="viewhead">
+              <h2>Memoria</h2>
+              <div class="vh-actions">
+                <input
+                  type="text"
+                  id="memInput"
+                  aria-label="Añade algo que Sagitari debe recordar"
+                  placeholder="Añade algo que Sagitari debe recordar…"
+                />
+                <button class="btn" id="memAdd">
+                  <span class="bi"><i data-i="plus"></i></span> Añadir
+                </button>
+              </div>
             </div>
-          </div>
+            <div id="memList" class="memlist"></div>
+          </section>
 
-          <!-- ===== ACERCA DE ===== -->
-          <div class="setpanel" data-panel="about">
-            <div class="setcard">
-              <div class="sc-head"><b>Actualizaciones</b><span class="sc-hint">Desde GitHub, y solo cuando tú lo pidas</span></div>
-              <div class="swrow srow" data-keys="actualizacion actualizar version update ultima comprobar estado">
-                <span class="st"><b>Versión instalada</b><small id="updState">Aún no se ha comprobado.</small></span>
-                <span class="kbd" id="updCurrent">—</span>
+          <!-- SKILLS -->
+          <section class="view" id="view-skills">
+            <h1 class="sr-only">Skills</h1>
+            <div class="viewhead">
+              <h2>Skills</h2>
+              <div class="vh-actions">
+                <input
+                  type="text"
+                  id="skillImportInput"
+                  aria-label="Repositorio de GitHub (owner/repo) con SKILL.md"
+                  placeholder="owner/repo de GitHub con SKILL.md…"
+                />
+                <button class="btn" id="skillImportBtn">
+                  <span class="bi"><i data-i="download"></i></span> Importar
+                </button>
+                <button class="btn ghost" id="skillsFolderBtn">
+                  <span class="bi"><i data-i="folder"></i></span> Carpeta
+                </button>
               </div>
-              <div class="srow updprog" id="updProgressRow" data-keys="actualizacion actualizar version update descargar progreso porcentaje">
-                <div class="updbar" id="updBar" role="progressbar" aria-valuemin="0" aria-valuemax="100" aria-valuenow="0" aria-label="Progreso de la descarga"><span id="updBarFill"></span></div>
-                <div class="subnote" id="updBarNote">Descargando…</div>
-              </div>
+            </div>
+            <p class="subnote" style="margin-top: -6px; margin-bottom: 14px">
+              Las skills son instrucciones especializadas (SKILL.md) que Sagitari carga solo cuando la tarea lo necesita: sin coste en
+              tokens hasta que aplican. Importa packs desde GitHub (owner/repo), crea las tuyas o edita la carpeta directamente.
+            </p>
+            <div id="skillsList" class="memlist"></div>
+            <div class="tooltray" style="margin-top: 18px; max-width: 860px">
+              <div class="tt-head">CATÁLOGO DE PACKS · LISTOS PARA INSTALAR</div>
               <div class="btnrow">
-                <button class="btn" id="updCheckBtn" aria-label="Buscar actualizaciones publicadas en GitHub"><span class="bi"><i data-i="refresh"></i></span><span id="updCheckLabel">Buscar actualizaciones</span></button>
-                <button class="btn primary" id="updDownloadBtn" hidden aria-label="Descargar la actualización disponible"><span class="bi"><i data-i="download"></i></span> Descargar</button>
-                <button class="btn primary" id="updInstallBtn" hidden aria-label="Instalar la actualización; Sagitari se cerrará para instalarse"><span class="bi"><i data-i="download"></i></span><span id="updInstallLabel">Instalar y cerrar</span></button>
-                <button class="btn ghost" id="updPageBtn" aria-label="Ver las novedades de la versión en GitHub"><span class="bi"><i data-i="external"></i></span> Ver novedades</button>
+                <input
+                  type="text"
+                  id="marketQuery"
+                  aria-label="Buscar packs de skills en GitHub"
+                  placeholder="Buscar packs en GitHub: blender, wordpress, excel…"
+                  style="flex: 1; min-width: 180px"
+                />
+                <button class="btn ghost" id="marketSearchBtn">
+                  <span class="bi"><i data-i="search"></i></span> Buscar
+                </button>
+                <button class="btn ghost" id="skillsUpdateAllBtn">
+                  <span class="bi"><i data-i="history"></i></span> Actualizar todas
+                </button>
               </div>
-              <div class="subnote" id="updNote" hidden></div>
-              <div class="saving" id="updMsg"></div>
+              <div id="marketList" class="memlist" style="margin-top: 10px"></div>
+              <span class="saving" id="marketMsg"></span>
+            </div>
+            <div class="tooltray" style="margin-top: 18px; max-width: 860px">
+              <div class="tt-head">CREAR SKILL</div>
+              <div class="btnrow">
+                <input
+                  type="text"
+                  id="skillNewName"
+                  aria-label="Nombre de la skill"
+                  placeholder="nombre-ejemplo"
+                  style="flex: 1; min-width: 160px"
+                />
+                <input
+                  type="text"
+                  id="skillNewDesc"
+                  aria-label="Qué hace la skill y cuándo usarla"
+                  placeholder="Qué hace y cuándo usarla"
+                  style="flex: 2; min-width: 240px"
+                />
+              </div>
+              <textarea
+                id="skillNewBody"
+                aria-label="Instrucciones que seguirá Sagitari (markdown)"
+                rows="5"
+                placeholder="Instrucciones que seguirá Sagitari… (markdown)"
+              ></textarea>
+              <div class="btnrow" style="margin-top: 8px">
+                <button class="btn primary" id="skillCreateBtn">
+                  <span class="bi"><i data-i="plus"></i></span> Crear skill
+                </button>
+                <span class="saving" id="skillMsg"></span>
+              </div>
+            </div>
+          </section>
+
+          <!-- SETTINGS -->
+          <section class="view" id="view-settings">
+            <h1 class="sr-only">Ajustes</h1>
+            <div class="viewhead">
+              <h2>Ajustes</h2>
+              <div class="vh-actions">
+                <input type="search" id="setSearch" aria-label="Buscar en ajustes" placeholder="Buscar en ajustes…" />
+              </div>
             </div>
 
-            <div class="setcard">
-              <div class="sc-head"><b>Aplicación</b><span class="sc-hint">Sagitari, tu asistente agéntico</span></div>
-              <div class="swrow srow" data-keys="aplicacion about acerca sagitari version actual repositorio releases">
-                <span class="st"><b>SAGITARI</b><small>Asistente agéntico de escritorio para tu equipo.</small></span>
-                <span class="kbd" id="aboutVersion">—</span>
+            <!-- estado del modelo activo: de un vistazo -->
+            <div class="activecard" id="activeCard">
+              <div class="ac-ic"><i data-i="spark"></i></div>
+              <div class="ac-main">
+                <b id="activeModelName">Sin modelo activo</b>
+                <small id="activeModelMeta">Elige un proveedor y activa un modelo para empezar.</small>
               </div>
-              <div class="btnrow" style="margin:12px 0 0">
-                <button class="btn ghost" id="aboutRepoBtn" aria-label="Abrir el repositorio de Sagitari en GitHub"><span class="bi"><i data-i="code"></i></span> Repositorio</button>
-                <button class="btn ghost" id="aboutRelBtn" aria-label="Abrir la página de versiones en GitHub"><span class="bi"><i data-i="external"></i></span> Releases</button>
-              </div>
+              <span class="ac-badge off" id="activeModelBadge">sin activar</span>
             </div>
+
+            <!-- wizard de primer uso: aparece sólo si no hay modelo activo y no se ha saltado -->
+            <div class="wizard" id="wizardSetup">
+              <div class="wz-head">
+                <div class="wz-ic"><i data-i="spark"></i></div>
+                <div>
+                  <b>Configura tu primer modelo</b><small id="wzSub">Tres pasos y listo. Puedes cerrar esto y volver cuando quieras.</small>
+                </div>
+              </div>
+              <div class="wz-steps" aria-hidden="true">
+                <span class="wz-step" id="wzStep1"></span>
+                <span class="wz-step" id="wzStep2"></span>
+                <span class="wz-step" id="wzStep3"></span>
+              </div>
+              <div class="wz-body" id="wzBody"></div>
+            </div>
+
+            <div class="settabs" id="setTabs">
+              <button class="settab on" data-set="model"><i data-i="spark"></i> Modelo</button>
+              <button class="settab" data-set="prefs"><i data-i="gear"></i> Preferencias</button>
+              <button class="settab" data-set="security"><i data-i="key"></i> Seguridad</button>
+              <button class="settab" data-set="agent"><i data-i="agents"></i> Agente</button>
+              <button class="settab" data-set="data"><i data-i="history"></i> Datos y atajos</button>
+              <button class="settab" data-set="about"><i data-i="spark"></i> Acerca de</button>
+            </div>
+
+            <div class="setwrap" id="setWrap">
+              <!-- ===== MODELO ===== -->
+              <div class="setpanel on" data-panel="model">
+                <div class="setcard">
+                  <div class="sc-head"><b>Proveedor y modelo</b><span class="sc-hint">La API que usará Sagitari</span></div>
+                  <div class="field srow" data-keys="preset proveedor api plantilla">
+                    <label for="presetSel">PRESET</label>
+                    <select id="presetSel"></select>
+                    <div class="subnote" id="presetHint"></div>
+                  </div>
+                  <div class="grid2">
+                    <div class="field srow" data-keys="nombre proveedor etiqueta">
+                      <label for="pName">NOMBRE</label><input type="text" id="pName" />
+                    </div>
+                    <div class="field srow" data-keys="formato api protocolo endpoint anthropic responses openai">
+                      <label for="apiFormat">FORMATO DE API</label>
+                      <select id="apiFormat">
+                        <option value="auto">Automático (detectar)</option>
+                        <option value="openai">OpenAI — /chat/completions</option>
+                        <option value="anthropic">Anthropic — /messages</option>
+                        <option value="responses">OpenAI Responses — /responses</option>
+                      </select>
+                    </div>
+                  </div>
+                  <div class="field srow" data-keys="base url endpoint servidor direccion">
+                    <label for="pUrl">BASE URL</label><input type="text" id="pUrl" placeholder="https://…/v1" />
+                  </div>
+                  <div class="field srow" data-keys="api key token clave secreta">
+                    <label for="pKey">API KEY</label>
+                    <div class="keyrow">
+                      <input type="password" id="pKey" placeholder="sk-… (vacío para Ollama o LM Studio)" />
+                      <button class="btn ghost sq" id="apiKeyReveal" type="button" title="Mostrar u ocultar la clave">
+                        <i data-i="eye"></i>
+                      </button>
+                    </div>
+                    <div class="subnote">Se guarda en tu equipo, dentro de la carpeta de datos de Sagitari.</div>
+                  </div>
+                  <div class="srow" data-keys="detectar modelos guardar proveedor">
+                    <div class="btnrow">
+                      <button class="btn" id="btnDetect">
+                        <span class="bi"><i data-i="search"></i></span> Detectar modelos
+                      </button>
+                      <button class="btn" id="btnSaveProv">
+                        <span class="bi"><i data-i="save"></i></span> Guardar proveedor
+                      </button>
+                    </div>
+                  </div>
+                  <div class="field srow" data-keys="modelo model id elegir">
+                    <label for="modelSel">MODELO</label
+                    ><select id="modelSel">
+                      <option value="">— detecta modelos primero —</option>
+                    </select>
+                  </div>
+                  <div class="srow" data-keys="formato endpoint protocolo">
+                    <div class="subnote" id="formatHint">
+                      El formato «Automático» deduce el endpoint por proveedor y modelo: en OpenCode Go, los Qwen y MiniMax usan /messages y
+                      Grok o GPT-Luna usan /responses.
+                    </div>
+                  </div>
+                  <div class="srow" data-keys="activar modelo usar">
+                    <div class="btnrow">
+                      <button class="btn primary" id="btnActivate">
+                        <span class="bi"><i data-i="play"></i></span> Activar este modelo
+                      </button>
+                    </div>
+                  </div>
+                  <div class="saving" id="saveMsg"></div>
+                </div>
+
+                <div class="setcard">
+                  <div class="sc-head">
+                    <b>Proveedores guardados</b><span class="sc-hint">Reutiliza una configuración con un clic</span>
+                  </div>
+                  <div class="provlist"><div id="provList"></div></div>
+                </div>
+              </div>
+              <!-- ===== PREFERENCIAS ===== -->
+              <div class="setpanel" data-panel="prefs">
+                <div class="setcard">
+                  <div class="sc-head"><b>Personal</b><span class="sc-hint">Tu identidad y el comportamiento visual</span></div>
+                  <div class="swrow srow" data-keys="nombre usuario como te llamas identidad">
+                    <span class="st"><b>Tu nombre</b><small>Sagitari lo usa para dirigirse a ti.</small></span>
+                    <input type="text" id="setUserName" aria-label="Tu nombre" style="width: 160px" />
+                  </div>
+                  <div class="swrow srow" data-keys="glow resplandor bordes luz ambiental">
+                    <span class="st"
+                      ><b>Glow ambiental en los bordes</b
+                      ><small>El marco se ilumina cuando el agente piensa, trabaja o te habla.</small></span
+                    >
+                    <div class="sw on" id="swGlow" aria-label="Glow ambiental en los bordes"></div>
+                  </div>
+                  <div class="swrow srow" data-keys="voz tts leer hablar respuestas">
+                    <span class="st"><b>Leer en voz alta (TTS)</b><small>Sagitari pronuncia sus respuestas.</small></span>
+                    <div class="sw on" id="swTts" aria-label="Leer en voz alta (TTS)"></div>
+                  </div>
+                  <div class="swrow srow" data-keys="idioma voz dictado reconocimiento">
+                    <span class="st"><b>Idioma de voz</b><small>Para el dictado y la lectura en voz alta.</small></span>
+                    <select id="voiceLang" aria-label="Idioma de voz" style="width: 200px">
+                      <option value="es-ES">Español (España)</option>
+                      <option value="es-MX">Español (México)</option>
+                      <option value="es-AR">Español (Argentina)</option>
+                      <option value="en-US">English (US)</option>
+                      <option value="en-GB">English (UK)</option>
+                    </select>
+                  </div>
+                  <div class="swrow srow" data-keys="voz altavoz voz del sistema leer">
+                    <span class="st"><b>Voz de la lectura</b><small>Cuál de las voces instaladas usa SAGITARI.</small></span>
+                    <select id="ttsVoice" aria-label="Voz de la lectura" style="width: 240px"></select>
+                  </div>
+                  <div class="swrow srow" data-keys="piper voz local natural ligera offline instalar">
+                    <span class="st"
+                      ><b>Voz local de alta calidad (Piper)</b
+                      ><small>Neuronal, 100% local y ligera (≈80 MB). Se usa sola cuando está instalada; si no, Windows.</small></span
+                    >
+                    <div style="display: flex; flex-direction: column; gap: 6px; align-items: flex-end">
+                      <button class="wb" id="btnInstalarPiper" title="Instalar la voz local" style="min-width: 150px">Instalar voz</button>
+                      <small id="lblPiperEstado" style="max-width: 260px; text-align: right; opacity: 0.75"
+                        >no instalada — se usa la voz de Windows</small
+                      >
+                    </div>
+                  </div>
+                  <div class="swrow srow" data-keys="velocidad voz ritmo leer">
+                    <span class="st"><b>Velocidad de la voz</b><small>De más lenta a más rápida.</small></span>
+                    <input type="range" id="ttsRate" min="-40" max="40" step="5" class="glowslider" aria-label="Velocidad de la voz" />
+                  </div>
+                  <div class="swrow srow" data-keys="avisos voz leer todo permisos">
+                    <span class="st"
+                      ><b>Leer también los avisos</b><small>Permisos, errores y avisos cortos, además de la respuesta.</small></span
+                    >
+                    <div class="sw" id="swAvisos" aria-label="Leer también los avisos"></div>
+                  </div>
+                  <div class="swrow srow" data-keys="motor clasico dictado escucha reconocimiento micro sordo oye">
+                    <span class="st"
+                      ><b>Motor de escucha clásico</b
+                      ><small
+                        >Si al dictar no se escribe nada aunque el orbe se mueva, enciéndelo: usa el reconocedor clásico de Windows, que por
+                        donde escucha es distinto del moderno.</small
+                      ></span
+                    >
+                    <div class="sw" id="swSttClasico" aria-label="Motor de escucha clásico"></div>
+                  </div>
+                  <div class="swrow srow" data-keys="whisper dictado local transcribir preciso inteligencia artificial offline">
+                    <span class="st"
+                      ><b>Dictado local (Whisper)</b
+                      ><small
+                        >Transcripción de alta precisión, 100% local y sin internet, con transcripción en vivo mientras hablas. Instala el
+                        motor (≈190 MB) y SAGITARI lo usará automáticamente para entender mucho mejor lo que dices.</small
+                      ></span
+                    >
+                    <div style="display: flex; flex-direction: column; gap: 6px; align-items: flex-end">
+                      <button class="wb" id="btnInstalarWhisper" title="Instalar el motor de dictado local" style="min-width: 150px">
+                        Instalar motor
+                      </button>
+                      <small id="lblWhisperEstado" style="max-width: 260px; text-align: right; opacity: 0.75"
+                        >no instalado — se usa el motor de Windows</small
+                      >
+                    </div>
+                  </div>
+                </div>
+
+                <div class="setcard">
+                  <div class="sc-head"><b>Apariencia</b><span class="sc-hint">Color de la interfaz y del resplandor</span></div>
+                  <div class="themerow" data-keys="color tema apariencia acento interfaz">
+                    <span class="st"><b>Color de la interfaz</b><small>Teñe bordes, menús, botones y detalles de toda la app.</small></span>
+                    <span class="colordot" id="dotUiColor"></span>
+                    <select id="uiColor" aria-label="Color de la interfaz" style="width: 150px">
+                      <option value="violet">Violeta</option>
+                      <option value="magenta">Magenta</option>
+                      <option value="cyan">Cian</option>
+                      <option value="emerald">Esmeralda</option>
+                      <option value="amber">Ámbar</option>
+                      <option value="ice">Hielo</option>
+                      <option value="aurora">Aurora</option>
+                    </select>
+                  </div>
+                  <div class="themerow" data-keys="color glow resplandor luz">
+                    <span class="st"><b>Color del glow</b><small>El tono de la luz del marco, puede diferir del tema.</small></span>
+                    <span class="colordot glow" id="dotGlowColor"></span>
+                    <select id="glowColor" aria-label="Color del glow" style="width: 150px">
+                      <option value="match">Igual que la interfaz</option>
+                      <option value="violet">Violeta</option>
+                      <option value="magenta">Magenta</option>
+                      <option value="cyan">Cian</option>
+                      <option value="emerald">Esmeralda</option>
+                      <option value="amber">Ámbar</option>
+                      <option value="ice">Hielo</option>
+                      <option value="aurora">Aurora</option>
+                    </select>
+                  </div>
+                  <div class="themerow" data-keys="intensidad glow resplandor fuerza brillo">
+                    <span class="st"><b>Intensidad del glow</b><small id="glowStrengthLabel">Equilibrado</small></span>
+                    <div style="text-align: right">
+                      <input
+                        type="range"
+                        min="0.4"
+                        max="1.4"
+                        step="0.05"
+                        class="glowslider"
+                        id="glowStrength"
+                        aria-label="Intensidad del glow"
+                      />
+                      <div class="glowlabels">
+                        <span id="lblSuave">Suave</span><span id="lblEq">Equilibrado</span><span id="lblInt">Intenso</span>
+                      </div>
+                    </div>
+                  </div>
+                  <div class="themerow" data-keys="vidrio glass transparencia tintado claro opaco">
+                    <span class="st"><b>Vidrio: de ultra claro a tintado</b><small id="glassTintLabel">Equilibrado</small></span>
+                    <div style="text-align: right">
+                      <input
+                        type="range"
+                        min="0.4"
+                        max="1.3"
+                        step="0.05"
+                        class="glowslider"
+                        id="glassTint"
+                        aria-label="Transparencia del vidrio"
+                      />
+                      <div class="glowlabels">
+                        <span id="lblGlassClaro">Ultra claro</span><span id="lblGlassEq">Equilibrado</span
+                        ><span id="lblGlassTint">Tintado</span>
+                      </div>
+                    </div>
+                  </div>
+                </div>
+
+                <div class="setcard">
+                  <div class="sc-head"><b>Espacio de trabajo</b><span class="sc-hint">Dónde trabaja el agente con tus archivos</span></div>
+                  <div class="srow" data-keys="espacio trabajo carpeta workspace proyectos ruta">
+                    <div class="btnrow" style="margin: 0">
+                      <input type="text" id="wsPath" aria-label="Ruta del espacio de trabajo" readonly style="flex: 1; min-width: 200px" />
+                      <button class="btn" id="wsPick">
+                        <span class="bi"><i data-i="folder"></i></span> Elegir…
+                      </button>
+                    </div>
+                    <div class="subnote">
+                      Carpeta donde Sagitari crea y modifica archivos, y donde se ejecutan los comandos. Las rutas relativas («informe.md»)
+                      aterrizan aquí.
+                    </div>
+                  </div>
+                </div>
+
+                <div class="setcard">
+                  <div class="sc-head"><b>Atajos de teclado</b><span class="sc-hint">Disponibles en toda la app</span></div>
+                  <div class="swrow srow" data-keys="atajo mostrar ocultar ventana ctrl alt s">
+                    <span class="st"><b>Mostrar u ocultar la ventana</b></span
+                    ><span class="kbdrow"><kbd class="kbd">Ctrl</kbd><kbd class="kbd">Alt</kbd><kbd class="kbd">S</kbd></span>
+                  </div>
+                  <div class="swrow srow" data-keys="atajo traer al frente primer plano ventana alt shift s">
+                    <span class="st"><b>Traer la ventana al frente</b></span
+                    ><span class="kbdrow"><kbd class="kbd">Alt</kbd><kbd class="kbd">Shift</kbd><kbd class="kbd">S</kbd></span>
+                  </div>
+                  <div class="swrow srow" data-keys="atajo pulso glow resplandor">
+                    <span class="st"><b>Pulso de resplandor</b></span
+                    ><span class="kbdrow"><kbd class="kbd">Ctrl</kbd><kbd class="kbd">Shift</kbd><kbd class="kbd">G</kbd></span>
+                  </div>
+                  <div class="swrow srow" data-keys="atajo modo act plan think agente">
+                    <span class="st"><b>Cambiar de modo (Act / Plan / Think)</b></span
+                    ><span class="kbdrow"><kbd class="kbd">Alt</kbd><kbd class="kbd">M</kbd></span>
+                  </div>
+                </div>
+              </div>
+
+              <!-- ===== SEGURIDAD ===== -->
+              <div class="setpanel" data-panel="security">
+                <div class="setcard">
+                  <div class="sc-head">
+                    <b>Permisos por herramienta</b><span class="sc-hint">Qué puede hacer el agente sin preguntarte</span>
+                  </div>
+                  <div
+                    class="srow"
+                    data-keys="permisos herramienta permitir siempre seguro confirmar preguntar bloqueado terminal archivos"
+                  >
+                    <div id="permList"></div>
+                  </div>
+                  <div class="srow" data-keys="restablecer permisos recomendados defecto">
+                    <div class="btnrow" style="margin: 10px 0 0">
+                      <button class="btn ghost" id="secResetPerms">
+                        <span class="bi"><i data-i="history"></i></span> Restablecer permisos recomendados
+                      </button>
+                    </div>
+                    <div class="subnote">
+                      «Por defecto» usa el nivel recomendado de cada herramienta (aparece indicado en cada fila). «Permitir siempre» se
+                      ejecuta sin preguntar · «Preguntar antes» pide permiso en cada uso · «Bloqueado» la impide por completo.
+                    </div>
+                  </div>
+                </div>
+
+                <!-- avanzado: límites finos y protección anti-bucles, plegados por defecto -->
+                <div class="setcard advcard" id="advLimitsCard">
+                  <div
+                    class="advhead"
+                    data-advhead="advLimitsCard"
+                    role="button"
+                    tabindex="0"
+                    aria-expanded="false"
+                    aria-controls="advLimitsBody"
+                  >
+                    <div class="sc-head">
+                      <b>Avanzado · límites y anti-bucles</b
+                      ><span class="sc-hint">Tope de pasos, minutos, tokens y coste de cada tarea</span>
+                    </div>
+                    <span class="chev"><i data-i="chevron"></i></span>
+                  </div>
+                  <div class="advbody" id="advLimitsBody">
+                    <div class="grid2">
+                      <div class="field srow" data-keys="pasos maximos limite steps">
+                        <label for="grSteps">PASOS MÁXIMOS (0 = sin límite)</label><input type="number" id="grSteps" min="0" />
+                      </div>
+                      <div class="field srow" data-keys="herramientas maximas limite llamadas tools">
+                        <label for="grToolCalls">LLAMADAS A HERRAMIENTAS (0 = sin límite)</label
+                        ><input type="number" id="grToolCalls" min="0" />
+                      </div>
+                      <div class="field srow" data-keys="minutos tiempo maximo duracion">
+                        <label for="grMinutes">MINUTOS MÁXIMOS (0 = sin límite)</label><input type="number" id="grMinutes" min="0" />
+                      </div>
+                      <div class="field srow" data-keys="tokens limite consumo">
+                        <label for="grTokens">TOKENS MÁXIMOS (0 = sin límite)</label><input type="number" id="grTokens" min="0" />
+                      </div>
+                      <div class="field srow" data-keys="coste dinero dolares presupuesto gasto">
+                        <label for="grCost">COSTE MÁXIMO $ (0 = sin límite)</label><input type="number" id="grCost" min="0" step="0.1" />
+                      </div>
+                      <div class="field srow" data-keys="timeout sin respuesta silencio espera datos modelo">
+                        <label for="grLlmTimeout">SIN RESPUESTA DEL MODELO, SEGUNDOS (0 = sin límite)</label
+                        ><input type="number" id="grLlmTimeout" min="0" step="30" />
+                      </div>
+                    </div>
+                    <div class="subnote">
+                      Al alcanzar cualquiera de estos límites la ejecución se detiene y queda como tarea recuperable desde el panel Tareas.
+                    </div>
+                  </div>
+
+                  <div class="setcard">
+                    <div class="sc-head">
+                      <b>Protección anti-bucles</b><span class="sc-hint">Que el agente no se quede dando vueltas</span>
+                    </div>
+                    <div class="grid2">
+                      <div class="field srow" data-keys="repeticiones bucle loop identicas">
+                        <label for="grLoop">REPETICIONES DE UNA ACCIÓN = BUCLE</label><input type="number" id="grLoop" min="2" />
+                      </div>
+                      <div class="field srow" data-keys="pasos sin progreso estancado stall">
+                        <label for="grStall">PASOS SIN PROGRESO (0 = sin límite)</label><input type="number" id="grStall" min="0" />
+                      </div>
+                    </div>
+                    <div class="srow">
+                      <div class="btnrow" style="margin: 6px 0 0">
+                        <button class="btn ghost" id="secResetGuardrails">
+                          <span class="bi"><i data-i="history"></i></span> Restablecer límites recomendados
+                        </button>
+                      </div>
+                      <div class="subnote">
+                        Si el agente repite la misma acción sin avanzar, Sagitari detiene la ejecución sola para proteger el sistema.
+                      </div>
+                    </div>
+                  </div>
+                  <!-- /advbody -->
+                </div>
+                <!-- /advLimitsCard -->
+              </div>
+
+              <!-- ===== AGENTE ===== -->
+              <div class="setpanel" data-panel="agent">
+                <div class="setcard">
+                  <div class="sc-head"><b>Memoria</b><span class="sc-hint">Cuánta memoria entra en cada conversación</span></div>
+                  <div class="swrow srow" data-keys="memoria sensibilidad relevancia recuerdos contexto">
+                    <span class="st"
+                      ><b>Sensibilidad de relevancia (0-3)</b
+                      ><small>0 = entran más recuerdos · 3 = solo coincidencias muy claras.</small></span
+                    >
+                    <input
+                      type="number"
+                      id="memSens"
+                      aria-label="Sensibilidad de relevancia (0-3)"
+                      min="0"
+                      max="3"
+                      step="1"
+                      style="width: 80px"
+                    />
+                  </div>
+                  <div class="subnote">
+                    La memoria irrelevante no se inyecta en el contexto: solo lo que encaja con lo que estás pidiendo.
+                  </div>
+                </div>
+
+                <div class="setcard">
+                  <div class="sc-head">
+                    <b>Tareas en segundo plano</b><span class="sc-hint">Sagitari puede trabajar mientras sigues hablando</span>
+                  </div>
+                  <div class="swrow srow" data-keys="tareas simultaneas concurrencia background paralelo">
+                    <span class="st"><b>Tareas simultáneas (1-4)</b><small>Cuántas tareas puede ejecutar a la vez.</small></span>
+                    <input type="number" id="setMaxTasks" aria-label="Tareas simultáneas (1-4)" min="1" max="4" style="width: 80px" />
+                  </div>
+                  <div class="swrow srow" data-keys="recuperar tareas interrumpidas arrancar reanudar">
+                    <span class="st"
+                      ><b>Recuperar tareas interrumpidas al arrancar</b
+                      ><small>Si cierras la app con tareas a medias, se reanudan solas.</small></span
+                    >
+                    <div class="sw on" id="swAutoResume" aria-label="Recuperar tareas interrumpidas al arrancar"></div>
+                  </div>
+                </div>
+
+                <div class="setcard">
+                  <div class="sc-head">
+                    <b>Delegación y verificación</b><span class="sc-hint">Cómo reparte el trabajo y cómo comprueba que quedó bien</span>
+                  </div>
+                  <div class="swrow srow" data-keys="modelo por agente subagentes ahorro coste barato enrutado">
+                    <span class="st"
+                      ><b>Modelo por agente</b
+                      ><small
+                        >Deja que los subagentes que sólo leen, mueven archivos o miran capturas usen el modelo más ligero de tu proveedor;
+                        el que verifica y el chat siguen con el que elegiste.</small
+                      ></span
+                    >
+                    <div class="sw" id="swAgenteModelo" aria-label="Modelo por agente"></div>
+                  </div>
+                  <div class="swrow srow" data-keys="verificar comprobar resultado cierre calidad subagentes evidencia">
+                    <span class="st"
+                      ><b>Verificación antes de cerrar</b
+                      ><small
+                        >Cuando una tarea cambia archivos, SAGITARI comprueba el resultado (o lo delega en su agente de verificación) antes
+                        de dártela por hecha. Apágalo si prefieres respuestas más rápidas.</small
+                      ></span
+                    >
+                    <div class="sw" id="swVerificar" aria-label="Verificación antes de cerrar"></div>
+                  </div>
+                  <div class="swrow srow" data-keys="revisar revision codigo diff cambio revisor calidad">
+                    <span class="st"
+                      ><b>Revisar el cambio antes de cerrar</b
+                      ><small
+                        >Cuando una tarea modifica archivos, un agente de revisión lee el diff antes de dártelo por hecho y busca lo que
+                        está mal: contratos rotos, casos límite, restos del nombre viejo. Si encuentra algo bloqueante, SAGITARI lo arregla
+                        en el mismo turno. Apágalo si prefieres respuestas más rápidas.</small
+                      ></span
+                    >
+                    <div class="sw" id="swRevisar" aria-label="Revisar el cambio antes de cerrar"></div>
+                  </div>
+                  <div class="swrow srow" data-keys="diagnosticos escribir comprobar lint errores proyecto tipos eslint ruff mypy">
+                    <span class="st"
+                      ><b>Comprobar el proyecto al escribir</b
+                      ><small
+                        >Cada vez que SAGITARI escribe un archivo, pasa los comprobadores del proyecto (ESLint, Ruff, Flake8, Mypy) sobre
+                        las líneas que ha cambiado y el fallo vuelve al instante, en el mismo paso. Lo que ya estaba mal en el archivo no
+                        cuenta como suyo. Apágalo si prefieres que escribir no ejecute nada.</small
+                      ></span
+                    >
+                    <div class="sw" id="swDiagnosticos" aria-label="Comprobar el proyecto al escribir"></div>
+                  </div>
+                  <div class="swrow srow" data-keys="pruebas test cierre ejecutar verificar npm test compilacion">
+                    <span class="st"
+                      ><b>Ejecutar las pruebas al cerrar</b
+                      ><small
+                        >Antes de darte el turno por terminado, SAGITARI ejecuta el comando de pruebas del proyecto —o su compilación si no
+                        hay pruebas— y mira la salida de verdad. Si falla, se le devuelve el fallo y lo arregla: el turno no cierra en verde
+                        con algo roto.</small
+                      ></span
+                    >
+                    <div class="sw" id="swCierre" aria-label="Ejecutar las pruebas al cerrar"></div>
+                  </div>
+                  <div class="swrow srow" data-keys="aislamiento arboles subagentes paralelo git worktree conflicto fusion">
+                    <span class="st"
+                      ><b>Aislar a los subagentes que escriben</b
+                      ><small
+                        >Los especialistas que escriben código trabajan en su propio árbol de git y sus cambios vuelven al proyecto como un
+                        parche comprobado antes de aplicarse: dos agentes a la vez dejan de pisarse. Si algo no encaja, no se aplica nada y
+                        te lo dice. Necesita que el proyecto sea un repositorio git; sin git trabaja como siempre. Apágalo para que escriban
+                        directamente sobre tus archivos.</small
+                      ></span
+                    >
+                    <div class="sw" id="swArboles" aria-label="Aislar a los subagentes que escriben"></div>
+                  </div>
+                  <div class="swrow srow" data-keys="cache prompt contexto ahorro coste rapido tokens proveedor">
+                    <span class="st"
+                      ><b>Aprovechar el caché de prompt</b
+                      ><small
+                        >El prompt de cada paso (herramientas, mapa del proyecto, reglas y conversación) se guarda en el proveedor y se
+                        relee a una fracción del precio, con la misma respuesta. Se apaga solo si usas un proveedor compatible que no
+                        entienda el campo y te rechace las peticiones.</small
+                      ></span
+                    >
+                    <div class="sw" id="swCache" aria-label="Aprovechar el caché de prompt"></div>
+                  </div>
+                  <div class="subnote">
+                    Cada subagente tiene su propio presupuesto de pasos, así que sin este tope un turno largo acaba en una cadena de
+                    delegaciones. Al alcanzarlo, SAGITARI no se detiene: termina la tarea con lo que ya tiene.
+                  </div>
+                  <!-- avanzado: paralelismo e intentos de reintento, plegados por defecto -->
+                  <div class="setcard advcard" id="advAgentCard">
+                    <div
+                      class="advhead"
+                      data-advhead="advAgentCard"
+                      role="button"
+                      tabindex="0"
+                      aria-expanded="false"
+                      aria-controls="advAgentBody"
+                    >
+                      <div class="sc-head">
+                        <b>Avanzado · paralelismo, reintentos y hooks</b
+                        ><span class="sc-hint">Para ajustar el comportamiento fino del agente</span>
+                      </div>
+                      <span class="chev"><i data-i="chevron"></i></span>
+                    </div>
+                    <div class="advbody" id="advAgentBody">
+                      <div class="grid2">
+                        <div class="field srow" data-keys="subagentes delegaciones limite equipo tope">
+                          <label for="grDelegations">SUBAGENTES POR TURNO (0 = sin tope)</label
+                          ><input type="number" id="grDelegations" min="0" />
+                        </div>
+                        <div class="field srow" data-keys="paralelo simultaneo concurrencia herramientas rapidez">
+                          <label for="parTools">HERRAMIENTAS EN PARALELO (1-4)</label><input type="number" id="parTools" min="1" max="4" />
+                        </div>
+                      </div>
+                      <div class="grid2">
+                        <div class="field srow" data-keys="intentos arreglo fallo pruebas reintentos vueltas">
+                          <label for="verAttempts">INTENTOS DE ARREGLAR UN FALLO (0-5)</label
+                          ><input type="number" id="verAttempts" min="0" max="5" />
+                        </div>
+                      </div>
+                      <div class="subnote">
+                        Varias órdenes del mismo mensaje se ejecutan a la vez cuando no chocan: el navegador es uno solo, la escritura en
+                        disco va en cola y la terminal admite dos comandos. Con 1, todo va en orden.
+                      </div>
+                    </div>
+                    <!-- /advbody -->
+                  </div>
+                  <!-- /advAgentCard -->
+                </div>
+
+                <div class="setcard">
+                  <div class="sc-head">
+                    <b>Reglas del proyecto y hooks</b><span class="sc-hint">Cómo se comporta dentro de tus repositorios</span>
+                  </div>
+                  <div class="srow" data-keys="sagitari md agents md reglas instrucciones convenciones proyecto estilo">
+                    <div class="subnote" style="margin-top: 0">
+                      Si el proyecto tiene un <b>SAGITARI.md</b> o un <b>AGENTS.md</b> en su raíz (o en <b>.sagitari/</b>), sus reglas se
+                      leen siempre, antes de tocar nada: convenciones, qué no tocar, cómo se llama cada cosa. Valen también para los
+                      subagentes. En la carpeta de datos puedes tener un <b>AGENTS.md</b> con las tuyas, para todos los proyectos a la vez.
+                    </div>
+                    <div id="instrList" class="instrlist"></div>
+                    <div class="btnrow" style="margin: 12px 0 0">
+                      <button class="btn ghost" id="instrReload">
+                        <span class="bi"><i data-i="refresh"></i></span> Comprobar
+                      </button>
+                      <button class="btn ghost" id="instrCreate">
+                        <span class="bi"><i data-i="plus"></i></span> Crear SAGITARI.md
+                      </button>
+                    </div>
+                  </div>
+                  <div class="field srow" data-keys="hook editar escribir formatear prettier lint fix comando automatico">
+                    <label for="hookEditar">HOOK TRAS ESCRIBIR UN ARCHIVO (OPCIONAL)</label>
+                    <input type="text" id="hookEditar" placeholder="npx prettier --write {{file}}" spellcheck="false" />
+                    <div class="subnote">
+                      Se ejecuta después de escribir y su salida se le enseña al modelo. Marcadores: <b>{{file}}</b> (el archivo),
+                      <b>{{files}}</b> (todos los de ese paso), <b>{{dir}}</b> (el espacio de trabajo); se ponen entre comillas solos.
+                    </div>
+                  </div>
+                  <div class="field srow" data-keys="hook cerrar pruebas lint comprobar comando final">
+                    <label for="hookCerrar">HOOK ANTES DE CERRAR EL TURNO (OPCIONAL)</label>
+                    <input type="text" id="hookCerrar" placeholder="npm run lint" spellcheck="false" />
+                    <div class="subnote">
+                      Se ejecuta antes de dar el turno por terminado. Si falla, el turno no cierra: SAGITARI lee la salida y lo arregla,
+                      igual que con las pruebas del proyecto.
+                    </div>
+                  </div>
+                </div>
+
+                <div class="setcard">
+                  <div class="sc-head"><b>Conversación</b><span class="sc-hint">Qué se ve de lo que Sagitari piensa por dentro</span></div>
+                  <div class="swrow srow" data-keys="razonamiento thinking pensar proceso interno razonar">
+                    <span class="st"
+                      ><b>Mostrar el razonamiento del modelo</b
+                      ><small
+                        >Los modelos que razonan (Claude, la serie o y GPT-5, DeepSeek R1…) enseñan su proceso antes de responder. Aparece
+                        plegado encima de la respuesta y se pliega solo al empezar a contestar. Nunca se lee en voz alta. Puede costar
+                        tokens extra en algunos proveedores.</small
+                      ></span
+                    >
+                    <div class="sw" id="swThinking" aria-label="Mostrar el razonamiento del modelo"></div>
+                  </div>
+                </div>
+
+                <div class="setcard">
+                  <div class="sc-head"><b>Diagnóstico</b><span class="sc-hint">Para depurar el comportamiento del agente</span></div>
+                  <div class="swrow srow" data-keys="modo desarrollador metricas debug tokens latencia coste">
+                    <span class="st"
+                      ><b>Modo desarrollador</b><small>Muestra métricas en vivo (tokens, latencia, coste) bajo el chat.</small></span
+                    >
+                    <div class="sw" id="devModeSw" aria-label="Modo desarrollador"></div>
+                  </div>
+                </div>
+              </div>
+
+              <!-- ===== DATOS ===== -->
+              <div class="setpanel" data-panel="data">
+                <div class="setcard">
+                  <div class="sc-head">
+                    <b>Hábitos aprendidos</b><span class="sc-hint">Lo que Sagitari ha deducido de cómo trabajas</span>
+                  </div>
+                  <div class="srow" data-keys="habitos aprendizaje preferencias reiniciar borrar">
+                    <div class="subnote" style="margin-top: 0">
+                      Apps y webs que usas, comandos frecuentes, carpetas y tu modo preferido. Nada de esto sale de tu equipo.
+                    </div>
+                    <div id="habitsPreview" class="habitprev"></div>
+                    <div class="btnrow" style="margin: 12px 0 0">
+                      <button class="btn ghost danger" id="habitsResetBtn">
+                        <span class="bi"><i data-i="trash"></i></span> Reiniciar hábitos aprendidos
+                      </button>
+                    </div>
+                  </div>
+                </div>
+
+                <div class="setcard">
+                  <div class="sc-head"><b>Carpeta de datos</b><span class="sc-hint">Configuración, memoria, skills y tareas</span></div>
+                  <div class="swrow srow" data-keys="carpeta datos copia seguridad ruta backup abrir">
+                    <span class="st"><b>Ubicación</b><small id="dataDirPath">—</small></span>
+                    <button class="btn ghost" id="openDataDirBtn">
+                      <span class="bi"><i data-i="external"></i></span> Abrir
+                    </button>
+                  </div>
+                  <div class="subnote">Copia esta carpeta para respaldar tu configuración, tu memoria y tus skills.</div>
+                </div>
+              </div>
+
+              <!-- ===== ACERCA DE ===== -->
+              <div class="setpanel" data-panel="about">
+                <div class="setcard">
+                  <div class="sc-head"><b>Actualizaciones</b><span class="sc-hint">Desde GitHub, y solo cuando tú lo pidas</span></div>
+                  <div class="swrow srow" data-keys="actualizacion actualizar version update ultima comprobar estado">
+                    <span class="st"><b>Versión instalada</b><small id="updState">Aún no se ha comprobado.</small></span>
+                    <span class="kbd" id="updCurrent">—</span>
+                  </div>
+                  <div
+                    class="srow updprog"
+                    id="updProgressRow"
+                    data-keys="actualizacion actualizar version update descargar progreso porcentaje"
+                  >
+                    <div
+                      class="updbar"
+                      id="updBar"
+                      role="progressbar"
+                      aria-valuemin="0"
+                      aria-valuemax="100"
+                      aria-valuenow="0"
+                      aria-label="Progreso de la descarga"
+                    >
+                      <span id="updBarFill"></span>
+                    </div>
+                    <div class="subnote" id="updBarNote">Descargando…</div>
+                  </div>
+                  <div class="btnrow">
+                    <button class="btn" id="updCheckBtn" aria-label="Buscar actualizaciones publicadas en GitHub">
+                      <span class="bi"><i data-i="refresh"></i></span><span id="updCheckLabel">Buscar actualizaciones</span>
+                    </button>
+                    <button class="btn primary" id="updDownloadBtn" hidden aria-label="Descargar la actualización disponible">
+                      <span class="bi"><i data-i="download"></i></span> Descargar
+                    </button>
+                    <button
+                      class="btn primary"
+                      id="updInstallBtn"
+                      hidden
+                      aria-label="Instalar la actualización; Sagitari se cerrará para instalarse"
+                    >
+                      <span class="bi"><i data-i="download"></i></span><span id="updInstallLabel">Instalar y cerrar</span>
+                    </button>
+                    <button class="btn ghost" id="updPageBtn" aria-label="Ver las novedades de la versión en GitHub">
+                      <span class="bi"><i data-i="external"></i></span> Ver novedades
+                    </button>
+                  </div>
+                  <div class="subnote" id="updNote" hidden></div>
+                  <div class="saving" id="updMsg"></div>
+                </div>
+
+                <div class="setcard">
+                  <div class="sc-head"><b>Aplicación</b><span class="sc-hint">Sagitari, tu asistente agéntico</span></div>
+                  <div class="swrow srow" data-keys="aplicacion about acerca sagitari version actual repositorio releases">
+                    <span class="st"><b>SAGITARI</b><small>Asistente agéntico de escritorio para tu equipo.</small></span>
+                    <span class="kbd" id="aboutVersion">—</span>
+                  </div>
+                  <div class="btnrow" style="margin: 12px 0 0">
+                    <button class="btn ghost" id="aboutRepoBtn" aria-label="Abrir el repositorio de Sagitari en GitHub">
+                      <span class="bi"><i data-i="code"></i></span> Repositorio
+                    </button>
+                    <button class="btn ghost" id="aboutRelBtn" aria-label="Abrir la página de versiones en GitHub">
+                      <span class="bi"><i data-i="external"></i></span> Releases
+                    </button>
+                  </div>
+                </div>
+              </div>
+
+              <div class="setempty" id="setNoResults" hidden>Ningún ajuste coincide con esa búsqueda.</div>
+            </div>
+          </section>
+        </main>
+
+        <!-- ===== Right rail ===== -->
+        <aside class="rail">
+          <div class="rcard">
+            <div class="rc-top">
+              <span class="live"><span class="dot ok"></span> En vivo</span>
+              <div class="bigring" id="bigRing"></div>
+            </div>
+            <div class="rc-title">Agentes activos</div>
+            <div class="rc-count">
+              <span id="agentCount">0</span
+              ><span class="mini-dots"><span class="dot ok"></span><span class="dot pur"></span><span class="dot blu"></span></span>
+            </div>
+            <div id="railAgents" class="rail-agents"></div>
           </div>
 
-          <div class="setempty" id="setNoResults" hidden>Ningún ajuste coincide con esa búsqueda.</div>
-        </div>
-      </section>
-    </main>
+          <div class="rcard">
+            <div class="rc-top">
+              <span class="live2">Actividad en vivo</span><span class="board-clock" id="boardClock" title="Hora local">--:--:--</span>
+            </div>
+            <div id="activityFeed" class="feed"></div>
+          </div>
+        </aside>
 
-    <!-- ===== Right rail ===== -->
-    <aside class="rail">
-      <div class="rcard">
-        <div class="rc-top"><span class="live"><span class="dot ok"></span> En vivo</span><div class="bigring" id="bigRing"></div></div>
-        <div class="rc-title">Agentes activos</div>
-        <div class="rc-count"><span id="agentCount">0</span><span class="mini-dots"><span class="dot ok"></span><span class="dot pur"></span><span class="dot blu"></span></span></div>
-        <div id="railAgents" class="rail-agents"></div>
-      </div>
-
-      <div class="rcard">
-        <div class="rc-top"><span class="live2">Actividad en vivo</span><span class="board-clock" id="boardClock" title="Hora local">--:--:--</span></div>
-        <div id="activityFeed" class="feed"></div>
-      </div>
-
-    </aside>
-
-      <!-- Modo voz: se superpone al área del chat. El orbe es decorativo (aria-hidden) y
+        <!-- Modo voz: se superpone al área del chat. El orbe es decorativo (aria-hidden) y
            todo lo que importa es texto, para que quien use lector de pantalla no dependa
            del dibujo. `hidden` de verdad cuando está cerrado: nada animando de fondo. -->
-      <div id="voiceMode" hidden>
-        <div class="vm-cabecera"><span id="vmEstado">Escuchando</span></div>
-        <canvas id="vmOrbe" width="380" height="380" aria-hidden="true"></canvas>
-        <div class="vm-texto">
-          <p id="vmParcial" class="vm-parcial" aria-live="polite"></p>
-          <div id="vmHistorial"></div>
-        </div>
-        <div id="vmPasos" class="vm-pasos"></div>
-        <div id="vmConfirm" class="vm-confirm" hidden>
-          <p id="vmConfirmTexto"></p>
-          <div class="vm-botones">
-            <button class="cbtn" id="vmSi">Sí, hazlo</button>
-            <button class="cbtn" id="vmNo">No</button>
+        <div id="voiceMode" hidden>
+          <div class="vm-cabecera"><span id="vmEstado">Escuchando</span></div>
+          <canvas id="vmOrbe" width="380" height="380" aria-hidden="true"></canvas>
+          <div class="vm-texto">
+            <p id="vmParcial" class="vm-parcial" aria-live="polite"></p>
+            <div id="vmHistorial"></div>
           </div>
-        </div>
-        <div id="vmError" class="vm-error" hidden>
-          <p id="vmErrorTexto"></p>
-          <p id="vmErrorFix" class="vm-hint"></p>
-        </div>
-        <div class="vm-pie"><span><kbd>Esc</kbd> para salir</span><span id="vmPista">habla cuando quieras, te escucho</span></div>
-        <!-- Parar el turno en curso: el panel tapa el chat, así que el botón de Detener del
+          <div id="vmPasos" class="vm-pasos"></div>
+          <div id="vmConfirm" class="vm-confirm" hidden>
+            <p id="vmConfirmTexto"></p>
+            <div class="vm-botones">
+              <button class="cbtn" id="vmSi">Sí, hazlo</button>
+              <button class="cbtn" id="vmNo">No</button>
+            </div>
+          </div>
+          <div id="vmError" class="vm-error" hidden>
+            <p id="vmErrorTexto"></p>
+            <p id="vmErrorFix" class="vm-hint"></p>
+          </div>
+          <div class="vm-pie">
+            <span><kbd>Esc</kbd> para salir</span><span id="vmPista">habla cuando quieras, te escucho</span>
+          </div>
+          <!-- Parar el turno en curso: el panel tapa el chat, así que el botón de Detener del
              compositor no se puede pulsar mientras el modo voz está abierto. Se enseña sólo
              cuando hay algo que parar (lo decide el panel; ver setEstado). -->
-        <button class="cbtn vm-parar" id="vmParar" hidden>Parar</button>
+          <button class="cbtn vm-parar" id="vmParar" hidden>Parar</button>
+        </div>
       </div>
-  </div>
-</div>
-<script src="frases.js"></script>
-<script src="icons.js"></script>
-<script src="marked.min.js"></script>
-<script src="chatkit.js"></script>
-<script src="orb.js"></script>
-<script src="voice-mode.js"></script>
-<script src="10-chat.js"></script>
-<script src="20-voz.js"></script>
-<script src="30-ajustes.js"></script>
-<script src="40-vistas.js"></script>
-</body>
+    </div>
+    <script src="frases.js"></script>
+    <script src="icons.js"></script>
+    <script src="marked.min.js"></script>
+    <script src="chatkit.js"></script>
+    <script src="orb.js"></script>
+    <script src="voice-mode.js"></script>
+    <script src="10-chat.js"></script>
+    <script src="20-voz.js"></script>
+    <script src="30-ajustes.js"></script>
+    <script src="40-vistas.js"></script>
+  </body>
 </html>

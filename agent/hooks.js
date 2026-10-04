@@ -25,7 +25,7 @@
 
 const path = require('path');
 
-const MAX_POR_HOOK = 2000;   // caracteres de salida que se le enseñan al modelo
+const MAX_POR_HOOK = 2000; // caracteres de salida que se le enseñan al modelo
 
 /** Cita una ruta para que sobreviva a los espacios (cmd.exe y sh entienden comillas dobles). */
 function citar(ruta) {
@@ -39,7 +39,7 @@ function citar(ruta) {
  * @returns {string} comando listo para lanzar (sin marcadores)
  */
 function expandir(plantilla, { ws = '', archivos = [] } = {}) {
-  const abs = (archivos || []).map(f => (path.isAbsolute(f) ? f : path.join(ws || '.', f)));
+  const abs = (archivos || []).map((f) => (path.isAbsolute(f) ? f : path.join(ws || '.', f)));
   const comando = String(plantilla == null ? '' : plantilla);
   return comando
     .replace(/\{\{\s*file\s*\}\}/gi, () => citar(abs[0] || path.join(ws || '.', '')))
@@ -64,13 +64,12 @@ function resumen(resultado, { etiqueta = 'Hook', comando = '' } = {}) {
   if (!resultado) return '';
   const salida = recortar(resultado.texto);
   if (resultado.ok) {
-    return salida
-      ? `${etiqueta} «${comando}» OK:\n${salida}`
-      : `${etiqueta} «${comando}» OK (sin salida).`;
+    return salida ? `${etiqueta} «${comando}» OK:\n${salida}` : `${etiqueta} «${comando}» OK (sin salida).`;
   }
-  const motivo = resultado.code === null || resultado.code === undefined
-    ? `no se pudo ejecutar${resultado.texto ? ': ' + recortar(resultado.texto, 300) : ''}`
-    : `falló (código ${resultado.code})`;
+  const motivo =
+    resultado.code === null || resultado.code === undefined
+      ? `no se pudo ejecutar${resultado.texto ? ': ' + recortar(resultado.texto, 300) : ''}`
+      : `falló (código ${resultado.code})`;
   return `${etiqueta} «${comando}» ${motivo}${salida ? ':\n' + salida : ''}`;
 }
 

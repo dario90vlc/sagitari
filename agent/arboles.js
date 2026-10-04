@@ -38,7 +38,7 @@ const fsp = require('fs/promises');
 const path = require('path');
 const { spawn } = require('child_process');
 
-const VIVEN = new Map();   // id -> { ws, dir, base }  (los que siguen en pie)
+const VIVEN = new Map(); // id -> { ws, dir, base }  (los que siguen en pie)
 
 function nuevoId() {
   return 'arbol-' + Date.now().toString(36) + '-' + Math.random().toString(36).slice(2, 8);
@@ -59,18 +59,29 @@ function git(args, cwd, opts = {}) {
       resolve({ code: -1, stdout: '', stderr: String(e.message) });
       return;
     }
-    let out = '', err = '', done = false;
+    let out = '',
+      err = '',
+      done = false;
     const finish = (code) => {
       if (done) return;
       done = true;
       clearTimeout(timer);
       resolve({ code, stdout: out, stderr: err });
     };
-    child.stdout.on('data', (d) => { out += d; });
-    child.stderr.on('data', (d) => { err += d; });
+    child.stdout.on('data', (d) => {
+      out += d;
+    });
+    child.stderr.on('data', (d) => {
+      err += d;
+    });
     child.on('error', () => finish(-1));
     child.on('close', (code) => finish(code == null ? -1 : code));
-    const timer = setTimeout(() => { try { child.kill(); } catch {} finish(1); }, opts.timeout || 120000);
+    const timer = setTimeout(() => {
+      try {
+        child.kill();
+      } catch {}
+      finish(1);
+    }, opts.timeout || 120000);
   });
 }
 
@@ -79,7 +90,9 @@ async function disponible(ws) {
   if (!ws) return false;
   try {
     if (!fs.statSync(ws).isDirectory()) return false;
-  } catch { return false; }
+  } catch {
+    return false;
+  }
   const dentro = await git(['rev-parse', '--is-inside-work-tree'], ws, { timeout: 15000 });
   if (dentro.code !== 0 || String(dentro.stdout).trim() !== 'true') return false;
   const head = await git(['rev-parse', '--verify', 'HEAD'], ws, { timeout: 15000 });
@@ -142,10 +155,22 @@ async function crear(ws, opts = {}) {
      presentado como trabajo del subagente. Con la línea base, el parche contiene
      SOLO lo que cambió el subagente. */
   await git(['add', '-A'], dir);
-  const commit = await git([
-    '-c', 'user.email=sagitari@local', '-c', 'user.name=SAGITARI', '-c', 'commit.gpgsign=false',
-    'commit', '-q', '--no-verify', '-m', 'linea base de SAGITARI',
-  ], dir);
+  const commit = await git(
+    [
+      '-c',
+      'user.email=sagitari@local',
+      '-c',
+      'user.name=SAGITARI',
+      '-c',
+      'commit.gpgsign=false',
+      'commit',
+      '-q',
+      '--no-verify',
+      '-m',
+      'linea base de SAGITARI',
+    ],
+    dir,
+  );
   if (commit.code === 0) {
     const rev = await git(['rev-parse', 'HEAD'], dir);
     if (rev.code === 0) base = String(rev.stdout).trim();
@@ -176,7 +201,10 @@ async function fusionar(arbol, opts = {}) {
   if (!parche.trim()) return { ok: true, vacio: true, archivos: [], parche: '' };
 
   const nombres = await git(['diff', '--cached', '--name-only', base], dir);
-  const archivos = String(nombres.stdout || '').split('\n').map((s) => s.trim()).filter(Boolean);
+  const archivos = String(nombres.stdout || '')
+    .split('\n')
+    .map((s) => s.trim())
+    .filter(Boolean);
 
   const tmp = path.join(os.tmpdir(), 'sagitari-arboles', arbol.id + '.patch');
   await fsp.mkdir(path.dirname(tmp), { recursive: true }).catch(() => {});
@@ -195,17 +223,23 @@ async function fusionar(arbol, opts = {}) {
   if (check.code !== 0) {
     arbol.parche = tmp;
     return {
-      ok: false, archivos, parche: tmp,
+      ok: false,
+      archivos,
+      parche: tmp,
       conflicto: (check.stderr || check.stdout || '').trim() || 'el parche no entra limpio',
     };
   }
-  if (opts.preparar) { try { opts.preparar(archivos); } catch {} }
+  if (opts.preparar) {
+    try {
+      opts.preparar(archivos);
+    } catch {}
+  }
   const apply = await git(['apply', '--whitespace=nowarn', tmp], ws);
   return {
     ok: apply.code === 0,
     archivos,
     parche: tmp,
-    conflicto: apply.code === 0 ? null : ((apply.stderr || apply.stdout || '').trim() || 'git apply falló'),
+    conflicto: apply.code === 0 ? null : (apply.stderr || apply.stdout || '').trim() || 'git apply falló',
   };
 }
 
@@ -220,10 +254,14 @@ async function descartar(arbol, opts = {}) {
   }
   await git(['worktree', 'remove', '--force', arbol.dir], arbol.ws).catch(() => {});
   await fsp.rm(arbol.dir, { recursive: true, force: true }).catch(() => {});
-  try { await fsp.rm(arbol.parche, { force: true }); } catch {}
+  try {
+    await fsp.rm(arbol.parche, { force: true });
+  } catch {}
 }
 
 /** Cuántos árboles siguen en pie (diagnóstico y pruebas). */
-function vivos() { return Array.from(VIVEN.values()); }
+function vivos() {
+  return Array.from(VIVEN.values());
+}
 
 module.exports = { disponible, crear, fusionar, descartar, vivos, sinSeguimiento, __test: { _reset: () => VIVEN.clear() } };

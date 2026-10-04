@@ -1,8 +1,28 @@
 'use strict';
 /* Suite SAGITARI — actualizador, reparaciones, navegador y logs (antes run.js 2764-3452).
    Registra tests en la cola de ./comun; run.js carga los bloques en orden. */
-const { fs, path, tmpDir, test, eq, ok, Guardrails, describeAction, summarizeArgs, skills, memory, modelsMod, SKILLS_TMP, spawnSync, MAIN_SRC, MAIN_ALL, updater, Browser, profiles, runlog, PROF_TMP, readRenderer, RENDERER_JS } = require('./comun');
-
+const {
+  fs,
+  path,
+  tmpDir,
+  test,
+  eq,
+  ok,
+  Guardrails,
+  describeAction,
+  summarizeArgs,
+  skills,
+  modelsMod,
+  SKILLS_TMP,
+  MAIN_SRC,
+  MAIN_ALL,
+  updater,
+  Browser,
+  profiles,
+  runlog,
+  PROF_TMP,
+  readRenderer,
+} = require('./comun');
 
 /* ---------- actualizador: versiones, assets, descarga y verificación ---------- */
 
@@ -18,9 +38,13 @@ test('updater: compara versiones como semver', () => {
 });
 
 const RELEASE = {
-  tag_name: 'v2.3.0', name: '2.3.0', draft: false, prerelease: false,
+  tag_name: 'v2.3.0',
+  name: '2.3.0',
+  draft: false,
+  prerelease: false,
   html_url: 'https://github.com/dario90vlc/sagitari/releases/tag/v2.3.0',
-  published_at: '2026-10-01T10:00:00Z', body: 'Notas de la versión',
+  published_at: '2026-10-01T10:00:00Z',
+  body: 'Notas de la versión',
   assets: [
     { name: 'latest.yml', browser_download_url: 'https://x/latest.yml', size: 300 },
     { name: 'SAGITARI-Portable-2.3.0.exe', browser_download_url: 'https://x/p.exe', size: 2 },
@@ -41,7 +65,16 @@ test('updater: elige los binarios correctos de la release', () => {
 });
 
 test('updater: lee el sha512 del latest.yml del CI', () => {
-  const yml = ['version: 2.3.0', 'files:', '  - url: SAGITARI-Setup-2.3.0.exe', '    sha512: ABC123==', '    size: 117000000', 'path: SAGITARI-Setup-2.3.0.exe', 'sha512: ABC123==', 'releaseDate: 2026-10-01'].join('\n');
+  const yml = [
+    'version: 2.3.0',
+    'files:',
+    '  - url: SAGITARI-Setup-2.3.0.exe',
+    '    sha512: ABC123==',
+    '    size: 117000000',
+    'path: SAGITARI-Setup-2.3.0.exe',
+    'sha512: ABC123==',
+    'releaseDate: 2026-10-01',
+  ].join('\n');
   const y = updater.parseLatestYml(yml);
   eq(y.version, '2.3.0');
   eq(y.sha512, 'ABC123==');
@@ -53,22 +86,42 @@ test('updater: lee el sha512 del latest.yml del CI', () => {
 test('updater: detecta la actualización y descarta prereleases y errores', async () => {
   const fake = (rel) => async () => new Response(JSON.stringify(rel), { status: 200, headers: { 'content-type': 'application/json' } });
   let r = await updater.checkForUpdate({ currentVersion: '2.2.0', fetchFn: fake(RELEASE) });
-  eq(r.ok, true); eq(r.available, true); eq(r.latest, '2.3.0'); ok(r.assets.setup, 'trae los assets');
+  eq(r.ok, true);
+  eq(r.available, true);
+  eq(r.latest, '2.3.0');
+  ok(r.assets.setup, 'trae los assets');
   r = await updater.checkForUpdate({ currentVersion: '2.3.0', fetchFn: fake(RELEASE) });
   eq(r.available, false, 'la misma versión no es una actualización');
   r = await updater.checkForUpdate({ currentVersion: '2.2.0', fetchFn: fake({ ...RELEASE, prerelease: true }) });
   eq(r.available, false, 'una prerelease no cuenta como actualización');
   r = await updater.checkForUpdate({ currentVersion: '2.2.0', fetchFn: async () => new Response('{}', { status: 404 }) });
-  eq(r.ok, true); eq(r.available, false); ok(/sin releases/.test(r.error));
-  r = await updater.checkForUpdate({ currentVersion: '2.2.0', fetchFn: async () => { throw new Error('ENOTFOUND'); } });
-  eq(r.ok, false); ok(/ENOTFOUND/.test(r.error), 'un fallo de red se comunica, no se traga');
+  eq(r.ok, true);
+  eq(r.available, false);
+  ok(/sin releases/.test(r.error));
+  r = await updater.checkForUpdate({
+    currentVersion: '2.2.0',
+    fetchFn: async () => {
+      throw new Error('ENOTFOUND');
+    },
+  });
+  eq(r.ok, false);
+  ok(/ENOTFOUND/.test(r.error), 'un fallo de red se comunica, no se traga');
 });
 
 test('updater: descarga, informa del progreso y devuelve el sha512', async () => {
   const dir = tmpDir('sagi-upd-');
   const dest = path.join(dir, 'bin.exe');
   const chunks = ['abc', 'def'];
-  const fetchFn = async () => new Response(new ReadableStream({ start(c) { for (const ch of chunks) c.enqueue(new Uint8Array(Buffer.from(ch))); c.close(); } }), { status: 200, headers: { 'content-length': '6' } });
+  const fetchFn = async () =>
+    new Response(
+      new ReadableStream({
+        start(c) {
+          for (const ch of chunks) c.enqueue(new Uint8Array(Buffer.from(ch)));
+          c.close();
+        },
+      }),
+      { status: 200, headers: { 'content-length': '6' } },
+    );
   const ticks = [];
   const r = await updater.downloadTo('https://x/bin.exe', dest, { fetchFn, onProgress: (p) => ticks.push(p) });
   eq(fs.readFileSync(dest, 'utf8'), 'abcdef', 'el archivo llega completo');
@@ -81,9 +134,22 @@ test('updater: descarga, informa del progreso y devuelve el sha512', async () =>
 test('updater: una descarga cortada no deja un instalador a medias', async () => {
   const dir = tmpDir('sagi-upd2-');
   const dest = path.join(dir, 'bin.exe');
-  const fetchFn = async () => new Response(new ReadableStream({ start(c) { c.enqueue(new Uint8Array(Buffer.from('ab'))); c.error(new Error('corte de red')); } }), { status: 200 });
+  const fetchFn = async () =>
+    new Response(
+      new ReadableStream({
+        start(c) {
+          c.enqueue(new Uint8Array(Buffer.from('ab')));
+          c.error(new Error('corte de red'));
+        },
+      }),
+      { status: 200 },
+    );
   let fallo = false;
-  try { await updater.downloadTo('https://x/bin.exe', dest, { fetchFn }); } catch { fallo = true; }
+  try {
+    await updater.downloadTo('https://x/bin.exe', dest, { fetchFn });
+  } catch {
+    fallo = true;
+  }
   eq(fallo, true, 'el corte debe propagarse');
   eq(fs.existsSync(dest), false, 'no puede quedar un .exe incompleto en el destino');
   eq(fs.existsSync(dest + '.part'), false, 'ni el temporal');
@@ -95,7 +161,11 @@ test('updater: cada modo guarda el binario donde toca', () => {
   eq(updater.hostKind({ isPackaged: true, env: { PORTABLE_EXECUTABLE_DIR: 'C:/apps' } }), 'portable');
   const t = updater.downloadTarget({ kind: 'nsis', assetName: 'SAGITARI-Setup-2.3.0.exe' });
   ok(t.path.includes('sagitari-update'), 'los instaladores van a su carpeta temporal');
-  const p = updater.downloadTarget({ kind: 'portable', assetName: 'SAGITARI-Portable-2.3.0.exe', env: { PORTABLE_EXECUTABLE_DIR: 'C:/apps' } });
+  const p = updater.downloadTarget({
+    kind: 'portable',
+    assetName: 'SAGITARI-Portable-2.3.0.exe',
+    env: { PORTABLE_EXECUTABLE_DIR: 'C:/apps' },
+  });
   eq(p.path, path.join('C:/apps', 'SAGITARI-Portable-2.3.0.exe'), 'el portable se deja junto al que se está ejecutando');
   const evil = updater.downloadTarget({ kind: 'nsis', assetName: '../../evil name.exe' });
   eq(path.basename(evil.path), '.._.._evil_name.exe', 'el nombre no puede escapar de la carpeta');
@@ -116,7 +186,10 @@ test('updater: el ayudante que instala espera a la app y no juega con comillas',
   eq(Buffer.from(plan.encoded, 'base64').toString('utf16le'), plan.script, 'lo que se ejecuta es el guion tal cual');
   ok(plan.script.includes('ExitCode'), 'y el diario recoge el código con el que salió el instalador');
   ok(plan.script.includes('la app seguia en ejecucion'), 'y si la app seguía viva al lanzarlo, para poder diagnosticarlo');
-  ok(plan.script.includes("'" + installer.replace(/'/g, "''") + "'"), 'la ruta va como literal de PowerShell, con sus comillas simples dobladas');
+  ok(
+    plan.script.includes("'" + installer.replace(/'/g, "''") + "'"),
+    'la ruta va como literal de PowerShell, con sus comillas simples dobladas',
+  );
   ok(plan.script.includes("'SAGITARI'"), 'espera a que no quede ninguna instancia de la app');
   ok(plan.script.includes('Start-Process -FilePath'), 'y entonces lanza el instalador');
   ok(plan.script.includes("'/S','--updated'"), 'en silencio y como actualización, no como instalación nueva');
@@ -137,30 +210,45 @@ test('updater: la vía tarea programa con schtasks y el guion lleva latido', asy
   const argv = updater.scheduleCreateArgs({ taskName: 'T', psPath: 'C:/x.ps1', startTime: '01:00' });
   eq(argv[0], '/create');
   ok(argv.includes('/tn') && argv.includes('T') && argv.includes('/sc') && argv.includes('/f'), argv.join(' '));
-  ok(!argv.some(a => /&&|\|/.test(a)), 'nada que parezca shell');
+  ok(!argv.some((a) => /&&|\|/.test(a)), 'nada que parezca shell');
   // programarInstalacion con exec falso: escribe el .ps1 y llama create+run
   const dir = tmpDir('sagi-tarea-');
   const llamadas = [];
-  const execFn = async (cmd, a) => { llamadas.push(cmd + ' ' + a.join(' ')); return { code: 0, stdout: 'OK', stderr: '' }; };
-  const r = await updater.programarInstalacion({ dir, name: 'APP', installer: 'C:/i/setup.exe', args: '/S', logPath: path.join(dir, 'instalar.log'), taskName: 'TAREA-TEST', execFn });
+  const execFn = async (cmd, a) => {
+    llamadas.push(cmd + ' ' + a.join(' '));
+    return { code: 0, stdout: 'OK', stderr: '' };
+  };
+  const r = await updater.programarInstalacion({
+    dir,
+    name: 'APP',
+    installer: 'C:/i/setup.exe',
+    args: '/S',
+    logPath: path.join(dir, 'instalar.log'),
+    taskName: 'TAREA-TEST',
+    execFn,
+  });
   eq(r.ok, true);
   eq(llamadas.length, 2, 'create y run, nada más: ' + JSON.stringify(llamadas));
   ok(/^schtasks \/create /.test(llamadas[0]) && /\/tn TAREA-TEST/.test(llamadas[0]), llamadas[0]);
   ok(/^schtasks \/run \/tn TAREA-TEST$/.test(llamadas[1]), llamadas[1]);
   const ps = fs.readFileSync(path.join(dir, 'sagitari-instalar.ps1'));
-  ok(ps[0] === 0xEF && ps[1] === 0xBB && ps[2] === 0xBF, 'BOM para que la 5.1 lea los acentos');
+  ok(ps[0] === 0xef && ps[1] === 0xbb && ps[2] === 0xbf, 'BOM para que la 5.1 lea los acentos');
   const txt = ps.toString('utf8');
   ok(/latido/.test(txt) && /sigo esperando/.test(txt), 'el diario lleva latido cada ~10 s');
   ok(txt.includes("/delete /tn 'TAREA-TEST'"), 'la tarea de un solo uso se autoborra');
   // si /create falla, no se intenta /run y el motivo llega al usuario
   const bad = async () => ({ code: 1, stdout: '', stderr: 'acceso denegado' });
   let fallo = '';
-  try { await updater.programarInstalacion({ dir: tmpDir('sagi-tarea2-'), name: 'A', installer: 'x', logPath: 'y', execFn: bad }); } catch (e) { fallo = e.message; }
+  try {
+    await updater.programarInstalacion({ dir: tmpDir('sagi-tarea2-'), name: 'A', installer: 'x', logPath: 'y', execFn: bad });
+  } catch (e) {
+    fallo = e.message;
+  }
   ok(/no se pudo programar/.test(fallo) && /acceso denegado/.test(fallo), 'el motivo llega: ' + fallo);
 });
 
 test('updater: el ayudante lanza el instalador de verdad (integración)', async () => {
-  if (process.platform !== 'win32') return;   // el actualizador solo instala en Windows
+  if (process.platform !== 'win32') return; // el actualizador solo instala en Windows
   const { spawn } = require('child_process');
   const dir = tmpDir('sagi-ayudante-');
   const probe = path.join(dir, 'probe.bat');
@@ -171,19 +259,27 @@ test('updater: el ayudante lanza el instalador de verdad (integración)', async 
   // exactamente lo que antes no llegaba a pasar NUNCA (el señuelo no se ejecutaba).
   const plan = updater.afterExitCommand({
     name: 'SAGITARI-PROCESO-QUE-NO-EXISTE',
-    installer: probe, args: '/S --updated', logPath: log, graceMs: 100,
+    installer: probe,
+    args: '/S --updated',
+    logPath: log,
+    graceMs: 100,
   });
   const hijo = spawn(plan.file, plan.args, plan.spawnOpts);
   hijo.on('error', () => {});
   const esperar = async (f, ms) => {
     const t0 = Date.now();
-    while (Date.now() - t0 < ms) { if (fs.existsSync(f)) return true; await new Promise((r) => setTimeout(r, 250)); }
+    while (Date.now() - t0 < ms) {
+      if (fs.existsSync(f)) return true;
+      await new Promise((r) => setTimeout(r, 250));
+    }
     return false;
   };
   const esperarTexto = async (f, rx, ms) => {
     const t0 = Date.now();
     while (Date.now() - t0 < ms) {
-      try { if (rx.test(fs.readFileSync(f, 'utf8'))) return true; } catch {}
+      try {
+        if (rx.test(fs.readFileSync(f, 'utf8'))) return true;
+      } catch {}
       await new Promise((r) => setTimeout(r, 200));
     }
     return false;
@@ -211,20 +307,24 @@ test('updater: el ayudante SOBREVIVE al cierre de ELECTRON (regresión: «se cie
   if (process.platform !== 'win32') return;
   const { verificar } = require('../scripts/verificar-actualizador');
   const r = await verificar({ dir: tmpDir('sagi-supervivencia-'), pasadas: 1, conControl: true });
-  if (r.estado === 'sin-electron') return;   // sin binario no hay escenario que montar
+  if (r.estado === 'sin-electron') return; // sin binario no hay escenario que montar
   const p = r.pasadas[0];
   ok(p.arranco, 'el ayudante arranca ANTES de que la app se cierre (padre: ' + p.padre + ')');
   ok(p.ejecuto, 'y el instalador se ejecuta DESPUÉS de que la app haya salido (diario: ' + p.diario.slice(0, 220) + ')');
   ok(p.orden, 'con la orden de silencio, actualización y reapertura');
   ok(p.codigo0, 'y el diario recoge el código de salida del instalador');
-  ok(r.controlRoto, 'el CONTROL (PowerShell directo, el diseño que falló) NO debe instalar: si instala, este test no está midiendo el cierre real');
+  ok(
+    r.controlRoto,
+    'el CONTROL (PowerShell directo, el diseño que falló) NO debe instalar: si instala, este test no está midiendo el cierre real',
+  );
 });
 
 test('updater: una instalación a medias se recuerda solo mientras sirva', () => {
   const p = { version: '3.2.1', path: 'C:/tmp/SAGITARI-Setup-3.2.1.exe', expected: 'abc', at: '2026-09-18T10:00:00Z' };
   const vivo = updater.pendingFor(p, '3.2.0');
   eq(vivo.version, '3.2.1', 'con la versión vieja en marcha, la instalación sigue pendiente');
-  eq(vivo.path, p.path); eq(vivo.expected, 'abc');
+  eq(vivo.path, p.path);
+  eq(vivo.expected, 'abc');
   eq(updater.pendingFor(p, '3.2.1'), null, 'si ya se instaló, el aviso desaparece');
   eq(updater.pendingFor(p, '3.3.0'), null, 'y tampoco se ofrece una versión anterior a la instalada');
   eq(updater.pendingFor({ version: '3.2.1' }, '3.2.0'), null, 'sin ruta no hay nada que reintentar');
@@ -238,14 +338,23 @@ test('updater: el motivo de no tener firma dice la verdad', () => {
   // release no publica latest.yml» y en la 3.2.1 eso era mentira: el yml estaba,
   // solo que no firmaba el portable, así que no había forma de saber qué pasaba.
   eq(updater.motivoSinFirma({ tieneYml: true, assetName: 'x.exe', expected: 'abc' }), null, 'con firma no hay motivo');
-  ok(/no publica latest\.yml$/.test(updater.motivoSinFirma({ tieneYml: false, assetName: 'SAGITARI-Portable-3.2.1.exe' })),
-    'sin yml se dice que falta el manifiesto');
+  ok(
+    /no publica latest\.yml$/.test(updater.motivoSinFirma({ tieneYml: false, assetName: 'SAGITARI-Portable-3.2.1.exe' })),
+    'sin yml se dice que falta el manifiesto',
+  );
   const sinEntrada = updater.motivoSinFirma({ tieneYml: true, assetName: 'SAGITARI-Portable-3.2.1.exe' });
-  ok(/no publica la firma de SAGITARI-Portable-3\.2\.1\.exe/.test(sinEntrada), 'si el yml está pero no firma ESTE archivo, se dice cuál: ' + sinEntrada);
-  ok(/no publica la firma de/.test(updater.motivoSinFirma({ tieneYml: true, assetName: 'x.exe' })),
-    'y no se confunde con «la release no publica latest.yml»');
-  ok(/no se pudo leer/.test(updater.motivoSinFirma({ tieneYml: true, assetName: 'x.exe', error: 'timeout' })),
-    'si el yml no se pudo leer, se dice eso, no que no exista');
+  ok(
+    /no publica la firma de SAGITARI-Portable-3\.2\.1\.exe/.test(sinEntrada),
+    'si el yml está pero no firma ESTE archivo, se dice cuál: ' + sinEntrada,
+  );
+  ok(
+    /no publica la firma de/.test(updater.motivoSinFirma({ tieneYml: true, assetName: 'x.exe' })),
+    'y no se confunde con «la release no publica latest.yml»',
+  );
+  ok(
+    /no se pudo leer/.test(updater.motivoSinFirma({ tieneYml: true, assetName: 'x.exe', error: 'timeout' })),
+    'si el yml no se pudo leer, se dice eso, no que no exista',
+  );
 });
 
 test('updater: latest.yml firma TODOS los binarios y el CI corta si falta alguno', () => {
@@ -259,7 +368,8 @@ test('updater: latest.yml firma TODOS los binarios y el CI corta si falta alguno
   const portable = 'SAGITARI-Portable-9.9.9.exe';
   for (const f of [setup, portable]) fs.writeFileSync(path.join(dir, f), 'binario falso de prueba: ' + f);
   const sha = (f) => updater.sha512Of(path.join(dir, f));
-  const correr = (extra = []) => spawnSync(process.execPath, [script, dir, ...extra], { cwd: path.join(__dirname, '..'), encoding: 'utf8' });
+  const correr = (extra = []) =>
+    spawnSync(process.execPath, [script, dir, ...extra], { cwd: path.join(__dirname, '..'), encoding: 'utf8' });
   const escribirYml = (contenido) => fs.writeFileSync(path.join(dir, 'latest.yml'), contenido);
   const contenido = [
     'version: 9.9.9',
@@ -299,8 +409,11 @@ test('updater: latest.yml firma TODOS los binarios y el CI corta si falta alguno
   ok(malo.status !== 0, 'una firma que no es la del binario tampoco puede publicarse');
   ok(/no es la del binario/.test(malo.stderr), 'y se explica: ' + malo.stderr);
   correr();
-  eq(updater.sha512For(updater.parseLatestYml(fs.readFileSync(path.join(dir, 'latest.yml'), 'utf8')), portable), sha(portable),
-    'completar corrige también una firma equivocada');
+  eq(
+    updater.sha512For(updater.parseLatestYml(fs.readFileSync(path.join(dir, 'latest.yml'), 'utf8')), portable),
+    sha(portable),
+    'completar corrige también una firma equivocada',
+  );
 });
 
 /* ---------- reparaciones: regresiones que no pueden volver ---------- */
@@ -311,9 +424,17 @@ test('skills: un id con .. o separadores no puede salir del almacén', async () 
   fs.writeFileSync(path.join(legitima, 'SKILL.md'), '---\nname: victima\ndescription: x\n---\ncuerpo');
   const venenos = ['.', '..', '../fuera', '..\\..\\fuera', 'a/b', 'a\\b', '', '   ', '...', 'SKILL.md/..'];
   for (const id of venenos) {
-    for (const [nombre, fn] of [['deleteSkill', skills.deleteSkill], ['setEnabled', (i) => skills.setEnabled(i, true)], ['writeSource', (i) => skills.writeSource(i, { repo: 'x/y' })]]) {
+    for (const [nombre, fn] of [
+      ['deleteSkill', skills.deleteSkill],
+      ['setEnabled', (i) => skills.setEnabled(i, true)],
+      ['writeSource', (i) => skills.writeSource(i, { repo: 'x/y' })],
+    ]) {
       let lanzo = false;
-      try { await fn(id); } catch { lanzo = true; }
+      try {
+        await fn(id);
+      } catch {
+        lanzo = true;
+      }
       ok(lanzo, `${nombre}() debe rechazar ${JSON.stringify(id)}`);
     }
   }
@@ -341,10 +462,10 @@ test('permisos: la tabla de riesgo es única y no tiene claves muertas', () => {
   const { RISK, toolDefs } = require('../agent/tools');
   const { DEFAULT_RISK } = require('../agent/guardrails');
   eq(DEFAULT_RISK, RISK, 'guardrails debe consumir la MISMA tabla que declara tools.js');
-  const nombres = toolDefs.map(d => d.function.name);
-  const sinNivel = nombres.filter(n => !RISK[n]);
+  const nombres = toolDefs.map((d) => d.function.name);
+  const sinNivel = nombres.filter((n) => !RISK[n]);
   eq(sinNivel.join(', '), '', 'toda herramienta debe declarar su nivel de riesgo');
-  const muertas = Object.keys(RISK).filter(k => !nombres.includes(k));
+  const muertas = Object.keys(RISK).filter((k) => !nombres.includes(k));
   eq(muertas.join(', '), '', 'la tabla no puede declarar herramientas que no existen');
 });
 
@@ -360,34 +481,58 @@ test('permisos: leer el portapapeles y evaluar JS piden confirmación aunque el 
 test('permisos: el permiso propio de JavaScript gobierna al eval', () => {
   const expr = { action: 'eval', expression: '1+1' };
   // con la clave browser_eval fijada a mano, su nivel manda para action:'eval'
-  eq(new Guardrails({ permissions: { browser_eval: 'safe' } }).decide('browser_control', expr).action, 'allow',
-    'permitir siempre de JavaScript deja pasar el eval');
-  eq(new Guardrails({ permissions: { browser_eval: 'confirm' } }).decide('browser_control', expr).action, 'confirm',
-    'preguntar antes sigue preguntando');
-  eq(new Guardrails({ permissions: { browser_eval: 'restricted' } }).decide('browser_control', expr).action, 'deny',
-    'bloqueado de JavaScript bloquea el eval');
+  eq(
+    new Guardrails({ permissions: { browser_eval: 'safe' } }).decide('browser_control', expr).action,
+    'allow',
+    'permitir siempre de JavaScript deja pasar el eval',
+  );
+  eq(
+    new Guardrails({ permissions: { browser_eval: 'confirm' } }).decide('browser_control', expr).action,
+    'confirm',
+    'preguntar antes sigue preguntando',
+  );
+  eq(
+    new Guardrails({ permissions: { browser_eval: 'restricted' } }).decide('browser_control', expr).action,
+    'deny',
+    'bloqueado de JavaScript bloquea el eval',
+  );
   // bloquear el navegador entero gana al permiso suelto de su JavaScript
-  eq(new Guardrails({ permissions: { browser_control: 'restricted', browser_eval: 'safe' } }).decide('browser_control', expr).action, 'deny',
-    'bloquear el navegador bloquea también su JavaScript');
+  eq(
+    new Guardrails({ permissions: { browser_control: 'restricted', browser_eval: 'safe' } }).decide('browser_control', expr).action,
+    'deny',
+    'bloquear el navegador bloquea también su JavaScript',
+  );
   // sin la clave propia, el forzado de siempre no se mueve (test de arriba)
   const d = new Guardrails({ permissions: { browser_control: 'safe' } }).decide('browser_control', expr);
   eq(d.action, 'confirm');
   ok(d.sensitive, 'sin fijar, el eval sigue sensible');
   // el permiso propio es SOLO del eval: el resto de acciones siguen como estaban
-  eq(new Guardrails({ permissions: { browser_eval: 'safe' } }).decide('browser_control', { action: 'profile', profile: 'work' }).action, 'confirm',
-    'cambiar de perfil no se aprovecha del permiso del JavaScript');
+  eq(
+    new Guardrails({ permissions: { browser_eval: 'safe' } }).decide('browser_control', { action: 'profile', profile: 'work' }).action,
+    'confirm',
+    'cambiar de perfil no se aprovecha del permiso del JavaScript',
+  );
 });
 
 test('permisos: un clic por índice se juzga con la etiqueta del inventario', () => {
   const g = new Guardrails({ permissions: { browser_control: 'safe' } });
   // el navegador resuelve la etiqueta y viaja como `_label` (agent.js)
-  eq(g.decide('browser_control', { action: 'click_index', index: 3, _label: 'Aceptar cookies' }).action, 'allow',
-    'un clic inocuo sigue siendo automático si el usuario confía en el navegador');
-  eq(g.decide('browser_control', { action: 'click_index', index: 7, _label: 'Pagar ahora 49,90 €' }).action, 'confirm',
-    'comprar por índice también se confirma');
+  eq(
+    g.decide('browser_control', { action: 'click_index', index: 3, _label: 'Aceptar cookies' }).action,
+    'allow',
+    'un clic inocuo sigue siendo automático si el usuario confía en el navegador',
+  );
+  eq(
+    g.decide('browser_control', { action: 'click_index', index: 7, _label: 'Pagar ahora 49,90 €' }).action,
+    'confirm',
+    'comprar por índice también se confirma',
+  );
   eq(g.decide('browser_control', { action: 'click_index', index: 7, _label: 'Eliminar cuenta' }).sensitive, true);
-  eq(g.decide('browser_control', { action: 'click_index', index: 1 }).action, 'confirm',
-    'sin etiqueta no se sabe qué se pulsa: se pregunta');
+  eq(
+    g.decide('browser_control', { action: 'click_index', index: 1 }).action,
+    'confirm',
+    'sin etiqueta no se sabe qué se pulsa: se pregunta',
+  );
 });
 
 test('permisos: abrir una URL pide confirmación por defecto', () => {
@@ -399,13 +544,17 @@ test('mcp: las herramientas dinamicas entran en el catalogo sin tocar la tabla n
   const toolsMod = require('../agent/tools');
   const antes = toolsMod.toolDefs.length;
   const { RISK } = toolsMod;
-  toolsMod.setDynamicToolProvider(() => ([{ type: 'function', function: { name: 'mcp__eco__echo', description: 'x', parameters: { type: 'object', properties: {} } } }]));
+  toolsMod.setDynamicToolProvider(() => [
+    { type: 'function', function: { name: 'mcp__eco__echo', description: 'x', parameters: { type: 'object', properties: {} } } },
+  ]);
   try {
     eq(toolsMod.allToolDefs().length, antes + 1, 'la dinamica se suma al catálogo nativo');
-    ok(toolsMod.allToolDefs().some(d => d.function.name === 'mcp__eco__echo'));
+    ok(toolsMod.allToolDefs().some((d) => d.function.name === 'mcp__eco__echo'));
     eq(toolsMod.toolDefs.length, antes, 'la tabla nativa no se toca (es la que valida el test de niveles)');
     ok(!RISK['mcp__eco__echo'], 'y no se le inventa un nivel: sin override será confirm');
-  } finally { toolsMod.setDynamicToolProvider(null); }
+  } finally {
+    toolsMod.setDynamicToolProvider(null);
+  }
   eq(toolsMod.allToolDefs().length, antes, 'sin proveedor, el catálogo vuelve a ser el nativo');
 });
 
@@ -415,7 +564,7 @@ test('permisos: el comodín de servidor MCP sube la confianza de todo un servido
   eq(g.decide('mcp__github__create_issue', {}).action, 'allow');
   eq(g.decide('mcp__otro__x', {}).action, 'confirm', 'y solo para ese servidor');
   // el override exacto sigue ganando al comodín
-  const g2 = new Guardrails({ permissions: { 'mcp__github__*': 'safe', 'mcp__github__borrar': 'restricted' } });
+  const g2 = new Guardrails({ permissions: { 'mcp__github__*': 'safe', mcp__github__borrar: 'restricted' } });
   eq(g2.decide('mcp__github__borrar', {}).action, 'deny');
   // y ninguna herramienta MCP entra en 'safe' por defecto
   eq(new Guardrails().decide('mcp__loquesea__x', {}).action, 'confirm');
@@ -425,7 +574,9 @@ test('permisos: la tarjeta de confirmación nombra el servidor y la herramienta'
   ok(describeAction('mcp__github__create_issue', {}).includes('MCP'));
   const d = describeAction('mcp__github__create_issue', { _mcp: { serverName: 'GitHub', toolName: 'create_issue' } });
   ok(/GitHub/.test(d) && /create_issue/.test(d), 'con la etiqueta real: ' + d);
-  ok(summarizeArgs('mcp__github__create_issue', { title: 'x', _mcp: { serverName: 'GitHub', toolName: 'create_issue' } }).includes('GitHub'));
+  ok(
+    summarizeArgs('mcp__github__create_issue', { title: 'x', _mcp: { serverName: 'GitHub', toolName: 'create_issue' } }).includes('GitHub'),
+  );
 });
 
 test('permisos: un _mcp inyectado no puede falsear la tarjeta de una herramienta nativa', () => {
@@ -461,8 +612,8 @@ test('guardrails: esperar la confirmación no consume el límite de duración', 
      máquina (una versión anterior medía lapsos cortos y fallaba por ruido). */
   const g = new Guardrails({ guardrails: { maxDurationMs: 400, maxSteps: 0 } });
   g.beginRun();
-  g.pauseClock();                                // el usuario tiene la tarjeta en pantalla
-  await new Promise(r => setTimeout(r, 600));    // más que el límite entero
+  g.pauseClock(); // el usuario tiene la tarjeta en pantalla
+  await new Promise((r) => setTimeout(r, 600)); // más que el límite entero
   g.resumeClock();
   ok(g.checkStep().ok, 'el tiempo esperando al usuario no es tiempo de ejecución');
 });
@@ -470,7 +621,7 @@ test('guardrails: esperar la confirmación no consume el límite de duración', 
 test('health: el coste por modelo se acumula y llega al panel', () => {
   modelsMod.record('cost-test-model', { ok: true, tokens: { prompt_tokens: 1000, completion_tokens: 500 }, costUsd: 0.25 });
   modelsMod.record('cost-test-model', { ok: true, tokens: { prompt_tokens: 1000, completion_tokens: 500 }, costUsd: 0.25 });
-  const s = modelsMod.summary().find(r => r.model === 'cost-test-model');
+  const s = modelsMod.summary().find((r) => r.model === 'cost-test-model');
   eq(s.costUsd, 0.5, 'el panel publicaba siempre 0.0000 porque record() nunca guardaba el coste');
 });
 
@@ -519,9 +670,15 @@ test('glass27: aura multicolor, cáusticas y slider ultra claro ↔ tintado', ()
   const app = readRenderer();
   // filo tricolor: el borde nítido de 1px reparte los 3 tonos (un filo de un
   // solo tono mandaba sobre los halos y todo se veía de un color)
-  ok(/\.glow::before\s*\{[^}]*conic-gradient\([^}]*--glow-a-rgb[^}]*--glow-b-rgb[^}]*--glow-c-rgb/.test(css), 'el filo del glow debe llevar los 3 tonos');
+  ok(
+    /\.glow::before\s*\{[^}]*conic-gradient\([^}]*--glow-a-rgb[^}]*--glow-b-rgb[^}]*--glow-c-rgb/.test(css),
+    'el filo del glow debe llevar los 3 tonos',
+  );
   ok(/@keyframes giro/.test(css) && /@keyframes reachLife/.test(css), 'los 3 halos ruedan y respiran');
-  ok(/@property --giro/.test(css) && /@property --reach/.test(css), 'las propiedades del aura van registradas (si no, el movimiento va a saltos)');
+  ok(
+    /@property --giro/.test(css) && /@property --reach/.test(css),
+    'las propiedades del aura van registradas (si no, el movimiento va a saltos)',
+  );
   ok(/\.glowFlow\.halo-a/.test(css) && /--glow-a-rgb/.test(css), 'el halo A lleva su tono');
   ok(/\.glowFlow\.halo-b/.test(css) && /255,255,255/.test(css), 'el halo B lleva su tono + núcleo blanco');
   ok(/\.glowFlow\.halo-c/.test(css) && /--glow-c-rgb/.test(css), 'el halo C lleva su tono');
@@ -541,10 +698,10 @@ test('integración: cada canal push del preload tiene remitente en main', () => 
   const preload = fs.readFileSync(path.join(__dirname, '..', 'main', 'preload.js'), 'utf8');
   // Fase 4: los send() viven repartidos entre main.js y los routers main/ipc-*.js.
   const main = MAIN_ALL;
-  const canales = [...preload.matchAll(/\bon\('([^']+)'/g)].map(m => m[1]);
+  const canales = [...preload.matchAll(/\bon\('([^']+)'/g)].map((m) => m[1]);
   ok(canales.length >= 10, 'deben detectarse los canales push (' + canales.length + ')');
-  const emisores = new Set([...main.matchAll(/send\('([^']+)'/g)].map(m => m[1]));
-  const sinEmisor = [...new Set(canales)].filter(c => !emisores.has(c));
+  const emisores = new Set([...main.matchAll(/send\('([^']+)'/g)].map((m) => m[1]));
+  const sinEmisor = [...new Set(canales)].filter((c) => !emisores.has(c));
   eq(sinEmisor.join(', '), '', 'canales push que el renderer nunca recibiría');
 });
 
@@ -557,24 +714,27 @@ test('updater: una descarga que deja de recibir datos se corta sola', async () =
     headers: { get: () => null },
     body: {
       [Symbol.asyncIterator]: () => ({
-        next: () => new Promise((_, reject) => {
-          const s = opts.signal;
-          if (s) s.addEventListener('abort', () => reject(s.reason || new Error('abortado')), { once: true });
-        }),
+        next: () =>
+          new Promise((_, reject) => {
+            const s = opts.signal;
+            if (s) s.addEventListener('abort', () => reject(s.reason || new Error('abortado')), { once: true });
+          }),
       }),
     },
   });
   let error = null;
   const t0 = Date.now();
-  try { await updater.downloadTo('https://x/bin.exe', dest, { fetchFn, idleTimeoutMs: 60 }); }
-  catch (e) { error = e; }
+  try {
+    await updater.downloadTo('https://x/bin.exe', dest, { fetchFn, idleTimeoutMs: 60 });
+  } catch (e) {
+    error = e;
+  }
   ok(error, 'debe rechazar en vez de esperar para siempre');
   ok(Date.now() - t0 < 3000, 'el vigilante de inactividad debe dispararse pronto');
   eq(fs.existsSync(dest + '.part'), false, 'no puede quedar un temporal a medias');
 });
 
 /* ---------- navegador y logs: cobertura que faltaba ---------- */
-
 
 test('perfiles: cada nombre tiene su carpeta y la migración conserva los logins', () => {
   ok(profiles.profileDirFor('Mi Work!').startsWith(PROF_TMP), 'la carpeta vive en la base de perfiles');
@@ -589,7 +749,7 @@ test('perfiles: cada nombre tiene su carpeta y la migración conserva los logins
 
 test('perfiles: ensureProfileDir no pisa lo que ya había', () => {
   const a = profiles.ensureProfileDir('dos');
-  fs.mkdirSync(a, { recursive: true });   // la carpeta la crea el navegador al arrancar
+  fs.mkdirSync(a, { recursive: true }); // la carpeta la crea el navegador al arrancar
   fs.writeFileSync(path.join(a, 'Cookies'), 'x');
   eq(profiles.ensureProfileDir('dos'), a, 'misma carpeta en la segunda llamada');
   eq(fs.readFileSync(path.join(a, 'Cookies'), 'utf8'), 'x');
@@ -611,7 +771,7 @@ test('browser: el puerto CDP se recupera del perfil', () => {
 test('browser: una acción desconocida no lanza un navegador', async () => {
   const b = new Browser();
   b.profileDir = tmpDir('sagi-prof2-');
-  const r = await b.handle({ action: 'clik' });   // errata típica del modelo
+  const r = await b.handle({ action: 'clik' }); // errata típica del modelo
   ok(/Acción desconocida/.test(r), 'debe rechazarla');
   eq(b.ws, null, 'sin abrir conexión');
   eq(b.browserPid, null, 'sin lanzar ningún proceso');
@@ -634,13 +794,13 @@ test('browser: las acciones se ejecutan de una en una', async () => {
   const order = [];
   b._handle = async (args) => {
     order.push('inicio' + args.n);
-    await new Promise(r => setTimeout(r, 20));
+    await new Promise((r) => setTimeout(r, 20));
     if (args.n === 1) throw new Error('fallo simulado');
     order.push('fin' + args.n);
   };
   // dos agentes a la vez (chat + tarea de background) comparten el navegador: sus
   // acciones no pueden solaparse porque el estado de la pestaña es global
-  const p1 = b.handle({ n: 1 }).catch(e => 'error:' + e.message);
+  const p1 = b.handle({ n: 1 }).catch((e) => 'error:' + e.message);
   const p2 = b.handle({ n: 2 });
   const p3 = b.handle({ n: 3 });
   eq(await p1, 'error:fallo simulado', 'el fallo llega a quien lo pidió');
@@ -651,7 +811,7 @@ test('browser: las acciones se ejecutan de una en una', async () => {
 test('browser: cambiar de perfil olvida el estado del anterior', async () => {
   const b = new Browser();
   b.port = 9333;
-  b.browserPid = 4242;              // pid ficticio: no debe poder matarse después
+  b.browserPid = 4242; // pid ficticio: no debe poder matarse después
   b.activeId = 'tab1';
   b._lastElements = [{ x: 1, y: 1 }];
   b._sessions.set('tab1', 's1');
@@ -667,10 +827,14 @@ test('browser: cambiar de perfil olvida el estado del anterior', async () => {
 test('browser: kill deja el estado limpio y se puede repetir', () => {
   const b = new Browser();
   b.profileDir = tmpDir('sagi-prof3-');
-  b.port = 9333; b.activeId = 'tab1'; b._sessions.set('tab1', 's1');
+  b.port = 9333;
+  b.activeId = 'tab1';
+  b._sessions.set('tab1', 's1');
   b.kill();
-  eq(b.ws, null); eq(b.activeId, null); eq(b._sessions.size, 0);
-  b.kill();   // sin navegador abierto no puede lanzar ningún taskkill
+  eq(b.ws, null);
+  eq(b.activeId, null);
+  eq(b._sessions.size, 0);
+  b.kill(); // sin navegador abierto no puede lanzar ningún taskkill
 });
 
 test('runlog: escribe, se lee y rota por bytes reales', async () => {
@@ -678,15 +842,18 @@ test('runlog: escribe, se lee y rota por bytes reales', async () => {
   runlog.__test._resetForTests({ dir, maxBytes: 400, maxLogs: 3 });
   let streams = 0;
   const abrir = fs.createWriteStream;
-  fs.createWriteStream = (...a) => { streams++; return abrir(...a); };
+  fs.createWriteStream = (...a) => {
+    streams++;
+    return abrir(...a);
+  };
   for (let i = 0; i < 200; i++) runlog.log({ agent: 'test', event: 'e', text: 'ñ'.repeat(60) + i });
   fs.createWriteStream = abrir;
   runlog.close();
   ok(streams > 1, 'el tope por archivo fuerza rotación (' + streams + ' ficheros abiertos)');
   // la poda corre unos cientos de ms después de la última rotación y reintenta:
   // en Windows el fichero anterior puede seguir con el handle cerrándose
-  await new Promise(r => setTimeout(r, 1200));
-  const files = fs.readdirSync(dir).filter(f => f.endsWith('.jsonl'));
+  await new Promise((r) => setTimeout(r, 1200));
+  const files = fs.readdirSync(dir).filter((f) => f.endsWith('.jsonl'));
   ok(files.length <= 3, 'no se conservan más ficheros de los permitidos (' + files.length + ')');
   /* El tope es de BYTES: contando caracteres UTF-16 cada línea de 60 «ñ» pesa la
      mitad de lo que ocupa en disco, así que el fichero se pasaba del tope al
@@ -704,7 +871,10 @@ test('runlog: escribe, se lee y rota por bytes reales', async () => {
   }
   const recent = runlog.readRecent(3);
   ok(recent.length === 3, 'readRecent devuelve los últimos eventos');
-  ok(recent.every(e => e.agent === 'test' && e.ts), 'cada evento con su origen y su marca de tiempo');
+  ok(
+    recent.every((e) => e.agent === 'test' && e.ts),
+    'cada evento con su origen y su marca de tiempo',
+  );
   ok(/^run-\d+(-\d+)?\.jsonl$/.test(path.basename(runlog.currentLogFile() || '')), 'el fichero de sesión se nombra run-<ts>.jsonl');
   runlog.__test._resetForTests({});
 });

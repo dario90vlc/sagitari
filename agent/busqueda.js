@@ -24,10 +24,9 @@
  */
 
 const fs = require('fs');
-const os = require('os');
 const path = require('path');
 const { spawnSync } = require('child_process');
-const indiceCompartido = require('./indice');   // recorrido unico del arbol (compartido con repomap)
+const indiceCompartido = require('./indice'); // recorrido unico del arbol (compartido con repomap)
 
 const MAX_FICHERO = 300 * 1024;
 const MAX_FICHEROS = 4000;
@@ -37,23 +36,110 @@ const TTL_MS = 20000;
 
 /* Extensiones que se indexan: código y texto donde vive el conocimiento de un proyecto. */
 const EXTENSIONES = new Set([
-  '.js', '.mjs', '.cjs', '.jsx', '.ts', '.tsx', '.py', '.go', '.rs', '.rb', '.php',
-  '.java', '.cs', '.kt', '.swift', '.c', '.h', '.cpp', '.hpp', '.sh', '.ps1', '.bat',
-  '.json', '.yml', '.yaml', '.toml', '.ini', '.md', '.txt', '.sql', '.html', '.css',
+  '.js',
+  '.mjs',
+  '.cjs',
+  '.jsx',
+  '.ts',
+  '.tsx',
+  '.py',
+  '.go',
+  '.rs',
+  '.rb',
+  '.php',
+  '.java',
+  '.cs',
+  '.kt',
+  '.swift',
+  '.c',
+  '.h',
+  '.cpp',
+  '.hpp',
+  '.sh',
+  '.ps1',
+  '.bat',
+  '.json',
+  '.yml',
+  '.yaml',
+  '.toml',
+  '.ini',
+  '.md',
+  '.txt',
+  '.sql',
+  '.html',
+  '.css',
 ]);
 
 /* Palabras vacías de los dos idiomas del proyecto: si no se quitan, «de la para» pesa
    tanto como el término que importa y el ranking se convierte en ruido. */
 const VACIAS = new Set([
-  'the', 'and', 'for', 'with', 'that', 'this', 'from', 'are', 'was', 'has', 'have', 'not',
-  'but', 'you', 'all', 'any', 'can', 'use', 'our', 'out', 'into', 'when', 'what', 'how',
-  'que', 'los', 'las', 'del', 'con', 'por', 'para', 'una', 'uno', 'este', 'esta', 'como',
-  'mas', 'más', 'sin', 'sus', 'son', 'esa', 'ese', 'eso', 'hay', 'muy', 'dos', 'nos',
-  'sea', 'ver', 'tan', 'tal', 'sus', 'les', 'ser', 'fue', 'era', 'han', 'has', 'hemos',
+  'the',
+  'and',
+  'for',
+  'with',
+  'that',
+  'this',
+  'from',
+  'are',
+  'was',
+  'has',
+  'have',
+  'not',
+  'but',
+  'you',
+  'all',
+  'any',
+  'can',
+  'use',
+  'our',
+  'out',
+  'into',
+  'when',
+  'what',
+  'how',
+  'que',
+  'los',
+  'las',
+  'del',
+  'con',
+  'por',
+  'para',
+  'una',
+  'uno',
+  'este',
+  'esta',
+  'como',
+  'mas',
+  'más',
+  'sin',
+  'sus',
+  'son',
+  'esa',
+  'ese',
+  'eso',
+  'hay',
+  'muy',
+  'dos',
+  'nos',
+  'sea',
+  'ver',
+  'tan',
+  'tal',
+  'sus',
+  'les',
+  'ser',
+  'fue',
+  'era',
+  'han',
+  'has',
+  'hemos',
 ]);
 
 function normalizar(s) {
-  return String(s).normalize('NFD').replace(/[\u0300-\u036f]/g, '').toLowerCase();
+  return String(s)
+    .normalize('NFD')
+    .replace(/[\u0300-\u036f]/g, '')
+    .toLowerCase();
 }
 
 /**
@@ -64,7 +150,9 @@ function normalizar(s) {
  */
 function terminos(texto) {
   const out = [];
-  const limpio = String(texto == null ? '' : texto).normalize('NFD').replace(/[\u0300-\u036f]/g, '');
+  const limpio = String(texto == null ? '' : texto)
+    .normalize('NFD')
+    .replace(/[\u0300-\u036f]/g, '');
   for (const palabra of limpio.split(/[^A-Za-z0-9_$]+/)) {
     if (!palabra) continue;
     const partes = palabra.split(/(?<=[a-z0-9])(?=[A-Z])|_|\$/).filter(Boolean);
@@ -87,7 +175,9 @@ function disponibleRg() {
   try {
     const r = spawnSync('rg', ['--version'], { timeout: 4000, encoding: 'utf8' });
     _rgCache = !!(r && r.status === 0);
-  } catch { _rgCache = false; }
+  } catch {
+    _rgCache = false;
+  }
   return _rgCache;
 }
 
@@ -106,11 +196,34 @@ function coincidencias(workspace, consulta, { limit = 30 } = {}) {
          un repositorio de git. En un proyecto que no lo es (o en una carpeta copiada),
          buscaba dentro de lo que el usuario tiene mandado ignorar — y la mitad exacta
          devolvía lo que la mitad de relevancia había descartado bien. */
-      const args = ['--line-number', '--no-heading', '--color', 'never', '--max-count', '5', '--smart-case',
-        '--no-require-git', '--glob', '!node_modules', '--glob', '!dist', '--glob', '!build',
-        '--fixed-strings', '--', patron, workspace];
+      const args = [
+        '--line-number',
+        '--no-heading',
+        '--color',
+        'never',
+        '--max-count',
+        '5',
+        '--smart-case',
+        '--no-require-git',
+        '--glob',
+        '!node_modules',
+        '--glob',
+        '!dist',
+        '--glob',
+        '!build',
+        '--fixed-strings',
+        '--',
+        patron,
+        workspace,
+      ];
       try {
-        const r = spawnSync('rg', args, { cwd: workspace, timeout: 15000, encoding: 'utf8', maxBuffer: 4 * 1024 * 1024, stdio: ['ignore', 'pipe', 'pipe'] });
+        const r = spawnSync('rg', args, {
+          cwd: workspace,
+          timeout: 15000,
+          encoding: 'utf8',
+          maxBuffer: 4 * 1024 * 1024,
+          stdio: ['ignore', 'pipe', 'pipe'],
+        });
         const hits = [];
         for (const linea of String(r.stdout || '').split(/\r?\n/)) {
           const m = linea.match(/^(.+?):(\d+):(.*)$/);
@@ -122,18 +235,23 @@ function coincidencias(workspace, consulta, { limit = 30 } = {}) {
           if (hits.length >= tope) break;
         }
         return hits;
-      } catch { return []; }
+      } catch {
+        return [];
+      }
     };
     const hits = rg(q, limit);
     if (hits.length) return { hits, metodo: 'ripgrep' };
     /* Una consulta de varias palabras casi nunca aparece literal («aplicar actualizacion
        instalador»). Sin esto, la mitad exacta de la búsqueda no aportaba nada en las
        preguntas de verdad: se busca también por los términos más largos, uno a uno. */
-    const terminosLargos = [...new Set(terminos(q))].filter(t => t.length >= 4).sort((a, b) => b.length - a.length).slice(0, 2);
+    const terminosLargos = [...new Set(terminos(q))]
+      .filter((t) => t.length >= 4)
+      .sort((a, b) => b.length - a.length)
+      .slice(0, 2);
     const porTermino = [];
     for (const t of terminosLargos) {
       for (const h of rg(t, Math.ceil(limit / Math.max(1, terminosLargos.length)))) {
-        if (porTermino.some(x => x.ruta === h.ruta && x.linea === h.linea)) continue;
+        if (porTermino.some((x) => x.ruta === h.ruta && x.linea === h.linea)) continue;
         porTermino.push(h);
         if (porTermino.length >= limit) break;
       }
@@ -144,15 +262,20 @@ function coincidencias(workspace, consulta, { limit = 30 } = {}) {
   const hits = [];
   for (const f of listar(workspace)) {
     let texto = '';
-    try { texto = fs.readFileSync(f.abs, 'utf8'); } catch { continue; }
+    try {
+      texto = fs.readFileSync(f.abs, 'utf8');
+    } catch {
+      continue;
+    }
     if (!normalizar(texto).includes(normalizar(q))) continue;
     const lineas = texto.split(/\r?\n/);
     for (let i = 0; i < lineas.length && hits.length < limit; i++) {
-      if (normalizar(lineas[i]).includes(normalizar(q))) hits.push({ ruta: f.ruta, linea: i + 1, texto: lineas[i].trim().slice(0, 200), exacta: true });
+      if (normalizar(lineas[i]).includes(normalizar(q)))
+        hits.push({ ruta: f.ruta, linea: i + 1, texto: lineas[i].trim().slice(0, 200), exacta: true });
     }
     if (hits.length >= limit) break;
   }
-  return { hits, metodo: 'barrido' };// sin ripgrep se recorre el proyecto (más lento, mismo resultado)
+  return { hits, metodo: 'barrido' }; // sin ripgrep se recorre el proyecto (más lento, mismo resultado)
 }
 
 /* --------------------------------------------------------------------------- *
@@ -170,7 +293,7 @@ function listar(workspace) {
     maxProfundidad: 8,
   });
   // los grandes se saltan aqui (el mapa los marca; la busqueda los ignora)
-  return recorrido.archivos.filter(f => !f.grande);
+  return recorrido.archivos.filter((f) => !f.grande);
 }
 
 /** Trocea un archivo en bloques de líneas: un bloque es la unidad que se puntúa. */
@@ -191,7 +314,7 @@ function trocear(texto, maxLineas = MAX_LINEAS_CHUNK) {
   return trozos;
 }
 
-let cache = null;   // { raiz, ts, indice }
+let cache = null; // { raiz, ts, indice }
 
 /** Índice BM25 del proyecto (con caché por TTL). */
 function indice(workspace, opts = {}) {
@@ -202,21 +325,34 @@ function indice(workspace, opts = {}) {
   let totalLineas = 0;
   for (const f of listar(workspace)) {
     let texto = '';
-    try { texto = fs.readFileSync(f.abs, 'utf8'); } catch { continue; }
+    try {
+      texto = fs.readFileSync(f.abs, 'utf8');
+    } catch {
+      continue;
+    }
     let linea = 1;
     for (const trozo of trocear(texto)) {
       const cuerpo = trozo.join('\n');
       const tf = new Map();
       for (const t of terminos(cuerpo)) tf.set(t, (tf.get(t) || 0) + 1);
-      if (!tf.size) { linea += trozo.length; continue; }
-      docs.push({ ruta: f.ruta, linea, lineas: trozo.length, tf, len: terminos(cuerpo).length, cabeza: trozo.find(l => l.trim()) || '' });
+      if (!tf.size) {
+        linea += trozo.length;
+        continue;
+      }
+      docs.push({ ruta: f.ruta, linea, lineas: trozo.length, tf, len: terminos(cuerpo).length, cabeza: trozo.find((l) => l.trim()) || '' });
       for (const t of tf.keys()) df.set(t, (df.get(t) || 0) + 1);
       totalLineas += trozo.length;
       linea += trozo.length;
     }
     if (docs.length >= MAX_CHUNKS) break;
   }
-  const indiceListo = { docs, df, n: docs.length, mediaLen: docs.length ? docs.reduce((a, d) => a + d.len, 0) / docs.length : 1, totalLineas };
+  const indiceListo = {
+    docs,
+    df,
+    n: docs.length,
+    mediaLen: docs.length ? docs.reduce((a, d) => a + d.len, 0) / docs.length : 1,
+    totalLineas,
+  };
   cache = { raiz: workspace, ts: ahora, indice: indiceListo };
   return indiceListo;
 }
@@ -224,7 +360,10 @@ function invalidar(workspace) {
   if (!cache) return;
   if (!workspace || cache.raiz === workspace) cache = null;
 }
-function _resetForTests() { cache = null; _rgCache = null; }
+function _resetForTests() {
+  cache = null;
+  _rgCache = null;
+}
 
 /** Puntuación BM25 de un documento para unos términos. */
 function puntuar(doc, terminosQ, idx, { k1 = 1.4, b = 0.75 } = {}) {
@@ -242,7 +381,9 @@ function puntuar(doc, terminosQ, idx, { k1 = 1.4, b = 0.75 } = {}) {
 
 /** Primera línea con contenido del bloque: da contexto sin pegar el archivo entero. */
 function recorte(doc) {
-  return String(doc.cabeza || '').trim().slice(0, 200);
+  return String(doc.cabeza || '')
+    .trim()
+    .slice(0, 200);
 }
 
 /**
@@ -276,7 +417,9 @@ function buscar(workspace, consulta, { limit = 12, exactas = 8 } = {}) {
     for (const { d, s } of puntuados) {
       const clave = d.ruta + ':' + d.linea;
       if (vistos.has(clave)) continue;
-      const yaEnRango = [...vistos].some(k => k.startsWith(d.ruta + ':') && Math.abs(Number(k.split(':')[1]) - d.linea) < MAX_LINEAS_CHUNK);
+      const yaEnRango = [...vistos].some(
+        (k) => k.startsWith(d.ruta + ':') && Math.abs(Number(k.split(':')[1]) - d.linea) < MAX_LINEAS_CHUNK,
+      );
       if (yaEnRango) continue;
       const repes = porArchivo.get(d.ruta) || 0;
       if (repes >= 2) continue;
@@ -286,7 +429,11 @@ function buscar(workspace, consulta, { limit = 12, exactas = 8 } = {}) {
     }
   }
   const orden = hits.sort((a, b) => b.score - a.score).slice(0, limit);
-  return { hits: orden, metodo: ex.metodo === 'ripgrep' ? 'ripgrep + relevancia' : 'barrido + relevancia', indice: { chunks: idx.docs.length, archivos: new Set(idx.docs.map(d => d.ruta)).size } };
+  return {
+    hits: orden,
+    metodo: ex.metodo === 'ripgrep' ? 'ripgrep + relevancia' : 'barrido + relevancia',
+    indice: { chunks: idx.docs.length, archivos: new Set(idx.docs.map((d) => d.ruta)).size },
+  };
 }
 
 /** Texto que ve el modelo (con de dónde sale cada cosa). */
@@ -295,15 +442,33 @@ function textoBusqueda(workspace, consulta, { limit = 12 } = {}) {
   if (!r.hits.length) {
     return `Sin resultados para «${consulta}» (${r.indice.archivos} archivos indexados). Prueba con menos palabras, o usa repo_map para ver el índice del proyecto.`;
   }
-  const exactas = r.hits.filter(h => h.tipo === 'exacta');
-  const lineas = [`${r.hits.length} resultado(s) para «${consulta}» — ${r.metodo}, ${r.indice.chunks} bloques de ${r.indice.archivos} archivos:`];
+  const exactas = r.hits.filter((h) => h.tipo === 'exacta');
+  const lineas = [
+    `${r.hits.length} resultado(s) para «${consulta}» — ${r.metodo}, ${r.indice.chunks} bloques de ${r.indice.archivos} archivos:`,
+  ];
   for (const h of r.hits) {
-    lineas.push(`- ${h.ruta}:${h.linea}  ${h.tipo === 'exacta' ? '(coincidencia exacta)' : '(relevancia)'}${h.texto ? '  ' + h.texto : ''}`);
+    lineas.push(
+      `- ${h.ruta}:${h.linea}  ${h.tipo === 'exacta' ? '(coincidencia exacta)' : '(relevancia)'}${h.texto ? '  ' + h.texto : ''}`,
+    );
   }
-  lineas.push(exactas.length
-    ? 'Lee el tramo que te interese con read_file (offset/limit) en vez del archivo entero.'
-    : 'No hay coincidencia literal: son los sitios MÁS relacionados con lo que buscas. Léelos con read_file antes de dar nada por hecho.');
+  lineas.push(
+    exactas.length
+      ? 'Lee el tramo que te interese con read_file (offset/limit) en vez del archivo entero.'
+      : 'No hay coincidencia literal: son los sitios MÁS relacionados con lo que buscas. Léelos con read_file antes de dar nada por hecho.',
+  );
   return lineas.join('\n');
 }
 
-module.exports = { buscar, textoBusqueda, indice, invalidar, listar, terminos, trocear, disponibleRg, coincidencias, EXTENSIONES, _resetForTests };
+module.exports = {
+  buscar,
+  textoBusqueda,
+  indice,
+  invalidar,
+  listar,
+  terminos,
+  trocear,
+  disponibleRg,
+  coincidencias,
+  EXTENSIONES,
+  _resetForTests,
+};

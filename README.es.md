@@ -136,23 +136,23 @@ SAGITARI tiene acceso real a tu ordenador, por eso la seguridad forma parte del 
 
 Atajos útiles:
 
-| Atajo | Acción |
-|---|---|
-| `Alt+1…9` | Cambiar de sección |
-| `Ctrl+Alt+S` | Mostrar u ocultar el panel |
-| `Alt+Shift+S` | Traer SAGITARI al frente |
-| `Ctrl+Shift+G` | Lanzar un pulso de glow |
-| `Alt+M` | Ciclar ACT → PLAN → THINK |
-| `/` en el chat | Abrir la paleta de skills |
+| Atajo          | Acción                     |
+| -------------- | -------------------------- |
+| `Alt+1…9`      | Cambiar de sección         |
+| `Ctrl+Alt+S`   | Mostrar u ocultar el panel |
+| `Alt+Shift+S`  | Traer SAGITARI al frente   |
+| `Ctrl+Shift+G` | Lanzar un pulso de glow    |
+| `Alt+M`        | Ciclar ACT → PLAN → THINK  |
+| `/` en el chat | Abrir la paleta de skills  |
 
 ## Descarga
 
-| Paquete | Descripción |
-|---|---|
+| Paquete                                                                                         | Descripción                                                                |
+| ----------------------------------------------------------------------------------------------- | -------------------------------------------------------------------------- |
 | [**⬇ Descargar SAGITARI para Windows**](https://github.com/dario90vlc/sagitari/releases/latest) | Instalador (accesos directos + desinstalador) y portable en un solo `.exe` |
-| [**Notas de la versión**](https://github.com/dario90vlc/sagitari/releases) | Cambios, correcciones de seguridad y hashes SHA-256 |
+| [**Notas de la versión**](https://github.com/dario90vlc/sagitari/releases)                      | Cambios, correcciones de seguridad y hashes SHA-256                        |
 
-> **Windows SmartScreen:** los binarios no tienen firma digital actualmente, por lo que Windows puede mostrar un aviso la primera vez. Pulsa *Más información → Ejecutar de todas formas* si confías en la descarga. Comprueba el hash SHA-256 publicado en las notas de la release.
+> **Windows SmartScreen:** los binarios no tienen firma digital actualmente, por lo que Windows puede mostrar un aviso la primera vez. Pulsa _Más información → Ejecutar de todas formas_ si confías en la descarga. Comprueba el hash SHA-256 publicado en las notas de la release.
 
 > **Motores de voz:** la voz neuronal local (Piper) y el dictado local de alta precisión (Whisper) **no** van dentro del instalador —se descargan a petición desde Ajustes, en total unos 700 MB— así que la descarga sigue siendo ligera y el modo voz funciona igualmente con los motores de Windows mientras no los instales.
 

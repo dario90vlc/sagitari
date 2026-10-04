@@ -36,8 +36,8 @@ const MODEL_PRICING = {
   'claude-opus': { in: 15, out: 75 },
   'claude-haiku': { in: 0.8, out: 4 },
   'gemini-2': { in: 1.25, out: 10 },
-  'deepseek': { in: 0.27, out: 1.1 },
-  'llama': { in: 0.2, out: 0.6 },
+  deepseek: { in: 0.27, out: 1.1 },
+  llama: { in: 0.2, out: 0.6 },
   __default: { in: 1, out: 3 },
 };
 
@@ -55,13 +55,20 @@ function pricingFor(model, override) {
 function summarizeArgs(name, args = {}) {
   const a = args || {};
   switch (name) {
-    case 'run_command': return String(a.command || '').slice(0, 200);
-    case 'write_file': return String(a.path || '');
-    case 'browser_control': return `${a.action || ''}${a.url ? ' → ' + a.url : ''}${a.text ? ' («' + a.text + '»)' : ''}${a.action === 'click_index' ? ' (' + (a._label ? '«' + String(a._label).slice(0, 80) + '»' : 'elemento sin identificar') + ')' : ''}`;
-    case 'open_app': return String(a.name || '');
-    case 'open_url': return String(a.url || '');
-    case 'clipboard': return a.action === 'write' ? 'escribir en el portapapeles' : 'leer el portapapeles';
-    case 'window_manage': return String(a.action || '');
+    case 'run_command':
+      return String(a.command || '').slice(0, 200);
+    case 'write_file':
+      return String(a.path || '');
+    case 'browser_control':
+      return `${a.action || ''}${a.url ? ' → ' + a.url : ''}${a.text ? ' («' + a.text + '»)' : ''}${a.action === 'click_index' ? ' (' + (a._label ? '«' + String(a._label).slice(0, 80) + '»' : 'elemento sin identificar') + ')' : ''}`;
+    case 'open_app':
+      return String(a.name || '');
+    case 'open_url':
+      return String(a.url || '');
+    case 'clipboard':
+      return a.action === 'write' ? 'escribir en el portapapeles' : 'leer el portapapeles';
+    case 'window_manage':
+      return String(a.action || '');
     default: {
       if (String(name).startsWith('mcp__') && a._mcp) return `${a._mcp.serverName} → ${a._mcp.toolName}`;
       return Object.keys(a).length ? JSON.stringify(a).slice(0, 160) : '';
@@ -73,19 +80,26 @@ function summarizeArgs(name, args = {}) {
 function describeAction(name, args = {}) {
   const a = args || {};
   switch (name) {
-    case 'run_command': return 'Ejecutar comando en la terminal';
-    case 'write_file': return 'Crear o sobrescribir un archivo';
+    case 'run_command':
+      return 'Ejecutar comando en la terminal';
+    case 'write_file':
+      return 'Crear o sobrescribir un archivo';
     case 'browser_control':
       if (a.action === 'click') return 'Hacer clic en la página web';
       if (a.action === 'type') return 'Escribir en la página web';
       if (a.action === 'navigate' || a.action === 'launch' || a.action === 'new_tab') return 'Abrir una página web';
       return 'Controlar el navegador (' + (a.action || '') + ')';
-    case 'open_app': return 'Abrir una aplicación';
-    case 'open_url': return 'Abrir una URL';
-    case 'clipboard': return a.action === 'write' ? 'Escribir en el portapapeles' : 'Leer el portapapeles';
-    case 'window_manage': return 'Gestionar ventanas';
+    case 'open_app':
+      return 'Abrir una aplicación';
+    case 'open_url':
+      return 'Abrir una URL';
+    case 'clipboard':
+      return a.action === 'write' ? 'Escribir en el portapapeles' : 'Leer el portapapeles';
+    case 'window_manage':
+      return 'Gestionar ventanas';
     default: {
-      if (String(name).startsWith('mcp__') && a._mcp) return 'Usar la herramienta «' + a._mcp.toolName + '» del servidor MCP «' + a._mcp.serverName + '»';
+      if (String(name).startsWith('mcp__') && a._mcp)
+        return 'Usar la herramienta «' + a._mcp.toolName + '» del servidor MCP «' + a._mcp.serverName + '»';
       if (String(name).startsWith('mcp__')) return 'Usar una herramienta MCP (' + name.slice(5).replace(/__/g, ' · ') + ')';
       return 'Usar herramienta ' + name;
     }
@@ -95,7 +109,8 @@ function describeAction(name, args = {}) {
 /* Acciones del navegador SIEMPRE sensibles (v1.5): aunque browser_control esté
    en 'safe', estas acciones piden confirmación — comprar, pagar, eliminar,
    publicar, enviar datos o cambiar ajustes críticos nunca son automáticas. */
-const SENSITIVE_BROWSER_RX = /(comprar|compra|pagar|pago|checkout|finalizar|eliminar|borrar|delete|suspender|cancelar suscripci|dar de baja|publicar|enviar|transferir|vender|contratar)/i;
+const SENSITIVE_BROWSER_RX =
+  /(comprar|compra|pagar|pago|checkout|finalizar|eliminar|borrar|delete|suspender|cancelar suscripci|dar de baja|publicar|enviar|transferir|vender|contratar)/i;
 
 /* Campos de datos sensibles: escribir en ellos también exige confirmación */
 const SENSITIVE_FIELD_RX = /(card|cvv|cvc|expir|iban|tarjeta|password|contrase|passwd|pin\b|cuenta.*number|account.*num|ssn|dni\b)/i;
@@ -139,8 +154,10 @@ function forcedConfirmReason(name, args = {}) {
   // la página puede confirmar algo destructivo («¿borrar la cuenta?»): ninguna de las
   // dos cosas se hace sin preguntar.
   if (a.action === 'upload') {
-    const f = Array.isArray(a.files) ? a.files : (a.file ? [a.file] : []);
-    return 'Subir archivo(s) del equipo a una página web' + (f.length ? ': ' + f.map((x) => String(x).split(/[\\/]/).pop()).join(', ') : '');
+    const f = Array.isArray(a.files) ? a.files : a.file ? [a.file] : [];
+    return (
+      'Subir archivo(s) del equipo a una página web' + (f.length ? ': ' + f.map((x) => String(x).split(/[\\/]/).pop()).join(', ') : '')
+    );
   }
   if (a.action === 'dialog' && a.accept !== false) return 'Aceptar el diálogo de la página (puede confirmar algo destructivo)';
   // Un clic por índice no dice a qué se está clicando: la etiqueta la resuelve el
@@ -157,9 +174,12 @@ function forcedConfirmReason(name, args = {}) {
   }
   if (!['click', 'type', 'press'].includes(a.action)) return null;
 
-  const what = a.action === 'click' ? 'hacer clic en «' + (a.text || a.selector || '') + '»'
-    : a.action === 'type' ? 'escribir en «' + (a.selector || '') + '»'
-      : 'pulsar ' + (a.key || '');
+  const what =
+    a.action === 'click'
+      ? 'hacer clic en «' + (a.text || a.selector || '') + '»'
+      : a.action === 'type'
+        ? 'escribir en «' + (a.selector || '') + '»'
+        : 'pulsar ' + (a.key || '');
   if (SENSITIVE_BROWSER_RX.test(String(a.text || '') + ' ' + String(a.selector || ''))) {
     return 'ACCIÓN SENSIBLE en la web: ' + what + ' — parece una compra/pago/eliminación/publicación';
   }
@@ -185,18 +205,18 @@ class Guardrails {
       permissions: { ...policy.permissions },
       modelPricing: policy.modelPricing || null,
       guardrails: {
-        maxSteps: policy.guardrails?.maxSteps ?? 60,           // 0 or null = unlimited
-        maxToolCalls: policy.guardrails?.maxToolCalls ?? 80,   // 0 or null = unlimited
+        maxSteps: policy.guardrails?.maxSteps ?? 60, // 0 or null = unlimited
+        maxToolCalls: policy.guardrails?.maxToolCalls ?? 80, // 0 or null = unlimited
         maxDurationMs: policy.guardrails?.maxDurationMs ?? 15 * 60 * 1000,
-        maxTokens: policy.guardrails?.maxTokens ?? 0,          // 0 = unlimited
-        maxCostUsd: policy.guardrails?.maxCostUsd ?? 0,        // 0 = unlimited (estimación)
+        maxTokens: policy.guardrails?.maxTokens ?? 0, // 0 = unlimited
+        maxCostUsd: policy.guardrails?.maxCostUsd ?? 0, // 0 = unlimited (estimación)
         maxDelegations: policy.guardrails?.maxDelegations ?? 8, // 0 = sin tope (subagentes por turno)
-        loopThreshold: policy.guardrails?.loopThreshold ?? 3,  // identical consecutive calls before loop
+        loopThreshold: policy.guardrails?.loopThreshold ?? 3, // identical consecutive calls before loop
         stallThreshold: policy.guardrails?.stallThreshold ?? 6, // pasos sin señal de progreso
       },
     };
     this.startedAt = 0;
-    this._pausedAt = 0;          // instante en que el reloj se paró (espera al usuario)
+    this._pausedAt = 0; // instante en que el reloj se paró (espera al usuario)
     this.steps = 0;
     this.toolCalls = 0;
     this.tokensUsed = 0;
@@ -204,10 +224,10 @@ class Guardrails {
     this.tokensOut = 0;
     this.costUsd = 0;
     this.model = null;
-    this.recentCalls = [];       // signatures of last N tool calls
-    this.approvals = new Map();  // remembered confirmations: signature -> expiry
-    this.delegations = 0;        // subagentes lanzados en este turno
-    this._stall = 0;             // pasos consecutivos sin progreso
+    this.recentCalls = []; // signatures of last N tool calls
+    this.approvals = new Map(); // remembered confirmations: signature -> expiry
+    this.delegations = 0; // subagentes lanzados en este turno
+    this._stall = 0; // pasos consecutivos sin progreso
   }
 
   /** Hot-reload policy from Settings without losing run counters. */
@@ -230,7 +250,7 @@ class Guardrails {
     this.recentCalls = [];
     this.delegations = 0;
     this._stall = 0;
-    this._lastToolName = null;   // si no, la señal de progreso quedaba contaminada entre ejecuciones
+    this._lastToolName = null; // si no, la señal de progreso quedaba contaminada entre ejecuciones
   }
 
   /**
@@ -310,7 +330,9 @@ class Guardrails {
   }
 
   /** Para el panel: coste estimado de la ejecución en curso. */
-  getCost() { return this.costUsd; }
+  getCost() {
+    return this.costUsd;
+  }
 
   /**
    * Parar/reanudar el reloj de `maxDurationMs`. El tiempo que el turno pasa
@@ -360,7 +382,11 @@ class Guardrails {
    */
   signature(name, args = {}) {
     let s;
-    try { s = JSON.stringify(canonical(args)); } catch { s = String(args); }
+    try {
+      s = JSON.stringify(canonical(args));
+    } catch {
+      s = String(args);
+    }
     return name + ' ' + s.replace(/\s+/g, ' ');
   }
 
@@ -386,7 +412,8 @@ class Guardrails {
     }
     // ping-pong A-B-A-B…
     if (recent.length >= 4) {
-      const a1 = recent[recent.length - 2], a2 = recent[recent.length - 4];
+      const a1 = recent[recent.length - 2],
+        a2 = recent[recent.length - 4];
       if (a1 === a2 && recent[recent.length - 1] === recent[recent.length - 3] && a1 !== sig) {
         return { loop: true, pattern: 'alternancia repetida A-B-A-B' };
       }
@@ -397,7 +424,9 @@ class Guardrails {
   /* ---------- stall detection (ausencia de progreso) ---------- */
 
   /** Señales de progreso: una herramienta NUEVA distinta de la anterior, o texto no vacío. */
-  _lastSig() { return this.recentCalls[this.recentCalls.length - 1]; }
+  _lastSig() {
+    return this.recentCalls[this.recentCalls.length - 1];
+  }
 
   /**
    * Llamar UNA vez por vuelta del modelo (antes de checkStep idealmente).
@@ -447,7 +476,10 @@ class Guardrails {
     if (name === 'run_command') {
       const c = comandos.clasificar(args && args.command);
       if (c.nivel === 'prohibido') {
-        return { action: 'deny', reason: `Comando prohibido: ${c.motivo}. No se ejecuta ni con permiso: hazlo tú si de verdad lo necesitas.` };
+        return {
+          action: 'deny',
+          reason: `Comando prohibido: ${c.motivo}. No se ejecuta ni con permiso: hazlo tú si de verdad lo necesitas.`,
+        };
       }
     }
     /* Permiso propio del JavaScript del navegador (Ajustes ▸ Seguridad ▸ fila
@@ -458,18 +490,27 @@ class Guardrails {
        forzado y se deja llegar al chequeo de nivel de abajo, que deniega.
        Sin la clave, el eval sigue forzando la confirmación sensible de siempre. */
     let jsEvalRegulado = false;
-    if (name === 'browser_control' && args && args.action === 'eval'
-        && this.policy.permissions.browser_eval) {
+    if (name === 'browser_control' && args && args.action === 'eval' && this.policy.permissions.browser_eval) {
       if (this.levelFor(name) === 'restricted') {
         jsEvalRegulado = true;
       } else {
         const lvlJs = this.policy.permissions.browser_eval;
         if (lvlJs === 'safe') return { action: 'allow' };
-        if (lvlJs === 'restricted') return { action: 'deny', reason: 'La ejecución de JavaScript en el navegador está bloqueada por la configuración de seguridad del usuario.' };
+        if (lvlJs === 'restricted')
+          return {
+            action: 'deny',
+            reason: 'La ejecución de JavaScript en el navegador está bloqueada por la configuración de seguridad del usuario.',
+          };
         if (lvlJs === 'confirm') {
           const sigJs = this.signature(name, args);
           if (this.approvals.get(sigJs) > Date.now()) return { action: 'allow' };
-          return { action: 'confirm', tool: name, description: describeAction(name, args), summary: summarizeArgs(name, args), signature: sigJs };
+          return {
+            action: 'confirm',
+            tool: name,
+            description: describeAction(name, args),
+            summary: summarizeArgs(name, args),
+            signature: sigJs,
+          };
         }
       }
     }
@@ -496,7 +537,7 @@ class Guardrails {
     if (level === 'restricted') {
       return {
         action: 'deny',
-        reason: `La herramienta «${name}» está bloqueada por la configuración de seguridad del usuario.`
+        reason: `La herramienta «${name}» está bloqueada por la configuración de seguridad del usuario.`,
       };
     }
     return {
@@ -519,4 +560,16 @@ class Guardrails {
   }
 }
 
-module.exports = { Guardrails, DEFAULT_RISK, LEVELS, describeAction, summarizeArgs, pricingFor, MODEL_PRICING, isSensitiveBrowserAction, forcedConfirmReason, SENSITIVE_BROWSER_RX, SENSITIVE_FIELD_RX };
+module.exports = {
+  Guardrails,
+  DEFAULT_RISK,
+  LEVELS,
+  describeAction,
+  summarizeArgs,
+  pricingFor,
+  MODEL_PRICING,
+  isSensitiveBrowserAction,
+  forcedConfirmReason,
+  SENSITIVE_BROWSER_RX,
+  SENSITIVE_FIELD_RX,
+};

@@ -61,7 +61,9 @@ function validateProvider(p, { requireId = true, requireModel = false } = {}) {
 
 /** Clave del proveedor guardado al que corresponde una activación (por id o por URL). */
 function claveGuardadaPara(config, { providerId, id, baseUrl } = {}) {
-  const prov = (config.providers || []).find(p => (providerId && p.id === providerId) || (id && p.id === id) || (baseUrl && p.baseUrl === baseUrl));
+  const prov = (config.providers || []).find(
+    (p) => (providerId && p.id === providerId) || (id && p.id === id) || (baseUrl && p.baseUrl === baseUrl),
+  );
   return (prov && prov.apiKey) || '';
 }
 
@@ -77,7 +79,7 @@ function registerConfigIpc(ipcMain, ctx) {
       providers: (config.providers || []).map(enmascararApiKey),
       active: config.active ? enmascararApiKey(config.active) : config.active,
       settings: config.settings,
-      presets: PRESETS
+      presets: PRESETS,
     };
   });
 
@@ -89,10 +91,10 @@ function registerConfigIpc(ipcMain, ctx) {
     if (bad) return bad;
     // '••••' = la UI reenvía la máscara (no trae secreto nuevo): se conserva la
     // clave guardada en vez de pisarla con la máscara.
-    const prev = config.providers.find(x => x.id === p.id);
+    const prev = config.providers.find((x) => x.id === p.id);
     const guardada = (prev && prev.apiKey) || '';
     const payload = { ...p, apiKey: desenmascararApiKey(p.apiKey, guardada) };
-    const idx = config.providers.findIndex(x => x.id === payload.id);
+    const idx = config.providers.findIndex((x) => x.id === payload.id);
     if (idx >= 0) config.providers[idx] = { ...config.providers[idx], ...payload };
     else config.providers.push(payload);
     return persistConfig();
@@ -100,7 +102,7 @@ function registerConfigIpc(ipcMain, ctx) {
 
   ipcMain.handle('provider:delete', (e, id) => {
     const config = cfg();
-    config.providers = config.providers.filter(x => x.id !== id);
+    config.providers = config.providers.filter((x) => x.id !== id);
     // el proveedor activo puede no llevar providerId (el renderer no siempre lo
     // manda), así que se compara también por id. Comparar una baseUrl con un id
     // (como se hacía antes) podía desactivar el proveedor equivocado.
@@ -116,9 +118,12 @@ function registerConfigIpc(ipcMain, ctx) {
     // modelos no puede fallar en 401 por una credencial que ya está guardada.
     // '••••' = la UI reenvía la máscara de config:get: también es «usar la guardada».
     const recibida = String(apiKey || '').trim();
-    const key = (!recibida || recibida === SECRETO_MASK) ? claveGuardadaPara(config, { baseUrl }) : recibida;
-    try { return { ok: true, models: await listModels(baseUrl, key) }; }
-    catch (err) { return { ok: false, error: err.message }; }
+    const key = !recibida || recibida === SECRETO_MASK ? claveGuardadaPara(config, { baseUrl }) : recibida;
+    try {
+      return { ok: true, models: await listModels(baseUrl, key) };
+    } catch (err) {
+      return { ok: false, error: err.message };
+    }
   });
 
   ipcMain.handle('provider:activate', (e, provCfg) => {
@@ -128,8 +133,9 @@ function registerConfigIpc(ipcMain, ctx) {
     const bad = validateProvider(provCfg, { requireId: false, requireModel: true });
     if (bad) return bad;
     // id resuelto del catálogo: es lo que permite desactivarlo al borrarlo
-    const prov = config.providers.find(p => p.baseUrl === provCfg.baseUrl && p.model === provCfg.model)
-      || config.providers.find(p => p.baseUrl === provCfg.baseUrl);
+    const prov =
+      config.providers.find((p) => p.baseUrl === provCfg.baseUrl && p.model === provCfg.model) ||
+      config.providers.find((p) => p.baseUrl === provCfg.baseUrl);
     // El formulario manda la clave de su campo, y ese campo se vacía al
     // cambiar de preset: activar con el campo vacío dejaba `config.active` SIN
     // clave aunque el proveedor guardado la tuviera, y cada turno salía en 401
@@ -164,7 +170,8 @@ function registerConfigIpc(ipcMain, ctx) {
     // v2.5: herramientas del mismo mensaje que corren a la vez (1 = una detrás de otra)
     if ('parallelTools' in clean) {
       const n = Math.round(Number(clean.parallelTools));
-      if (!Number.isFinite(n) || n < 1 || n > 4) delete clean.parallelTools; else clean.parallelTools = n;
+      if (!Number.isFinite(n) || n < 1 || n > 4) delete clean.parallelTools;
+      else clean.parallelTools = n;
     }
     /* v2.5 — verificación real: booleanos estrictos (como verifyGate) para que un «false»
        en texto no pueda dejarlos encendidos sin querer, y el número de vueltas de arreglo
@@ -181,7 +188,8 @@ function registerConfigIpc(ipcMain, ctx) {
     if ('arbolesAislados' in clean && typeof clean.arbolesAislados !== 'boolean') delete clean.arbolesAislados;
     if ('intentosArreglo' in clean) {
       const n = Math.round(Number(clean.intentosArreglo));
-      if (!Number.isFinite(n) || n < 0 || n > 5) delete clean.intentosArreglo; else clean.intentosArreglo = n;
+      if (!Number.isFinite(n) || n < 0 || n > 5) delete clean.intentosArreglo;
+      else clean.intentosArreglo = n;
     }
     /* v2.5 — tus hooks (Ajustes ▸ Agente). Una sola línea cada uno y sin saltos de línea:
        un hook es UN comando; si alguien pega un guion de varias líneas, se queda la primera
@@ -200,13 +208,19 @@ function registerConfigIpc(ipcMain, ctx) {
     if ('uiColor' in clean || 'glowColor' in clean || 'glowStrength' in clean || 'glassTint' in clean) {
       try {
         const win = getWin();
-        if (win && !win.isDestroyed()) win.webContents.send('theme:changed', { uiColor: config.settings.uiColor, glowColor: config.settings.glowColor, glowStrength: config.settings.glowStrength, glassTint: config.settings.glassTint });
+        if (win && !win.isDestroyed())
+          win.webContents.send('theme:changed', {
+            uiColor: config.settings.uiColor,
+            glowColor: config.settings.glowColor,
+            glowStrength: config.settings.glowStrength,
+            glassTint: config.settings.glassTint,
+          });
       } catch {}
       /* El pulso es acuse de la LUZ del marco: solo si cambia algo de la luz.
          glassTint tiñe los paneles — se repinta con theme:changed (arriba), pero
          el marco no debe destellar en cada movimiento del slider del vidrio. */
-      if (('uiColor' in clean || 'glowColor' in clean || 'glowStrength' in clean)
-        && config.settings.glowEnabled && !isHidden()) glow('pulse');
+      if (('uiColor' in clean || 'glowColor' in clean || 'glowStrength' in clean) && config.settings.glowEnabled && !isHidden())
+        glow('pulse');
     }
     // el renderer sigue recibiendo los ajustes; si el disco falló, se lo decimos
     // además por el mismo canal (y ya ha recibido el toast de persistConfig)

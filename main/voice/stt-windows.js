@@ -16,13 +16,19 @@ const { assertEngine, CAPACIDADES_BASE } = require('./contract');
    Node, no para el sistema. Ver ruta-script.js. */
 const { rutaScriptReal } = require('./ruta-script');
 
-const SEP = '\u001f';   // separador de unidad: no aparece en texto normal
+const SEP = '\u001f'; // separador de unidad: no aparece en texto normal
 
-function createSttWindows({ emit, lang = 'es-ES', spawnFn = spawn, scriptPath = rutaScriptReal(path.join(__dirname, '..', 'voice.ps1')), forzarClasico: forzarClasicoInicial = false } = {}) {
+function createSttWindows({
+  emit,
+  lang = 'es-ES',
+  spawnFn = spawn,
+  scriptPath = rutaScriptReal(path.join(__dirname, '..', 'voice.ps1')),
+  forzarClasico: forzarClasicoInicial = false,
+} = {}) {
   let proc = null;
   let buf = '';
   let info = { motor: '', idioma: '' };
-  let detenido = false;   // lo pone stop(): un cierre pedido no es una muerte que avisar
+  let detenido = false; // lo pone stop(): un cierre pedido no es una muerte que avisar
   /* Rescate pedido por el renderer (y por Ajustes, manualmente): en algunas máquinas el
      motor moderno ARRANCA y declara que escucha, pero no recibe nunca audio del
      dispositivo (NVIDIA Broadcast y similares enganchan el camino de audio moderno; el
@@ -48,7 +54,10 @@ function createSttWindows({ emit, lang = 'es-ES', spawnFn = spawn, scriptPath = 
     } else if (linea.startsWith('MODE::')) {
       info.motor = linea.slice(6).trim();
       if (info.motor === 'sapi') {
-        emit({ type: 'notice', text: 'Motor de voz clásico. Activa "Reconocimiento de voz en línea" en Windows (Privacidad › Voz) para máxima precisión.' });
+        emit({
+          type: 'notice',
+          text: 'Motor de voz clásico. Activa "Reconocimiento de voz en línea" en Windows (Privacidad › Voz) para máxima precisión.',
+        });
       }
     } else if (linea.startsWith('READY::')) {
       info.idioma = linea.slice(7).trim();
@@ -62,7 +71,7 @@ function createSttWindows({ emit, lang = 'es-ES', spawnFn = spawn, scriptPath = 
          futuro (caída, reapertura) va directo al clásico con -NoWinrt — y se avisa. */
       forzarClasico = true;
       emit({ type: 'notice', text: 'El motor moderno no recibe audio en este dispositivo: cambio al motor clásico…' });
-      if (!proc) arranque().catch(() => {});   // carrera imposible pero barata de cubrir
+      if (!proc) arranque().catch(() => {}); // carrera imposible pero barata de cubrir
     } else if (linea.startsWith('HINT::')) {
       emit({ type: 'notice', text: linea.slice(6) });
     } else if (linea.startsWith('NOTE::')) {
@@ -76,9 +85,11 @@ function createSttWindows({ emit, lang = 'es-ES', spawnFn = spawn, scriptPath = 
       stop();
     } else if (linea.startsWith('ERROR::')) {
       const texto = linea.slice(7).trim();
-      const fix = /micr[oó]fono/i.test(texto) ? 'Abre Sonido en Windows (ms-settings:sound) y elige el micrófono correcto como predeterminado.'
-        : /reconocimiento de voz en l[ií]nea/i.test(texto) ? 'Actívalo en ms-settings:privacy-speech y vuelve a abrir el modo voz.'
-        : 'Vuelve a abrir el modo voz; si sigue, revisa el micrófono en ms-settings:sound.';
+      const fix = /micr[oó]fono/i.test(texto)
+        ? 'Abre Sonido en Windows (ms-settings:sound) y elige el micrófono correcto como predeterminado.'
+        : /reconocimiento de voz en l[ií]nea/i.test(texto)
+          ? 'Actívalo en ms-settings:privacy-speech y vuelve a abrir el modo voz.'
+          : 'Vuelve a abrir el modo voz; si sigue, revisa el micrófono en ms-settings:sound.';
       emit({ type: 'error', text: texto, fix });
     }
   }
@@ -97,7 +108,13 @@ function createSttWindows({ emit, lang = 'es-ES', spawnFn = spawn, scriptPath = 
          arrancar otro (si no, el PowerShell viejo seguiría con el micrófono abierto) y
          se tira el búfer a medias. `proc = null` va ANTES de matarlo para que su 'exit'
          tardío no pise la referencia al proceso nuevo. */
-      if (proc) { const viejo = proc; proc = null; try { viejo.kill(); } catch {} }
+      if (proc) {
+        const viejo = proc;
+        proc = null;
+        try {
+          viejo.kill();
+        } catch {}
+      }
       buf = '';
       info = { motor: '', idioma: '' };
       detenido = false;
@@ -109,10 +126,13 @@ function createSttWindows({ emit, lang = 'es-ES', spawnFn = spawn, scriptPath = 
         const args = ['-NoProfile', '-ExecutionPolicy', 'Bypass', '-File', scriptPath, '-Lang', lang];
         if (forzarClasico) args.push('-NoWinrt');
         p = spawnFn('powershell.exe', args, { windowsHide: true });
-      } catch (e) { reject(e); return; }
+      } catch (e) {
+        reject(e);
+        return;
+      }
       proc = p;
       p.stdout.on('data', (d) => {
-        if (p !== proc) return;   // proceso ya reemplazado: su salida no interesa
+        if (p !== proc) return; // proceso ya reemplazado: su salida no interesa
         buf += d.toString('utf8');
         let i;
         while ((i = buf.indexOf('\n')) >= 0) {
@@ -124,7 +144,8 @@ function createSttWindows({ emit, lang = 'es-ES', spawnFn = spawn, scriptPath = 
       p.stderr.on('data', (d) => {
         if (p !== proc) return;
         const msg = d.toString('utf8').trim();
-        if (msg) emit({ type: 'error', text: 'El motor de voz falló: ' + msg.slice(0, 200), fix: 'Cierra el modo voz y vuelve a abrirlo.' });
+        if (msg)
+          emit({ type: 'error', text: 'El motor de voz falló: ' + msg.slice(0, 200), fix: 'Cierra el modo voz y vuelve a abrirlo.' });
       });
       /* `spawn` no lanza cuando no puede arrancar (ENOENT, EACCES): avisa por el evento
          'error' y sin listener Node lo relanzaría como excepción no capturada, capaz de
@@ -135,7 +156,7 @@ function createSttWindows({ emit, lang = 'es-ES', spawnFn = spawn, scriptPath = 
         emit({ type: 'error', text: 'No se pudo arrancar el motor de voz: ' + e.message, fix: 'Vuelve a abrir el modo voz.' });
       });
       p.on('exit', () => {
-        if (p !== proc) return;   // el que sale no es el vigente: no se toca `proc`
+        if (p !== proc) return; // el que sale no es el vigente: no se toca `proc`
         proc = null;
         /* Muerte que nadie pidió (caída, kill externo, entrada estándar cerrada por
            fuera): sin esto el consumidor se queda en «escuchando» y el usuario habla
@@ -148,8 +169,10 @@ function createSttWindows({ emit, lang = 'es-ES', spawnFn = spawn, scriptPath = 
           if (temporizador) clearTimeout(temporizador);
           temporizador = setTimeout(() => {
             temporizador = null;
-            if (detenido || proc) return;   // mientras tanto llegó un cierre o un arranque nuevo
-            arranque().catch(() => emit({ type: 'error', text: 'El motor de voz no ha podido rearrancar.', fix: 'Vuelve a abrir el modo voz.' }));
+            if (detenido || proc) return; // mientras tanto llegó un cierre o un arranque nuevo
+            arranque().catch(() =>
+              emit({ type: 'error', text: 'El motor de voz no ha podido rearrancar.', fix: 'Vuelve a abrir el modo voz.' }),
+            );
           }, 1200);
           return;
         }
@@ -179,17 +202,36 @@ function createSttWindows({ emit, lang = 'es-ES', spawnFn = spawn, scriptPath = 
   function stop() {
     return new Promise((resolve) => {
       detenido = true;
-      if (temporizador) { clearTimeout(temporizador); temporizador = null; }   // un rearranque pendiente ya no procede
+      if (temporizador) {
+        clearTimeout(temporizador);
+        temporizador = null;
+      } // un rearranque pendiente ya no procede
       const p = proc;
       proc = null;
-      if (!p) { resolve(); return; }
-      try { p.stdin.end(); } catch {}
-      try { p.kill(); } catch {}
+      if (!p) {
+        resolve();
+        return;
+      }
+      try {
+        p.stdin.end();
+      } catch {}
+      try {
+        p.kill();
+      } catch {}
       resolve();
     });
   }
 
-  const engine = { nombre: 'windows', capacidades: { ...CAPACIDADES_BASE, partials: true, confidence: true }, start, push: () => {}, stop, motorAlternativo, usarClasico, info: () => ({ ...info }) };
+  const engine = {
+    nombre: 'windows',
+    capacidades: { ...CAPACIDADES_BASE, partials: true, confidence: true },
+    start,
+    push: () => {},
+    stop,
+    motorAlternativo,
+    usarClasico,
+    info: () => ({ ...info }),
+  };
   assertEngine(engine);
   return engine;
 }

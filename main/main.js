@@ -1,15 +1,25 @@
-
 'use strict';
 
 // SAGITARI — Electron main process
 // Chat window + click-through screen-edge glow overlay + agent + voice + settings.
 
-const { app, BrowserWindow, ipcMain, desktopCapturer, screen, globalShortcut, shell, dialog, Tray, Menu, safeStorage, session } = require('electron');
+const {
+  app,
+  BrowserWindow,
+  ipcMain,
+  desktopCapturer,
+  screen,
+  globalShortcut,
+  shell,
+  dialog,
+  Tray,
+  Menu,
+  safeStorage,
+} = require('electron');
 const path = require('path');
 const { pathToFileURL } = require('url');
 const fs = require('fs');
 const fsp = require('fs/promises');
-const { spawn } = require('child_process');
 
 const DEV = process.argv.includes('--dev');
 const SMOKE = process.argv.includes('--smoke');
@@ -46,15 +56,23 @@ registerSkillsIpc(ipcMain, { skills, runlog: require('../agent/runlog') });
 const { registerMemoryIpc } = require('./ipc-memory');
 registerMemoryIpc(ipcMain, { memory: require('../agent/memory'), models: require('../agent/models'), habits: require('../agent/habits') });
 const marketplace = require('../agent/marketplace');
-const models = require('../agent/models');
 const habits = require('../agent/habits');
 const { McpManager, serverSlug } = require('../agent/mcp');
 const { registerMcpIpc } = require('./ipc-mcp');
 const mcpConfig = require('./mcp-config');
 // config es un único objeto vivo (se muta, no se reasigna): ctx.config() lo lee siempre fresco.
-registerMcpIpc(ipcMain, { config: () => config, wireMcp, persistConfig, mcpState, mcpExport,
-  setAgentPolicy: (sec) => { if (agent) agent.setPolicy(sec); },
-  mcpConfig, serverSlug });
+registerMcpIpc(ipcMain, {
+  config: () => config,
+  wireMcp,
+  persistConfig,
+  mcpState,
+  mcpExport,
+  setAgentPolicy: (sec) => {
+    if (agent) agent.setPolicy(sec);
+  },
+  mcpConfig,
+  serverSlug,
+});
 
 // Solo para probar el actualizador: apunta la comprobación a otra API de releases
 // (p. ej. un JSON local con una versión inventada) y hace que también se compruebe
@@ -66,7 +84,9 @@ registerMcpIpc(ipcMain, { config: () => config, wireMcp, persistConfig, mcpState
 const UPDATE_API_RAW = process.env.SAGITARI_UPDATE_API || '';
 const UPDATE_API = !app.isPackaged ? UPDATE_API_RAW : '';
 if (UPDATE_API_RAW && app.isPackaged) {
-  try { console.warn('SAGITARI_UPDATE_API ignorada en la app instalada (solo dev).'); } catch {}
+  try {
+    console.warn('SAGITARI_UPDATE_API ignorada en la app instalada (solo dev).');
+  } catch {}
 }
 
 // Windows usa este identificador para asociar la ventana con su icono y agruparla
@@ -82,7 +102,9 @@ if (process.platform === 'win32') app.setAppUserModelId(APP_USER_MODEL_ID);
 // probar.bat se cerraba solo, en silencio. Eso era «la app se cierra».
 // Se fija ANTES de pedir el bloqueo, que se calcula a partir de esta ruta.
 if (HEADLESS) {
-  try { app.setPath('userData', path.join(app.getPath('appData'), 'SagitariAI-test')); } catch {}
+  try {
+    app.setPath('userData', path.join(app.getPath('appData'), 'SagitariAI-test'));
+  } catch {}
 }
 
 // single instance: si ya está abierta, enfoca la ventana existente
@@ -90,38 +112,61 @@ const gotLock = app.requestSingleInstanceLock();
 if (!gotLock) {
   // OJO: salir en silencio aquí es lo que hacía parecer que «la app se cierra».
   // La instancia que ya corre recibe 'second-instance' y se muestra sola.
-  try { process.stdout.write('SAGITARI ya está abierta: se muestra la ventana existente.\n'); } catch {}
+  try {
+    process.stdout.write('SAGITARI ya está abierta: se muestra la ventana existente.\n');
+  } catch {}
   app.quit();
 }
 app.on('second-instance', () => showWindow());
 
 // ---------- config ----------
-const CONFIG_DIR = DATA_DIR;   // la misma raíz que usan los módulos de agent/ (ver arriba)
+const CONFIG_DIR = DATA_DIR; // la misma raíz que usan los módulos de agent/ (ver arriba)
 const LEGACY_CONFIG = path.join(app.getPath('appData'), 'JarvisAI', 'config.json');
 const CONFIG_FILE = path.join(CONFIG_DIR, 'config.json');
 let config = {
-  providers: [],                 // [{id, name, baseUrl, apiKey, models:[], activeModel}]
-  active: null,                  // {providerId, name, baseUrl, apiKey, model, temperature, vision}
-  settings: { theme: 'violet', uiColor: 'aurora', glowColor: 'match', glowStrength: 1, glassTint: 1, ttsEnabled: true, voiceLang: 'es-ES', glowEnabled: true, userName: 'Darío', mode: 'act', maxConcurrentTasks: 1, autoResumeTasks: true, llmTimeoutMs: 120000, showThinking: false, reviewGate: true, parallelTools: 3, diagnosticosEscritura: true, verificacionCierre: true, intentosArreglo: 2, promptCache: true,
-    hookEditar: '', hookCerrar: '' },
-  mcp: { enabled: true, servers: [] },   // servidores MCP del usuario (ver main/mcp-config.js)
+  providers: [], // [{id, name, baseUrl, apiKey, models:[], activeModel}]
+  active: null, // {providerId, name, baseUrl, apiKey, model, temperature, vision}
+  settings: {
+    theme: 'violet',
+    uiColor: 'aurora',
+    glowColor: 'match',
+    glowStrength: 1,
+    glassTint: 1,
+    ttsEnabled: true,
+    voiceLang: 'es-ES',
+    glowEnabled: true,
+    userName: 'Darío',
+    mode: 'act',
+    maxConcurrentTasks: 1,
+    autoResumeTasks: true,
+    llmTimeoutMs: 120000,
+    showThinking: false,
+    reviewGate: true,
+    parallelTools: 3,
+    diagnosticosEscritura: true,
+    verificacionCierre: true,
+    intentosArreglo: 2,
+    promptCache: true,
+    hookEditar: '',
+    hookCerrar: '',
+  },
+  mcp: { enabled: true, servers: [] }, // servidores MCP del usuario (ver main/mcp-config.js)
 };
 
 /* ---- v1.1 seguridad: permisos por herramienta + guardarraíles (configurables) ---- */
 const securityDefaults = {
-  permissions: {},               // { toolName: 'safe'|'confirm'|'restricted' } — vacío = defaults
+  permissions: {}, // { toolName: 'safe'|'confirm'|'restricted' } — vacío = defaults
   guardrails: {
-    maxSteps: 60,                // 0 = sin límite
-    maxToolCalls: 80,            // 0 = sin límite
+    maxSteps: 60, // 0 = sin límite
+    maxToolCalls: 80, // 0 = sin límite
     maxDurationMs: 15 * 60 * 1000, // 0 = sin límite
-    maxTokens: 0,                // 0 = sin límite
-    maxCostUsd: 0,               // 0 = sin límite (coste estimado en USD)
-    maxDelegations: 8,           // subagentes por turno (0 = sin tope)
-    loopThreshold: 3,            // llamadas idénticas seguidas antes de parar
-    stallThreshold: 6,           // pasos sin progreso antes de parar (0 = sin límite)
+    maxTokens: 0, // 0 = sin límite
+    maxCostUsd: 0, // 0 = sin límite (coste estimado en USD)
+    maxDelegations: 8, // subagentes por turno (0 = sin tope)
+    loopThreshold: 3, // llamadas idénticas seguidas antes de parar
+    stallThreshold: 6, // pasos sin progreso antes de parar (0 = sin límite)
   },
 };
-let providersChanged = false;
 
 /* ---------- claves de API en disco ----------
    Las claves se guardan cifradas con el almacén del sistema (DPAPI en Windows vía
@@ -131,18 +176,27 @@ let providersChanged = false;
    guarda en claro y queda constancia en el log: antes se hacía siempre. */
 const KEY_PREFIX = 'enc:v1:';
 function encryptionAvailable() {
-  try { return safeStorage.isEncryptionAvailable(); } catch { return false; }
+  try {
+    return safeStorage.isEncryptionAvailable();
+  } catch {
+    return false;
+  }
 }
 function protectKey(k) {
   if (typeof k !== 'string' || !k) return k;
-  if (k.startsWith(KEY_PREFIX)) return k;                 // ya estaba cifrada
+  if (k.startsWith(KEY_PREFIX)) return k; // ya estaba cifrada
   if (!encryptionAvailable()) return k;
-  try { return KEY_PREFIX + safeStorage.encryptString(k).toString('base64'); } catch { return k; }
+  try {
+    return KEY_PREFIX + safeStorage.encryptString(k).toString('base64');
+  } catch {
+    return k;
+  }
 }
 function revealKey(k) {
   if (typeof k !== 'string' || !k.startsWith(KEY_PREFIX)) return k;
-  try { return safeStorage.decryptString(Buffer.from(k.slice(KEY_PREFIX.length), 'base64')); }
-  catch {
+  try {
+    return safeStorage.decryptString(Buffer.from(k.slice(KEY_PREFIX.length), 'base64'));
+  } catch {
     // No se pudo descifrar (config copiada de otro equipo o perfil, o clave
     // maestra recreada). Se devuelve el CRIPTOGRAMA tal cual para que el
     // siguiente guardado no lo pise con una cadena vacía: antes la credencial se
@@ -178,21 +232,22 @@ function needsKeyEncryption() {
   if (sinCifrar(config.active) || (config.providers || []).some(sinCifrar)) return true;
   // los secretos de un servidor MCP también cuentan: si se quedaran en claro, un
   // config.json copiado expondría los tokens igual que antes con las claves
-  return ((config.mcp && config.mcp.servers) || []).some(s => [...Object.values(s.env || {}), ...Object.values(s.headers || {})]
-    .some(v => v && !String(v).startsWith(KEY_PREFIX)));
+  return ((config.mcp && config.mcp.servers) || []).some((s) =>
+    [...Object.values(s.env || {}), ...Object.values(s.headers || {})].some((v) => v && !String(v).startsWith(KEY_PREFIX)),
+  );
 }
 
 function applyConfig(raw) {
   config = { ...config, ...raw, settings: { ...config.settings, ...(raw.settings || {}) } };
   // de disco llegan cifradas: en memoria el agente necesita el valor real
   if (config.active && config.active.apiKey) config.active = { ...config.active, apiKey: revealKey(config.active.apiKey) };
-  config.providers = (config.providers || []).map(p => (p && p.apiKey ? { ...p, apiKey: revealKey(p.apiKey) } : p));
+  config.providers = (config.providers || []).map((p) => (p && p.apiKey ? { ...p, apiKey: revealKey(p.apiKey) } : p));
   config.security = {
-    permissions: { ...(raw.security && raw.security.permissions || {}) },
-    guardrails: { ...securityDefaults.guardrails, ...(raw.security && raw.security.guardrails || {}) },
+    permissions: { ...((raw.security && raw.security.permissions) || {}) },
+    guardrails: { ...securityDefaults.guardrails, ...((raw.security && raw.security.guardrails) || {}) },
   };
   // MCP: la lista de servidores la valida el módulo puro (comando, URL, timeout)
-  const mcpRaw = (raw.mcp && Array.isArray(raw.mcp.servers)) ? raw.mcp.servers : [];
+  const mcpRaw = raw.mcp && Array.isArray(raw.mcp.servers) ? raw.mcp.servers : [];
   const servers = [];
   for (const s of mcpRaw) {
     const v = mcpConfig.validateServer(s);
@@ -201,7 +256,10 @@ function applyConfig(raw) {
   config.mcp = { enabled: raw.mcp ? raw.mcp.enabled !== false : true, servers };
 }
 function loadConfig() {
-  try { applyConfig(JSON.parse(fs.readFileSync(CONFIG_FILE, 'utf8'))); return; } catch (e) {
+  try {
+    applyConfig(JSON.parse(fs.readFileSync(CONFIG_FILE, 'utf8')));
+    return;
+  } catch (e) {
     // config.json ilegible: antes de dar la configuración por perdida se prueba
     // la copia .bak que deja cada guardado.
     try {
@@ -229,7 +287,9 @@ function writeJsonAtomic(file, data) {
   const tmp = file + '.tmp';
   fs.mkdirSync(path.dirname(file), { recursive: true });
   fs.writeFileSync(tmp, data, 'utf8');
-  try { if (fs.existsSync(file)) fs.copyFileSync(file, file + '.bak'); } catch {}
+  try {
+    if (fs.existsSync(file)) fs.copyFileSync(file, file + '.bak');
+  } catch {}
   fs.renameSync(tmp, file);
 }
 function saveConfig() {
@@ -269,7 +329,7 @@ function persistConfig() {
 
 // ---------- windows ----------
 const INDEX_HTML = path.join(__dirname, '..', 'renderer', 'index.html');
-let win = null;        // chat
+let win = null; // chat
 
 function createChatWindow() {
   const { width, height } = screen.getPrimaryDisplay().workAreaSize;
@@ -296,11 +356,11 @@ function createChatWindow() {
       preload: path.join(__dirname, 'preload.js'),
       contextIsolation: true,
       nodeIntegration: false,
-      sandbox: true,          // el preload solo usa contextBridge + ipcRenderer
-      spellcheck: false
+      sandbox: true, // el preload solo usa contextBridge + ipcRenderer
+      spellcheck: false,
     },
     icon: path.join(__dirname, '..', 'renderer', 'assets', 'sagitari.ico'),
-    show: !HIDDEN
+    show: !HIDDEN,
   });
   /* Icono de la ventana (barra de tareas). Ya viaja en las opciones de arriba, pero en
      Windows el icono del botón de la barra puede quedarse con el del ejecutable si la
@@ -309,7 +369,9 @@ function createChatWindow() {
      `electron.exe`, así que ahí puede verse el de Electron: es del binario, no de la app
      (las versiones publicadas llevan el nuestro, con sus seis tamaños). */
   if (process.platform === 'win32') {
-    try { win.setIcon(path.join(__dirname, '..', 'renderer', 'assets', 'sagitari.ico')); } catch {}
+    try {
+      win.setIcon(path.join(__dirname, '..', 'renderer', 'assets', 'sagitari.ico'));
+    } catch {}
   }
   win.loadFile(INDEX_HTML);
   // La ventana no navega fuera de su index.html local: si un enlace o un script
@@ -329,8 +391,14 @@ function createChatWindow() {
   win.webContents.on('did-finish-load', () => win.webContents.send('win:maximized', win.isMaximized()));
   // si el renderer se cae, la confirmación pendiente ya no la puede contestar
   // nadie: se detiene el agente en limpio en vez de dejarlo colgado esperando
-  win.webContents.on('render-process-gone', () => { try { if (agent) agent.stop(); } catch {} });
-  win.on('closed', () => { win = null; });
+  win.webContents.on('render-process-gone', () => {
+    try {
+      if (agent) agent.stop();
+    } catch {}
+  });
+  win.on('closed', () => {
+    win = null;
+  });
   // cerrar = cerrar de verdad: X sale de la app completa (antes se ocultaba y
   // quedaban procesos vivos). Para ocultar/mostrar: Ctrl+Alt+S o la bandeja.
   win.on('maximize', () => win.webContents.send('win:maximized', true));
@@ -359,15 +427,24 @@ function createTray() {
     if (!fs.existsSync(ico)) return;
     tray = new Tray(ico);
     tray.setToolTip('SAGITARI — tu asistente');
-    tray.setContextMenu(Menu.buildFromTemplate([
-      { label: 'Mostrar SAGITARI', click: () => showWindow() },
-      { label: 'Ocultar ventana', click: () => { if (win && !win.isDestroyed()) win.hide(); } },
-      { type: 'separator' },
-      { label: 'Salir', click: () => app.quit() },
-    ]));
+    tray.setContextMenu(
+      Menu.buildFromTemplate([
+        { label: 'Mostrar SAGITARI', click: () => showWindow() },
+        {
+          label: 'Ocultar ventana',
+          click: () => {
+            if (win && !win.isDestroyed()) win.hide();
+          },
+        },
+        { type: 'separator' },
+        { label: 'Salir', click: () => app.quit() },
+      ]),
+    );
     tray.on('click', () => showWindow());
     tray.on('double-click', () => showWindow());
-  } catch (e) { tray = null; }
+  } catch (e) {
+    tray = null;
+  }
 }
 
 // El glow vive en el marco de la propia app (renderer), no en un overlay de pantalla.
@@ -378,8 +455,8 @@ function glow(mode, color) {
 
 // ---------- agent wiring (v1.3: agentes de chat Y de background) ----------
 const browser = new Browser();
-let agent = null;            // agente del chat interactivo
-let taskManager = null;      // cola de tareas en background (agent/tasks.js)
+let agent = null; // agente del chat interactivo
+let taskManager = null; // cola de tareas en background (agent/tasks.js)
 // (el dictado push-to-talk vive en main/ipc-voz.js — quinto router de la fase 4)
 
 const runlog = require('../agent/runlog');
@@ -401,15 +478,26 @@ function registrarFallo(kind, err) {
   try {
     const dir = path.join(CONFIG_DIR, 'logs');
     fs.mkdirSync(dir, { recursive: true });
-    fs.appendFileSync(path.join(dir, 'crash.log'),
-      JSON.stringify({ ts: new Date().toISOString(), kind, version: app.getVersion(), message, stack }) + '\n', 'utf8');
+    fs.appendFileSync(
+      path.join(dir, 'crash.log'),
+      JSON.stringify({ ts: new Date().toISOString(), kind, version: app.getVersion(), message, stack }) + '\n',
+      'utf8',
+    );
   } catch {}
-  try { runlog.log({ agent: 'sagitari', event: 'crash', kind, message: message.slice(0, 300) }); } catch {}
-  try { console.error('[SAGITARI] ' + kind + ': ' + message); } catch {}
+  try {
+    runlog.log({ agent: 'sagitari', event: 'crash', kind, message: message.slice(0, 300) });
+  } catch {}
+  try {
+    console.error('[SAGITARI] ' + kind + ': ' + message);
+  } catch {}
   // un aviso por tipo como máximo: si el fallo se repite en bucle, no molesta
   if (avisosDeFallo++ < 3) {
     try {
-      if (win && !win.isDestroyed()) win.webContents.send('agent:event', { type: 'error', message: 'Fallo interno (' + kind + '): ' + message.slice(0, 200) + '\nSe ha guardado en logs\\crash.log' });
+      if (win && !win.isDestroyed())
+        win.webContents.send('agent:event', {
+          type: 'error',
+          message: 'Fallo interno (' + kind + '): ' + message.slice(0, 200) + '\nSe ha guardado en logs\\crash.log',
+        });
       else dialog.showErrorBox('SAGITARI — fallo interno', message.slice(0, 400) + '\n\nDetalle completo en logs\\crash.log');
     } catch {}
   }
@@ -436,10 +524,10 @@ function agentEmit(e, isBackground) {
       const c = currentConv();
       if (c && e.text) {
         const tt = trazaActual();
-        const conTraza = (tt && (tt.tools.length || (tt.think && tt.think.text) || (tt.todos && tt.todos.length))) ? tt : null;
+        const conTraza = tt && (tt.tools.length || (tt.think && tt.think.text) || (tt.todos && tt.todos.length)) ? tt : null;
         // Se guarda la narración COMPLETA del turno, no solo el párrafo final:
         // reabrir la conversación enseña lo mismo que se vio en vivo.
-        const completo = (e.transcript && e.transcript.length > e.text.length) ? e.transcript : e.text;
+        const completo = e.transcript && e.transcript.length > e.text.length ? e.transcript : e.text;
         c.messages.push({ role: 'assistant', content: completo, ts: Date.now(), ...(conTraza ? { trace: conTraza } : {}) });
         c.updatedAt = Date.now();
         saveConvs();
@@ -474,11 +562,13 @@ function createAgent(isBackground = false) {
       return { dataUrl: b64, w: s.thumbnail.getSize().width, h: s.thumbnail.getSize().height };
     },
     browser,
-    mcp: wireMcp(),   // el ejecutor despacha mcp__*: sin esto, «no hay servidores MCP en esta ejecución»
+    mcp: wireMcp(), // el ejecutor despacha mcp__*: sin esto, «no hay servidores MCP en esta ejecución»
   });
 }
 
-function wireAgent() { agent = createAgent(false); }
+function wireAgent() {
+  agent = createAgent(false);
+}
 
 // ---- v1.3: TaskManager — cola de tareas en background con notificaciones ----
 function wireTaskManager() {
@@ -489,9 +579,21 @@ function wireTaskManager() {
     // el chat y las tareas comparten run store: «Reanudar» no puede lanzar un
     // segundo agente sobre el run que el chat está ejecutando ahora mismo
     isRunBusy: (runId) => !!(agent && agent.isBusy() && agent.currentRunId === runId),
-    emit: (e) => { if (win && !win.isDestroyed()) win.webContents.send('agent:event', e); },
+    emit: (e) => {
+      if (win && !win.isDestroyed()) win.webContents.send('agent:event', e);
+    },
     notify: (run, kind) => {
-      const title = 'SAGITARI — tarea ' + (kind === 'completed' ? 'completada' : kind === 'failed' ? 'falló' : kind === 'cancelled' ? 'cancelada' : kind === 'paused' ? 'pausada' : 'actualizada');
+      const title =
+        'SAGITARI — tarea ' +
+        (kind === 'completed'
+          ? 'completada'
+          : kind === 'failed'
+            ? 'falló'
+            : kind === 'cancelled'
+              ? 'cancelada'
+              : kind === 'paused'
+                ? 'pausada'
+                : 'actualizada');
       const body = String(run.goal || '').slice(0, 120);
       try {
         const { Notification } = require('electron');
@@ -509,8 +611,7 @@ function wireTaskManager() {
    (cuarto router de la fase 4). Los helpers de secretos se importan aquí porque
    mcpState() (dominio MCP) los usa para enmascarar env/headers. */
 const { registerConfigIpc, enmascararMapaSecretos, claveGuardadaPara } = require('./ipc-config');
-registerConfigIpc(ipcMain, { config: () => config, persistConfig, PRESETS, listModels,
-  glow, getWin: () => win, isHidden: () => HIDDEN });
+registerConfigIpc(ipcMain, { config: () => config, persistConfig, PRESETS, listModels, glow, getWin: () => win, isHidden: () => HIDDEN });
 
 // ---- modo/agentes/market: router en main/ipc-modo.js (noveno router de la fase 4) ----
 const { registerModoIpc } = require('./ipc-modo');
@@ -524,29 +625,57 @@ registerModoIpc(ipcMain, {
   fsp,
 });
 
-
 // ---- chat/adjuntos/traza: router en main/ipc-chat.js (octavo router de la fase 4) ----
 
 const checkpoints = require('../agent/checkpoints');
-const cambios = require('../agent/cambios');    // v2.5: pre-imágenes del turno (revisión y deshacer)
-const repomap = require('../agent/repomap');    // v2.5: hay que invalidarlo cuando se deshace
+const cambios = require('../agent/cambios'); // v2.5: pre-imágenes del turno (revisión y deshacer)
+const repomap = require('../agent/repomap'); // v2.5: hay que invalidarlo cuando se deshace
 const instrucciones = require('../agent/instrucciones'); // v2.5: SAGITARI.md / AGENTS.md del proyecto
 
 // ---- tareas/seguridad/meta: router en main/ipc-tareas.js (sexto router de la fase 4) ----
 const { registerTareasIpc } = require('./ipc-tareas');
-registerTareasIpc(ipcMain, { config: () => config, persistConfig, getTaskManager: () => wireTaskManager(), peekTaskManager: () => taskManager, checkpoints, getAgent: () => agent, securityDefaults, DEFAULT_RISK, CONFIG_DIR, runlog, getWin: () => win });
+registerTareasIpc(ipcMain, {
+  config: () => config,
+  persistConfig,
+  getTaskManager: () => wireTaskManager(),
+  peekTaskManager: () => taskManager,
+  checkpoints,
+  getAgent: () => agent,
+  securityDefaults,
+  DEFAULT_RISK,
+  CONFIG_DIR,
+  runlog,
+  getWin: () => win,
+});
 
 // ---- conversaciones/workspace: router en main/ipc-convs.js (séptimo router de la fase 4) ----
 const { registerConvsIpc } = require('./ipc-convs');
-const convsApi = registerConvsIpc(ipcMain, { config: () => config, saveConfig, configDir: () => CONFIG_DIR, writeJsonAtomic, onSaveError: (m) => avisarDisco(m), getWin: () => win, getAgent: () => agent, dialog, app, fs, path });
-const { currentConv, saveConvs, ensureConv, getWorkspace } = convsApi;
+const convsApi = registerConvsIpc(ipcMain, {
+  config: () => config,
+  saveConfig,
+  configDir: () => CONFIG_DIR,
+  writeJsonAtomic,
+  onSaveError: (m) => avisarDisco(m),
+  getWin: () => win,
+  getAgent: () => agent,
+  dialog,
+  app,
+  fs,
+  path,
+});
+const { currentConv, saveConvs, getWorkspace } = convsApi;
 
 // ---- cambios/instrucciones: router en main/ipc-cambios.js (undécimo router de la fase 4) ----
 const { registerCambiosIpc } = require('./ipc-cambios');
 registerCambiosIpc(ipcMain, {
   getAgent: () => agent,
   getWorkspace,
-  cambios, repomap, instrucciones, runlog, fs, path,
+  cambios,
+  repomap,
+  instrucciones,
+  runlog,
+  fs,
+  path,
 });
 
 // ---- app/shell/glow: router en main/ipc-misc.js (décimo router de la fase 4) ----
@@ -558,7 +687,12 @@ registerMiscIpc(ipcMain, {
   getWorkspace,
   configDir: () => CONFIG_DIR,
   getGlow: (...a) => glow(...a),
-  app, shell, dialog, fsp, fs, path,
+  app,
+  shell,
+  dialog,
+  fsp,
+  fs,
+  path,
 });
 
 // ---- chat/adjuntos/traza: router en main/ipc-chat.js (octavo router de la fase 4) ----
@@ -566,14 +700,21 @@ const { registerChatIpc } = require('./ipc-chat');
 registerChatIpc(ipcMain, {
   config: () => config,
   getAgent: () => agent,
-  ensureAgent: () => { if (!agent) wireAgent(); return agent; },
+  ensureAgent: () => {
+    if (!agent) wireAgent();
+    return agent;
+  },
   convsApi,
   getSkills: () => skills,
   getGlow: (...a) => glow(...a),
   getWin: () => win,
   configDir: () => CONFIG_DIR,
   onError: (k, err) => registrarFallo(k, err),
-  dialog, fsp, fs, path, attach: require('./attachments'),
+  dialog,
+  fsp,
+  fs,
+  path,
+  attach: require('./attachments'),
 });
 
 /* ---------- v3.1: servidores MCP del usuario ---------- */
@@ -588,10 +729,14 @@ registerChatIpc(ipcMain, {
    con un id con guion o de más de 16 caracteres el id crudo no coincidiría con el
    nombre real (y el nivel por servidor no llegaría a aplicarse). */
 function mcpState() {
-  const vivo = new Map(wireMcp().status().map(s => [s.id, s]));
+  const vivo = new Map(
+    wireMcp()
+      .status()
+      .map((s) => [s.id, s]),
+  );
   return {
     enabled: config.mcp.enabled !== false,
-    servers: (config.mcp.servers || []).map(s => {
+    servers: (config.mcp.servers || []).map((s) => {
       const v = vivo.get(s.id) || {};
       return {
         ...s,
@@ -614,14 +759,13 @@ function mcpState() {
 function mcpExport() {
   const mcpServers = {};
   for (const s of config.mcp.servers || []) {
-    mcpServers[s.id] = s.transport === 'http'
-      ? { url: s.url, headers: { ...(s.headers || {}) } }
-      : { command: s.command, args: [...(s.args || [])], env: { ...(s.env || {}) } };
+    mcpServers[s.id] =
+      s.transport === 'http'
+        ? { url: s.url, headers: { ...(s.headers || {}) } }
+        : { command: s.command, args: [...(s.args || [])], env: { ...(s.env || {}) } };
   }
   return { mcpServers };
 }
-
-
 
 // ---- voz/TTS/dictado: router en main/ipc-voz.js (quinto router de la fase 4) ----
 const { registerVozIpc } = require('./ipc-voz');
@@ -639,7 +783,9 @@ function seedStarterSkills() {
         fs.copyFileSync(path.join(src, name, 'SKILL.md'), dest);
       }
     }
-  } catch (e) { console.error('seedStarterSkills', e.message); }
+  } catch (e) {
+    console.error('seedStarterSkills', e.message);
+  }
 }
 
 // ---- actualizaciones: router en main/ipc-update.js (duodécimo router de la fase 4) ----
@@ -648,12 +794,18 @@ const updateApi = registerUpdateIpc(ipcMain, {
   config: () => config,
   saveConfig,
   getWin: () => win,
-  updater, UPDATE_API, DATA_DIR, runlog,
-  app, shell, fsp, fs, path,
+  updater,
+  UPDATE_API,
+  DATA_DIR,
+  runlog,
+  app,
+  shell,
+  fsp,
+  fs,
+  path,
 });
 
 // ---- cambios/instrucciones: router en main/ipc-cambios.js (undécimo router de la fase 4) ----
-
 
 /* --------------------------------------------------------------------------- *
  *  `--banco`: el banco de pruebas de tareas (npm run banco)
@@ -665,11 +817,15 @@ const updateApi = registerUpdateIpc(ipcMain, {
  * --------------------------------------------------------------------------- */
 async function correrBancoYsalir() {
   const banco = require('../agent/banco');
-  const arg = (n) => { const i = process.argv.indexOf(n); return i >= 0 && i + 1 < process.argv.length ? process.argv[i + 1] : null; };
+  const arg = (n) => {
+    const i = process.argv.indexOf(n);
+    return i >= 0 && i + 1 < process.argv.length ? process.argv[i + 1] : null;
+  };
   const hay = (n) => process.argv.includes(n);
   if (!config.active || !config.active.baseUrl || !config.active.model) {
     console.error('[banco] no hay proveedor activo con modelo: configúralo en Ajustes y vuelve a intentarlo');
-    app.exit(2); return;
+    app.exit(2);
+    return;
   }
   const dirTareas = arg('--dir') || banco.DIR_POR_DEFECTO;
   const filtro = arg('--tarea');
@@ -682,9 +838,11 @@ async function correrBancoYsalir() {
     // Cada tarea estrena agente: reutilizarlo arrastraría el historial de la anterior
     // (y mediría un agente con ventaja, que es justo lo que no queremos).
     nuevoAgente: () => {
-      const a = new Agent({ emit: (e) => {
-        if (e && e.type === 'tool' && e.name) process.stdout.write('    · ' + e.name + '\n');
-      } });
+      const a = new Agent({
+        emit: (e) => {
+          if (e && e.type === 'tool' && e.name) process.stdout.write('    · ' + e.name + '\n');
+        },
+      });
       a.setPolicy(config.security);
       return a;
     },
@@ -701,7 +859,10 @@ async function correrBancoYsalir() {
   let codigo = informe.resumen.pasaron === informe.resumen.tareas ? 0 : 1;
   if (hay('--guardar-base') || hay('--base')) {
     const fBase = path.join(__dirname, '..', 'bench', 'linea-base.json');
-    if (hay('--guardar-base')) { banco.guardarBase(fBase, informe); console.log('  Línea base actualizada: ' + fBase); }
+    if (hay('--guardar-base')) {
+      banco.guardarBase(fBase, informe);
+      console.log('  Línea base actualizada: ' + fBase);
+    }
     if (hay('--base')) {
       const base = banco.leerBase(fBase);
       if (!base) console.log('  (sin línea base con la que comparar)');
@@ -712,7 +873,20 @@ async function correrBancoYsalir() {
         for (const r of c.mejoras) console.log('    mejor      ' + r.nombre);
         for (const r of c.nuevos) console.log('    nueva      ' + r.nombre + (r.pasa ? ' (pasa)' : ' (falla)'));
         for (const r of c.faltantes) console.log('    ya no está ' + r.nombre);
-        for (const a of c.avisos) console.log('    más caro   ' + a.nombre + ': ' + Math.round(a.antesMs / 1000) + 's→' + Math.round(a.ms / 1000) + 's, ' + a.antesTokens + '→' + a.tokens + ' tokens');
+        for (const a of c.avisos)
+          console.log(
+            '    más caro   ' +
+              a.nombre +
+              ': ' +
+              Math.round(a.antesMs / 1000) +
+              's→' +
+              Math.round(a.ms / 1000) +
+              's, ' +
+              a.antesTokens +
+              '→' +
+              a.tokens +
+              ' tokens',
+          );
         if (c.hayRegresion) codigo = 1;
       }
     }
@@ -723,17 +897,25 @@ async function correrBancoYsalir() {
 app.whenReady().then(() => {
   if (!gotLock) return;
   loadConfig();
-  if (BANCO) { correrBancoYsalir().catch((e) => { console.error('[banco] ' + ((e && e.message) || e)); app.exit(1); }); return; }
+  if (BANCO) {
+    correrBancoYsalir().catch((e) => {
+      console.error('[banco] ' + ((e && e.message) || e));
+      app.exit(1);
+    });
+    return;
+  }
   // ¿se quedó una instalación a medias en la sesión anterior? `pendingFor` la
   // descarta sola si ya estamos en la versión nueva (o si el aviso está roto).
   updateApi.setPending(updater.pendingFor(updateApi.readPending(), app.getVersion()));
-  if (!updateApi.getPending()) { updateApi.clearPendingFile(); }
+  if (!updateApi.getPending()) {
+    updateApi.clearPendingFile();
+  }
   // migración: un config.json de una versión anterior trae las claves en claro;
   // se reescribe cifrado en cuanto arranca (el .bak conserva la copia previa)
   if (needsKeyEncryption()) {
     const r = saveConfig();
     if (r.ok) console.log('[SAGITARI] claves de API cifradas con el almacén del sistema (' + CONFIG_FILE + ')');
-  } else if (!encryptionAvailable() && ((config.providers || []).some(p => p && p.apiKey))) {
+  } else if (!encryptionAvailable() && (config.providers || []).some((p) => p && p.apiKey)) {
     console.warn('[SAGITARI] el sistema no ofrece cifrado: las claves se guardan en claro en config.json');
   }
   // Reparación: si el proveedor activo se quedó sin clave pero el proveedor
@@ -767,20 +949,30 @@ app.whenReady().then(() => {
   wireMcp();
   // Con el interruptor global apagado no se conecta nada: arrancar procesos para un
   // catálogo que no se va a servir es trabajo y ruido inútiles.
-  if (config.mcp.enabled !== false) for (const s of config.mcp.servers || []) if (s.autoStart && s.enabled) mcp.ensure(s.id).catch(() => {});
+  if (config.mcp.enabled !== false)
+    for (const s of config.mcp.servers || []) if (s.autoStart && s.enabled) mcp.ensure(s.id).catch(() => {});
   createChatWindow();
   createTray();
 
   // comprobación silenciosa 12 s después de arrancar: si hay versión nueva, el
   // renderer muestra un aviso discreto y el botón queda en Ajustes. Nunca
   // interrumpe ni descarga nada por su cuenta (y no corre en los modos de prueba).
-  if (!HEADLESS || UPDATE_API) setTimeout(() => { updateApi.checkUpdates({ announce: true }).catch(() => {}); }, 12000);
+  if (!HEADLESS || UPDATE_API)
+    setTimeout(() => {
+      updateApi.checkUpdates({ announce: true }).catch(() => {});
+    }, 12000);
   // Si la sesión anterior se quedó a medias instalando, el usuario tiene que
   // enterarse (y poder reintentarlo): para instalar se cierra la app, así que
   // este es el único momento en que se le puede contar.
-  if (updateApi.getPending() && (!HEADLESS || UPDATE_API)) setTimeout(() => {
-    sendUpdate({ type: 'install-failed', version: updateApi.getPending().version, path: updateApi.getPending().path, exists: fs.existsSync(updateApi.getPending().path) });
-  }, 12000);
+  if (updateApi.getPending() && (!HEADLESS || UPDATE_API))
+    setTimeout(() => {
+      sendUpdate({
+        type: 'install-failed',
+        version: updateApi.getPending().version,
+        path: updateApi.getPending().path,
+        exists: fs.existsSync(updateApi.getPending().path),
+      });
+    }, 12000);
 
   // Alt+Espacio era el atajo para ocultar la ventana, pero es el menú de sistema
   // de Windows: robarlo a nivel global con la app oculta y sin bandeja dejaba
@@ -791,7 +983,9 @@ app.whenReady().then(() => {
     win.isVisible() ? win.hide() : showWindow();
   });
   globalShortcut.register('Alt+Shift+S', () => showWindow());
-  globalShortcut.register('CommandOrControl+Shift+G', () => { win && win.isVisible() ? glow('pulse') : null; });
+  globalShortcut.register('CommandOrControl+Shift+G', () => {
+    win && win.isVisible() ? glow('pulse') : null;
+  });
 
   if (SMOKE) {
     setTimeout(async () => {
@@ -807,12 +1001,35 @@ app.whenReady().then(() => {
 
 app.on('window-all-closed', () => app.quit());
 app.on('before-quit', async () => {
-  try { await vozApi.cerrar(); } catch {}   // dictado + modo voz: reintento desarmado, procesos fuera
+  try {
+    await vozApi.cerrar();
+  } catch {} // dictado + modo voz: reintento desarmado, procesos fuera
   globalShortcut.unregisterAll();
-  if (tray) { try { tray.destroy(); } catch {} tray = null; }
-  if (taskManager) { try { taskManager.stopAll(); } catch {} }      // tareas en background → interrupted
-  if (agent && agent.isBusy()) { try { agent.stop(); } catch {} }   // chat en curso
-  if (mcp) { try { mcp.shutdown(); } catch {} }                 // servidores MCP: procesos hijos fuera
-  try { browser.ws && browser.send('Browser.close'); } catch {} // Chrome/Edge lanzado por CDP
-  try { runlog.close(); } catch {}                              // logs de sesión
+  if (tray) {
+    try {
+      tray.destroy();
+    } catch {}
+    tray = null;
+  }
+  if (taskManager) {
+    try {
+      taskManager.stopAll();
+    } catch {}
+  } // tareas en background → interrupted
+  if (agent && agent.isBusy()) {
+    try {
+      agent.stop();
+    } catch {}
+  } // chat en curso
+  if (mcp) {
+    try {
+      mcp.shutdown();
+    } catch {}
+  } // servidores MCP: procesos hijos fuera
+  try {
+    browser.ws && browser.send('Browser.close');
+  } catch {} // Chrome/Edge lanzado por CDP
+  try {
+    runlog.close();
+  } catch {} // logs de sesión
 });

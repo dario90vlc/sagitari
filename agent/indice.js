@@ -19,10 +19,39 @@ const fs = require('fs');
 const path = require('path');
 
 const IGNORADOS = new Set([
-  'node_modules', '.git', '.hg', '.svn', 'dist', 'build', 'out', 'target', 'bin', 'obj',
-  '.venv', 'venv', 'env', '__pycache__', '.pytest_cache', '.mypy_cache', '.ruff_cache',
-  '.next', '.nuxt', '.svelte-kit', '.cache', '.parcel-cache', 'coverage', '.nyc_output',
-  'vendor', '.idea', '.vscode', '.gradle', '.terraform', 'tmp', 'temp', 'logs', 'release',
+  'node_modules',
+  '.git',
+  '.hg',
+  '.svn',
+  'dist',
+  'build',
+  'out',
+  'target',
+  'bin',
+  'obj',
+  '.venv',
+  'venv',
+  'env',
+  '__pycache__',
+  '.pytest_cache',
+  '.mypy_cache',
+  '.ruff_cache',
+  '.next',
+  '.nuxt',
+  '.svelte-kit',
+  '.cache',
+  '.parcel-cache',
+  'coverage',
+  '.nyc_output',
+  'vendor',
+  '.idea',
+  '.vscode',
+  '.gradle',
+  '.terraform',
+  'tmp',
+  'temp',
+  'logs',
+  'release',
 ]);
 
 /** Patrones simples del .gitignore (nombres, `*.ext` y `carpeta/`). */
@@ -43,8 +72,14 @@ function reglasIgnoradas(workspace) {
 function ignoradoPorRegla(rel, reglas) {
   for (const r of reglas) {
     if (!r) continue;
-    if (r.startsWith('*.')) { if (rel.endsWith(r.slice(1))) return true; continue; }
-    if (r.includes('/')) { if (rel === r || rel.startsWith(r + '/')) return true; continue; }
+    if (r.startsWith('*.')) {
+      if (rel.endsWith(r.slice(1))) return true;
+      continue;
+    }
+    if (r.includes('/')) {
+      if (rel === r || rel.startsWith(r + '/')) return true;
+      continue;
+    }
     if (rel === r || path.basename(rel) === r) return true;
   }
   return false;
@@ -57,13 +92,16 @@ function ignoradoPorRegla(rel, reglas) {
  *
  * @returns {{ archivos: Array<{ruta, abs, bytes, grande}>, truncado: boolean }}
  */
-function recorrer(workspace, {
-  extensiones = null,       // Set de extensiones en minúsculas, o null para aceptar todas
-  maxFichero = Infinity,    // por encima de esto el archivo se marca como `grande`
-  maxFicheros = 6000,       // tope duro del recorrido
-  maxProfundidad = 8,
-  incluirGithub = false,    // el mapa enseña .github; la búsqueda lo salta como el resto de ocultos
-} = {}) {
+function recorrer(
+  workspace,
+  {
+    extensiones = null, // Set de extensiones en minúsculas, o null para aceptar todas
+    maxFichero = Infinity, // por encima de esto el archivo se marca como `grande`
+    maxFicheros = 6000, // tope duro del recorrido
+    maxProfundidad = 8,
+    incluirGithub = false, // el mapa enseña .github; la búsqueda lo salta como el resto de ocultos
+  } = {},
+) {
   if (!workspace) return { archivos: [], truncado: false };
   const archivos = [];
   let truncado = false;
@@ -72,7 +110,11 @@ function recorrer(workspace, {
   while (pila.length && archivos.length < maxFicheros) {
     const { dir, prof } = pila.pop();
     let entradas;
-    try { entradas = fs.readdirSync(dir, { withFileTypes: true }); } catch { continue; }
+    try {
+      entradas = fs.readdirSync(dir, { withFileTypes: true });
+    } catch {
+      continue;
+    }
     for (const e of entradas) {
       const abs = path.join(dir, e.name);
       const rel = path.relative(workspace, abs).replace(/\\/g, '/');
@@ -80,7 +122,10 @@ function recorrer(workspace, {
         if (IGNORADOS.has(e.name)) continue;
         if (e.name.startsWith('.') && !(incluirGithub && e.name === '.github')) continue;
         if (ignoradoPorRegla(rel, reglas)) continue;
-        if (prof >= maxProfundidad) { truncado = true; continue; }
+        if (prof >= maxProfundidad) {
+          truncado = true;
+          continue;
+        }
         pila.push({ dir: abs, prof: prof + 1 });
         continue;
       }
@@ -88,9 +133,16 @@ function recorrer(workspace, {
       const ext = path.extname(e.name).toLowerCase();
       if (extensiones && !extensiones.has(ext)) continue;
       if (ignoradoPorRegla(rel, reglas)) continue;
-      if (archivos.length >= maxFicheros) { truncado = true; break; }
+      if (archivos.length >= maxFicheros) {
+        truncado = true;
+        break;
+      }
       let st;
-      try { st = fs.statSync(abs); } catch { continue; }
+      try {
+        st = fs.statSync(abs);
+      } catch {
+        continue;
+      }
       archivos.push({ ruta: rel, abs, bytes: st.size, grande: st.size > maxFichero });
     }
   }
@@ -104,6 +156,9 @@ function listarArchivos(workspace, opts = {}) {
 }
 
 module.exports = {
-  recorrer, listarArchivos, reglasIgnoradas, ignoradoPorRegla,
+  recorrer,
+  listarArchivos,
+  reglasIgnoradas,
+  ignoradoPorRegla,
   IGNORADOS,
 };

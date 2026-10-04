@@ -26,14 +26,18 @@ const path = require('path');
 
 const NOMBRES = ['SAGITARI.md', 'AGENTS.md', 'CLAUDE.md', 'sagitari.md', 'agents.md'];
 const NOMBRES_EXTRA = [path.join('.sagitari', 'AGENTS.md'), path.join('.github', 'SAGITARI.md')];
-const MAX_POR_ARCHIVO = 6000;   // caracteres por fichero (≈1.500 tokens)
-const MAX_TOTAL = 9000;         // caracteres del bloque entero
+const MAX_POR_ARCHIVO = 6000; // caracteres por fichero (≈1.500 tokens)
+const MAX_TOTAL = 9000; // caracteres del bloque entero
 
-let _cache = new Map();   // ws -> { firma, texto, fuentes }
+let _cache = new Map(); // ws -> { firma, texto, fuentes }
 
 /** Fichero de instrucciones global (tuyo, vale para todos los proyectos). */
 function rutaGlobal() {
-  try { return path.join(require('./datadir').dataDir(), 'AGENTS.md'); } catch { return null; }
+  try {
+    return path.join(require('./datadir').dataDir(), 'AGENTS.md');
+  } catch {
+    return null;
+  }
 }
 
 /** Rutas candidatas, en orden de prioridad (el proyecto primero). */
@@ -41,7 +45,8 @@ function candidatas(workspace) {
   const out = [];
   if (workspace) {
     const ws = path.resolve(workspace);
-    for (const n of [...NOMBRES, ...NOMBRES_EXTRA]) out.push({ ruta: path.join(ws, n), donde: 'proyecto', etiqueta: n.replace(/\\/g, '/') });
+    for (const n of [...NOMBRES, ...NOMBRES_EXTRA])
+      out.push({ ruta: path.join(ws, n), donde: 'proyecto', etiqueta: n.replace(/\\/g, '/') });
   }
   const g = rutaGlobal();
   if (g) out.push({ ruta: g, donde: 'usuario', etiqueta: 'AGENTS.md (tus reglas globales)' });
@@ -52,8 +57,12 @@ function candidatas(workspace) {
 function firmaDe(lista) {
   const partes = [];
   for (const c of lista) {
-    try { const st = fs.statSync(c.ruta); partes.push(c.ruta + ':' + st.mtimeMs + ':' + st.size); }
-    catch { /* no existe: no cuenta */ }
+    try {
+      const st = fs.statSync(c.ruta);
+      partes.push(c.ruta + ':' + st.mtimeMs + ':' + st.size);
+    } catch {
+      /* no existe: no cuenta */
+    }
   }
   return partes.join('|');
 }
@@ -79,34 +88,50 @@ function leer(workspace) {
        DUPLICADAS en el prompt (mismo texto dos veces, y el doble de tokens). La
        comparación se hace por ruta real, no por el nombre que hemos escrito. */
     let real = c.ruta;
-    try { real = fs.realpathSync(c.ruta); } catch { /* no existe: se ignora abajo */ }
+    try {
+      real = fs.realpathSync(c.ruta);
+    } catch {
+      /* no existe: se ignora abajo */
+    }
     const clave = process.platform === 'linux' ? real : real.toLowerCase();
     if (vistos.has(clave)) continue;
     let bruto = '';
-    try { bruto = fs.readFileSync(c.ruta, 'utf8'); } catch { continue; }
+    try {
+      bruto = fs.readFileSync(c.ruta, 'utf8');
+    } catch {
+      continue;
+    }
     vistos.add(clave);
     bruto = String(bruto).replace(/\r\n/g, '\n').trim();
     if (!bruto) continue;
     let recortado = false;
-    if (bruto.length > MAX_POR_ARCHIVO) { bruto = bruto.slice(0, MAX_POR_ARCHIVO).trimEnd(); recortado = true; }
+    if (bruto.length > MAX_POR_ARCHIVO) {
+      bruto = bruto.slice(0, MAX_POR_ARCHIVO).trimEnd();
+      recortado = true;
+    }
     if (total + bruto.length > MAX_TOTAL) {
       const queda = MAX_TOTAL - total;
-      if (queda < 200) { recortado = true; fuentes.push({ etiqueta: c.etiqueta, ruta: c.ruta, donde: c.donde, chars: 0, recortado: true }); continue; }
+      if (queda < 200) {
+        recortado = true;
+        fuentes.push({ etiqueta: c.etiqueta, ruta: c.ruta, donde: c.donde, chars: 0, recortado: true });
+        continue;
+      }
       bruto = bruto.slice(0, queda).trimEnd();
       recortado = true;
     }
     total += bruto.length;
-    partes.push({ titulo: c.etiqueta + (c.donde === 'usuario' ? '' : ' — ' + c.etiqueta) , texto: bruto, donde: c.donde, recortado });
+    partes.push({ titulo: c.etiqueta + (c.donde === 'usuario' ? '' : ' — ' + c.etiqueta), texto: bruto, donde: c.donde, recortado });
     fuentes.push({ etiqueta: c.etiqueta, ruta: c.ruta, donde: c.donde, chars: bruto.length, recortado });
   }
 
   let texto = '';
   if (partes.length) {
-    const trozos = partes.map(p => `— ${p.titulo}:\n${p.texto}`);
-    texto = 'INSTRUCCIONES DEL PROYECTO (las ha escrito el usuario: son OBLIGATORIAS, ' +
+    const trozos = partes.map((p) => `— ${p.titulo}:\n${p.texto}`);
+    texto =
+      'INSTRUCCIONES DEL PROYECTO (las ha escrito el usuario: son OBLIGATORIAS, ' +
       'mandan sobre tus costumbres y sobre lo que recuerdes de otros repositorios):\n' +
       trozos.join('\n\n');
-    if (partes.some(p => p.recortado)) texto += '\n(recortado por tamaño: léelo entero con read_file si te hace falta)';
+    if (partes.some((p) => p.recortado)) texto += '\n(recortado por tamaño: léelo entero con read_file si te hace falta)';
   }
   _cache.set(clave, { firma, texto, fuentes });
   return { texto, fuentes };
@@ -114,14 +139,24 @@ function leer(workspace) {
 
 /** Bloque listo para pegar en el prompt de sistema, o '' si no hay instrucciones. */
 function bloquePrompt(workspace) {
-  try { return leer(workspace).texto; } catch { return ''; }
+  try {
+    return leer(workspace).texto;
+  } catch {
+    return '';
+  }
 }
 
 /** ¿Hay instrucciones en este espacio de trabajo? (para la UI) */
 function hay(workspace) {
-  try { return leer(workspace).fuentes.length > 0; } catch { return false; }
+  try {
+    return leer(workspace).fuentes.length > 0;
+  } catch {
+    return false;
+  }
 }
 
-function _resetForTests() { _cache = new Map(); }
+function _resetForTests() {
+  _cache = new Map();
+}
 
 module.exports = { leer, bloquePrompt, hay, candidatas, rutaGlobal, NOMBRES, _resetForTests };

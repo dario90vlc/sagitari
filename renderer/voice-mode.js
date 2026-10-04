@@ -10,18 +10,33 @@
  * el orbe siempre late con la voz que importa en ese momento.
  */
 (function () {
-  const ESTADOS = { escuchando: 'Escuchando', oyendo: 'Oyendo', pensando: 'Pensando', hablando: 'Hablando', confirmando: 'Esperando tu permiso', error: 'Atención' };
+  const ESTADOS = {
+    escuchando: 'Escuchando',
+    oyendo: 'Oyendo',
+    pensando: 'Pensando',
+    hablando: 'Hablando',
+    confirmando: 'Esperando tu permiso',
+    error: 'Atención',
+  };
   let abierto = false;
   let estado = 'escuchando';
-  let nivel = 0, objetivo = 0;
-  let raf = 0, t0 = 0, prev = 0;
-  let mic = null, ctxAudio = null, analizadorMic = null;
-  let reproductor = null, analizadorSalida = null, fraseActual = null;
+  let nivel = 0,
+    objetivo = 0;
+  let raf = 0,
+    t0 = 0,
+    prev = 0;
+  let mic = null,
+    ctxAudio = null,
+    analizadorMic = null;
+  let reproductor = null,
+    analizadorSalida = null,
+    fraseActual = null;
   /* Suelo de ruido de la sala y cuánto se ha medido ya. Se mide SOLO del micrófono y
      SOLO mientras el asistente no habla, y se congela: antes se adaptaba sin fin y
      con la fuente que estuviera sonando, así que la propia voz del asistente lo iba
      subiendo y el umbral de interrupción se iba con él hasta no dispararse nunca. */
-  let sueloRuido = 0.01, mediciones = 0;
+  let sueloRuido = 0.01,
+    mediciones = 0;
   let reducido = false;
   /* La calibración dura ~1,5 s (90 fotogramas a 60 Hz): suficiente para medir el
      ambiente y corta para que el orbe no tarde en reaccionar. */
@@ -61,7 +76,8 @@
        sin nada que pulsar (y el turno esperando). Cuando la confirmación se contesta o se
        olvida, `confirmacion` queda a null y el siguiente cambio de estado la esconde. */
     if (!confirmacion && (s === 'escuchando' || s === 'oyendo' || s === 'pensando' || s === 'error')) {
-      const c = $vm('#vmConfirm'); if (c) c.hidden = true;
+      const c = $vm('#vmConfirm');
+      if (c) c.hidden = true;
     }
     /* El botón de parar sólo tiene sentido mientras hay algo que parar: pensando (el agente
        trabaja) o hablando (está leyendo). En los demás estados no hay nada que detener y un
@@ -73,17 +89,25 @@
   /* Punto único: todo lo que ocurre en el modo voz entra por aquí. */
   function handle(ev) {
     if (!ev || !ev.type) return;
-    if (ev.type === 'state') { setEstado(ev.state); return; }
-    if (ev.type === 'level') { objetivo = Math.max(0, Math.min(1, ev.value)); return; }
+    if (ev.type === 'state') {
+      setEstado(ev.state);
+      return;
+    }
+    if (ev.type === 'level') {
+      objetivo = Math.max(0, Math.min(1, ev.value));
+      return;
+    }
     if (ev.type === 'partial') {
-      textoVisto = true;   // para el vigía: texto del motor = no está sordo
+      textoVisto = true; // para el vigía: texto del motor = no está sordo
       setEstado('oyendo');
-      const p = $vm('#vmParcial'); if (p) p.textContent = ev.text;
+      const p = $vm('#vmParcial');
+      if (p) p.textContent = ev.text;
       return;
     }
     if (ev.type === 'final') {
-      textoVisto = true;   // para el vigía: el motor oyó algo de verdad
-      const p = $vm('#vmParcial'); if (p) p.textContent = '';
+      textoVisto = true; // para el vigía: el motor oyó algo de verdad
+      const p = $vm('#vmParcial');
+      if (p) p.textContent = '';
       /* Antes de mandar nada al agente hay tres cosas que se atienden aquí:
          1) la respuesta a una confirmación pendiente («sí»/«no»);
          2) la orden de salir («adiós», «cierra»);
@@ -105,8 +129,13 @@
          la ventana» o un «cierra el navegador» es una ORDEN para el agente y tenía que
          llegarle — el prefijo suelto «cierra» se comía todas esas peticiones y el usuario
          veía cómo su dictado apagaba el panel en vez de hacer el trabajo. */
-      if (/^(adi[oó]s|hasta luego|salir|cierra|cerrar|para|apaga)\s+(el\s+|la\s+)?(modo\s+)?(voz|dictado)\b/i.test(String(ev.text).trim())
-        || /^(adi[oó]s|hasta luego|salir)\b/i.test(String(ev.text).trim())) { cerrar(); return; }
+      if (
+        /^(adi[oó]s|hasta luego|salir|cierra|cerrar|para|apaga)\s+(el\s+|la\s+)?(modo\s+)?(voz|dictado)\b/i.test(String(ev.text).trim()) ||
+        /^(adi[oó]s|hasta luego|salir)\b/i.test(String(ev.text).trim())
+      ) {
+        cerrar();
+        return;
+      }
       /* La confianza se muestra: con menos de 0,5 la frase queda marcada y se puede
          corregir pinchando en ella. El motor falla sobre todo en nombres propios. */
       escribir('Tú', ev.text, ev.confidence);
@@ -120,9 +149,14 @@
       /* La basura («No te he entendido…») prueba que el motor SÍ oyó audio: para el
          vigía cuenta como texto visto. Los HINT del guion no (los suelta un motor sordo). */
       if (/no te he entendido/i.test(ev.text)) textoVisto = true;
-      pista(ev.text); HABLAR(ev.text); return;
+      pista(ev.text);
+      HABLAR(ev.text);
+      return;
     }
-    if (ev.type === 'error') { error(ev.text, ev.fix || ''); return; }
+    if (ev.type === 'error') {
+      error(ev.text, ev.fix || '');
+      return;
+    }
   }
 
   function escribir(quien, texto, confianza) {
@@ -131,10 +165,18 @@
     const fila = document.createElement('div');
     fila.className = 'vm-fila vm-' + (quien === 'Tú' ? 'tu' : 'sagitari');
     if (quien === 'Tú' && typeof confianza === 'number' && confianza < 0.5) fila.classList.add('vm-dudoso');
-    const q = document.createElement('span'); q.className = 'vm-quien'; q.textContent = quien;
-    const t = document.createElement('span'); t.className = 'vm-dice'; t.textContent = texto;
-    if (quien === 'Tú') { t.title = 'Pincha para corregir; Enter reenvía'; t.onclick = () => editar(t, texto); }
-    fila.appendChild(q); fila.appendChild(t);
+    const q = document.createElement('span');
+    q.className = 'vm-quien';
+    q.textContent = quien;
+    const t = document.createElement('span');
+    t.className = 'vm-dice';
+    t.textContent = texto;
+    if (quien === 'Tú') {
+      t.title = 'Pincha para corregir; Enter reenvía';
+      t.onclick = () => editar(t, texto);
+    }
+    fila.appendChild(q);
+    fila.appendChild(t);
     h.appendChild(fila);
     /* Quien desborda y tiene el `overflow: auto` es la caja de texto, no la lista:
        desplazar la lista no movía nada y la frase recién dictada quedaba fuera de la vista. */
@@ -144,12 +186,15 @@
 
   /* Corregir lo dictado: se pincha la frase, se arregla y Enter la reenvía por el MISMO
      camino (es la red de seguridad frente a un nombre propio mal oído). */
-  let edicion = null;   // { campo, nodo, original } mientras hay una corrección en curso
+  let edicion = null; // { campo, nodo, original } mientras hay una corrección en curso
   function editar(nodo, original) {
     const campo = document.createElement('input');
-    campo.className = 'vm-editar'; campo.type = 'text'; campo.value = original;
+    campo.className = 'vm-editar';
+    campo.type = 'text';
+    campo.value = original;
     nodo.replaceWith(campo);
-    campo.focus(); campo.select();
+    campo.focus();
+    campo.select();
     edicion = { campo, nodo, original };
     campo.onkeydown = (e) => {
       if (e.key === 'Enter') {
@@ -157,7 +202,10 @@
         edicion = null;
         nodo.textContent = nuevo || original;
         campo.replaceWith(nodo);
-        if (nuevo && nuevo !== original) { setEstado('pensando'); ENVIAR(nuevo); }
+        if (nuevo && nuevo !== original) {
+          setEstado('pensando');
+          ENVIAR(nuevo);
+        }
       } else if (e.key === 'Escape') {
         /* Normalmente ya lo ha cancelado alTeclado (va en captura, antes que esto); se
            repite aquí para que la edición siga siendo cancelable sin el panel montado. */
@@ -166,7 +214,9 @@
     };
     /* Si el foco se va a otro sitio, la corrección se abandona: dejar el campo vivo sin
        foco haría que el siguiente Esc cancelase una edición que el usuario ya no ve. */
-    campo.onblur = () => { if (edicion && edicion.campo === campo) cancelarEdicion(); };
+    campo.onblur = () => {
+      if (edicion && edicion.campo === campo) cancelarEdicion();
+    };
   }
   function cancelarEdicion() {
     if (!edicion) return;
@@ -176,10 +226,14 @@
     if (campo.parentNode) campo.replaceWith(nodo);
   }
 
-  function pista(texto) { const p = $vm('#vmPista'); if (p) p.textContent = texto; }
+  function pista(texto) {
+    const p = $vm('#vmPista');
+    if (p) p.textContent = texto;
+  }
   function error(texto, fix) {
     setEstado('error');
-    const caja = $vm('#vmError'); if (!caja) return;
+    const caja = $vm('#vmError');
+    if (!caja) return;
     caja.hidden = false;
     $vm('#vmErrorTexto').textContent = texto;
     $vm('#vmErrorFix').textContent = fix || '';
@@ -187,9 +241,12 @@
   /* Apaga el aviso de error. Se llama al abrir: si el permiso de micrófono se denegó, al
      cerrar y volver a abrir seguía a la vista el aviso de la sesión anterior. */
   function olvidarError() {
-    const caja = $vm('#vmError'); if (caja) caja.hidden = true;
-    const t = $vm('#vmErrorTexto'); if (t) t.textContent = '';
-    const f = $vm('#vmErrorFix'); if (f) f.textContent = '';
+    const caja = $vm('#vmError');
+    if (caja) caja.hidden = true;
+    const t = $vm('#vmErrorTexto');
+    if (t) t.textContent = '';
+    const f = $vm('#vmErrorFix');
+    if (f) f.textContent = '';
   }
 
   function pasos(lista) {
@@ -211,7 +268,8 @@
   function pedirConfirmacion({ texto, si, no }) {
     setEstado('confirmando');
     confirmacion = { si, no };
-    const caja = $vm('#vmConfirm'); if (!caja) return;
+    const caja = $vm('#vmConfirm');
+    if (!caja) return;
     $vm('#vmConfirmTexto').textContent = texto;
     caja.hidden = false;
   }
@@ -219,7 +277,8 @@
   function contestar(cual) {
     const fn = confirmacion && confirmacion[cual];
     confirmacion = null;
-    const caja = $vm('#vmConfirm'); if (caja) caja.hidden = true;
+    const caja = $vm('#vmConfirm');
+    if (caja) caja.hidden = true;
     setEstado('pensando');
     if (fn) fn();
   }
@@ -231,16 +290,25 @@
   function olvidarConfirmacion() {
     if (!confirmacion) return;
     confirmacion = null;
-    const caja = $vm('#vmConfirm'); if (caja) caja.hidden = true;
+    const caja = $vm('#vmConfirm');
+    if (caja) caja.hidden = true;
     setEstado('pensando');
   }
   function responder(texto) {
     if (!confirmacion) return false;
-    const t = String(texto || '').toLowerCase().trim();
+    const t = String(texto || '')
+      .toLowerCase()
+      .trim();
     /* Reconocimiento natural y robusto de confirmación («sí»/«no») en español:
        acepta variantes coloquiales y compuestas («sí por favor», «claro», «adelante», «cancela», etc.) */
-    const si = /^(s[ií]|vale|hazlo|adelante|confirma|de acuerdo|ok|correcto|claro|por supuesto|acepto|dale|ejecuta|procede|afirmativo|seguro)(?=$|[^\p{L}\p{N}_])/u.test(t);
-    const no = /^(no|cancela|para|detente|mejor no|rechaza|deniega|alto|espera|ni de coña|no gracias|no lo hagas|negativo)(?=$|[^\p{L}\p{N}_])/u.test(t);
+    const si =
+      /^(s[ií]|vale|hazlo|adelante|confirma|de acuerdo|ok|correcto|claro|por supuesto|acepto|dale|ejecuta|procede|afirmativo|seguro)(?=$|[^\p{L}\p{N}_])/u.test(
+        t,
+      );
+    const no =
+      /^(no|cancela|para|detente|mejor no|rechaza|deniega|alto|espera|ni de coña|no gracias|no lo hagas|negativo)(?=$|[^\p{L}\p{N}_])/u.test(
+        t,
+      );
     if (!si && !no) return false;
     contestar(si ? 'si' : 'no');
     return true;
@@ -249,15 +317,26 @@
      callback, esconden la caja y el estado pasa a `pensando`. Sin confirmación pendiente
      no hacen nada (la caja no está a la vista, así que no hay nada que contestar). */
   function cablearConfirmacion() {
-    const bSi = $vm('#vmSi'), bNo = $vm('#vmNo');
-    if (bSi) bSi.onclick = () => { if (confirmacion) contestar('si'); };
-    if (bNo) bNo.onclick = () => { if (confirmacion) contestar('no'); };
+    const bSi = $vm('#vmSi'),
+      bNo = $vm('#vmNo');
+    if (bSi)
+      bSi.onclick = () => {
+        if (confirmacion) contestar('si');
+      };
+    if (bNo)
+      bNo.onclick = () => {
+        if (confirmacion) contestar('no');
+      };
   }
   /* Botón de parar del panel: la misma orden que decir «para» (y la misma que el botón
      Detener del chat, que el panel tapa). */
   function cablearParar() {
     const b = $vm('#vmParar');
-    if (b) b.onclick = () => { pista('Deteniendo lo que estaba haciendo…'); PARAR(); };
+    if (b)
+      b.onclick = () => {
+        pista('Deteniendo lo que estaba haciendo…');
+        PARAR();
+      };
   }
 
   /* ---- Vigía del motor sordo ----
@@ -271,29 +350,42 @@
      entrado del motor en toda la sesión (ni parciales ni finales ni basura — «No te he
      entendido» prueba que oyó audio). Ni barge-in (sólo se vigila mientras nadie
      habla) ni gracia al abrir: nadie habla en los primeros segundos por arte de magia. */
-  const PRIMERA_FRASE_MS = 8000;    // margen de gracia tras abrir la sesión
-  const MODO_CALMA_MS = 1500;       // voz sostenida mínima para juzgar (una palmada no)
-  const VOZ_MAX_SIN_TEXTO = 45000;  // voz sostenida y NADA de texto: aviso humano
-  let textoVisto = false;           // ¿llegó ya algún texto (parcial/final) del motor?
-  let vozCalmaDesde = 0;            // acumulador de voz sostenida sobre el suelo
-  let rescateHecho = false;         // el rescate se pide UNA vez por sesión
-  let vozDeCada = 0;                // ms acumulados de voz sin ni un solo texto
-  let vigia = 0;                    // id del intervalo de vigilancia
-  let tAbierto = 0;                 // cuándo arrancó la sesión (para la gracia inicial)
+  const PRIMERA_FRASE_MS = 8000; // margen de gracia tras abrir la sesión
+  const MODO_CALMA_MS = 1500; // voz sostenida mínima para juzgar (una palmada no)
+  const VOZ_MAX_SIN_TEXTO = 45000; // voz sostenida y NADA de texto: aviso humano
+  let textoVisto = false; // ¿llegó ya algún texto (parcial/final) del motor?
+  let vozCalmaDesde = 0; // acumulador de voz sostenida sobre el suelo
+  let rescateHecho = false; // el rescate se pide UNA vez por sesión
+  let vozDeCada = 0; // ms acumulados de voz sin ni un solo texto
+  let vigia = 0; // id del intervalo de vigilancia
+  let tAbierto = 0; // cuándo arrancó la sesión (para la gracia inicial)
 
   function vigilancia(ahora, nivelMicro) {
     if (ahora === undefined) ahora = Date.now();
     if (nivelMicro === undefined) nivelMicro = rms(analizadorMic);
     /* Mientras el asistente habla el micro recoge su propia voz: eso es barge-in, no
        prueba de sordera — fuera del alcance del vigía. */
-    if (!abierto || !mic || estado === 'hablando') { vozCalmaDesde = 0; return; }
-    if (ahora - tAbierto < PRIMERA_FRASE_MS) return;            // gracia al abrir
-    if (textoVisto) { vozCalmaDesde = 0; vozDeCada = 0; return; } // hay texto: no está sordo
+    if (!abierto || !mic || estado === 'hablando') {
+      vozCalmaDesde = 0;
+      return;
+    }
+    if (ahora - tAbierto < PRIMERA_FRASE_MS) return; // gracia al abrir
+    if (textoVisto) {
+      vozCalmaDesde = 0;
+      vozDeCada = 0;
+      return;
+    } // hay texto: no está sordo
     const umbral = Math.max(0.02, sueloRuido * 3.5);
-    if (!(nivelMicro > umbral)) { vozCalmaDesde = 0; return; }   // silencio: no se juzga
-    if (!vozCalmaDesde) { vozCalmaDesde = ahora; return; }
+    if (!(nivelMicro > umbral)) {
+      vozCalmaDesde = 0;
+      return;
+    } // silencio: no se juzga
+    if (!vozCalmaDesde) {
+      vozCalmaDesde = ahora;
+      return;
+    }
     if (ahora - vozCalmaDesde < MODO_CALMA_MS) return;
-    vozCalmaDesde = ahora;                    // recalibra: cada tramo sostenido cuenta una vez
+    vozCalmaDesde = ahora; // recalibra: cada tramo sostenido cuenta una vez
     if (!rescateHecho) {
       rescateHecho = true;
       /* El dictado local (whisper) se alimenta del tap del RENDERER: si hay voz y el
@@ -315,15 +407,19 @@
        para que la PRÓXIMA no repita el tramo sordo. */
     if (!window.__vigiaClasicoAvisado) {
       window.__vigiaClasicoAvisado = true;
-      try { window.sagitari.setSettings({ sttClasico: true }); } catch {}
+      try {
+        window.sagitari.setSettings({ sttClasico: true });
+      } catch {}
       const sw = document.querySelector('#swSttClasico');
       if (sw) sw.classList.add('on');
     }
     vozDeCada += MODO_CALMA_MS;
     if (vozDeCada >= VOZ_MAX_SIN_TEXTO) {
       vozDeCada = 0;
-      error('Sigo oyendo tu voz pero el motor de voz no transcribe nada.',
-        'Pon tu micrófono real como predeterminado en ms-settings:sound (si usas NVIDIA Broadcast u otro filtro, ese es el problema) y vuelve a abrir el modo voz.');
+      error(
+        'Sigo oyendo tu voz pero el motor de voz no transcribe nada.',
+        'Pon tu micrófono real como predeterminado en ms-settings:sound (si usas NVIDIA Broadcast u otro filtro, ese es el problema) y vuelve a abrir el modo voz.',
+      );
     }
   }
 
@@ -362,26 +458,45 @@
       return;
     }
     let rec = null;
-    try { rec = await pedirMicro(); } catch (e) { rec = null; }
+    try {
+      rec = await pedirMicro();
+    } catch (e) {
+      rec = null;
+    }
     /* Mismo caso, ahora con el micrófono ya pedido: si mientras se concedía el permiso se
        cerró (o se cerró y se reabrió), esto ya no es la apertura vigente. Se deja el audio
        como lo dejaría un cierre —primero se para la reproducción, que comparte el
        `AudioContext`, para no cortarle la frase a nadie sin avisar— y se suelta lo que se
        acaba de adquirir: sólo eso, porque el micrófono bueno puede ser el de la apertura
        nueva y pisárselo la dejaría sin micro. */
-    if (!vigente(gen)) { await pararAudio(); soltar(rec); return; }
-    if (!rec) { error('No tengo acceso al micrófono.', 'Revisa el permiso en ms-settings:privacy-microphone y vuelve a abrir el modo voz.'); }
-    else {
-      mic = rec.stream; ctxAudio = rec.ctx; analizadorMic = rec.analizador;
-      sueloRuido = 0.01; mediciones = 0;
+    if (!vigente(gen)) {
+      await pararAudio();
+      soltar(rec);
+      return;
+    }
+    if (!rec) {
+      error('No tengo acceso al micrófono.', 'Revisa el permiso en ms-settings:privacy-microphone y vuelve a abrir el modo voz.');
+    } else {
+      mic = rec.stream;
+      ctxAudio = rec.ctx;
+      analizadorMic = rec.analizador;
+      sueloRuido = 0.01;
+      mediciones = 0;
     }
     arrancarBucle();
     /* Hook simétrico al de cierre: la app engancha aquí sus recursos de sesión (el tap
        de micrófono del dictado local). Un único dueño del ciclo de vida — el panel —
        evita dos micros abiertos por dobles llamadas desde fuera. */
-    if (typeof window.__alAbrirModoVoz === 'function') { try { window.__alAbrirModoVoz(); } catch {} }
+    if (typeof window.__alAbrirModoVoz === 'function') {
+      try {
+        window.__alAbrirModoVoz();
+      } catch {}
+    }
     /* El vigía vive y muere con la sesión: se rearma aquí (apertura nueva, gracia nueva). */
-    textoVisto = false; rescateHecho = false; vozDeCada = 0; vozCalmaDesde = 0;
+    textoVisto = false;
+    rescateHecho = false;
+    vozDeCada = 0;
+    vozCalmaDesde = 0;
     tAbierto = Date.now();
     if (vigia) clearInterval(vigia);
     vigia = setInterval(() => vigilancia(), 500);
@@ -391,14 +506,24 @@
      compartidos: cerrar a ciegas los de la sesión viva la dejaría sin micro y sin audio. */
   function soltar(rec) {
     if (!rec) return;
-    if (rec.stream) { try { rec.stream.getTracks().forEach((t) => t.stop()); } catch {} }
-    if (rec.ctx && rec.ctx.state !== 'closed') { try { rec.ctx.close(); } catch {} }
+    if (rec.stream) {
+      try {
+        rec.stream.getTracks().forEach((t) => t.stop());
+      } catch {}
+    }
+    if (rec.ctx && rec.ctx.state !== 'closed') {
+      try {
+        rec.ctx.close();
+      } catch {}
+    }
   }
 
   /* Suelta el micrófono y el AudioContext de la sesión. */
   function soltarMicro() {
     soltar({ stream: mic, ctx: ctxAudio });
-    mic = null; ctxAudio = null; analizadorMic = null;
+    mic = null;
+    ctxAudio = null;
+    analizadorMic = null;
   }
 
   async function cerrar() {
@@ -407,9 +532,16 @@
     /* Hook de la app: el tap de micrófono del dictado local (y cualquier recurso que la
        app ate a la sesión) debe soltarse SIEMPRE que el panel se cierra — por su botón,
        por Esc o por despedida. Se llama primero, en cuanto se sabe que se cierra. */
-    if (typeof window.__alCerrarModoVoz === 'function') { try { window.__alCerrarModoVoz(); } catch {} }
+    if (typeof window.__alCerrarModoVoz === 'function') {
+      try {
+        window.__alCerrarModoVoz();
+      } catch {}
+    }
     pararBucle();
-    if (vigia) { clearInterval(vigia); vigia = 0; }
+    if (vigia) {
+      clearInterval(vigia);
+      vigia = 0;
+    }
     document.removeEventListener('keydown', alTeclado, true);
     cancelarEdicion();
     /* Al cerrar se suelta también la confirmación: con el panel fuera de la vista la barra
@@ -420,7 +552,9 @@
     soltarMicro();
     const panel = $vm('#voiceMode');
     if (panel) panel.hidden = true;
-    try { await window.sagitari.voiceClose(); } catch {}
+    try {
+      await window.sagitari.voiceClose();
+    } catch {}
   }
 
   /* Esc sale del modo… salvo que haya una corrección en curso: ahí Esc cancela la
@@ -429,7 +563,10 @@
   function alTeclado(e) {
     if (e.key !== 'Escape' || !abierto) return;
     e.preventDefault();
-    if (edicion) { cancelarEdicion(); return; }
+    if (edicion) {
+      cancelarEdicion();
+      return;
+    }
     cerrar();
   }
 
@@ -460,7 +597,10 @@
     const buf = new Uint8Array(analizador.fftSize);
     analizador.getByteTimeDomainData(buf);
     let s = 0;
-    for (let i = 0; i < buf.length; i++) { const v = (buf[i] - 128) / 128; s += v * v; }
+    for (let i = 0; i < buf.length; i++) {
+      const v = (buf[i] - 128) / 128;
+      s += v * v;
+    }
     return Math.sqrt(s / buf.length);
   }
 
@@ -468,7 +608,7 @@
      por un <audio src> a propósito: se decodifica en memoria (sin CSP de por medio) y se
      puede cortar en el acto, además de dar el nivel del orbe. */
   async function reproducir({ id, bytes }) {
-    let mio = false;   // ¿la fuente que se está montando es la de ESTA llamada?
+    let mio = false; // ¿la fuente que se está montando es la de ESTA llamada?
     try {
       if (!ctxAudio) ctxAudio = new (window.AudioContext || window.webkitAudioContext)();
       const datos = (bytes instanceof Uint8Array ? bytes : new Uint8Array(bytes)).buffer;
@@ -499,8 +639,12 @@
         /* Sólo se desmonta lo que montó esta llamada: si el que falla es el `decode`, la
            fuente que suena es todavía la de la frase anterior y cortarla en silencio
            dejaría a esa frase sin su aviso de «ya sonó». */
-        try { reproductor.onended = null; reproductor.stop(); } catch {}
-        reproductor = null; analizadorSalida = null;
+        try {
+          reproductor.onended = null;
+          reproductor.stop();
+        } catch {}
+        reproductor = null;
+        analizadorSalida = null;
       }
       if (fraseActual === id) fraseActual = null;
       window.sagitari.ttsPlayed(id);
@@ -510,8 +654,12 @@
   async function pararAudio() {
     if (reproductor) {
       const id = fraseActual;
-      try { reproductor.onended = null; reproductor.stop(); } catch {}
-      reproductor = null; analizadorSalida = null;
+      try {
+        reproductor.onended = null;
+        reproductor.stop();
+      } catch {}
+      reproductor = null;
+      analizadorSalida = null;
       /* Cortar de verdad: la frase que sonaba ya no va a terminar, así que se le dice al
          proceso principal que la dé por dicha para que no se quede esperando. */
       if (id !== null) window.sagitari.ttsPlayed(id);
@@ -523,10 +671,12 @@
     const c = $vm('#vmOrbe');
     if (!c || !window.OrbKit) return;
     const ctx = c.getContext('2d');
-    t0 = performance.now(); prev = t0;
+    t0 = performance.now();
+    prev = t0;
     const paso = (now) => {
       const t = (now - t0) / 1000;
-      const dt = Math.min(0.05, (now - prev) / 1000); prev = now;
+      const dt = Math.min(0.05, (now - prev) / 1000);
+      prev = now;
       /* El nivel que se pinta: el del audio que suena si estamos hablando, el del
          micrófono si estamos escuchando u oyendo. Cada analizador se lee UNA vez por
          fotograma: antes se leía el del micro dos veces más la salida en cada vuelta. */
@@ -540,19 +690,26 @@
         sueloRuido = Math.min(SUELO_MAX, sueloRuido * 0.9 + nivelMicro * 0.1);
       }
       const objetivoReal = Math.max(objetivo, fuente * 2.2);
-      nivel = window.OrbKit.smoothLevel(nivel, reducido ? window.OrbKit.nivelDeFondo(estado, t) : Math.max(objetivoReal, window.OrbKit.nivelDeFondo(estado, t)), dt);
+      nivel = window.OrbKit.smoothLevel(
+        nivel,
+        reducido ? window.OrbKit.nivelDeFondo(estado, t) : Math.max(objetivoReal, window.OrbKit.nivelDeFondo(estado, t)),
+        dt,
+      );
       window.OrbKit.draw(ctx, c.width, c.height, nivel, estado, t);
       /* La interrupción la decide el MICRÓFONO, no lo que suena: mirando la salida, la
          propia voz del asistente cuenta como «el usuario está hablando» y bastan ~250 ms
          de su respuesta para que se corte a sí mismo. El nivel del orbe mientras habla SÍ
          sigue saliendo de la salida (eso no se toca). */
       if (estado === 'hablando') vigilarInterrupcion(nivelMicro, nivelSalida, now);
-      else vozDesde = 0;   // la voz sostenida se cuenta dentro de una misma frase
+      else vozDesde = 0; // la voz sostenida se cuenta dentro de una misma frase
       raf = requestAnimationFrame(paso);
     };
     raf = requestAnimationFrame(paso);
   }
-  function pararBucle() { if (raf) cancelAnimationFrame(raf); raf = 0; }
+  function pararBucle() {
+    if (raf) cancelAnimationFrame(raf);
+    raf = 0;
+  }
 
   /* Interrupción (barge-in): si hablas mientras el asistente habla, se calla. Dos
      condiciones, y las dos hacen falta. Voz sostenida —250 ms— para que un golpe de
@@ -565,7 +722,10 @@
     const umbral = Math.max(0.02, sueloRuido * 3.5);
     if (nivelMicro > umbral && nivelMicro > nivelSalida * ECO) {
       if (!vozDesde) vozDesde = now;
-      if (now - vozDesde > 250) { vozDesde = 0; interrumpir(); }
+      if (now - vozDesde > 250) {
+        vozDesde = 0;
+        interrumpir();
+      }
     } else vozDesde = 0;
   }
   /* Interrumpir REINICIA el contador de frases del proceso principal: si no, la primera
@@ -579,7 +739,9 @@
     /* Y el resto de la respuesta deja de leerse: esto corta la frase que suena, pero el
        texto sigue llegando mientras el agente trabaja — sin avisar a la app, la lectura
        continuaba con la frase siguiente y la interrupción se quedaba a medias. */
-    try { AL_INTERRUMPIR(); } catch {}
+    try {
+      AL_INTERRUMPIR();
+    } catch {}
   }
 
   /* La respuesta del agente, en TEXTO. El panel es opaco y tapa el chat, así que mientras
@@ -595,16 +757,35 @@
   cablearParar();
 
   window.VoiceMode = {
-    abrir, cerrar, handle, pasos, respuesta, pedirConfirmacion, olvidarConfirmacion, responder, interrumpir,
-    estado: () => estado, abierto: () => abierto,
+    abrir,
+    cerrar,
+    handle,
+    pasos,
+    respuesta,
+    pedirConfirmacion,
+    olvidarConfirmacion,
+    responder,
+    interrumpir,
+    estado: () => estado,
+    abierto: () => abierto,
     /* Interno del banco de pruebas: estado del vigía y vigilancia inyectada (sin micro). */
     vigia: () => ({ textoVisto, rescateHecho, vozDeCada, calma: !!vozCalmaDesde, abierto }),
     probarRescate: (now, nivel) => vigilancia(now, nivel),
     audio: { reproducir, parar: pararAudio },
-    setEnviar: (fn) => { ENVIAR = fn; },
-    setHablar: (fn) => { HABLAR = fn; },
-    setParar: (fn) => { PARAR = fn; },
-    setOcupado: (fn) => { HAY_TRABAJO = fn; },
-    setInterrumpido: (fn) => { AL_INTERRUMPIR = fn; },
+    setEnviar: (fn) => {
+      ENVIAR = fn;
+    },
+    setHablar: (fn) => {
+      HABLAR = fn;
+    },
+    setParar: (fn) => {
+      PARAR = fn;
+    },
+    setOcupado: (fn) => {
+      HAY_TRABAJO = fn;
+    },
+    setInterrumpido: (fn) => {
+      AL_INTERRUMPIR = fn;
+    },
   };
 })();

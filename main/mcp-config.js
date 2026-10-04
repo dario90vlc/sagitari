@@ -9,14 +9,19 @@ const { httpUrlAllowed, buildCmdLine } = require('../agent/mcp-transport');
 const ID_RX = /^[a-z0-9_-]{1,24}$/;
 const TRANSPORTS = ['stdio', 'http'];
 
-const rawId = (s) => String(s || '').toLowerCase().replace(/[^a-z0-9_-]+/g, '_').replace(/^_+|_+$/g, '').slice(0, 24);
+const rawId = (s) =>
+  String(s || '')
+    .toLowerCase()
+    .replace(/[^a-z0-9_-]+/g, '_')
+    .replace(/^_+|_+$/g, '')
+    .slice(0, 24);
 
 /** Lista de nombres de herramienta: solo cadenas no vacías, sin duplicados. */
 function sanitizeList(v) {
-  const arr = Array.isArray(v) ? v : (typeof v === 'string' ? v.split(',') : []);
+  const arr = Array.isArray(v) ? v : typeof v === 'string' ? v.split(',') : [];
   const out = [];
   for (const x of arr) {
-    if (typeof x !== 'string') continue;   // un número o un nulo no es un nombre de herramienta
+    if (typeof x !== 'string') continue; // un número o un nulo no es un nombre de herramienta
     const s = x.trim();
     if (s && !out.includes(s)) out.push(s.slice(0, 80));
   }
@@ -43,7 +48,10 @@ function validateServer(raw) {
   }
   const base = {
     id,
-    name: String(s.name || s.id || id).trim().slice(0, 60) || id,
+    name:
+      String(s.name || s.id || id)
+        .trim()
+        .slice(0, 60) || id,
     enabled: s.enabled !== false,
     transport,
     timeoutMs,
@@ -60,8 +68,11 @@ function validateServer(raw) {
     if (s.args != null && s.args !== '' && !Array.isArray(s.args)) {
       return { ok: false, error: 'Los argumentos deben ser una lista (ej.: ["-y", "paquete"]).' };
     }
-    try { buildCmdLine(command, s.args || []); }
-    catch (e) { return { ok: false, error: e.message }; }
+    try {
+      buildCmdLine(command, s.args || []);
+    } catch (e) {
+      return { ok: false, error: e.message };
+    }
     const env = {};
     for (const [k, v] of Object.entries(s.env && typeof s.env === 'object' ? s.env : {})) {
       if (!/^[A-Za-z_][A-Za-z0-9_]*$/.test(k)) return { ok: false, error: `Nombre de variable inválido: ${k}` };
@@ -85,7 +96,7 @@ function mergeSecrets(prev = {}, next = {}) {
   const out = { ...prev };
   for (const [k, v] of Object.entries(next || {})) {
     const val = String(v == null ? '' : v);
-    out[k] = (!val || val === '••••') ? (prev[k] || '') : val;
+    out[k] = !val || val === '••••' ? prev[k] || '' : val;
   }
   return out;
 }
@@ -98,7 +109,11 @@ function mergeSecrets(prev = {}, next = {}) {
  */
 function parseMcpImport(text) {
   let raw = null;
-  try { raw = JSON.parse(String(text || '')); } catch { return { ok: false, error: 'Eso no es JSON válido.' }; }
+  try {
+    raw = JSON.parse(String(text || ''));
+  } catch {
+    return { ok: false, error: 'Eso no es JSON válido.' };
+  }
   const mapa = (raw && raw.mcpServers) || raw;
   if (!mapa || typeof mapa !== 'object' || Array.isArray(mapa)) return { ok: false, error: 'No encuentro el bloque mcpServers.' };
   const servers = [];
@@ -115,7 +130,8 @@ function parseMcpImport(text) {
       url: d.url,
       headers: d.headers,
     });
-    if (v.ok) servers.push(v.value); else rechazados.push(id + ': ' + v.error);
+    if (v.ok) servers.push(v.value);
+    else rechazados.push(id + ': ' + v.error);
   }
   if (!servers.length) return { ok: false, error: 'Ningún servidor válido. ' + rechazados.join(' · ') };
   return { ok: true, servers };

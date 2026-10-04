@@ -15,7 +15,11 @@ const os = require('os');
 /* Los tests crean almacenes temporales (memoria, checkpoints, skills…): se anotan
    aquí para borrarlos al terminar. Sin esto, cada ejecución dejaba basura en %TEMP%. */
 const TMP_DIRS = [];
-const tmpDir = (prefix) => { const d = fs.mkdtempSync(path.join(os.tmpdir(), prefix)); TMP_DIRS.push(d); return d; };
+const tmpDir = (prefix) => {
+  const d = fs.mkdtempSync(path.join(os.tmpdir(), prefix));
+  TMP_DIRS.push(d);
+  return d;
+};
 
 /* La suite NO puede escribir en los datos reales del usuario. Cada módulo de
    agent/ resuelve su carpeta AL CARGARSE (agent/datadir.js), así que la raíz de
@@ -24,7 +28,8 @@ const tmpDir = (prefix) => { const d = fs.mkdtempSync(path.join(os.tmpdir(), pre
    de una sesión real, y el panel de registros de la app los mostraba. */
 process.env.SAGITARI_DATA_DIR = tmpDir('sagitari-datadir-');
 
-let pass = 0, fail = 0;
+let pass = 0,
+  fail = 0;
 const failures = [];
 /* Los tests se ENCOLAN y se ejecutan al final, en orden de registro (ver el cierre
    del fichero). Antes cada uno arrancaba al registrarse, así que las secciones se
@@ -33,9 +38,15 @@ const failures = [];
    tiempo y del orden de registro. */
 const QUEUE = [];
 
-function test(name, fn) { QUEUE.push({ name, fn }); }
-function eq(a, b, msg) { if (a !== b) throw new Error((msg || 'eq') + `: esperado ${JSON.stringify(b)}, obtenido ${JSON.stringify(a)}`); }
-function ok(v, msg) { if (!v) throw new Error(msg || 'esperado verdadero'); }
+function test(name, fn) {
+  QUEUE.push({ name, fn });
+}
+function eq(a, b, msg) {
+  if (a !== b) throw new Error((msg || 'eq') + `: esperado ${JSON.stringify(b)}, obtenido ${JSON.stringify(a)}`);
+}
+function ok(v, msg) {
+  if (!v) throw new Error(msg || 'esperado verdadero');
+}
 
 /* Red de seguridad del propio runner: un test async que nunca resuelve dejaba el
    proceso sin resumen y salía con código 0 (CI en verde con la suite colgada).
@@ -63,7 +74,11 @@ const waitFor = async (fn, ms = 4000) => {
   const t0 = Date.now();
   for (;;) {
     let v = null;
-    try { v = fn(); } catch { v = null; }
+    try {
+      v = fn();
+    } catch {
+      v = null;
+    }
     if (v) return v;
     if (Date.now() - t0 > ms) return null;
     await wait(25);
@@ -73,12 +88,21 @@ const waitFor = async (fn, ms = 4000) => {
 /* Fakes de red: el proveedor habla SSE y fetch, así que los tests también. */
 function sseResponse(chunks, status = 200) {
   const enc = new TextEncoder();
-  const stream = new ReadableStream({ start(c) { for (const ch of chunks) c.enqueue(enc.encode(ch)); c.close(); } });
+  const stream = new ReadableStream({
+    start(c) {
+      for (const ch of chunks) c.enqueue(enc.encode(ch));
+      c.close();
+    },
+  });
   return new Response(stream, { status, headers: { 'content-type': 'text/event-stream' } });
 }
 function fakeFetch(chunks, sink) {
   return async (url, opts) => {
-    if (sink) { sink.url = url; sink.headers = opts.headers; sink.body = JSON.parse(opts.body); }
+    if (sink) {
+      sink.url = url;
+      sink.headers = opts.headers;
+      sink.body = JSON.parse(opts.body);
+    }
     return sseResponse(chunks);
   };
 }
@@ -87,12 +111,19 @@ const evNamed = (name, o) => `event: ${name}\ndata: ${JSON.stringify(o)}\n\n`;
 const noSignal = () => new AbortController().signal;
 
 /* Constructores de turnos: un turno de texto y un turno de llamada a herramienta. */
-function sseTurn(content) { return sseResponse([evData({ choices: [{ delta: { content } }] })]); }
+function sseTurn(content) {
+  return sseResponse([evData({ choices: [{ delta: { content } }] })]);
+}
 function toolTurn(id, name, args) {
-  return sseResponse([evData({ choices: [{ delta: { tool_calls: [{ index: 0, id, function: { name, arguments: JSON.stringify(args) } }] } }] })]);
+  return sseResponse([
+    evData({ choices: [{ delta: { tool_calls: [{ index: 0, id, function: { name, arguments: JSON.stringify(args) } }] } }] }),
+  ]);
 }
 function autoApprove(agent, events) {
-  return (e) => { events.push(e); if (e.type === 'confirm_request') setTimeout(() => agent.resolveConfirm(e.id, true), 0); };
+  return (e) => {
+    events.push(e);
+    if (e.type === 'confirm_request') setTimeout(() => agent.resolveConfirm(e.id, true), 0);
+  };
 }
 
 /* Ajustes mínimos para instanciar un Agent en los tests. */
@@ -109,7 +140,12 @@ function sseRota(chunk) {
   // el primer trozo SÍ se entrega y solo después revienta la lectura: es el fallo real
   // (proveedor que corta a media respuesta), no un error de conexión antes de empezar
   const body = new ReadableStream({
-    pull(c) { if (primera) { primera = false; c.enqueue(enc.encode(chunk)); } else c.error(new Error('conexión cortada')); },
+    pull(c) {
+      if (primera) {
+        primera = false;
+        c.enqueue(enc.encode(chunk));
+      } else c.error(new Error('conexión cortada'));
+    },
   });
   return new Response(body, { status: 200, headers: { 'content-type': 'text/event-stream' } });
 }
@@ -119,15 +155,21 @@ async function runAll() {
   for (const t of QUEUE) {
     try {
       await t.fn();
-      pass++; console.log('  ok  ' + t.name);
+      pass++;
+      console.log('  ok  ' + t.name);
     } catch (e) {
-      fail++; failures.push({ name: t.name, err: e.message });
+      fail++;
+      failures.push({ name: t.name, err: e.message });
       console.error('FAIL  ' + t.name + ' — ' + e.message);
     }
   }
   // limpieza: la suite no debe dejar basura en %TEMP%
-  for (const d of TMP_DIRS) { try { fs.rmSync(d, { recursive: true, force: true }); } catch {} }
-  clearTimeout(suiteTimer);   // fin normal: el vigilante ya no hace falta
+  for (const d of TMP_DIRS) {
+    try {
+      fs.rmSync(d, { recursive: true, force: true });
+    } catch {}
+  }
+  clearTimeout(suiteTimer); // fin normal: el vigilante ya no hace falta
   console.log('');
   if (fail) {
     console.error(`${fail} test(s) fallaron, ${pass} pasaron`);
@@ -139,12 +181,30 @@ async function runAll() {
 }
 
 module.exports = {
-  fs, path, os, TMP_DIRS, tmpDir,
-  pass: () => pass, fail: () => fail,
-  QUEUE, test, eq, ok,
-  SUITE_TIMEOUT_MS, suiteTimer,
-  wait, waitFor,
-  sseResponse, fakeFetch, evData, evNamed, noSignal,
-  sseTurn, toolTurn, autoApprove, SETTINGS_BASE, sseRota,
+  fs,
+  path,
+  os,
+  TMP_DIRS,
+  tmpDir,
+  pass: () => pass,
+  fail: () => fail,
+  QUEUE,
+  test,
+  eq,
+  ok,
+  SUITE_TIMEOUT_MS,
+  suiteTimer,
+  wait,
+  waitFor,
+  sseResponse,
+  fakeFetch,
+  evData,
+  evNamed,
+  noSignal,
+  sseTurn,
+  toolTurn,
+  autoApprove,
+  SETTINGS_BASE,
+  sseRota,
   runAll,
 };

@@ -29,7 +29,8 @@ function assertEvent(ev) {
       break;
     case 'final':
       if (typeof ev.text !== 'string') throw new Error('final sin texto');
-      if (ev.confidence !== null && ev.confidence !== undefined && typeof ev.confidence !== 'number') throw new Error('confianza no numérica');
+      if (ev.confidence !== null && ev.confidence !== undefined && typeof ev.confidence !== 'number')
+        throw new Error('confianza no numérica');
       break;
     case 'error':
       if (typeof ev.text !== 'string') throw new Error('error sin texto');

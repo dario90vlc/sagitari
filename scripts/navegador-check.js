@@ -26,7 +26,10 @@ const PASOS = [];
 const fallos = [];
 function ok(cond, que, detalle = '') {
   if (cond) PASOS.push('  ok   ' + que);
-  else { fallos.push(que + (detalle ? '  →  ' + detalle : '')); PASOS.push('  FALLO ' + que + (detalle ? '  →  ' + detalle : '')); }
+  else {
+    fallos.push(que + (detalle ? '  →  ' + detalle : ''));
+    PASOS.push('  FALLO ' + que + (detalle ? '  →  ' + detalle : ''));
+  }
 }
 
 const PAGINA = `<!doctype html>
@@ -116,7 +119,10 @@ const sleep = (ms) => new Promise((r) => setTimeout(r, ms));
       return m ? Number(m.trim().split(':')[0]) : -1;
     };
     const idx = (frag) => idxDe(inv, frag);
-    const reInv = async () => { const t = await b.elements(sess, 'check'); return t; };
+    const reInv = async () => {
+      const t = await b.elements(sess, 'check');
+      return t;
+    };
 
     /* ---- clic en lo que está fuera de pantalla (scroll + huella) ---- */
     const iAbajo = idx('Botón al final de la página');
@@ -183,7 +189,11 @@ const sleep = (ms) => new Promise((r) => setTimeout(r, ms));
     /* ---- diálogos: la página se bloquea y el aviso aparece ---- */
     // por el mismo camino que usa el agente (handle): es quien añade el aviso del diálogo
     const dialogo = await b.handle({ action: 'click', text: 'Borrar cuenta' }, 'check');
-    ok(/diálogo abierto/.test(dialogo), 'un confirm() avisa en el resultado (sin colgar la acción)', dialogo.slice(-200) + ' | _dialog=' + JSON.stringify(b._dialog));
+    ok(
+      /diálogo abierto/.test(dialogo),
+      'un confirm() avisa en el resultado (sin colgar la acción)',
+      dialogo.slice(-200) + ' | _dialog=' + JSON.stringify(b._dialog),
+    );
     const mientras = await b.handle({ action: 'elements' }, 'check');
     ok(/diálogo/.test(String(mientras)), 'y con el diálogo abierto se avisa en vez de esperar 30 s', String(mientras).slice(0, 160));
     await sleep(300);
@@ -208,9 +218,15 @@ const sleep = (ms) => new Promise((r) => setTimeout(r, ms));
     fallos.push('excepción: ' + (e && e.message));
     PASOS.push('  FALLO excepción: ' + (e && e.message));
   } finally {
-    try { await b.handle({ action: 'close' }); } catch {}
-    try { b.kill(); } catch {}
-    try { fs.rmSync(dir, { recursive: true, force: true }); } catch {}
+    try {
+      await b.handle({ action: 'close' });
+    } catch {}
+    try {
+      b.kill();
+    } catch {}
+    try {
+      fs.rmSync(dir, { recursive: true, force: true });
+    } catch {}
   }
 
   console.log(PASOS.join('\n'));
