@@ -5,21 +5,20 @@
 
 const {
   app,
-  BrowserWindow,
   ipcMain,
   desktopCapturer,
   screen,
   globalShortcut,
   shell,
   dialog,
-  Tray,
-  Menu,
-  safeStorage,
 } = require('electron');
 const path = require('path');
-const { pathToFileURL } = require('url');
 const fs = require('fs');
 const fsp = require('fs/promises');
+
+const { KEY_PREFIX, encryptionAvailable, protectKey, revealKey, protectServerSecrets, revealServerSecrets, writeJsonAtomic } = require('./config');
+const { crearVentana } = require('./ventana');
+const { crearBandeja } = require('./bandeja');
 
 const DEV = process.argv.includes('--dev');
 const SMOKE = process.argv.includes('--smoke');
@@ -153,6 +152,20 @@ let config = {
   mcp: { enabled: true, servers: [] }, // servidores MCP del usuario (ver main/mcp-config.js)
 };
 
+// Ventana principal: se crea aquí con dependencias lazy (agent y config se asignan más tarde)
+const ventana = crearVentana({
+  HIDDEN,
+  DEV,
+  INDEX_HTML: path.join(__dirname, '..', 'renderer', 'index.html'),
+  getAgent: () => agent,
+  getConfig: () => config,
+});
+const { createChatWindow, showWindow, glow, getWin } = ventana;
+
+// Bandeja del sistema: sin ella, ocultar la ventana dejaba SAGITARI inalcanzable
+const bandeja = crearBandeja({ HEADLESS, showWindow, getWin, app });
+const { createTray, getTray } = bandeja;
+
 /* ---- v1.1 seguridad: permisos por herramienta + guardarraíles (configurables) ---- */
 const securityDefaults = {
   permissions: {}, // { toolName: 'safe'|'confirm'|'restricted' } — vacío = defaults
@@ -174,46 +187,7 @@ const securityDefaults = {
    no expone las credenciales. En memoria siempre están en claro porque el agente
    las necesita para llamar al proveedor. Si el sistema no ofrece cifrado, se
    guarda en claro y queda constancia en el log: antes se hacía siempre. */
-const KEY_PREFIX = 'enc:v1:';
-function encryptionAvailable() {
-  try {
-    return safeStorage.isEncryptionAvailable();
-  } catch {
-    return false;
-  }
-}
-function protectKey(k) {
-  if (typeof k !== 'string' || !k) return k;
-  if (k.startsWith(KEY_PREFIX)) return k; // ya estaba cifrada
-  if (!encryptionAvailable()) return k;
-  try {
-    return KEY_PREFIX + safeStorage.encryptString(k).toString('base64');
-  } catch {
-    return k;
-  }
-}
-function revealKey(k) {
-  if (typeof k !== 'string' || !k.startsWith(KEY_PREFIX)) return k;
-  try {
-    return safeStorage.decryptString(Buffer.from(k.slice(KEY_PREFIX.length), 'base64'));
-  } catch {
-    // No se pudo descifrar (config copiada de otro equipo o perfil, o clave
-    // maestra recreada). Se devuelve el CRIPTOGRAMA tal cual para que el
-    // siguiente guardado no lo pise con una cadena vacía: antes la credencial se
-    // destruía en silencio (el .bak incluido) y no había vuelta atrás.
-    registrarFallo('revealKey', new Error('no se pudo descifrar una clave guardada en este equipo; vuelve a escribirla en Ajustes'));
-    return k;
-  }
-}
-/** Cifra los valores de env/headers de un servidor MCP (pueden ser tokens). */
-function protectServerSecrets(s) {
-  const paint = (obj) => Object.fromEntries(Object.entries(obj || {}).map(([k, v]) => [k, protectKey(String(v))]));
-  return { ...s, env: paint(s.env), headers: paint(s.headers) };
-}
-function revealServerSecrets(s) {
-  const paint = (obj) => Object.fromEntries(Object.entries(obj || {}).map(([k, v]) => [k, revealKey(String(v))]));
-  return { ...s, env: paint(s.env), headers: paint(s.headers) };
-}
+
 /** Copia del config con las claves cifradas, tal y como va a disco. */
 function configParaDisco() {
   const paint = (p) => (p && typeof p === 'object' ? { ...p, apiKey: protectKey(p.apiKey) } : p);
@@ -240,8 +214,8 @@ function needsKeyEncryption() {
 function applyConfig(raw) {
   config = { ...config, ...raw, settings: { ...config.settings, ...(raw.settings || {}) } };
   // de disco llegan cifradas: en memoria el agente necesita el valor real
-  if (config.active && config.active.apiKey) config.active = { ...config.active, apiKey: revealKey(config.active.apiKey) };
-  config.providers = (config.providers || []).map((p) => (p && p.apiKey ? { ...p, apiKey: revealKey(p.apiKey) } : p));
+  if (config.active && config.active.apiKey) config.active = { ...config.active, apiKey: revealKey(config.active.apiKey, (k, e) => registrarFallo(k, e)) };
+  config.providers = (config.providers || []).map((p) => (p && p.apiKey ? { ...p, apiKey: revealKey(p.apiKey, (k, e) => registrarFallo(k, e)) } : p));
   config.security = {
     permissions: { ...((raw.security && raw.security.permissions) || {}) },
     guardrails: { ...securityDefaults.guardrails, ...((raw.security && raw.security.guardrails) || {}) },
@@ -251,7 +225,7 @@ function applyConfig(raw) {
   const servers = [];
   for (const s of mcpRaw) {
     const v = mcpConfig.validateServer(s);
-    if (v.ok) servers.push(revealServerSecrets(v.value));
+    if (v.ok) servers.push(revealServerSecrets(v.value, (k) => revealKey(k, (kind, err) => registrarFallo(kind, err))));
   }
   config.mcp = { enabled: raw.mcp ? raw.mcp.enabled !== false : true, servers };
 }
@@ -280,18 +254,6 @@ function loadConfig() {
     config.security = { permissions: {}, guardrails: { ...securityDefaults.guardrails } };
   }
 }
-/* Guardado atómico: se escribe en <archivo>.tmp y se renombra encima, y antes de
-   pisar el archivo bueno se conserva una copia .bak. Así un cierre a lo bruto o
-   un corte a mitad de escritura no dejan el JSON truncado y sin vuelta atrás. */
-function writeJsonAtomic(file, data) {
-  const tmp = file + '.tmp';
-  fs.mkdirSync(path.dirname(file), { recursive: true });
-  fs.writeFileSync(tmp, data, 'utf8');
-  try {
-    if (fs.existsSync(file)) fs.copyFileSync(file, file + '.bak');
-  } catch {}
-  fs.renameSync(tmp, file);
-}
 function saveConfig() {
   try {
     writeJsonAtomic(CONFIG_FILE, JSON.stringify(configParaDisco(), null, 2));
@@ -312,8 +274,8 @@ function avisarDisco(mensaje) {
   if (now - avisoDiscoAt < 30000) return;
   avisoDiscoAt = now;
   try {
-    if (win && !win.isDestroyed()) {
-      win.webContents.send('agent:event', { type: 'toast', title: 'No se pudo guardar', message: mensaje });
+    if (getWin() && !getWin().isDestroyed()) {
+      getWin().webContents.send('agent:event', { type: 'toast', title: 'No se pudo guardar', message: mensaje });
     }
   } catch {}
 }
@@ -325,132 +287,6 @@ function persistConfig() {
   const r = saveConfig();
   if (!r.ok) avisarDisco('La configuración no se pudo escribir en disco (' + r.error + ').');
   return r;
-}
-
-// ---------- windows ----------
-const INDEX_HTML = path.join(__dirname, '..', 'renderer', 'index.html');
-let win = null; // chat
-
-function createChatWindow() {
-  const { width, height } = screen.getPrimaryDisplay().workAreaSize;
-  // El mínimo de la ventana manda: en pantallas estrechas (área de trabajo
-  // < 1088px) `width - 88` quedaba por debajo de minWidth, el SO forzaba 1000 y
-  // la ventana se salía por la derecha con la x calculada sobre un ancho menor.
-  const W = Math.max(1000, Math.min(1560, width - 88));
-  const H = Math.max(620, Math.min(920, height - 88));
-  win = new BrowserWindow({
-    width: W,
-    height: H,
-    // mínimo por debajo del cual la ventana no se reduce: el diseño se mantiene
-    // intacto hasta este límite (ver media queries en styles.css)
-    minWidth: 1000,
-    minHeight: 620,
-    x: Math.max(0, Math.round((width - W) / 2)),
-    y: Math.max(0, Math.round((height - H) / 2)),
-    frame: false,
-    transparent: true,
-    resizable: true,
-    alwaysOnTop: false,
-    backgroundColor: '#00000000',
-    webPreferences: {
-      preload: path.join(__dirname, 'preload.js'),
-      contextIsolation: true,
-      nodeIntegration: false,
-      sandbox: true, // el preload solo usa contextBridge + ipcRenderer
-      spellcheck: false,
-    },
-    icon: path.join(__dirname, '..', 'renderer', 'assets', 'sagitari.ico'),
-    show: !HIDDEN,
-  });
-  /* Icono de la ventana (barra de tareas). Ya viaja en las opciones de arriba, pero en
-     Windows el icono del botón de la barra puede quedarse con el del ejecutable si la
-     ventana se crea antes de que el sistema lo pida: fijarlo otra vez al arrancar es la
-     forma barata de que salga SIEMPRE el de SAGITARI. En desarrollo el proceso es
-     `electron.exe`, así que ahí puede verse el de Electron: es del binario, no de la app
-     (las versiones publicadas llevan el nuestro, con sus seis tamaños). */
-  if (process.platform === 'win32') {
-    try {
-      win.setIcon(path.join(__dirname, '..', 'renderer', 'assets', 'sagitari.ico'));
-    } catch {}
-  }
-  win.loadFile(INDEX_HTML);
-  // La ventana no navega fuera de su index.html local: si un enlace o un script
-  // lo intenta, se cancela (las URLs http/https se abren en el navegador del
-  // sistema). Abrir ventanas nuevas queda denegado de plano.
-  const appUrl = pathToFileURL(INDEX_HTML).href;
-  win.webContents.on('will-navigate', (e, url) => {
-    if (String(url).split('#')[0] !== appUrl) {
-      e.preventDefault();
-      if (/^https?:\/\//i.test(url)) shell.openExternal(url);
-    }
-  });
-  win.webContents.setWindowOpenHandler(({ url }) => {
-    if (/^https?:\/\//i.test(url)) shell.openExternal(url);
-    return { action: 'deny' };
-  });
-  win.webContents.on('did-finish-load', () => win.webContents.send('win:maximized', win.isMaximized()));
-  // si el renderer se cae, la confirmación pendiente ya no la puede contestar
-  // nadie: se detiene el agente en limpio en vez de dejarlo colgado esperando
-  win.webContents.on('render-process-gone', () => {
-    try {
-      if (agent) agent.stop();
-    } catch {}
-  });
-  win.on('closed', () => {
-    win = null;
-  });
-  // cerrar = cerrar de verdad: X sale de la app completa (antes se ocultaba y
-  // quedaban procesos vivos). Para ocultar/mostrar: Ctrl+Alt+S o la bandeja.
-  win.on('maximize', () => win.webContents.send('win:maximized', true));
-  win.on('unmaximize', () => win.webContents.send('win:maximized', false));
-  if (DEV) win.webContents.openDevTools({ mode: 'detach' });
-}
-
-/* Muestra la ventana existente (o la crea si se cerró). Se usa desde el
-   segundo lanzamiento, desde el icono de la bandeja y desde los atajos: es la
-   red de seguridad para que la app nunca quede fuera de alcance. */
-function showWindow() {
-  if (!win || win.isDestroyed()) return createChatWindow();
-  if (win.isMinimized()) win.restore();
-  win.show();
-  win.focus();
-}
-
-/* Icono en la bandeja del sistema. Sin él, ocultar la ventana (atajo) dejaba
-   SAGITARI invisible e inalcanzable: ni barra de tareas ni forma evidente de
-   volver. Desde aquí siempre se puede mostrar, ocultar o salir. */
-let tray = null;
-function createTray() {
-  if (tray || HEADLESS) return;
-  try {
-    const ico = path.join(__dirname, '..', 'renderer', 'assets', 'sagitari.ico');
-    if (!fs.existsSync(ico)) return;
-    tray = new Tray(ico);
-    tray.setToolTip('SAGITARI — tu asistente');
-    tray.setContextMenu(
-      Menu.buildFromTemplate([
-        { label: 'Mostrar SAGITARI', click: () => showWindow() },
-        {
-          label: 'Ocultar ventana',
-          click: () => {
-            if (win && !win.isDestroyed()) win.hide();
-          },
-        },
-        { type: 'separator' },
-        { label: 'Salir', click: () => app.quit() },
-      ]),
-    );
-    tray.on('click', () => showWindow());
-    tray.on('double-click', () => showWindow());
-  } catch (e) {
-    tray = null;
-  }
-}
-
-// El glow vive en el marco de la propia app (renderer), no en un overlay de pantalla.
-function glow(mode, color) {
-  if (!config.settings.glowEnabled) return;
-  if (win && !win.isDestroyed()) win.webContents.send('glow:set', { mode, color: color || config.settings.theme });
 }
 
 // ---------- agent wiring (v1.3: agentes de chat Y de background) ----------
@@ -493,8 +329,8 @@ function registrarFallo(kind, err) {
   // un aviso por tipo como máximo: si el fallo se repite en bucle, no molesta
   if (avisosDeFallo++ < 3) {
     try {
-      if (win && !win.isDestroyed())
-        win.webContents.send('agent:event', {
+      if (getWin() && !getWin().isDestroyed())
+        getWin().webContents.send('agent:event', {
           type: 'error',
           message: 'Fallo interno (' + kind + '): ' + message.slice(0, 200) + '\nSe ha guardado en logs\\crash.log',
         });
@@ -514,7 +350,7 @@ function agentEmit(e, isBackground) {
   // v1.3: los eventos de tareas en background se marcan para que el renderer NO
   // los mezcle con el chat interactivo (burbujas, estado busy, etc.).
   const out = isBackground ? { ...e, bg: true } : e;
-  if (win && !win.isDestroyed()) win.webContents.send('agent:event', out);
+  if (getWin() && !getWin().isDestroyed()) getWin().webContents.send('agent:event', out);
   if (e.type === 'tool') glow('work', 'work');
   // solo el chat interactivo escribe en la conversación actual
   if (!isBackground) {
@@ -580,7 +416,7 @@ function wireTaskManager() {
     // segundo agente sobre el run que el chat está ejecutando ahora mismo
     isRunBusy: (runId) => !!(agent && agent.isBusy() && agent.currentRunId === runId),
     emit: (e) => {
-      if (win && !win.isDestroyed()) win.webContents.send('agent:event', e);
+      if (getWin() && !getWin().isDestroyed()) getWin().webContents.send('agent:event', e);
     },
     notify: (run, kind) => {
       const title =
@@ -599,7 +435,7 @@ function wireTaskManager() {
         const { Notification } = require('electron');
         if (Notification.isSupported()) new Notification({ title, body }).show();
       } catch {}
-      if (win && !win.isDestroyed()) win.webContents.send('agent:event', { type: 'toast', title, message: body });
+      if (getWin() && !getWin().isDestroyed()) getWin().webContents.send('agent:event', { type: 'toast', title, message: body });
       runlog.log({ agent: 'sagitari', task: run.runId, event: 'task_notify', kind });
     },
   });
@@ -611,7 +447,7 @@ function wireTaskManager() {
    (cuarto router de la fase 4). Los helpers de secretos se importan aquí porque
    mcpState() (dominio MCP) los usa para enmascarar env/headers. */
 const { registerConfigIpc, enmascararMapaSecretos, claveGuardadaPara } = require('./ipc-config');
-registerConfigIpc(ipcMain, { config: () => config, persistConfig, PRESETS, listModels, glow, getWin: () => win, isHidden: () => HIDDEN });
+registerConfigIpc(ipcMain, { config: () => config, persistConfig, PRESETS, listModels, glow, getWin: () => getWin(), isHidden: () => HIDDEN });
 
 // ---- modo/agentes/market: router en main/ipc-modo.js (noveno router de la fase 4) ----
 const { registerModoIpc } = require('./ipc-modo');
@@ -645,7 +481,7 @@ registerTareasIpc(ipcMain, {
   DEFAULT_RISK,
   CONFIG_DIR,
   runlog,
-  getWin: () => win,
+  getWin: () => getWin(),
 });
 
 // ---- conversaciones/workspace: router en main/ipc-convs.js (séptimo router de la fase 4) ----
@@ -656,7 +492,7 @@ const convsApi = registerConvsIpc(ipcMain, {
   configDir: () => CONFIG_DIR,
   writeJsonAtomic,
   onSaveError: (m) => avisarDisco(m),
-  getWin: () => win,
+  getWin: () => getWin(),
   getAgent: () => agent,
   dialog,
   app,
@@ -683,7 +519,7 @@ const { registerMiscIpc } = require('./ipc-misc');
 registerMiscIpc(ipcMain, {
   config: () => config,
   saveConfig,
-  getWin: () => win,
+  getWin: () => getWin(),
   getWorkspace,
   configDir: () => CONFIG_DIR,
   getGlow: (...a) => glow(...a),
@@ -707,7 +543,7 @@ registerChatIpc(ipcMain, {
   convsApi,
   getSkills: () => skills,
   getGlow: (...a) => glow(...a),
-  getWin: () => win,
+  getWin: () => getWin(),
   configDir: () => CONFIG_DIR,
   onError: (k, err) => registrarFallo(k, err),
   dialog,
@@ -769,7 +605,7 @@ function mcpExport() {
 
 // ---- voz/TTS/dictado: router en main/ipc-voz.js (quinto router de la fase 4) ----
 const { registerVozIpc } = require('./ipc-voz');
-const vozApi = registerVozIpc(ipcMain, { config: () => config, isHeadless: () => HEADLESS, getWin: () => win, DATA_DIR });
+const vozApi = registerVozIpc(ipcMain, { config: () => config, isHeadless: () => HEADLESS, getWin: () => getWin(), DATA_DIR });
 
 // ---------- app lifecycle ----------
 // copia las skills incluidas (skills-starter/) al perfil del usuario en el primer arranque
@@ -793,7 +629,7 @@ const { registerUpdateIpc } = require('./ipc-update');
 const updateApi = registerUpdateIpc(ipcMain, {
   config: () => config,
   saveConfig,
-  getWin: () => win,
+  getWin: () => getWin(),
   updater,
   UPDATE_API,
   DATA_DIR,
@@ -979,17 +815,17 @@ app.whenReady().then(() => {
   // SAGITARI invisible e irrecuperable salvo por Alt+Mayús+S (que nadie sabe).
   // Ahora ocultar/mostrar usa una combinación propia y la bandeja siempre está.
   globalShortcut.register('CommandOrControl+Alt+S', () => {
-    if (!win || win.isDestroyed()) return createChatWindow();
-    win.isVisible() ? win.hide() : showWindow();
+    if (!getWin() || getWin().isDestroyed()) return createChatWindow();
+    getWin().isVisible() ? getWin().hide() : showWindow();
   });
   globalShortcut.register('Alt+Shift+S', () => showWindow());
   globalShortcut.register('CommandOrControl+Shift+G', () => {
-    win && win.isVisible() ? glow('pulse') : null;
+    getWin() && getWin().isVisible() ? glow('pulse') : null;
   });
 
   if (SMOKE) {
     setTimeout(async () => {
-      const ok = { window: !!win && !win.isDestroyed(), configDir: CONFIG_DIR };
+      const ok = { window: !!getWin() && !getWin().isDestroyed(), configDir: CONFIG_DIR };
       console.log('SMOKE::' + JSON.stringify(ok));
       // Salir con 0 SIEMPRE hacía que este paso no pudiera fallar: publicaba si
       // había ventana, pero nadie leía esa línea y el job quedaba verde con una
@@ -1005,11 +841,11 @@ app.on('before-quit', async () => {
     await vozApi.cerrar();
   } catch {} // dictado + modo voz: reintento desarmado, procesos fuera
   globalShortcut.unregisterAll();
-  if (tray) {
+  if (getTray()) {
     try {
-      tray.destroy();
+      getTray().destroy();
     } catch {}
-    tray = null;
+    bandeja.setTray(null);
   }
   if (taskManager) {
     try {
