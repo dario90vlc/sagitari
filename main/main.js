@@ -3,20 +3,20 @@
 // SAGITARI — Electron main process
 // Chat window + click-through screen-edge glow overlay + agent + voice + settings.
 
-const {
-  app,
-  ipcMain,
-  desktopCapturer,
-  screen,
-  globalShortcut,
-  shell,
-  dialog,
-} = require('electron');
+const { app, ipcMain, desktopCapturer, screen, globalShortcut, shell, dialog } = require('electron');
 const path = require('path');
 const fs = require('fs');
 const fsp = require('fs/promises');
 
-const { KEY_PREFIX, encryptionAvailable, protectKey, revealKey, protectServerSecrets, revealServerSecrets, writeJsonAtomic } = require('./config');
+const {
+  KEY_PREFIX,
+  encryptionAvailable,
+  protectKey,
+  revealKey,
+  protectServerSecrets,
+  revealServerSecrets,
+  writeJsonAtomic,
+} = require('./config');
 const { crearVentana } = require('./ventana');
 const { crearBandeja } = require('./bandeja');
 
@@ -214,8 +214,11 @@ function needsKeyEncryption() {
 function applyConfig(raw) {
   config = { ...config, ...raw, settings: { ...config.settings, ...(raw.settings || {}) } };
   // de disco llegan cifradas: en memoria el agente necesita el valor real
-  if (config.active && config.active.apiKey) config.active = { ...config.active, apiKey: revealKey(config.active.apiKey, (k, e) => registrarFallo(k, e)) };
-  config.providers = (config.providers || []).map((p) => (p && p.apiKey ? { ...p, apiKey: revealKey(p.apiKey, (k, e) => registrarFallo(k, e)) } : p));
+  if (config.active && config.active.apiKey)
+    config.active = { ...config.active, apiKey: revealKey(config.active.apiKey, (k, e) => registrarFallo(k, e)) };
+  config.providers = (config.providers || []).map((p) =>
+    p && p.apiKey ? { ...p, apiKey: revealKey(p.apiKey, (k, e) => registrarFallo(k, e)) } : p,
+  );
   config.security = {
     permissions: { ...((raw.security && raw.security.permissions) || {}) },
     guardrails: { ...securityDefaults.guardrails, ...((raw.security && raw.security.guardrails) || {}) },
@@ -447,7 +450,15 @@ function wireTaskManager() {
    (cuarto router de la fase 4). Los helpers de secretos se importan aquí porque
    mcpState() (dominio MCP) los usa para enmascarar env/headers. */
 const { registerConfigIpc, enmascararMapaSecretos, claveGuardadaPara } = require('./ipc-config');
-registerConfigIpc(ipcMain, { config: () => config, persistConfig, PRESETS, listModels, glow, getWin: () => getWin(), isHidden: () => HIDDEN });
+registerConfigIpc(ipcMain, {
+  config: () => config,
+  persistConfig,
+  PRESETS,
+  listModels,
+  glow,
+  getWin: () => getWin(),
+  isHidden: () => HIDDEN,
+});
 
 // ---- modo/agentes/market: router en main/ipc-modo.js (noveno router de la fase 4) ----
 const { registerModoIpc } = require('./ipc-modo');

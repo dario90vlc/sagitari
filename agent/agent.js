@@ -109,7 +109,6 @@ const MODE_PROFILES = {
 
 /* ---------- integridad del historial ---------- */
 
-
 class Agent {
   /* v2.5: cuántas herramientas del mismo mensaje corren a la vez (las que pueden:
      el bloqueo por recurso decide). Es un tope del bucle, no del modelo. */
