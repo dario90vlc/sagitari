@@ -17,6 +17,7 @@
     "verificar:actualizador": "node scripts/verificar-actualizador.js 3",
     "banco": "node scripts/banco.js",
     "test": "node test/run.js",
+    "test:renderer": "node test/renderer/chatkit.test.js",
     "dist": "electron-builder --win nsis portable",
     "dist:installer": "electron-builder --win nsis",
     "dist:portable": "electron-builder --win portable"
@@ -34,6 +35,7 @@
     "electron-builder": "^26.15.3",
     "eslint": "^9.39.5",
     "eslint-config-prettier": "^10.1.8",
+    "jsdom": "^26.1.0",
     "prettier": "^3.9.9"
   },
   "build": {
