@@ -219,8 +219,17 @@ Two checks cover what unit tests cannot see — the pixels and the contrast:
 
 ```bash
 npm run uicheck     # arranca la app y comprueba iconos, cableado, navegación y temas
-npm run shots       # captura las 9 vistas a shots/<vista>.png por CDP
+npm run shots       # captura las 10 vistas a shots/<vista>.png por CDP
 npm run contraste   # mide el contraste de cada color de texto contra cada superficie
+```
+
+`shots` accepts a view list and a size, and `--demo` seeds a real conversation
+drawn with the renderer's own `bubble()` so `chat.png` shows the interface
+rather than the empty state:
+
+```bash
+npm run shots                                  # las 10 vistas, con demo
+node scripts/shot-cdp.js shots chat 1440 900   # solo el chat, sin demo
 ```
 
 `uicheck` drives the real window over the Chromium debugging protocol: it fails if a

@@ -17,10 +17,15 @@
         máquina, sin red.
 
    Uso:
-     node scripts/shot-cdp.js [carpetaSalida] [vistas] [ancho] [alto]
+     node scripts/shot-cdp.js [carpetaSalida] [vistas] [ancho] [alto] [--demo]
 
-   vistas: lista separada por comas de data-view (chat, tasks, tools, memory,
-           skills, mcp, history, settings) o «all». Por defecto: chat.
+   --demo siembra una conversación de verdad antes de fotografiar el chat. Sin
+   ella, shots/chat.png es el estado vacío: no enseña la interfaz.
+
+   vistas: lista separada por comas de data-view (chat, tasks, projects, agents,
+           memory, skills, mcp, tools, history, settings) o «all». Por defecto:
+           chat. Debe coincidir con los .navitem[data-view] de index.html: una
+           vista lista aqui y no ahi hace que el clic no encuentre el boton.
 
    Las capturas van a <carpetaSalida>/<vista>.png
    ============================================================================ */
@@ -44,8 +49,30 @@ const VIEWS = (process.argv[3] || 'chat')
   .filter(Boolean);
 const WIDTH = Number(process.argv[4] || 1440);
 const HEIGHT = Number(process.argv[5] || 900);
+/* --demo siembra una conversación de verdad antes de fotografiar el chat: sin
+   ella, la captura del chat es el estado vacío, que no enseña la interfaz. */
+const DEMO = process.argv.includes('--demo');
 
-const TODAS = ['chat', 'tasks', 'tools', 'memory', 'skills', 'mcp', 'history', 'settings'];
+const TODAS = ['chat', 'tasks', 'projects', 'agents', 'memory', 'skills', 'mcp', 'tools', 'history', 'settings'];
+
+/* Conversación de demostración, dibujada con las propias funciones del renderer
+   (bubble + scroll) para que salga lo que sale de verdad: burbuja, markdown,
+   código y espaciado reales, no un HTML imitado. */
+const DEMO_CHAT = `(() => {
+  const log = document.getElementById('messages');
+  if (!log) return 'NO_CONTAINER';
+  if (typeof bubble !== 'function') return 'NO_BUBBLE_FN';
+  log.innerHTML = '';
+  const say = (role, html) => { bubble(role).innerHTML = html; };
+  say('user', 'Ayúdame a organizar mi carpeta de Descargas: quiero separar instaladores, documentos e imágenes.');
+  say('ai', 'He revisado <b>Descargas</b>: 214 archivos. Mi plan:<br><br>1. Crear <b>Instaladores</b>, <b>Documentos</b> e <b>Imágenes</b>.<br>2. Clasificar por extensión: <code>.exe/.msi</code> → Instaladores · <code>.pdf/.docx</code> → Documentos · <code>.png/.jpg</code> → Imágenes.<br>3. Ejecutar y darte un resumen.<br><br>¿Confirmas?');
+  say('user', 'Adelante, ejecuta el plan.');
+  say('ai', 'Hecho. <b>214 archivos</b> clasificados sin perder ninguno:<br><br>• <b>Instaladores</b> → 38&nbsp;&nbsp;• <b>Documentos</b> → 121&nbsp;&nbsp;• <b>Imágenes</b> → 55<br><br>Tiempo total: <b>42 s</b>. ¿Quieres que mueva los instaladores de más de 1 GB a la Papelera?');
+  const ta = document.getElementById('chatInput');
+  if (ta) { ta.value = ''; ta.style.height = 'auto'; }
+  if (typeof scroll === 'function') scroll();
+  return 'OK msgs=' + log.querySelectorAll('.msg').length;
+})()`;
 
 /* Perfil de pruebas: proveedor con lista larga (el caso que desplaza el menú de
    modelos) y un servidor MCP apagado. Sin credenciales: no toca claves reales. */
@@ -207,9 +234,24 @@ async function esperarCdp(port, intentos = 80) {
 
     const lista = VIEWS[0] === 'all' ? TODAS : VIEWS;
     for (const vista of lista) {
-      await send('Runtime.evaluate', {
+      if (vista === 'chat' && DEMO) {
+        // La conversación se siembra con las funciones del renderer, no con HTML
+        // imitado: así la captura enseña la burbuja, el markdown y el código reales.
+        const r = await send('Runtime.evaluate', { expression: DEMO_CHAT, returnByValue: true });
+        const v = r.result && r.result.result && r.result.result.value;
+        if (v && v.indexOf('OK') !== 0) console.error('  demo no sembrada:', v);
+        await sleep(700);
+      }
+      const pulso = await send('Runtime.evaluate', {
         expression: `(function(){ var b=document.querySelector('.navitem[data-view="${vista}"]'); if(b){b.click(); return true;} return false; })()`,
+        returnByValue: true,
       });
+      if (!pulso.result.value) {
+        // Sin aviso, la captura sale repetida: se fotografía la vista anterior y se
+        // guarda con el nombre de la que no existe, que parece que salió bien.
+        console.error('  OMITIDA ' + vista + ': no hay .navitem[data-view="' + vista + '"]');
+        continue;
+      }
       await sleep(900);
       const shot = await send('Page.captureScreenshot', { format: 'png' });
       fs.writeFileSync(path.join(OUT_DIR, vista + '.png'), Buffer.from(shot.data, 'base64'));

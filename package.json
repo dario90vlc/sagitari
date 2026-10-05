@@ -13,7 +13,7 @@
     "format": "prettier --write .",
     "format:check": "prettier --check .",
     "uicheck": "node scripts/ui-check.js",
-    "shots": "node scripts/shot-cdp.js shots all",
+    "shots": "node scripts/shot-cdp.js shots all --demo",
     "contraste": "node scripts/contraste.js",
     "navcheck": "node scripts/navegador-check.js",
     "verificar:actualizador": "node scripts/verificar-actualizador.js 3",
