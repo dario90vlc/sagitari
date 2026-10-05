@@ -39,7 +39,17 @@ const HIDDEN = HEADLESS && !process.argv.includes('--test-visible');
 // porque cada uno resuelve su ruta al cargarse: es la única forma de que los
 // arranques de prueba no escriban en los skills, logs, memoria, hábitos,
 // checkpoints, perfiles de navegador y salud de modelos REALES del usuario.
-const DATA_DIR = path.join(app.getPath('appData'), HEADLESS ? 'SagitariAI-test' : 'SagitariAI');
+// SAGITARI_TEST_PROFILE (solo arranques de prueba) apunta el perfil a un
+// directorio escribible: en un sandbox que restringe el token, Electron no
+// puede escribir en %APPDATA% y el bloqueo de instancia no se crea (la app
+// sale con «ya está abierta» sin que haya ninguna). No afecta a la app
+// instalada: sin la variable, la ruta es siempre la de antes.
+const PERFIL = HEADLESS
+  ? process.env.SAGITARI_TEST_PROFILE
+    ? path.resolve(process.env.SAGITARI_TEST_PROFILE)
+    : path.join(app.getPath('appData'), 'SagitariAI-test')
+  : path.join(app.getPath('appData'), 'SagitariAI');
+const DATA_DIR = PERFIL;
 process.env.SAGITARI_DATA_DIR = DATA_DIR;
 
 const { Agent } = require('../agent/agent');
@@ -103,7 +113,7 @@ if (process.platform === 'win32') app.setAppUserModelId(APP_USER_MODEL_ID);
 // Se fija ANTES de pedir el bloqueo, que se calcula a partir de esta ruta.
 if (HEADLESS) {
   try {
-    app.setPath('userData', path.join(app.getPath('appData'), 'SagitariAI-test'));
+    app.setPath('userData', PERFIL);
   } catch {}
 }
 

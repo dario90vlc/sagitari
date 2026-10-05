@@ -6,125 +6,70 @@
 
    Por qué CDP y no PrintWindow: los píxeles son exactos (sin marco de ventana,
    sin composición del escritorio, sin dependencia de que la ventana esté
-   delante) y se puede elegir el viewport y recorrer las vistas.
-
-   DOS REQUISITOS del entorno, ambos documentados abajo:
-     1. ELECTRON_RUN_AS_NODE no puede estar definido: con él Electron se
-        comporta como Node, `app` no existe y la ventana nunca se abre.
-     2. En un sandbox que restringe el token, el binario de Electron sale con
-        STATUS_CONTROL_C_EXIT. --no-sandbox --disable-gpu lo arranca. Es una
-        herramienta de desarrollo: captura la app del propio usuario, en su
-        máquina, sin red.
+   visible) y se puede cambiar de vista con el mismo proceso.
 
    Uso:
-     node scripts/shot-cdp.js [carpetaSalida] [vistas] [ancho] [alto] [--demo]
+     node scripts/shot-cdp.js [dir] [vistas] [ancho] [alto] [--demo]
+
+   vistas: lista separada por comas (chat, tasks, projects, agents, memory,
+   skills, mcp, tools, history, settings) o «all». Por defecto: chat.
 
    --demo siembra una conversación de verdad antes de fotografiar el chat. Sin
    ella, shots/chat.png es el estado vacío: no enseña la interfaz.
-
-   vistas: lista separada por comas de data-view (chat, tasks, projects, agents,
-           memory, skills, mcp, tools, history, settings) o «all». Por defecto:
-           chat. Debe coincidir con los .navitem[data-view] de index.html: una
-           vista lista aqui y no ahi hace que el clic no encuentre el boton.
-
-   Las capturas van a <carpetaSalida>/<vista>.png
    ============================================================================ */
 
 const { spawn } = require('child_process');
-const http = require('http');
-const net = require('net');
-const path = require('path');
 const fs = require('fs');
-const os = require('os');
+const http = require('http');
+const path = require('path');
 const WebSocket = require('ws');
 
-const electron = require('electron'); // en un proceso Node normal: la ruta del binario
 const APP_DIR = path.join(__dirname, '..');
-const TEST_DATA_DIR = path.join(process.env.APPDATA || path.join(os.homedir(), 'AppData', 'Roaming'), 'SagitariAI-test');
-
-const OUT_DIR = path.resolve(process.argv[2] || path.join(APP_DIR, 'shots'));
-const VIEWS = (process.argv[3] || 'chat')
-  .split(',')
-  .map((s) => s.trim())
-  .filter(Boolean);
-const WIDTH = Number(process.argv[4] || 1440);
-const HEIGHT = Number(process.argv[5] || 900);
-/* --demo siembra una conversación de verdad antes de fotografiar el chat: sin
-   ella, la captura del chat es el estado vacío, que no enseña la interfaz. */
-const DEMO = process.argv.includes('--demo');
-
 const TODAS = ['chat', 'tasks', 'projects', 'agents', 'memory', 'skills', 'mcp', 'tools', 'history', 'settings'];
 
 /* Conversación de demostración, dibujada con las propias funciones del renderer
-   (bubble + scroll) para que salga lo que sale de verdad: burbuja, markdown,
-   código y espaciado reales, no un HTML imitado. */
-const DEMO_CHAT = `(() => {
-  const log = document.getElementById('messages');
+   (bubble, scroll) para que la captura enseñe el markdown, el código y el
+   espaciado reales, no un HTML imitado. */
+const DEMO_CHAT = `(function () {
+  var log = document.getElementById('messages');
   if (!log) return 'NO_CONTAINER';
   if (typeof bubble !== 'function') return 'NO_BUBBLE_FN';
   log.innerHTML = '';
-  const say = (role, html) => { bubble(role).innerHTML = html; };
+  var say = function (role, html) { bubble(role).innerHTML = html; };
   say('user', 'Ayúdame a organizar mi carpeta de Descargas: quiero separar instaladores, documentos e imágenes.');
   say('ai', 'He revisado <b>Descargas</b>: 214 archivos. Mi plan:<br><br>1. Crear <b>Instaladores</b>, <b>Documentos</b> e <b>Imágenes</b>.<br>2. Clasificar por extensión: <code>.exe/.msi</code> → Instaladores · <code>.pdf/.docx</code> → Documentos · <code>.png/.jpg</code> → Imágenes.<br>3. Ejecutar y darte un resumen.<br><br>¿Confirmas?');
-  say('user', 'Adelante, ejecuta el plan.');
   say('ai', 'Hecho. <b>214 archivos</b> clasificados sin perder ninguno:<br><br>• <b>Instaladores</b> → 38&nbsp;&nbsp;• <b>Documentos</b> → 121&nbsp;&nbsp;• <b>Imágenes</b> → 55<br><br>Tiempo total: <b>42 s</b>. ¿Quieres que mueva los instaladores de más de 1 GB a la Papelera?');
-  const ta = document.getElementById('chatInput');
-  if (ta) { ta.value = ''; ta.style.height = 'auto'; }
-  if (typeof scroll === 'function') scroll();
-  return 'OK msgs=' + log.querySelectorAll('.msg').length;
+  return 'OK';
 })()`;
 
-/* Perfil de pruebas: proveedor con lista larga (el caso que desplaza el menú de
-   modelos) y un servidor MCP apagado. Sin credenciales: no toca claves reales. */
-function seedTestConfig() {
-  const modelos = Array.from({ length: 12 }, (_, i) => 'test-model-' + (i + 1));
-  const dummy = {
-    providerId: 'ui-check',
-    name: 'Prueba (sin conexión)',
-    baseUrl: 'http://127.0.0.1:1/v1',
-    apiKey: '',
-    model: 'test-model-10',
-    vision: false,
-  };
-  try {
-    fs.mkdirSync(TEST_DATA_DIR, { recursive: true });
-    fs.writeFileSync(
-      path.join(TEST_DATA_DIR, 'config.json'),
-      JSON.stringify(
-        {
-          providers: [{ ...dummy, id: 'ui-check', models: modelos }],
-          active: dummy,
-          mcp: {
-            enabled: true,
-            servers: [
-              { id: 'eco', name: 'Eco de prueba', enabled: false, transport: 'stdio', command: process.execPath, args: [], env: {} },
-            ],
-          },
-          settings: { showThinking: true, workspace: fs.mkdtempSync(path.join(os.tmpdir(), 'sagi-shot-ws-')) },
-        },
-        null,
-        2,
-      ),
-      'utf8',
-    );
-  } catch (e) {
-    console.error('no se pudo sembrar el config de pruebas:', e.message);
-  }
-}
+/* --demo es una opción, no una posición: si se trata como tal cae en el ancho y
+   Emulation.setDeviceMetricsOverride recibe NaN («Invalid parameters»). */
+const DEMO = process.argv.includes('--demo');
+const args = process.argv.slice(2).filter((a) => a !== '--demo');
+
+const OUT_DIR = path.resolve(args[0] || path.join(APP_DIR, 'shots'));
+const VIEWS = (args[1] || 'chat')
+  .split(',')
+  .map((s) => s.trim())
+  .filter(Boolean);
+const WIDTH = Number(args[2] || 1440);
+const HEIGHT = Number(args[3] || 900);
+
+const sleep = (ms) => new Promise((r) => setTimeout(r, ms));
 
 function freePort() {
   return new Promise((res, rej) => {
-    const srv = net.createServer();
-    srv.on('error', rej);
-    srv.listen(0, '127.0.0.1', () => {
-      const p = srv.address().port;
-      srv.close(() => res(p));
+    const s = require('net').createServer();
+    s.on('error', rej);
+    s.listen(0, '127.0.0.1', () => {
+      const p = s.address().port;
+      s.close(() => res(p));
     });
   });
 }
 
-const getJson = (url) =>
-  new Promise((res, rej) => {
+function getJson(url) {
+  return new Promise((res, rej) => {
     http
       .get(url, (r) => {
         let d = '';
@@ -139,28 +84,32 @@ const getJson = (url) =>
       })
       .on('error', rej);
   });
+}
 
-const sleep = (ms) => new Promise((r) => setTimeout(r, ms));
-
-async function esperarCdp(port, intentos = 80) {
+async function esperarCdp(port, intentos = 60) {
   for (let i = 0; i < intentos; i++) {
     try {
-      const v = await getJson(`http://127.0.0.1:${port}/json/version`);
-      if (v && v.webSocketDebuggerUrl) return v;
-    } catch {}
-    await sleep(250);
+      await getJson(`http://127.0.0.1:${port}/json/version`);
+      return;
+    } catch {
+      await sleep(250);
+    }
   }
   throw new Error('el endpoint de depuración no respondió (¿otra instancia de SAGITARI abierta?)');
 }
 
 (async () => {
-  seedTestConfig();
-  const port = await freePort();
   fs.mkdirSync(OUT_DIR, { recursive: true });
+  const port = await freePort();
 
-  /* El entorno no debe heredar ELECTRON_RUN_AS_NODE: con él no hay ventana. */
+  const electron = require('electron');
+  /* El entorno no debe heredar ELECTRON_RUN_AS_NODE: con él no hay ventana. Y el
+     perfil de pruebas tiene que ser escribible: en un sandbox que restringe el
+     token, Electron no puede escribir en %APPDATA% y el bloqueo de instancia no
+     crea (la app sale con «ya está abierta» sin que haya ninguna). */
   const env = Object.assign({}, process.env);
   delete env.ELECTRON_RUN_AS_NODE;
+  env.SAGITARI_TEST_PROFILE = path.join(APP_DIR, '.perfil-shots');
 
   const child = spawn(
     electron,
@@ -176,6 +125,7 @@ async function esperarCdp(port, intentos = 80) {
   );
 
   let salido = false;
+  let quedan = 0; // capturas que faltan: si el proceso muere con todas hechas, no es fallo
   const salir = (code) => {
     if (salido) return;
     salido = true;
@@ -186,6 +136,7 @@ async function esperarCdp(port, intentos = 80) {
   };
 
   child.on('exit', (c) => {
+    if (quedan === 0) return; // ya están todas: el proceso se apagó solo, bien
     console.error('Electron salió antes de tiempo con código', c);
     console.error('Si dice «SAGITARI ya está abierta», cierra la app y vuelve a intentarlo.');
     salir(1);
@@ -208,21 +159,26 @@ async function esperarCdp(port, intentos = 80) {
     ws.on('message', (raw) => {
       const m = JSON.parse(raw);
       if (m.id && pendientes.has(m.id)) {
-        const { res, rej } = pendientes.get(m.id);
+        const { res, rej, method } = pendientes.get(m.id);
         pendientes.delete(m.id);
-        if (m.error) rej(new Error(m.error.message));
-        else res(m.result);
+        if (m.error) {
+          console.error('  [cdp] error en ' + method + ': ' + m.error.message);
+          rej(new Error(method + ': ' + m.error.message));
+        } else res(m.result);
+      } else if (m.method) {
+        console.error('  [cdp] evento ' + m.method + ' ' + JSON.stringify(m.params || {}).slice(0, 160));
       }
     });
     const send = (method, params = {}) =>
       new Promise((res, rej) => {
         const i = ++id;
-        pendientes.set(i, { res, rej });
+        pendientes.set(i, { res, rej, method });
         ws.send(JSON.stringify({ id: i, method, params }));
       });
 
     await send('Page.enable');
     await send('Emulation.setDeviceMetricsOverride', { width: WIDTH, height: HEIGHT, deviceScaleFactor: 1, mobile: false });
+    console.error('  [cdp] métricas ' + WIDTH + 'x' + HEIGHT + ' ok');
 
     // Esperar a que el renderer haya pintado de verdad.
     for (let i = 0; i < 40; i++) {
@@ -233,7 +189,9 @@ async function esperarCdp(port, intentos = 80) {
     await sleep(1200);
 
     const lista = VIEWS[0] === 'all' ? TODAS : VIEWS;
+    quedan = lista.length;
     for (const vista of lista) {
+      console.error('  [cdp] vista ' + vista);
       if (vista === 'chat' && DEMO) {
         // La conversación se siembra con las funciones del renderer, no con HTML
         // imitado: así la captura enseña la burbuja, el markdown y el código reales.
@@ -250,11 +208,13 @@ async function esperarCdp(port, intentos = 80) {
         // Sin aviso, la captura sale repetida: se fotografía la vista anterior y se
         // guarda con el nombre de la que no existe, que parece que salió bien.
         console.error('  OMITIDA ' + vista + ': no hay .navitem[data-view="' + vista + '"]');
+        quedan--;
         continue;
       }
       await sleep(900);
       const shot = await send('Page.captureScreenshot', { format: 'png' });
       fs.writeFileSync(path.join(OUT_DIR, vista + '.png'), Buffer.from(shot.data, 'base64'));
+      quedan--;
       console.log('  ' + vista + '.png');
     }
 

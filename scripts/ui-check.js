@@ -38,11 +38,18 @@ const CHECK_DEADLINE_MS = 8000;
    local de mentira (`fakeLlm`), así que las llamadas al modelo no salen a la red
    ni tocan claves reales — y de paso enseñan qué herramientas le ofrece la app
    al modelo, que no viaja por ningún canal de la interfaz. */
-const TEST_DATA_DIR = path.join(process.env.APPDATA || path.join(os.homedir(), 'AppData', 'Roaming'), 'SagitariAI-test');
-/* El espacio de trabajo de la instancia de prueba: una carpeta TEMPORAL, no la del
-   usuario. La comprobación de la revisión del cambio escribe un archivo de verdad y
-   no puede dejar nada en el escritorio de quien ejecuta esto. */
-const WS_TEST = fs.mkdtempSync(path.join(os.tmpdir(), 'sagi-ui-ws-'));
+/* Perfil de la instancia de prueba. SAGITARI_TEST_PROFILE lo apunta a un directorio
+   escribible: en un sandbox que restringe el token, Electron no puede escribir en
+   %APPDATA% (el bloqueo de instancia no se crea y la app sale con «ya está
+   abierta» sin que haya ninguna). Sin la variable, la ruta es siempre la de antes. */
+const TEST_PROFILE = process.env.SAGITARI_TEST_PROFILE
+  ? path.resolve(process.env.SAGITARI_TEST_PROFILE)
+  : path.join(process.env.APPDATA || path.join(os.homedir(), 'AppData', 'Roaming'), 'SagitariAI-test');
+const TEST_DATA_DIR = TEST_PROFILE;
+/* El espacio de trabajo de la instancia de prueba: dentro del workspace, no en
+   %TEMP% — por el mismo motivo de arriba: Electron no puede escribir en %TEMP% y
+   la comprobación de la revisión del cambio escribe un archivo de verdad. */
+const WS_TEST = fs.mkdtempSync(path.join(APP_DIR, 'sagi-ui-ws-'));
 function seedTestConfig(apiPort) {
   const file = path.join(TEST_DATA_DIR, 'config.json');
   /* Proveedor con lista larga y el modelo en uso al final: es el caso que hace
@@ -283,16 +290,27 @@ const AFTER = {
      El WAV de mentira sustituye al tono constante de la tarea anterior: con voz y
      silencios de verdad, la interrupción y el nivel se pueden comprobar. */
   const wavFalso = await vozFalsa();
+  /* El entorno no debe heredar ELECTRON_RUN_AS_NODE: con él Electron se comporta
+     como Node, no hay ventana y el puerto de depuración no existe. Y el perfil de
+     pruebas tiene que ser escribible (arriba). */
+  const env = Object.assign({}, process.env);
+  delete env.ELECTRON_RUN_AS_NODE;
+  env.SAGITARI_TEST_PROFILE = TEST_PROFILE;
   const child = spawn(
     electron,
     [
       '--remote-debugging-port=' + port,
       '--hidden',
+      /* Sin --no-sandbox el sandbox de Chromium no se levanta en un token
+         restringido y el proceso sale con STATUS_CONTROL_C_EXIT. --disable-gpu
+         evita el proceso de GPU, que es el que falla en un escritorio sin GPU. */
+      '--no-sandbox',
+      '--disable-gpu',
       '--use-fake-device-for-media-stream',
       '--use-file-for-fake-audio-capture=' + wavFalso,
       '.',
     ],
-    { cwd: APP_DIR, stdio: ['ignore', 'pipe', 'pipe'] },
+    { cwd: APP_DIR, stdio: ['ignore', 'pipe', 'pipe'], env },
   );
   let childOut = '';
   child.stdout.on('data', (d) => {

@@ -2,7 +2,12 @@
 
 /* Funciones de utilidad para el panel de ajustes.
    Se extraen de 30-ajustes.js para que sean más fáciles de mantener.
-   Usan $ (jQuery-like) que es una variable global del renderer. */
+   Usan $ (jQuery-like) que es una variable global del renderer.
+
+   Estas funciones se llaman desde OTROS scripts del renderer (30-ajustes.js,
+   40-vistas.js), no desde este fichero: ESLint no ve ese uso entre ficheros
+   y las da por sin usar. */
+/* eslint-disable no-unused-vars */
 
 function smsg(t) {
   $('#saveMsg').textContent = t;
@@ -33,4 +38,9 @@ function updMsg(text) {
   if (el) el.textContent = text || '';
 }
 
-module.exports = { smsg, mcpMsg, updVer, updSize, updMsg };
+/* Sin module.exports: este fichero se carga con <script> en index.html, no con
+   require(). En el navegador `module` no existe y la línea lanzaba
+   «ReferenceError: module is not defined», que abortaba el fichero ENTERO: ninguna
+   de las funciones de arriba quedaba definida y 30-ajustes.js se encontraba
+   smsg() sin declarar. Al ser funciones de nivel superior ya viven en el scope
+   global comparten el resto de los scripts. */

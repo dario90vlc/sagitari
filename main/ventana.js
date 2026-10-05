@@ -5,7 +5,12 @@
    Patrón factory: recibe las dependencias y retorna las funciones de ventana.
    Así main.js puede inyectar `agent`, `config`, etc. sin dependencias circulares. */
 
-const { BrowserWindow, screen, pathToFileURL, shell } = require('electron');
+/* pathToFileURL viene de `url` de Node, no de `electron`: en este Electron (44.2.0)
+   la API existe en el binario pero no la expone `require('electron')`, y la línea
+   60 rompía con «pathToFileURL is not a function». La de Node está en el proceso
+   principal desde siempre. */
+const { BrowserWindow, screen, shell } = require('electron');
+const { pathToFileURL } = require('url');
 const path = require('path');
 
 function crearVentana({ HIDDEN, DEV, INDEX_HTML, getAgent, getConfig }) {

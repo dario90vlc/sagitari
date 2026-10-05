@@ -16,11 +16,19 @@ const ic = (n, c) => window.SAGI_ICONS.icon(n, c);
 testearlas de verdad desde Node. */
 const K = window.ChatKit;
 
-const CFG = { providers: [], active: null, settings: {}, presets: [] };
-const busy = false;
+/* CFG, busy y mode se reasignan desde otros scripts del renderer (30-ajustes.js,
+   40-vistas.js, 20-voz.js): tienen que ser let. Un commit de lint los dejó como
+   const y desde entonces fillSettings() y enviarTexto() rompían con «Assignment
+   to constant variable». ESLint no ve las reasignaciones entre ficheros, así que
+   se le apaga la regla en estas tres líneas. */
+// eslint-disable-next-line prefer-const
+let CFG = { providers: [], active: null, settings: {}, presets: [] };
+// eslint-disable-next-line prefer-const
+let busy = false;
 let pendingAssistant = null;
 var listening = false;
-const mode = 'act';
+// eslint-disable-next-line prefer-const
+let mode = 'act';
 let currentRunMode = 'act'; // modo con el que se lanzó el turno en curso
 let lastAssistantEl = null; // último bloque de respuesta (para regenerar/copiar)
 let pendingTurn = null; // estado del turno: grupo de herramientas, plan…

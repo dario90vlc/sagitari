@@ -48,3 +48,6 @@ shots/
 
 # Directorios de trabajo de asistentes locales (no se versionan)
 .agent/
+
+# Perfiles de datos que crean las pruebas (scripts/lanzar.js, scripts/shot-cdp.js)
+.perfil-*/

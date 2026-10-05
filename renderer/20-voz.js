@@ -990,7 +990,10 @@ function askConfirm(anchor, message, detail) {
   });
 }
 
-const devMode = false;
+/* devMode se reasigna desde 30-ajustes.js (dos veces): tiene que ser let.
+   ESLint no ve la reasignación entre ficheros. */
+// eslint-disable-next-line prefer-const
+let devMode = false;
 async function paintMeta() {
   const line = $('#devMeta');
   if (!line) return;
