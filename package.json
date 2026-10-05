@@ -17,7 +17,7 @@
     "verificar:actualizador": "node scripts/verificar-actualizador.js 3",
     "banco": "node scripts/banco.js",
     "test": "node test/run.js",
-    "test:renderer": "node test/renderer/chatkit.test.js && node test/renderer/historial.test.js && node test/renderer/config.test.js",
+    "test:renderer": "node test/renderer/chatkit.test.js && node test/renderer/historial.test.js && node test/renderer/config.test.js && node test/renderer/protocols.test.js && node test/renderer/tools.test.js",
     "dist": "electron-builder --win nsis portable",
     "dist:installer": "electron-builder --win nsis",
     "dist:portable": "electron-builder --win portable"
