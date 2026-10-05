@@ -19,6 +19,7 @@ const {
 } = require('./config');
 const { crearVentana } = require('./ventana');
 const { crearBandeja } = require('./bandeja');
+const log = require('./log');
 
 const DEV = process.argv.includes('--dev');
 const SMOKE = process.argv.includes('--smoke');
@@ -676,7 +677,7 @@ async function correrBancoYsalir() {
   }
   const dirTareas = arg('--dir') || banco.DIR_POR_DEFECTO;
   const filtro = arg('--tarea');
-  console.log('[banco] ' + config.active.model + (filtro ? ' · solo «' + filtro + '»' : ' · todas las tareas'));
+  log.info('[banco] ' + config.active.model + (filtro ? ' · solo «' + filtro + '»' : ' · todas las tareas'));
   const informe = await banco.correrTodo({
     dir: dirTareas,
     filtro,
@@ -695,33 +696,33 @@ async function correrBancoYsalir() {
     },
   });
   for (const m of informe.malas) console.error('[banco] tarea ignorada — ' + m.error);
-  console.log('\n' + banco.tabla(informe));
-  if (hay('--json')) console.log(JSON.stringify(informe));
+  log.info('\n' + banco.tabla(informe));
+  if (hay('--json')) log.info(JSON.stringify(informe));
   try {
     const f = path.join(DATA_DIR, 'banco', 'informe-' + new Date().toISOString().replace(/[:.]/g, '-') + '.json');
     fs.mkdirSync(path.dirname(f), { recursive: true });
     fs.writeFileSync(f, JSON.stringify(informe, null, 2));
-    console.log('  Informe: ' + f);
+    log.info('  Informe: ' + f);
   } catch {}
   let codigo = informe.resumen.pasaron === informe.resumen.tareas ? 0 : 1;
   if (hay('--guardar-base') || hay('--base')) {
     const fBase = path.join(__dirname, '..', 'bench', 'linea-base.json');
     if (hay('--guardar-base')) {
       banco.guardarBase(fBase, informe);
-      console.log('  Línea base actualizada: ' + fBase);
+      log.info('  Línea base actualizada: ' + fBase);
     }
     if (hay('--base')) {
       const base = banco.leerBase(fBase);
-      if (!base) console.log('  (sin línea base con la que comparar)');
+      if (!base) log.info('  (sin línea base con la que comparar)');
       else {
         const c = banco.comparar(informe, base);
-        console.log('  Comparado con la línea base de ' + (base.cuando || '?') + (base.modelo ? ' (' + base.modelo + ')' : ''));
-        for (const r of c.regresiones) console.log('    REGRESIÓN  ' + r.nombre + ': ' + (r.motivos || []).join('; '));
-        for (const r of c.mejoras) console.log('    mejor      ' + r.nombre);
-        for (const r of c.nuevos) console.log('    nueva      ' + r.nombre + (r.pasa ? ' (pasa)' : ' (falla)'));
-        for (const r of c.faltantes) console.log('    ya no está ' + r.nombre);
+        log.info('  Comparado con la línea base de ' + (base.cuando || '?') + (base.modelo ? ' (' + base.modelo + ')' : ''));
+        for (const r of c.regresiones) log.info('    REGRESIÓN  ' + r.nombre + ': ' + (r.motivos || []).join('; '));
+        for (const r of c.mejoras) log.info('    mejor      ' + r.nombre);
+        for (const r of c.nuevos) log.info('    nueva      ' + r.nombre + (r.pasa ? ' (pasa)' : ' (falla)'));
+        for (const r of c.faltantes) log.info('    ya no está ' + r.nombre);
         for (const a of c.avisos)
-          console.log(
+          log.info(
             '    más caro   ' +
               a.nombre +
               ': ' +
@@ -761,7 +762,7 @@ app.whenReady().then(() => {
   // se reescribe cifrado en cuanto arranca (el .bak conserva la copia previa)
   if (needsKeyEncryption()) {
     const r = saveConfig();
-    if (r.ok) console.log('[SAGITARI] claves de API cifradas con el almacén del sistema (' + CONFIG_FILE + ')');
+    if (r.ok) log.info('[SAGITARI] claves de API cifradas con el almacén del sistema (' + CONFIG_FILE + ')');
   } else if (!encryptionAvailable() && (config.providers || []).some((p) => p && p.apiKey)) {
     console.warn('[SAGITARI] el sistema no ofrece cifrado: las claves se guardan en claro en config.json');
   }
@@ -774,7 +775,7 @@ app.whenReady().then(() => {
     if (k) {
       config.active = { ...config.active, apiKey: k };
       saveConfig();
-      console.log('[SAGITARI] la clave del proveedor activo se recuperó del proveedor guardado');
+      log.info('[SAGITARI] la clave del proveedor activo se recuperó del proveedor guardado');
     }
   }
   seedStarterSkills();
@@ -837,7 +838,7 @@ app.whenReady().then(() => {
   if (SMOKE) {
     setTimeout(async () => {
       const ok = { window: !!getWin() && !getWin().isDestroyed(), configDir: CONFIG_DIR };
-      console.log('SMOKE::' + JSON.stringify(ok));
+      log.info('SMOKE::' + JSON.stringify(ok));
       // Salir con 0 SIEMPRE hacía que este paso no pudiera fallar: publicaba si
       // había ventana, pero nadie leía esa línea y el job quedaba verde con una
       // app que no abre ninguna. El código de salida es el veredicto.
