@@ -131,6 +131,38 @@
   --warn: #fbbf24;
   --danger: #fb7185;
   --r: 16px;
+  /* el caret pertenece a la paleta: el del sistema es un azul que no existe aquí */
+  caret-color: rgb(var(--acc-rgb));
+  /* ============ escala de diseño ============
+     Una sola fuente de verdad para radios, elevación y espaciado, de modo que
+     los valores repartidos por la hoja se lean como un sistema y no como
+     decisions sueltas.
+
+     RADIOS (de fuera a dentro: un radio interior nunca supera al que lo anida)
+       26px  héroe de la app: .side, .composer, #voiceMode
+       22px  héroe doblado: .composer.slim
+       20px  panel flotante: .bubble, .acard, .tooltray, menús
+       18px  puerta de navegación: .navitem, .side-status, .side-mode
+       16px  tarjeta y campo (--r)
+       11px  contenido dentro de una burbuja
+        8px  control pequeño: .wb, .sidecollapse
+        4px  barra de scroll y placa
+       999px  píldora: .btn, .modeseg, .toolchip, .ce-hint
+
+     ELEVACIÓN (vidrio por niveles: más alto = más blur y más luz)
+       sidebar  blur(18px) sombra 0 12px 34px
+       tarjeta   sombra 0 8px 24px + filo superior de 1px
+       menú      blur(26px) sombra 0 24px 70px
+       La sombra lleva desplazamiento Y y desenfoque: un halo de color a
+       desplazamiento cero es decoración, no profundidad.
+
+     ESPACIADO (pasos de 4px; un grupo va ajustado, una sección aireada)
+       4 / 6px   dentro de un componente (gap entre icono y etiqueta)
+       8 / 10px  entre componentes de un mismo grupo
+       12 / 16px entre grupos de una vista
+       20 / 24px  entre secciones de una vista
+       Una cabecera lleva más espacio debajo que arriba: separa lo que abre de
+       lo que sigue. */
 }
 * {
   box-sizing: border-box;
@@ -2067,6 +2099,13 @@ textarea::placeholder {
 }
 .btn:disabled {
   opacity: 0.5;
+  cursor: not-allowed;
+}
+/* un botón apagado no responde al ratón: sin el :hover seguiría ofreciendo el
+   borde de acento y el usuario pulsaría algo que no hace nada */
+.btn:disabled:hover {
+  border-color: var(--line);
+  box-shadow: none;
 }
 .saving {
   font-size: 12px;
@@ -3580,6 +3619,10 @@ depender del color de acento elegido. */
   background: rgba(var(--acc2-rgb), 0.2);
   transform: translateY(-1px);
 }
+/* respuesta al pulsado: el resto de la interfaz la tenía y el estado vacío no */
+.ce-hint:active {
+  transform: translateY(0) scale(0.97);
+}
 /* rejilla adaptativa real: 3 columnas si caben, 2 en ventanas medianas, 1 si no */
 .ce-modes {
   display: grid;
@@ -3600,6 +3643,9 @@ depender del color de acento elegido. */
   transform: translateY(-2px);
   border-color: rgba(var(--mr), 0.5);
   box-shadow: 0 6px 22px rgba(var(--mr), 0.16);
+}
+.ce-mode:active {
+  transform: translateY(0) scale(0.98);
 }
 .ce-mode.on {
   border-color: rgba(var(--mr), 0.6);
@@ -4772,9 +4818,7 @@ input.glowslider.compact::-webkit-slider-thumb {
   background: rgba(var(--acc2-rgb), 0.38);
   color: #fff;
 }
-:root {
-  caret-color: rgb(var(--acc-rgb));
-}
+/* el caret vive en :root, con el resto de tokens */
 * {
   scrollbar-color: rgba(var(--acc2-rgb), 0.35) transparent;
   scrollbar-width: thin;

@@ -192,6 +192,9 @@ sagitari/
 | `npm run lint:fix`      | Run ESLint with auto-fix          |
 | `npm run format`        | Format with Prettier              |
 | `npm run format:check`  | Check formatting with Prettier    |
+| `npm run uicheck`       | Check the live interface (CDP)    |
+| `npm run shots`         | Capture every view to `shots/`    |
+| `npm run contraste`     | Audit palette contrast (WCAG AA)  |
 
 ### Tests
 
@@ -209,6 +212,29 @@ npm run test:renderer
 `test/renderer/run.js` discovers every `*.test.js` in the folder and runs them in
 a single process — no child process is spawned, so it works under a restricted
 sandbox. Adding a new test file needs no config change.
+
+### Verifying the interface
+
+Two checks cover what unit tests cannot see — the pixels and the contrast:
+
+```bash
+npm run uicheck     # arranca la app y comprueba iconos, cableado, navegación y temas
+npm run shots       # captura las 9 vistas a shots/<vista>.png por CDP
+npm run contraste   # mide el contraste de cada color de texto contra cada superficie
+```
+
+`uicheck` drives the real window over the Chromium debugging protocol: it fails if a
+renderer script breaks, if an icon is undrawn, or if a view stops responding.
+
+`shots` needs a runnable Electron. In a sandbox where the binary exits with
+`STATUS_CONTROL_C_EXIT`, launch it with `--no-sandbox --disable-gpu` and make sure
+`ELECTRON_RUN_AS_NODE` is not set — with that variable Electron behaves as plain
+Node, `app` does not exist and no window ever opens.
+
+`contraste` reads the tokens from `renderer/styles.css`, composites each
+translucent surface over the base background, and reports every text/surface pair
+below 4.5:1 (WCAG 2.1 AA for body text). It reads the tokens, so a palette change
+is audited by re-running it.
 
 ### Linting and formatting
 
