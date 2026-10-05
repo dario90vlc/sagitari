@@ -187,7 +187,7 @@ sagitari/
 | `npm run dev`           | Start the app in development mode |
 | `npm run smoke`         | Run smoke test                    |
 | `npm test`              | Run existing tests                |
-| `npm run test:renderer` | Run renderer tests (57 tests)     |
+| `npm run test:renderer` | Run unit tests (237 tests)        |
 | `npm run lint`          | Run ESLint                        |
 | `npm run lint:fix`      | Run ESLint with auto-fix          |
 | `npm run format`        | Format with Prettier              |
@@ -195,11 +195,18 @@ sagitari/
 
 ### Tests
 
-57 automated tests for the renderer (chatkit, historial, config, protocols, tools):
+237 unit tests across 20 files, covering the pure logic of the agent (guardrails,
+commands, memory, hooks, skills, models, context budget, diffs, diagnostics,
+search, repo map, project detection) and the renderer (chatkit, protocols, tools,
+config, history):
 
 ```bash
 npm run test:renderer
 ```
+
+`test/renderer/run.js` discovers every `*.test.js` in the folder and runs them in
+a single process — no child process is spawned, so it works under a restricted
+sandbox. Adding a new test file needs no config change.
 
 ### Linting and formatting
 
