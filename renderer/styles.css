@@ -4750,14 +4750,13 @@ input.glowslider.compact::-webkit-slider-thumb {
 }
 
 /* ============ accesibilidad: movimiento reducido ============
-   Apaga las animaciones INFINITAS (glow del marco, indicadores de actividad,
-   puntos de escritura, caret de streaming, barra de confirmación) porque son
-   las que no paran nunca. Las transiciones cortas de color/borde se mantienen:
-   no marean y conservan la respuesta visual del hover. */
-/* Un solo sitio para el movimiento reducido: se va el latido y cualquier recorrido, y se
-   queda el enlace de feedback que importa —el aura sigue visible y quieta, con su
-   intensidad por estado—. Los selectores de estados del glow viven aquí, no en dos
-   bloques: tenerlos repartidos ya dejó un !important obsoleto anulando el aura. */
+    Un solo sitio para el movimiento reducido: se va el latido y cualquier recorrido,
+    y se queda el enlace de feedback que importa —el aura sigue visible y quieta,
+    con su intensidad por estado—. Apaga las animaciones INFINITAS (glow del marco,
+    indicadores de actividad, puntos de escritorio, caret de streaming, barra de
+    confirmación), que son las que no paran nunca. Los selectores de estados del
+    glow viven aquí, no en dos bloques: tenerlos repartidos ya dejó un !important
+    obsoleto anulando el aura. */
 @media (prefers-reduced-motion: reduce) {
   .glow::before,
   .glowRing {
@@ -4770,8 +4769,22 @@ input.glowslider.compact::-webkit-slider-thumb {
     animation: none !important;
   }
   input[type='range'].glowslider,
-  input[type='range'].glowslider::-webkit-slider-thumb {
+  input[type='range'].glowslider::-webkit-slider-thumb,
+  #vmOrbe {
     transition: none;
+  }
+  /* Red de seguridad: lo arriba apaga lo que se nombró, pero la hoja lleva 27
+     animaciones y 36 transiciones. Sin este paraguas, un control que no estaba en
+     la lista (el ascensor de una vista, el hundido de una tarjeta) seguiría moviéndose
+     para quien pidió que nada se mueva. La duración a 0 en la práctica: el estado
+     final se alcanza en el primer frame, sin recorrido. */
+  *,
+  *::before,
+  *::after {
+    animation-duration: 0.01ms !important;
+    animation-iteration-count: 1 !important;
+    transition-duration: 0.01ms !important;
+    scroll-behavior: auto !important;
   }
   .shell.glow-think .glow::before {
     opacity: 0.42;
@@ -5039,9 +5052,4 @@ kbd {
   border: 1px solid rgba(255, 255, 255, 0.25);
   border-radius: 5px;
   padding: 1px 6px;
-}
-@media (prefers-reduced-motion: reduce) {
-  #vmOrbe {
-    transition: none;
-  }
 }
