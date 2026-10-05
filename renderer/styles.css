@@ -136,17 +136,18 @@
   /* ============ escala de diseño ============
      Una sola fuente de verdad para radios, elevación y espaciado, de modo que
      los valores repartidos por la hoja se lean como un sistema y no como
-     decisions sueltas.
+     decisiones sueltas.
 
      RADIOS (de fuera a dentro: un radio interior nunca supera al que lo anida)
        26px  héroe de la app: .side, .composer, #voiceMode
        22px  héroe doblado: .composer.slim
        20px  panel flotante: .bubble, .acard, .tooltray, menús
-       18px  puerta de navegación: .navitem, .side-status, .side-mode
+       18px  puerta de navegación: .navitem, .side-status, .side-mode, .ce-mode
        16px  tarjeta y campo (--r)
-       11px  contenido dentro de una burbuja
+       11px  pestaña y contenido dentro de una burbuja
+       10px  marco de la ventana (.shell, .app)
         8px  control pequeño: .wb, .sidecollapse
-        4px  barra de scroll y placa
+        4px  barra de scroll
        999px  píldora: .btn, .modeseg, .toolchip, .ce-hint
 
      ELEVACIÓN (vidrio por niveles: más alto = más blur y más luz)
