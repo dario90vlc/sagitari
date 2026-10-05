@@ -187,7 +187,7 @@ sagitari/
 | `npm run dev`           | Start the app in development mode |
 | `npm run smoke`         | Run smoke test                    |
 | `npm test`              | Run existing tests                |
-| `npm run test:renderer` | Run unit tests (237 tests)        |
+| `npm run test:renderer` | Run unit tests (410 tests)        |
 | `npm run lint`          | Run ESLint                        |
 | `npm run lint:fix`      | Run ESLint with auto-fix          |
 | `npm run format`        | Format with Prettier              |
@@ -195,10 +195,11 @@ sagitari/
 
 ### Tests
 
-237 unit tests across 20 files, covering the pure logic of the agent (guardrails,
+410 unit tests across 34 files, covering the pure logic of the agent (guardrails,
 commands, memory, hooks, skills, models, context budget, diffs, diagnostics,
-search, repo map, project detection) and the renderer (chatkit, protocols, tools,
-config, history):
+search, repo map, project detection, habits, MCP transport/config, execution
+utilities, run-log redaction) and the renderer (chatkit, protocols, tools, config,
+history):
 
 ```bash
 npm run test:renderer
