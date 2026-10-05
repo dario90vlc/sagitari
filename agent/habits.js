@@ -149,7 +149,16 @@ function observe(type, ev = {}) {
       }
     }
     if ((ev.name === 'write_file' || ev.name === 'list_dir' || ev.name === 'read_file') && args.path) {
-      const dir = String(args.path).replace(/[\\/][^\\/]*$/, '');
+      /* `list_dir` recibe una CARPETA: quedarse con su carpeta padre —lo que hace
+         el dirname de abajo— registraba el sitio de al lado, un nivel por encima
+         del que el usuario trabaja de verdad. Los otros dos reciben un ARCHIVO,
+         así que ahí sí toca la carpeta que lo contiene. */
+      const dir =
+        ev.name === 'list_dir'
+          ? String(args.path)
+              .trim()
+              .replace(/[\\/]+$/, '')
+          : String(args.path).replace(/[\\/][^\\/]*$/, '');
       if (dir) {
         d.folders = d.folders || {};
         _bump(d, d.folders, dir, 1, 'folders');
