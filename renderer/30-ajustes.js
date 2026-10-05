@@ -1,9 +1,9 @@
 /* SAGITARI renderer — 30-ajustes.js (antes app.js 2754-4113): ajustes, proveedores, seguridad, MCP, hábitos, datos, updater y acerca de
    Script clásico: comparte el scope global con los demás 1x-*.js.
    El orden de carga en index.html preserva el orden original. */
-/* global glowStrengthLabel, glassTintLabel, smsg, mcpMsg, updVer, updSize, updMsg */
+/* global glowStrengthLabel, glassTintLabel, smsg */
 /* glowStrengthLabel y glassTintLabel están definidas en 40-vistas.js (scope compartido) */
-/* smsg, mcpMsg, updVer, updSize, updMsg están definidas en ajustes-util.js (scope compartido) */
+/* smsg está definida en ajustes-util.js (scope compartido) */
 /* exported fillSettings, pasosConMotor, refrescarWhisperUi, refrescarPiperUi, wizardMostrar, initAboutPanel */
 // ============ settings ============
 async function fillSettings() {
