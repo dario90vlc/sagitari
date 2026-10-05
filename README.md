@@ -236,6 +236,10 @@ translucent surface over the base background, and reports every text/surface pai
 below 4.5:1 (WCAG 2.1 AA for body text). It reads the tokens, so a palette change
 is audited by re-running it.
 
+The gallery at the top of this README is regenerated with `npm run shots` — the
+committed PNGs lag behind the CSS, so treat them as the design language rather
+than the current pixel state.
+
 ### Linting and formatting
 
 ESLint 9 + Prettier are configured across the project:
