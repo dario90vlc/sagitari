@@ -238,7 +238,12 @@ renderer script breaks, if an icon is undrawn, or if a view stops responding.
 `shots` needs a runnable Electron. In a sandbox where the binary exits with
 `STATUS_CONTROL_C_EXIT`, launch it with `--no-sandbox --disable-gpu` and make sure
 `ELECTRON_RUN_AS_NODE` is not set — with that variable Electron behaves as plain
-Node, `app` does not exist and no window ever opens.
+Node, `app` does not exist and no window ever opens. `scripts/lanzar.js` does all
+three and is what `npm run smoke` calls; it also points the data profile at
+`.perfil-pruebas/` inside the workspace, because a restricted token cannot write
+to `%APPDATA%` and the single-instance lock is never created (the app then exits
+with «SAGITARI ya está abierta» when nothing is open). `main/main.js` honours
+`SAGITARI_TEST_PROFILE` for the same reason, and `uicheck`/`shot-cdp` set it too.
 
 `contraste` reads the tokens from `renderer/styles.css`, composites each
 translucent surface over the base background, and reports every text/surface pair
