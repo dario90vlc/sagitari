@@ -18,6 +18,7 @@ const comandos = require('./comandos'); // v3.0: qué comando es peligroso y cu�
 const mcpTransport = require('./mcp-transport');
 const { killTree } = require('./proc');
 const { dataDir } = require('./datadir');
+const { tipoDeImagen, decodeOut, openUrlAllowed } = require('./exec-util');
 
 /* ---- confinamiento: los datos de la app no se leen ni se escriben ----
    CONFIG_DIR (claves API, conversaciones, memoria) no es un objetivo legítimo
@@ -64,52 +65,6 @@ function bloqueoEscritura(p) {
 // Windows en español), no en UTF-8: si los bytes no forman UTF-8 válido los decodificamos
 // como CP850 para que los acentos no lleguen corruptos. (Los acentos españoles coinciden
 // en CP850 y CP437, así que la tabla sirve también en equipos con OEM 437.)
-const CP850 =
-  '\u00c7\u00fc\u00e9\u00e2\u00e4\u00e0\u00e5\u00e7\u00ea\u00eb\u00e8\u00ef\u00ee\u00ec\u00c4\u00c5\u00c9\u00e6\u00c6\u00f4\u00f6\u00f2\u00fb\u00f9\u00ff\u00d6\u00dc\u00f8\u00a3\u00d8\u00d7\u0192' +
-  '\u00e1\u00ed\u00f3\u00fa\u00f1\u00d1\u00aa\u00ba\u00bf\u00ae\u00ac\u00bd\u00bc\u00a1\u00ab\u00bb\u2591\u2592\u2593\u2502\u2524\u00c1\u00c2\u00c0\u00a9\u2563\u2551\u2557\u255d\u00a2\u00a5\u2510' +
-  '\u2514\u2534\u252c\u251c\u2500\u253c\u00e3\u00c3\u255a\u2554\u2569\u2566\u2560\u2550\u256c\u00a4\u00f0\u00d0\u00ca\u00cb\u00c8\u0131\u00cd\u00ce\u00cf\u2518\u250c\u2588\u2584\u00a6\u00cc\u2580' +
-  '\u00d3\u00df\u00d4\u00d2\u00f5\u00d5\u00b5\u00fe\u00de\u00da\u00db\u00d9\u00fd\u00dd\u00af\u00b4\u00ad\u00b1\u2017\u00be\u00b6\u00a7\u00f7\u00b8\u00b0\u00a8\u00b7\u00b9\u00b3\u00b2\u25a0\u00a0';
-const UTF8_STRICT = new TextDecoder('utf-8', { fatal: true });
-/**
- * Tipo MIME real de una imagen por sus primeros bytes (no por la extensión: renombrar
- * un .txt a .png no lo convierte en imagen, y los modelos solo aceptan formatos de
- * verdad). Devuelve null si no es de un formato que se pueda enviar.
- */
-function tipoDeImagen(buf) {
-  if (!buf || buf.length < 4) return null;
-  if (buf[0] === 0x89 && buf[1] === 0x50 && buf[2] === 0x4e && buf[3] === 0x47) return 'image/png';
-  if (buf[0] === 0xff && buf[1] === 0xd8 && buf[2] === 0xff) return 'image/jpeg';
-  if (buf.slice(0, 4).toString('latin1') === 'GIF8') return 'image/gif';
-  if (buf.slice(0, 4).toString('latin1') === 'RIFF' && buf.slice(8, 12).toString('latin1') === 'WEBP') return 'image/webp';
-  return null;
-}
-
-function decodeOut(buf) {
-  buf = Buffer.isBuffer(buf) ? buf : Buffer.from(String(buf ?? ''), 'utf8');
-  try {
-    return UTF8_STRICT.decode(buf);
-  } catch {}
-  const s = buf.toString('latin1');
-  let out = '';
-  for (let i = 0; i < s.length; i++) {
-    const c = s.charCodeAt(i);
-    out += c < 0x80 ? s[i] : CP850[c - 0x80];
-  }
-  return out;
-}
-
-/* open_url acaba en shell.openExternal, que en Windows invoca el handler del
-   SISTEMA, no el navegador: file://, ms-msdt:, search-ms: o cualquier otro
-   protocolo registrado se abrirían sin que el usuario lo vea. Solo http(s) es
-   una dirección de navegador, así que es lo único que se acepta. */
-function openUrlAllowed(url) {
-  try {
-    const p = new URL(String(url || '').trim()).protocol.toLowerCase();
-    return p === 'http:' || p === 'https:';
-  } catch {
-    return false;
-  }
-}
 
 function run(cmd, opts = {}) {
   return new Promise((resolve) => {
