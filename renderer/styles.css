@@ -2047,6 +2047,10 @@ textarea::placeholder {
   color: var(--dim);
   margin-bottom: 5px;
   font-family: var(--font-display);
+  /* la mayúscula es presentación, no contenido: escritas en mayúsculas en el
+     HTML, algunos lectores de pantalla las deletrean o las siglas. Con
+     text-transform el texto se lee «Preset» y se ve «PRESET». */
+  text-transform: uppercase;
 }
 .field input,
 .field select {
