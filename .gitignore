@@ -43,5 +43,8 @@ _*.ps1
 # Mesa de diseño (briefs y capturas locales, no se publican)
 .impeccable/
 
+# Capturas de npm run shots (se generan, no se versionan)
+shots/
+
 # Directorios de trabajo de asistentes locales (no se versionan)
 .agent/
