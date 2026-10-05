@@ -177,6 +177,39 @@ sagitari/
 
 </details>
 
+## Development
+
+### Scripts
+
+| Script | Description |
+|---|---|
+| `npm start` | Start the app in production |
+| `npm run dev` | Start the app in development mode |
+| `npm run smoke` | Run smoke test |
+| `npm test` | Run existing tests |
+| `npm run test:renderer` | Run renderer tests (57 tests) |
+| `npm run lint` | Run ESLint |
+| `npm run lint:fix` | Run ESLint with auto-fix |
+| `npm run format` | Format with Prettier |
+| `npm run format:check` | Check formatting with Prettier |
+
+### Tests
+
+57 automated tests for the renderer (chatkit, historial, config, protocols, tools):
+
+```bash
+npm run test:renderer
+```
+
+### Linting and formatting
+
+ESLint 9 + Prettier are configured across the project:
+
+```bash
+npm run lint
+npm run format
+```
+
 ## License
 
 SAGITARI is free for personal use —100% free, forever, with no fees ever.
