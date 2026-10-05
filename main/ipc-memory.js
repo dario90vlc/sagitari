@@ -11,16 +11,29 @@
 
 function registerMemoryIpc(ipcMain, { memory, models, habits }) {
   ipcMain.handle('memory:list', () => memory.list());
-  ipcMain.handle('memory:add', (e, item) =>
-    memory.add({
-      text: item && item.text,
+  ipcMain.handle('memory:add', (e, item) => {
+    if (!item || typeof item.text !== 'string' || !item.text.trim()) {
+      return { ok: false, error: 'text es obligatorio' };
+    }
+    return memory.add({
+      text: item.text.trim().slice(0, 2000),
       source: 'user',
-      importance: Number((item && item.importance) ?? 0.5),
+      importance: Math.min(1, Math.max(0, Number(item.importance) || 0.5)),
       confidence: 0.8,
-    }),
-  );
-  ipcMain.handle('memory:update', (e, { id, patch }) => memory.update(String(id), patch || {}));
-  ipcMain.handle('memory:remove', (e, id) => memory.remove(String(id)));
+    });
+  });
+  ipcMain.handle('memory:update', (e, { id, patch }) => {
+    if (!id || typeof id !== 'string') {
+      return { ok: false, error: 'id es obligatorio' };
+    }
+    return memory.update(id, patch || {});
+  });
+  ipcMain.handle('memory:remove', (e, id) => {
+    if (!id || typeof id !== 'string') {
+      return { ok: false, error: 'id es obligatorio' };
+    }
+    return memory.remove(id);
+  });
   ipcMain.handle('health:get', () => models.summary());
   ipcMain.handle('habits:get', () => habits.stats());
   ipcMain.handle('habits:reset', () => {
