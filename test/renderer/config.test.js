@@ -27,7 +27,9 @@ Module.prototype.require = function (id) {
   return originalRequire.apply(this, arguments);
 };
 
-const { KEY_PREFIX, encryptionAvailable, protectKey, revealKey, protectServerSecrets, revealServerSecrets, writeJsonAtomic } = require(path.join(__dirname, '..', '..', 'main', 'config.js'));
+const { KEY_PREFIX, encryptionAvailable, protectKey, revealKey, protectServerSecrets, revealServerSecrets, writeJsonAtomic } = require(
+  path.join(__dirname, '..', '..', 'main', 'config.js'),
+);
 
 // Restaurar require original
 Module.prototype.require = originalRequire;
@@ -81,18 +83,26 @@ test('cifra una clave nueva', () => {
 console.log('config.js — revealKey');
 
 test('devuelve el valor si no está cifrado', () => {
-  assertEqual(revealKey('texto-plano', () => {}), 'texto-plano');
+  assertEqual(
+    revealKey('texto-plano', () => {}),
+    'texto-plano',
+  );
 });
 
 test('descifra una clave cifrada', () => {
   const cifrada = protectKey('mi-clave-secreta');
-  assertEqual(revealKey(cifrada, () => {}), 'mi-clave-secreta');
+  assertEqual(
+    revealKey(cifrada, () => {}),
+    'mi-clave-secreta',
+  );
 });
 
 test('llama a onError si no puede descifrar', () => {
   let called = false;
   // Usar un criptogramar inválido (no es base64 válido después del prefijo)
-  const resultado = revealKey(KEY_PREFIX + '!!!invalido!!!', () => { called = true; });
+  const resultado = revealKey(KEY_PREFIX + '!!!invalido!!!', () => {
+    called = true;
+  });
   assertOk(called, 'debe llamar a onError');
   assertEqual(resultado, KEY_PREFIX + '!!!invalido!!!', 'debe devolver el criptograma');
 });

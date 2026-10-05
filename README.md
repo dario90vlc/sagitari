@@ -181,17 +181,17 @@ sagitari/
 
 ### Scripts
 
-| Script | Description |
-|---|---|
-| `npm start` | Start the app in production |
-| `npm run dev` | Start the app in development mode |
-| `npm run smoke` | Run smoke test |
-| `npm test` | Run existing tests |
-| `npm run test:renderer` | Run renderer tests (57 tests) |
-| `npm run lint` | Run ESLint |
-| `npm run lint:fix` | Run ESLint with auto-fix |
-| `npm run format` | Format with Prettier |
-| `npm run format:check` | Check formatting with Prettier |
+| Script                  | Description                       |
+| ----------------------- | --------------------------------- |
+| `npm start`             | Start the app in production       |
+| `npm run dev`           | Start the app in development mode |
+| `npm run smoke`         | Run smoke test                    |
+| `npm test`              | Run existing tests                |
+| `npm run test:renderer` | Run renderer tests (57 tests)     |
+| `npm run lint`          | Run ESLint                        |
+| `npm run lint:fix`      | Run ESLint with auto-fix          |
+| `npm run format`        | Format with Prettier              |
+| `npm run format:check`  | Check formatting with Prettier    |
 
 ### Tests
 

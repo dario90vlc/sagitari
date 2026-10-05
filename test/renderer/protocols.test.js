@@ -86,7 +86,11 @@ test('construye body para openai con messages', () => {
 });
 
 test('construye body para anthropic con system', () => {
-  const body = protocols.buildBodyAnthropic({ model: 'claude-3-5-sonnet', system: 'Eres un asistente' }, [{ role: 'user', content: 'hola' }], []);
+  const body = protocols.buildBodyAnthropic(
+    { model: 'claude-3-5-sonnet', system: 'Eres un asistente' },
+    [{ role: 'user', content: 'hola' }],
+    [],
+  );
   assertEqual(body.model, 'claude-3-5-sonnet');
   assertOk(body, 'debe construir el body');
   assertOk(body.messages, 'debe incluir messages');

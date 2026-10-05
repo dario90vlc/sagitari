@@ -4,7 +4,9 @@
    Sin spawn: se ejecuta directo con node. */
 
 const path = require('path');
-const { MAX_HISTORY, MAX_TRANSCRIPT, trimHistory, payloadMessages, recortarTranscripcion, newConfirmId } = require(path.join(__dirname, '..', '..', 'agent', 'historial.js'));
+const { MAX_HISTORY, MAX_TRANSCRIPT, trimHistory, payloadMessages, recortarTranscripcion, newConfirmId } = require(
+  path.join(__dirname, '..', '..', 'agent', 'historial.js'),
+);
 
 let passed = 0;
 let failed = 0;
@@ -32,7 +34,10 @@ function assertOk(value, msg) {
 console.log('historial.js — trimHistory');
 
 test('devuelve el historial completo si está dentro del límite', () => {
-  const h = [{ role: 'user', content: 'hola' }, { role: 'assistant', content: 'hola' }];
+  const h = [
+    { role: 'user', content: 'hola' },
+    { role: 'assistant', content: 'hola' },
+  ];
   assertEqual(trimHistory(h).length, 2);
 });
 
@@ -58,7 +63,10 @@ test('MAX_HISTORY es 40', () => {
 console.log('historial.js — payloadMessages');
 
 test('convierte historial simple correctamente', () => {
-  const h = [{ role: 'user', content: 'hola' }, { role: 'assistant', content: 'hola' }];
+  const h = [
+    { role: 'user', content: 'hola' },
+    { role: 'assistant', content: 'hola' },
+  ];
   const msgs = payloadMessages(h);
   assertEqual(msgs.length, 2);
   assertEqual(msgs[0].role, 'user');
@@ -66,7 +74,10 @@ test('convierte historial simple correctamente', () => {
 });
 
 test('descarta tool huérfano (sin assistant previo)', () => {
-  const h = [{ role: 'tool', tool_call_id: '1', content: 'resultado' }, { role: 'user', content: 'hola' }];
+  const h = [
+    { role: 'tool', tool_call_id: '1', content: 'resultado' },
+    { role: 'user', content: 'hola' },
+  ];
   const msgs = payloadMessages(h);
   assertEqual(msgs.length, 1, 'solo debe quedar el user');
   assertEqual(msgs[0].role, 'user');
