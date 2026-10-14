@@ -587,12 +587,17 @@ test('arranque: los modos de prueba no comparten userData con la app real', () =
   const headless = MAIN_SRC.match(/const HEADLESS = ([^;]+);/);
   ok(headless, 'debe existir la detección HEADLESS');
   ok(/--hidden/.test(headless[1]) && /\bSMOKE\b/.test(headless[1]), 'HEADLESS cubre smoke y ui-check');
-  const seteo = MAIN_SRC.match(/if \(HEADLESS\) \{[\s\S]{0,240}?setPath\('userData'[\s\S]{0,80}?\n\}/);
-  ok(seteo, 'HEADLESS debe fijar su propio userData');
-  // y, sobre todo: antes de pedir el bloqueo
-  const iSeteo = MAIN_SRC.indexOf("app.setPath('userData'");
+  // Y dos cosas, las dos antes del bloqueo: la CARPETA del perfil de pruebas tiene
+  // que existir (Chromium crea el fichero del bloqueo antes que el userData, así que
+  // un perfil que aún no existe hacía fallar el bloqueo y la app decía «ya está
+  // abierta» sin que hubiera ninguna) y el userData tiene que apuntar ahí.
+  const iHeadless = MAIN_SRC.indexOf('if (HEADLESS) {');
+  const iMkdir = MAIN_SRC.indexOf('fs.mkdirSync(PERFIL', iHeadless);
+  const iSeteo = MAIN_SRC.indexOf("app.setPath('userData'", iHeadless);
   const iLock = MAIN_SRC.indexOf('app.requestSingleInstanceLock()');
-  ok(iSeteo > -1 && iLock > -1 && iSeteo < iLock, 'el userData de prueba se fija ANTES de pedir el bloqueo');
+  ok(iMkdir > -1 && iSeteo > -1, 'HEADLESS debe crear la carpeta y fijar su propio userData');
+  ok(iHeadless < iMkdir && iMkdir < iSeteo, 'la carpeta del perfil se crea antes de fijar el userData');
+  ok(iSeteo < iLock, 'el userData de prueba se fija ANTES de pedir el bloqueo');
 });
 
 test('arranque: la segunda instancia no muere en silencio y reutiliza la ventana', () => {

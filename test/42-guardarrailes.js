@@ -158,7 +158,33 @@ test('árboles: un repositorio anidado aísla la carpeta del usuario, no la que 
   eq(f.ok, true, 'debería fusionar: ' + f.conflicto);
   eq(f.archivos.join(','), 'nuevo.txt', 'el parche va contra la raíz del repositorio del usuario');
   eq(fs.readFileSync(path.join(ws, 'nuevo.txt'), 'utf8'), 'del agente\n', 'el trabajo llega a su repositorio');
-  eq(fs.existsSync(path.join(fuera, 'nuevo.txt')), false, 'y no al repositorio que lo contiene');
+  eq(fs.existsSync(path.join(fuera, 'nuevo.txt')), false, 'y no al que lo contiene');
+  await arbolesMod.descartar(arbol);
+  eq(arbolesMod.vivos().length, 0, 'no debe quedar ningún árbol en pie');
+});
+
+test('árboles: lo que el subagente escribe dentro de una ruta ignorada por git también llega', async () => {
+  if (!GIT_OK) return;
+  /* El espacio de trabajo del usuario puede caer dentro de una ruta que el proyecto tiene
+     en `.gitignore` (el arnés de interfaz trabaja en su carpeta `sagi-ui-ws-…`, ignorada
+     por el repositorio; y pasa de verdad con una carpeta de trabajo dentro del repo). El
+     parche de la fusión se calcula con `git add -A`, que RESPETA el `.gitignore`: todo lo
+     que el subagente escribiera ahí se quedaba fuera del parche y la fusión decía «no hay
+     cambios» — trabajo perdido y en silencio, que es la peor forma de perderlo. */
+  const raiz = repoDePrueba();
+  fs.writeFileSync(path.join(raiz, '.gitignore'), 'ignorada/\n');
+  gitEn(raiz, 'add', '-A');
+  gitEn(raiz, 'commit', '-qm', 'ignora la carpeta de trabajo');
+  const ws = path.join(raiz, 'ignorada');
+  fs.mkdirSync(ws);
+  const arbol = await arbolesMod.crear(ws);
+  ok(arbol, 'debería poder aislarse');
+  fs.writeFileSync(path.join(arbol.wsDir, 'nota.txt'), 'del agente\n');
+  const f = await arbolesMod.fusionar(arbol);
+  eq(f.ok, true, 'debería fusionar: ' + f.conflicto);
+  eq(f.vacio, undefined, 'no puede decir que no hubo cambios: el agente escribió');
+  eq(f.archivos.join(','), 'ignorada/nota.txt', 'el archivo ignorado viaja en el parche');
+  eq(fs.readFileSync(path.join(ws, 'nota.txt'), 'utf8'), 'del agente\n', 'y llega a la carpeta del usuario');
   await arbolesMod.descartar(arbol);
   eq(arbolesMod.vivos().length, 0, 'no debe quedar ningún árbol en pie');
 });

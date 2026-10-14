@@ -24,6 +24,10 @@ module.exports = [
       // espacios de trabajo temporales del arnés de interfaz (los crea y los borra
       // ui-check; si una ejecución se corta, no deben contarse como código del proyecto)
       'sagi-ui-ws-*/**',
+      // árboles de trabajo aislados (agent/arboles.js): las pruebas y el arnés los crean
+      // dentro del repositorio y los borran al terminar; una ejecución cortada deja ahí
+      // una copia entera del proyecto que NO es código del proyecto
+      '.tmp-arboles/**',
     ],
   },
   js.configs.recommended,

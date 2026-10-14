@@ -192,7 +192,7 @@ sagitari/
 | `npm start`             | Start the app in production          |
 | `npm run dev`           | Start the app in development mode    |
 | `npm run smoke`         | Run smoke test                       |
-| `npm test`              | Run the agent/main suite (449 tests) |
+| `npm test`              | Run the agent/main suite (450 tests) |
 | `npm run test:renderer` | Run the renderer suite (737 tests)   |
 | `npm run lint`          | Run ESLint                           |
 | `npm run lint:fix`      | Run ESLint with auto-fix             |
@@ -207,7 +207,7 @@ sagitari/
 Two suites, both green before every release:
 
 ```bash
-npm test              # 449 tests: the agent core and the main process
+npm test              # 450 tests: the agent core and the main process
 npm run test:renderer # 737 tests across 49 files: main-process modules and the renderer
 ```
 
@@ -265,7 +265,11 @@ subagent gets (`agent/arboles.js`). The suite points `SAGITARI_ARBOLES_DIR` at
 production the default is `%TEMP%/sagitari-arboles`. That base directory never moves the
 workspace: inside the tree the subagent works in the same relative path it has in the
 repository, and its work is merged back into the user's folder even when the same path is
-spelled in more than one way (a Windows 8.3 short name, a link, an MSYS path).
+spelled in more than one way (a Windows 8.3 short name, a link, an MSYS path). That merge
+also carries what the subagent writes inside a path the project has in `.gitignore`, which
+the plain `git add` never saw: the file used to be dropped while the fusion reported «no
+changes». `uicheck` does the same (`.tmp-arboles/uicheck/`) and fails if the teammate it
+drives did not really work in an isolated tree.
 
 `contraste` reads the tokens from `renderer/styles.css`, composites each
 translucent surface over the base background, and reports every text/surface pair

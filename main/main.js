@@ -128,6 +128,14 @@ if (process.platform === 'win32') app.setAppUserModelId(APP_USER_MODEL_ID);
 // probar.bat se cerraba solo, en silencio. Eso era «la app se cierra».
 // Se fija ANTES de pedir el bloqueo, que se calcula a partir de esta ruta.
 if (HEADLESS) {
+  // Chromium crea el fichero del bloqueo ANTES de crear el userData, así que un
+  // perfil que todavía no existe —un clon recién bajado, un arranque de prueba con
+  // un directorio nuevo— hacía fallar el bloqueo: la app decía «ya está abierta» sin
+  // que hubiera ninguna y el arnés se caía. La carpeta se crea aquí, antes de pedir
+  // el bloqueo.
+  try {
+    fs.mkdirSync(PERFIL, { recursive: true });
+  } catch {}
   try {
     app.setPath('userData', PERFIL);
   } catch {}

@@ -313,6 +313,21 @@ async function fusionar(arbol, opts = {}) {
   const raiz = arbol.topLevel || ws;
   const add = await git(['add', '-A'], dir);
   if (add.code !== 0) return { ok: false, archivos: [], conflicto: 'no se pudo preparar el árbol: ' + (add.stderr || add.stdout).trim() };
+  /* `git add -A` RESPETA el `.gitignore` del proyecto, y eso dejaba fuera del parche —y en
+     silencio— todo lo que el subagente escribiera dentro de una ruta ignorada: el parche
+     salía vacío, la fusión decía «no hay cambios» y el árbol se descartaba con el trabajo
+     dentro. Pasa de verdad: el espacio de trabajo del arnés de interfaz vive en una carpeta
+     que el repositorio ignora. El árbol arranca SIN archivos ignorados (el checkout trae los
+     seguidos y la copia trae los no ignorados), así que los que hay al terminar los puso el
+     subagente: dentro de su carpeta se fuerzan, que es justo el trabajo que no se puede
+     perder. Fuera de ella se sigue respetando el `.gitignore` (nadie quiere un parche con
+     `node_modules` por un `npm install` en la raíz del árbol). */
+  const rutaRel = String(arbol.rel || '.')
+    .split(path.sep)
+    .join('/'); // git quiere «/»
+  const addIgnorados = await git(['add', '-A', '-f', '--', rutaRel], dir);
+  if (addIgnorados.code !== 0)
+    return { ok: false, archivos: [], conflicto: 'no se pudo preparar el árbol: ' + (addIgnorados.stderr || addIgnorados.stdout).trim() };
 
   const diff = await git(['diff', '--cached', '--binary', base], dir, { timeout: 120000 });
   if (diff.code !== 0) return { ok: false, archivos: [], conflicto: 'no se pudo calcular el parche: ' + (diff.stderr || '').trim() };

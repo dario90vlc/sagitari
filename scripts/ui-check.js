@@ -63,6 +63,25 @@ try {
   }
 } catch {}
 const WS_TEST = fs.mkdtempSync(path.join(APP_DIR, 'sagi-ui-ws-'));
+/* El directorio de los árboles de trabajo aislados (agent/arboles.js) se fija AQUÍ para que
+   esta comprobación pruebe siempre lo mismo: sin fijarlo, un equipo donde %TEMP% no admita
+   un árbol hacía que el compañero escribiera directo en el espacio de trabajo —aislamiento
+   apagado sin decirlo— y la comprobación pasaba por el camino fácil. Dentro del repositorio
+   (ignorado por git) el aislamiento ocurre igual aquí y en la CI, y la comprobación de más
+   abajo exige ver el árbol mientras el compañero trabaja. */
+const ARBOLES_TEST = path.join(APP_DIR, '.tmp-arboles', 'uicheck');
+try {
+  fs.rmSync(ARBOLES_TEST, { recursive: true, force: true });
+} catch {}
+/** ¿Hay ahora mismo un árbol de trabajo aislado en pie? Se mira mientras el compañero espera
+    el permiso: en ese momento el árbol está creado y quieto, así que no es una carrera. */
+function hayArbolAislado() {
+  try {
+    return fs.readdirSync(ARBOLES_TEST).some((e) => /^arbol-/.test(e));
+  } catch {
+    return false;
+  }
+}
 function seedTestConfig(apiPort) {
   const file = path.join(TEST_DATA_DIR, 'config.json');
   /* Proveedor con lista larga y el modelo en uso al final: es el caso que hace
@@ -325,6 +344,9 @@ const AFTER = {
   const env = Object.assign({}, process.env);
   delete env.ELECTRON_RUN_AS_NODE;
   env.SAGITARI_TEST_PROFILE = TEST_PROFILE;
+  /* Y los árboles aislados a un directorio escribible dentro del repositorio: así el
+     aislamiento de verdad ocurre también donde %TEMP% no lo admite (ver ARBOLES_TEST). */
+  env.SAGITARI_ARBOLES_DIR = ARBOLES_TEST;
   const child = spawn(
     electron,
     [
@@ -363,6 +385,9 @@ const AFTER = {
     } catch {}
     try {
       fs.rmSync(WS_TEST, { recursive: true, force: true });
+    } catch {}
+    try {
+      fs.rmSync(ARBOLES_TEST, { recursive: true, force: true });
     } catch {}
     child.once('exit', salir);
     try {
@@ -1401,8 +1426,14 @@ const AFTER = {
     ESTADO_M1 +
     '; e.titulo=(document.querySelector("#confirmTitle").textContent||""); return e; })()';
   let permisoPendiente = null;
+  /* Mientras el compañero espera el permiso su árbol está en pie: se anota, porque es la
+     prueba de que trabajó AISLADO y no escribiendo directo en el espacio de trabajo (si el
+     aislamiento no ocurre, la comprobación del archivo pasaría por el camino fácil sin
+     decir nada). */
+  let arbolVisto = false;
   for (let i = 0; i < 120 && !permisoPendiente; i++) {
     permisoPendiente = await evaluate(PENDIENTE_M1);
+    if (!arbolVisto) arbolVisto = hayArbolAislado();
     if (!permisoPendiente) await new Promise((r) => setTimeout(r, 250));
   }
   if (permisoPendiente && /quiere:/.test(permisoPendiente.titulo) && /File Agent|m1/.test(permisoPendiente.titulo)) {
@@ -1449,6 +1480,12 @@ const AFTER = {
   } else {
     failed++;
     console.log('  FALLO el compañero no escribió ' + ARCHIVO_PERMISO + ' en el espacio de trabajo');
+  }
+  if (arbolVisto) {
+    console.log('  ok   el compañero trabajó en un árbol aislado de verdad y el archivo llegó fusionado');
+  } else {
+    failed++;
+    console.log('  FALLO el compañero no trabajó en un árbol aislado (el aislamiento no ocurrió)');
   }
   /* Y la tarjeta lo cuenta: sin insignia (el permiso ya se contestó) y con el compañero
      terminado. Su fila sigue viva aunque el líder ya cerrara su parte. */
