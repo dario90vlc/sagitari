@@ -28,11 +28,11 @@
 <table>
   <tr>
     <td width="50%"><img src="docs/shot-chat.png" alt="SAGITARI chat with a real task"></td>
-    <td width="50%"><img src="docs/shot-empty.png" alt="SAGITARI fresh start"></td>
+    <td width="50%"><img src="docs/shot-equipo.png" alt="SAGITARI team mode"></td>
   </tr>
   <tr>
     <td align="center"><sub><b>Chat</b> — plans, runs, and reports back</sub></td>
-    <td align="center"><sub><b>Fresh start</b> — a clean canvas, your accent</sub></td>
+    <td align="center"><sub><b>Team</b> — one order split between live teammates, with their mailbox and board</sub></td>
   </tr>
   <tr>
     <td width="50%"><img src="docs/shot-memory.png" alt="SAGITARI memory view"></td>

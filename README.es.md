@@ -28,11 +28,11 @@
 <table>
   <tr>
     <td width="50%"><img src="docs/shot-chat.png" alt="Chat de SAGITARI con una tarea real"></td>
-    <td width="50%"><img src="docs/shot-empty.png" alt="SAGITARI, estado limpio"></td>
+    <td width="50%"><img src="docs/shot-equipo.png" alt="SAGITARI, modo Equipo"></td>
   </tr>
   <tr>
     <td align="center"><sub><b>Chat</b> — planea, ejecuta y reporta</sub></td>
-    <td align="center"><sub><b>Estado limpio</b> — un lienzo nuevo, tu acento</sub></td>
+    <td align="center"><sub><b>Equipo</b> — un encargo repartido entre compañeros vivos, con su buzón y su tablero</sub></td>
   </tr>
   <tr>
     <td width="50%"><img src="docs/shot-memory.png" alt="Vista de memoria de SAGITARI"></td>

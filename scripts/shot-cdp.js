@@ -11,11 +11,17 @@
    Uso:
      node scripts/shot-cdp.js [dir] [vistas] [ancho] [alto] [--demo]
 
-   vistas: lista separada por comas (chat, tasks, projects, agents, memory,
-   skills, mcp, tools, history, settings) o «all». Por defecto: chat.
+   vistas: lista separada por comas (chat, tasks, projects, agents, equipo,
+   memory, skills, mcp, tools, history, settings, apariencia, seguridad) o
+   «all». Por defecto: chat. `apariencia` y `seguridad` son los dos paneles de
+   Ajustes que la galería enseña: `settings` entra por la vista y estos dos
+   además pulsan su pestaña.
 
-   --demo siembra una conversación de verdad antes de fotografiar el chat. Sin
-   ella, shots/chat.png es el estado vacío: no enseña la interfaz.
+   --demo siembra contenido de verdad antes de fotografiar: la conversación del
+   chat (con las funciones del renderer) y el equipo del modo EQUIPO (con sus
+   propios eventos `team_*`). Sin ella, shots/chat.png es el estado vacío y
+   shots/equipo.png es «Sin equipo en esta conversación»: ninguno enseña la
+   interfaz.
    ============================================================================ */
 
 const { spawn } = require('child_process');
@@ -37,9 +43,20 @@ const TODAS = [
   'tools',
   'history',
   'settings',
+  'apariencia',
+  'seguridad',
   'slash',
   'diffs',
 ];
+
+/* Dos vistas NO son secciones del menú sino paneles de Ajustes: para llegar a ellas hay
+   que entrar en la vista y pulsar su pestaña. La galería las enseña (Apariencia y
+   Seguridad son las que un lector busca) y sin esta tabla se fotografiaría la vista de
+   Ajustes por defecto con el nombre del panel: la captura parecería buena y no lo sería. */
+const SUBVISTAS = {
+  apariencia: { nav: 'settings', sel: '.settab[data-set="apariencia"]', panel: 'apariencia' },
+  seguridad: { nav: 'settings', sel: '.settab[data-set="security"]', panel: 'security' },
+};
 
 /* Dos capturas de ESTADO, no de sección: la paleta de órdenes abierta y la revisión del
    cambio con su diff. Se montan sobre el chat con el renderer de verdad —la paleta con
@@ -113,6 +130,41 @@ const DEMO_CHAT = `(function () {
   say('user', 'Ayúdame a organizar mi carpeta de Descargas: quiero separar instaladores, documentos e imágenes.');
   say('ai', 'He revisado <b>Descargas</b>: 214 archivos. Mi plan:<br><br>1. Crear <b>Instaladores</b>, <b>Documentos</b> e <b>Imágenes</b>.<br>2. Clasificar por extensión: <code>.exe/.msi</code> → Instaladores · <code>.pdf/.docx</code> → Documentos · <code>.png/.jpg</code> → Imágenes.<br>3. Ejecutar y darte un resumen.<br><br>¿Confirmas?');
   say('ai', 'Hecho. <b>214 archivos</b> clasificados sin perder ninguno:<br><br>• <b>Instaladores</b> → 38&nbsp;&nbsp;• <b>Documentos</b> → 121&nbsp;&nbsp;• <b>Imágenes</b> → 55<br><br>Tiempo total: <b>42 s</b>. ¿Quieres que mueva los instaladores de más de 1 GB a la Papelera?');
+  return 'OK';
+})()`;
+
+/* El equipo del modo EQUIPO no se puede sembrar desde el perfil: su estado se ACUMULA de
+   los eventos `team_*` del turno y no sobrevive al reinicio (renderer/40-vistas.js). Así
+   que se siembra por donde entra de verdad, `equipoEvento`, con un encargo a medias: un
+   compañero trabajando, otro esperando un permiso y otro que ya cerró su parte. Nada de
+   HTML imitado —la vista, las tarjetas, el buzón, el tablero, el rail y la insignia los
+   pinta la propia app—, y el orden y los nombres son los del producto (los especialistas
+   de secuencia del registro). */
+const DEMO_EQUIPO = `(function () {
+  if (typeof equipoEvento !== 'function') return 'NO_EVENTO';
+  var t = Date.now();
+  equipoEvento({ type: 'team_start', ts: t, miembros: [
+    { id: 'm1', spec: 'research', name: 'Investigador' },
+    { id: 'm2', spec: 'coding', name: 'Programador' },
+    { id: 'm3', spec: 'file', name: 'Archivador' }
+  ]});
+  equipoEvento({ type: 'team_member', id: 'm1', estado: 'trabajando', tarea: 'Recopilar las ventas de Q3 en la carpeta Informes', expect: 'cifras por producto y por mes' });
+  equipoEvento({ type: 'team_member', id: 'm2', estado: 'esperando', tarea: 'Dibujar la evolución trimestral con los datos unificados', expect: 'un PNG en Informes/graficos', atencion: 'ejecutar Python y escribir el PNG' });
+  equipoEvento({ type: 'team_member', id: 'm3', estado: 'terminado', tarea: 'Unificar los CSV de las tres delegaciones', expect: 'un solo fichero sin duplicados' });
+  equipoEvento({ type: 'team_done', id: 'm3', ok: true, resumen: '12 CSV unificados en ventas-Q3.csv (4.812 filas).', evidencia: 'Informes/ventas-Q3.csv' });
+  equipoEvento({ type: 'team_message', de: 'lider', para: 'm1', texto: 'Separa por producto y por mes; el detalle de suscripciones va aparte.', ts: t + 1000 });
+  equipoEvento({ type: 'team_message', de: 'm1', para: 'lider', texto: 'Hecho: 4.812 filas. El resumen está en el tablero.', ts: t + 2000 });
+  equipoEvento({ type: 'team_message', de: 'lider', para: 'm2', texto: 'Usa el CSV unificado, no toques los originales.', ts: t + 3000 });
+  equipoEvento({ type: 'team_message', de: 'm2', para: 'lider', texto: 'Necesito permiso para ejecutar Python y guardar el PNG.', ts: t + 4000 });
+  equipoEvento({ type: 'team_board', ts: t + 5000, items: [
+    { quien: 'm3', que: 'Unificar los CSV de las delegaciones', estado: 'completed', nota: 'ventas-Q3.csv · 12 ficheros' },
+    { quien: 'm1', que: 'Extraer las ventas de Q3', estado: 'completed', nota: '4.812 filas' },
+    { quien: 'm2', que: 'Gráfico de evolución', estado: 'in_progress', nota: 'Informes/graficos/Q3.png' },
+    { quien: 'lider', que: 'Redactar el informe final', estado: 'pending', nota: '' }
+  ]});
+  /* El permiso pendiente de m2 se cuenta por donde lo cuenta la app: la insignia del rail
+     y de la tarjeta salen de aquí, no de un número escrito a mano. */
+  if (typeof equipoPermiso === 'function') equipoPermiso(undefined, 'm2', 1);
   return 'OK';
 })()`;
 
@@ -304,6 +356,51 @@ async function esperarCdp(port, intentos = 60) {
         const v = r.result && r.result.value;
         if (v && v.indexOf('OK') !== 0) console.error('  demo no sembrada:', v);
         await sleep(700);
+      }
+      if (vista === 'equipo' && DEMO) {
+        // El equipo se acumula de eventos `team_*` (no vive en el perfil): se siembra por
+        // donde entra de verdad y la propia vista lo pinta.
+        const r = await send('Runtime.evaluate', { expression: DEMO_EQUIPO, returnByValue: true });
+        const v = r.result && r.result.value;
+        if (v !== 'OK') console.error('  demo de equipo no sembrada:', v);
+        await sleep(700);
+      }
+      /* Los dos paneles de Ajustes: primero la vista, luego su pestaña. */
+      const sub = SUBVISTAS[vista];
+      if (sub) {
+        const nav = await send('Runtime.evaluate', {
+          expression: `(function(){ var b=document.querySelector('.navitem[data-view="${sub.nav}"]'); if(!b) return 'NO_NAV'; b.click(); return 'OK'; })()`,
+          returnByValue: true,
+        });
+        if ((nav.result && nav.result.value) !== 'OK') {
+          console.error('  OMITIDA ' + vista + ': no hay .navitem[data-view="' + sub.nav + '"]');
+          quedan--;
+          continue;
+        }
+        await sleep(700);
+        const tab = await send('Runtime.evaluate', {
+          expression: `(function(){ var b=document.querySelector('${sub.sel}'); if(!b) return 'NO_TAB'; b.click(); return 'OK'; })()`,
+          returnByValue: true,
+        });
+        if ((tab.result && tab.result.value) !== 'OK') {
+          console.error('  OMITIDA ' + vista + ': no hay ' + sub.sel);
+          quedan--;
+          continue;
+        }
+        await sleep(900);
+        /* La pestaña se activa por `onclick`, así que si el clic no prendió se
+           fotografiaría el panel de Modelo con el nombre del otro: se comprueba. */
+        const panel = await send('Runtime.evaluate', {
+          expression: `(function(){ var p=document.querySelector('#setWrap .setpanel.on'); return p ? p.dataset.panel : 'NONE'; })()`,
+          returnByValue: true,
+        });
+        if ((panel.result && panel.result.value) !== vista)
+          console.error('  aviso: ' + vista + ' dejó el panel en «' + (panel.result && panel.result.value) + '»');
+        const shot = await send('Page.captureScreenshot', { format: 'png' });
+        fs.writeFileSync(path.join(OUT_DIR, vista + '.png'), Buffer.from(shot.data, 'base64'));
+        quedan--;
+        console.log('  ' + vista + '.png');
+        continue;
       }
       const pulso = await send('Runtime.evaluate', {
         expression: `(function(){ var b=document.querySelector('.navitem[data-view="${vista}"]'); if(b){b.click(); return true;} return false; })()`,
