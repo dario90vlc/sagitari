@@ -3616,6 +3616,36 @@ test('árboles: si el espacio de trabajo desaparece, el registro no se queda en 
   eq(/arbol-/.test(gitEn(raiz, 'worktree', 'list')), false, 'no puede quedar un registro fantasma en el repositorio');
 });
 
+test('árboles: con el espacio de trabajo en una subcarpeta, el trabajo del subagente llega a ESA carpeta', async () => {
+  if (!GIT_OK) return;
+  /* El espacio de trabajo del usuario puede ser una subcarpeta del repositorio (el
+     ui-check trabaja así). El árbol es un checkout del repositorio ENTERO, así que el
+     subagente tiene que trabajar en SU carpeta dentro del árbol y su trabajo tiene que
+     volver a ESA carpeta. Antes trabajaba en la raíz del árbol y el `git apply` de la
+     fusión corría desde la subcarpeta: git IGNORA los caminos del parche que caen fuera de
+     ella y sale con código 0, así que la fusión decía «correcta» sin aplicar nada y el
+     archivo se quedaba en el árbol, que se descarta acto seguido. Se perdía sin decir nada. */
+  const raiz = repoDePrueba();
+  const ws = path.join(raiz, 'proyecto');
+  fs.mkdirSync(ws);
+  fs.writeFileSync(path.join(ws, 'nota.txt'), 'lo que ya había\n');
+  const arbol = await arbolesMod.crear(ws);
+  ok(arbol, 'debería poder aislarse aunque el espacio de trabajo sea una subcarpeta');
+  eq(arbol.wsDir, path.join(arbol.dir, 'proyecto'), 'el subagente trabaja en su carpeta DENTRO del árbol');
+  eq(fs.readFileSync(path.join(arbol.wsDir, 'nota.txt'), 'utf8'), 'lo que ya había\n', 'y ve lo que el usuario ya tenía en su carpeta');
+  // el subagente escribe con ruta relativa a su espacio de trabajo, como cualquier herramienta
+  fs.writeFileSync(path.join(arbol.wsDir, 'nuevo.txt'), 'del agente\n');
+  const preparados = [];
+  const f = await arbolesMod.fusionar(arbol, { preparar: (rels) => preparados.push(...rels) });
+  eq(f.ok, true, 'debería fusionar: ' + f.conflicto);
+  eq(f.archivos.join(','), 'proyecto/nuevo.txt', 'el parche va relativo a la raíz del repositorio');
+  eq(fs.readFileSync(path.join(ws, 'nuevo.txt'), 'utf8'), 'del agente\n', 'y el archivo llega al espacio de trabajo');
+  eq(fs.existsSync(path.join(raiz, 'nuevo.txt')), false, 'nada fuera de la carpeta del usuario');
+  ok(preparados.includes('proyecto/nuevo.txt'), 'la pre-imagen se registra para poder deshacer');
+  await arbolesMod.descartar(arbol);
+  eq(arbolesMod.vivos().length, 0, 'no debe quedar ningún árbol en pie');
+});
+
 test('árboles: la fusión aplica solo lo que cambió el agente', async () => {
   if (!GIT_OK) return;
   const ws = repoDePrueba();

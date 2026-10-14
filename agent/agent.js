@@ -2225,9 +2225,11 @@ class Agent {
       }
     }
     // Todo el trabajo del subagente —sus herramientas, sus comprobadores, sus reglas—
-    // apunta al árbol cuando lo hay: su «espacio de trabajo» es ese, no el del usuario.
+    // apunta al árbol cuando lo hay: su «espacio de trabajo» es su carpeta DENTRO del
+    // árbol (la misma ruta relativa), no la del usuario. Con el espacio de trabajo en una
+    // subcarpeta del repositorio, la raíz del árbol NO es la carpeta del proyecto.
     const settingsTrabajo = arbol
-      ? { ...ctx.settings, settings: { ...(ctx.settings.settings || {}), workspace: arbol.dir } }
+      ? { ...ctx.settings, settings: { ...(ctx.settings.settings || {}), workspace: arbol.wsDir } }
       : ctx.settings;
     // v2.2: el tablero del chat necesita saber que EMPIEZA una delegación (no solo que
     // acaba): quién, qué y con qué criterio, en vivo.
@@ -2288,7 +2290,7 @@ class Agent {
     try {
       try {
         await sub._runWithSystem(
-          subagents.subagentSystemPrompt(spec.key, arbol ? arbol.dir : ws, { skillsIndex, suggested }),
+          subagents.subagentSystemPrompt(spec.key, arbol ? arbol.wsDir : ws, { skillsIndex, suggested }),
           settingsTrabajo,
           brief,
           subagents.toolDefsFor(spec.key),
@@ -2351,7 +2353,8 @@ class Agent {
             preparar: (rels) => {
               for (const rel of rels) {
                 try {
-                  cambios.recordar(ws, path.join(ws, rel), undefined, this.ownerCambios());
+                  // `rels` viene relativo a la RAÍZ DEL ÁRBOL, que es la raíz del repositorio
+                  cambios.recordar(ws, path.join(arbol.topLevel || ws, rel), undefined, this.ownerCambios());
                 } catch {}
               }
             },
@@ -2686,8 +2689,8 @@ class Agent {
         this._statusMiembro(miembro, `🌳 ${spec.name} (${miembro.id}): en un árbol aislado (sus cambios vuelven verificados)`);
       }
     }
-    const settingsTrabajo = arbol ? { ...settings, settings: { ...(settings.settings || {}), workspace: arbol.dir } } : settings;
-    const ws = arbol ? arbol.dir : wsBase;
+    const settingsTrabajo = arbol ? { ...settings, settings: { ...(settings.settings || {}), workspace: arbol.wsDir } } : settings;
+    const ws = arbol ? arbol.wsDir : wsBase;
     let skillsIndex = '';
     let suggested = [];
     try {
@@ -2760,7 +2763,8 @@ class Agent {
           preparar: (rels) => {
             for (const rel of rels) {
               try {
-                cambios.recordar(wsBase, path.join(wsBase, rel), undefined, this.ownerCambios());
+                // `rels` viene relativo a la RAÍZ DEL ÁRBOL, que es la raíz del repositorio
+                cambios.recordar(wsBase, path.join(arbol.topLevel || wsBase, rel), undefined, this.ownerCambios());
               } catch {}
             }
           },

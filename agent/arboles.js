@@ -24,10 +24,17 @@
    · Los archivos sin seguimiento (los que git no conoce) se copian al árbol: si
      no, el subagente no vería un archivo nuevo que el usuario acaba de crear.
    · La fusión es VERIFICADA: se genera un parche con `--binary` y se comprueba
-     con `git apply --check --3way` ANTES de tocar nada. Si no entra limpio, no se
-     aplica nada: se deja el árbol en pie y se dice dónde está para poder mirarlo.
+     con `git apply --check` ANTES de tocar nada (desde la RAÍZ del repositorio: ver
+     `fusionar`). Si no entra limpio, no se aplica nada: se deja el árbol en pie y se
+     dice dónde está para poder mirarlo.
    · Nunca se toca la historia del usuario: el árbol es detached y su baseline no
      es una referencia del repositorio.
+   · El espacio de trabajo puede ser una SUBCARPETA del repositorio. El árbol es un
+     checkout del repositorio ENTERO, así que la carpeta de trabajo del subagente es
+     LA MISMA ruta relativa dentro del árbol (`dir`), no la raíz del árbol: si el
+     usuario trabaja en `proyecto/`, el subagente trabaja en `<árbol>/proyecto`. Sin
+     esto una ruta relativa significaba otra cosa que sin aislamiento y sus archivos
+     acababan fuera de la carpeta del usuario (`wsDir`, ver `crear`).
 
    Todo con `git` explícito y sin shell, para que las rutas con espacios y acentos
    lleguen intactas. */
@@ -109,8 +116,10 @@ async function sinSeguimiento(ws) {
 
 /**
  * Crea un árbol de trabajo aislado del estado ACTUAL del usuario.
- * Devuelve { id, ws, dir, base } o null si no se puede (y entonces se trabaja
- * sobre el árbol compartido, como antes).
+ * Devuelve { id, ws, wsDir, rel, topLevel, dir, base, gitDir } — `wsDir` es la carpeta del
+ * subagente dentro del árbol (= `ws` en rutas relativas) y `topLevel` la raíz del
+ * repositorio contra la que se aplica el parche. Devuelve null si no se puede (y entonces
+ * se trabaja sobre el árbol compartido, como antes).
  */
 async function crear(ws, opts = {}) {
   if (!(await disponible(ws))) return null;
@@ -120,6 +129,16 @@ async function crear(ws, opts = {}) {
      caso que dejaba registros fantasma dentro del repositorio del usuario. */
   const gdir = await git(['rev-parse', '--absolute-git-dir'], ws, { timeout: 15000 });
   const gitDir = gdir.code === 0 ? String(gdir.stdout).trim() : '';
+  /* Dónde cae el espacio de trabajo DENTRO del repositorio: `''` si el espacio de trabajo
+     ES la raíz. El árbol es un checkout del repositorio entero (ver la cabecera), así que
+     la carpeta del subagente es `dir` con esta misma ruta relativa — no la raíz del
+     árbol—. Se calcula antes de crear nada: si el espacio de trabajo no cae dentro del
+     árbol (una ruta con enlaces que git resuelve de otra forma), no se aísla y se trabaja
+     sobre el árbol compartido, que es el camino seguro. */
+  const top = await git(['rev-parse', '--show-toplevel'], ws, { timeout: 15000 });
+  const topLevel = top.code === 0 ? path.resolve(String(top.stdout).trim()) : '';
+  const rel = topLevel ? path.relative(topLevel, path.resolve(ws)) : '';
+  if (!topLevel || rel.split(path.sep)[0] === '..') return null;
   const dir = path.join(os.tmpdir(), 'sagitari-arboles', id);
   await fsp.rm(dir, { recursive: true, force: true }).catch(() => {});
   await fsp.mkdir(path.dirname(dir), { recursive: true }).catch(() => {});
@@ -143,10 +162,13 @@ async function crear(ws, opts = {}) {
     return null;
   }
 
+  /* La carpeta del subagente dentro del árbol, y lo que el árbol no trae de git. */
+  const wsDir = rel ? path.join(dir, rel) : dir;
+  await fsp.mkdir(wsDir, { recursive: true }).catch(() => {});
   // los archivos que git no conoce no viajan en el commit: se copian a mano
-  for (const rel of await sinSeguimiento(ws)) {
-    const src = path.join(ws, rel);
-    const dst = path.join(dir, rel);
+  for (const sinTrackear of await sinSeguimiento(ws)) {
+    const src = path.join(ws, sinTrackear);
+    const dst = path.join(dir, rel, sinTrackear);
     try {
       const st = await fsp.lstat(src);
       if (!st.isFile() || st.size > 8 * 1024 * 1024) continue;
@@ -183,7 +205,7 @@ async function crear(ws, opts = {}) {
     if (rev.code === 0) base = String(rev.stdout).trim();
   }
 
-  const arbol = { id, ws, dir, base, gitDir, creado: Date.now() };
+  const arbol = { id, ws, wsDir, rel, topLevel, dir, base, gitDir, creado: Date.now() };
   VIVEN.set(id, arbol);
   return arbol;
 }
@@ -193,12 +215,21 @@ async function crear(ws, opts = {}) {
  * Devuelve { ok, vacio, archivos, conflicto, parche } — y NUNCA aplica nada si
  * la comprobación previa falla.
  *
+ * `archivos` viene en rutas relativas a la RAÍZ del árbol (= raíz del repositorio).
+ *
  * opts.preparar(archivosRel) se llama justo antes de aplicar: es el gancho para
  * que el usuario pueda deshacer la fusión como cualquier otro cambio del turno.
  */
 async function fusionar(arbol, opts = {}) {
   if (!arbol) return { ok: false, vacio: true, archivos: [], conflicto: 'no hay árbol' };
   const { ws, dir, base } = arbol;
+  /* `git apply` corre en la RAÍZ DEL REPOSITORIO, no en el espacio de trabajo: desde una
+     subcarpeta, git IGNORA los caminos del parche que caen fuera de ella y sale con código
+     0. Con el espacio de trabajo en una subcarpeta (`proyecto/`) eso significaba «fusión
+     correcta» sin aplicar NADA: el trabajo del subagente se quedaba en el árbol y se
+     descartaba en silencio. El parche se generó contra la raíz del árbol, así que se aplica
+     contra la raíz del árbol, que es donde los caminos significan lo mismo. */
+  const raiz = arbol.topLevel || ws;
   const add = await git(['add', '-A'], dir);
   if (add.code !== 0) return { ok: false, archivos: [], conflicto: 'no se pudo preparar el árbol: ' + (add.stderr || add.stdout).trim() };
 
@@ -226,7 +257,7 @@ async function fusionar(arbol, opts = {}) {
      secas compara contra el archivo tal y como está en el disco, que es justo lo que
      hay que respetar; y si el usuario lo ha tocado por medio, el contexto ya no
      cuadra y sale un conflicto honesto. */
-  const check = await git(['apply', '--check', '--whitespace=nowarn', tmp], ws);
+  const check = await git(['apply', '--check', '--whitespace=nowarn', tmp], raiz);
   if (check.code !== 0) {
     arbol.parche = tmp;
     return {
@@ -241,7 +272,7 @@ async function fusionar(arbol, opts = {}) {
       opts.preparar(archivos);
     } catch {}
   }
-  const apply = await git(['apply', '--whitespace=nowarn', tmp], ws);
+  const apply = await git(['apply', '--whitespace=nowarn', tmp], raiz);
   return {
     ok: apply.code === 0,
     archivos,
