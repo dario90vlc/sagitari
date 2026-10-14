@@ -7,6 +7,9 @@ const P = {
   agents:
     '<rect x="3" y="3" width="7" height="7" rx="1.5"/><rect x="14" y="3" width="7" height="7" rx="1.5"/><rect x="3" y="14" width="7" height="7" rx="1.5"/><rect x="14" y="14" width="7" height="7" rx="1.5"/>',
   projects: '<path d="M3 7a2 2 0 0 1 2-2h4l2 2.5h8a2 2 0 0 1 2 2V17a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2z"/>',
+  /* El equipo: personas, no una rejilla. Agentes y Equipo son dos secciones distintas y
+     compartían el dibujo de cuatro cuadrados — con el mismo icono no se distinguen. */
+  team: '<path d="M16 21v-2a4 4 0 0 0-4-4H6a4 4 0 0 0-4 4v2"/><circle cx="9" cy="7" r="4"/><path d="M22 21v-2a4 4 0 0 0-3-3.87"/><path d="M16 3.13a4 4 0 0 1 0 7.75"/>',
   tools: '<path d="M14.7 6.3a4 4 0 0 0-5.4 5.4L3 18v3h3l6.3-6.3a4 4 0 0 0 5.4-5.4L15 12l-3-3z"/>',
   memory: '<path d="M12 3v18"/><path d="M5 7l7-4 7 4v6c0 4.5-3 7.5-7 9-4-1.5-7-4.5-7-9z"/>',
   history: '<path d="M3.5 12a8.5 8.5 0 1 1 2.5 6L3.5 15.5"/><path d="M3.5 20v-4.5H8"/><path d="M12 8v4.5l3 2"/>',
@@ -29,7 +32,6 @@ const P = {
   bolt: '<path d="M13 2 4 14h6l-1 8 9-12h-6z"/>',
   doc: '<path d="M14 3H7a2 2 0 0 0-2 2v14a2 2 0 0 0 2 2h10a2 2 0 0 0 2-2V8z"/><path d="M14 3v5h5M9 13h6M9 17h4"/>',
   gear: '<circle cx="12" cy="12" r="3.2"/><path d="M19.4 13.5a1.7 1.7 0 0 0 .34 1.87l.06.06a2 2 0 1 1-2.83 2.83l-.06-.06a1.7 1.7 0 0 0-1.87-.34 1.7 1.7 0 0 0-1 1.55V21a2 2 0 1 1-4 0v-.09a1.7 1.7 0 0 0-1.1-1.56 1.7 1.7 0 0 0-1.88.34l-.06.06a2 2 0 1 1-2.83-2.83l.06-.06a1.7 1.7 0 0 0 .34-1.87 1.7 1.7 0 0 0-1.55-1H3a2 2 0 1 1 0-4h.09a1.7 1.7 0 0 0 1.56-1.1 1.7 1.7 0 0 0-.34-1.88l-.06-.06a2 2 0 1 1 2.83-2.83l.06.06a1.7 1.7 0 0 0 1.87.34h.01a1.7 1.7 0 0 0 1-1.55V3a2 2 0 1 1 4 0v.09a1.7 1.7 0 0 0 1 1.55 1.7 1.7 0 0 0 1.88-.34l.06-.06a2 2 0 1 1 2.83 2.83l-.06.06a1.7 1.7 0 0 0-.34 1.87v.01a1.7 1.7 0 0 0 1.55 1H21a2 2 0 1 1 0 4h-.09a1.7 1.7 0 0 0-1.55 1z"/>',
-  mic: '<rect x="9" y="3" width="6" height="11" rx="3"/><path d="M5 11a7 7 0 0 0 14 0M12 18v3"/>',
   send: '<path d="m4 12 16-8-5 16-3.5-6z"/><path d="M20 4 11.5 14"/>',
   stop: '<rect x="7" y="7" width="10" height="10" rx="1.5"/>',
   spark:
@@ -63,7 +65,6 @@ const P = {
   panel: '<rect x="3" y="4" width="18" height="16" rx="2"/><path d="M9.5 4v16"/>',
   copy: '<rect x="9" y="9" width="11.5" height="11.5" rx="2"/><path d="M5 15.5V5a2 2 0 0 1 2-2h9.5"/>',
   refresh: '<path d="M20.5 12a8.5 8.5 0 1 1-2.6-6.1"/><path d="M20.5 4.5V11h-6.5"/>',
-  volume: '<path d="M4 9.5v5h3.2L13 19.2V4.8L7.2 9.5z"/><path d="M16.2 9.2a4.2 4.2 0 0 1 0 5.6M18.8 6.6a8 8 0 0 1 0 10.8"/>',
   arrowDown: '<path d="M12 4.5v14M6 12.5l6 6 6-6"/>',
   chevron: '<path d="m9.5 6 6 6-6 6"/>',
   clock: '<circle cx="12" cy="12" r="9"/><path d="M12 7v5.5l3.5 2"/>',

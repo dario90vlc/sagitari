@@ -46,16 +46,17 @@ function assertOk(value, msg) {
 
 console.log('ChatKit — modos');
 
-test('los tres modos tienen identidad propia', () => {
+test('los cuatro modos tienen identidad propia', () => {
   const ChatKit = cargarChatKit();
   assertEqual(ChatKit.mode('act').key, 'act');
   assertEqual(ChatKit.mode('plan').key, 'plan');
   assertEqual(ChatKit.mode('think').key, 'think');
+  assertEqual(ChatKit.mode('equipo').key, 'equipo');
 });
 
 test('cada modo tiene color, icono y lema', () => {
   const ChatKit = cargarChatKit();
-  for (const key of ['act', 'plan', 'think']) {
+  for (const key of ['act', 'plan', 'think', 'equipo']) {
     const m = ChatKit.mode(key);
     assertMatch(m.color, /^#[0-9a-f]{6}$/i, `color de ${key}:`);
     assertOk(m.icon, `icon de ${key}`);

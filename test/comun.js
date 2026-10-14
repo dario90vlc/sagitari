@@ -69,8 +69,8 @@ const toolCall = (name, args) => ({
   id: 't1',
   function: { name, arguments: typeof args === 'string' ? args : JSON.stringify(args || {}) },
 });
-// renderer partido (10-chat/20-voz/30-ajustes/40-vistas): el JS de la UI como un todo.
-const RENDERER_JS = ['10-chat.js', '20-voz.js', '30-ajustes.js', '40-vistas.js'];
+// renderer partido (10-chat/30-ajustes/40-vistas): el JS de la UI como un todo.
+const RENDERER_JS = ['10-chat.js', '20-app.js', '30-ajustes.js', 'memoria-ui.js', '40-vistas.js'];
 const readRenderer = () => RENDERER_JS.map((f) => fs.readFileSync(path.join(__dirname, '..', 'renderer', f), 'utf8')).join('\n');
 
 module.exports = {

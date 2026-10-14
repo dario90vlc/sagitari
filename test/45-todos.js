@@ -205,7 +205,7 @@ test('todo_write: actualizaciones consecutivas no disparan el guardián de bucle
 test('traza: el evento todos se guarda acotado y se ofrece en el rastro del turno', () => {
   traza.trazaNueva();
   try {
-    traza.trazaApunta({
+    traza.trazaApunta(null, {
       type: 'todos',
       todos: [
         { content: 'x'.repeat(400), status: 'completed' }, // se recorta

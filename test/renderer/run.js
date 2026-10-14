@@ -41,62 +41,78 @@ const errorReal = process.stderr.write.bind(process.stderr);
 
 const resultados = [];
 
-for (const archivo of archivos) {
-  let salida = '';
-  let code = 0;
+/* Todo el recorrido va dentro de un ámbito asíncrono: un archivo de pruebas puede ser
+   asíncrono (devuelve su promesa) y hay que esperarlo. Los síncronos no cambian. */
+(async () => {
+  for (const archivo of archivos) {
+    let salida = '';
+    let code = 0;
 
-  process.stdout.write = (chunk, ...rest) => {
-    salida += String(chunk);
-    return writeReal(chunk, ...rest);
-  };
-  process.stderr.write = (chunk, ...rest) => {
-    salida += String(chunk);
-    return errorReal(chunk, ...rest);
-  };
-  process.exit = (c) => {
-    throw new FinDeArchivo(typeof c === 'number' ? c : 0);
-  };
+    process.stdout.write = (chunk, ...rest) => {
+      salida += String(chunk);
+      return writeReal(chunk, ...rest);
+    };
+    process.stderr.write = (chunk, ...rest) => {
+      salida += String(chunk);
+      return errorReal(chunk, ...rest);
+    };
+    process.exit = (c) => {
+      throw new FinDeArchivo(typeof c === 'number' ? c : 0);
+    };
 
-  let reventó = null;
-  try {
-    require(path.join(DIR, archivo));
-    // Si el archivo no llama a process.exit, se da por bueno.
-  } catch (e) {
-    if (e instanceof FinDeArchivo) code = e.code;
-    else reventó = e;
-  } finally {
-    process.exit = exitReal;
-    process.stdout.write = writeReal;
-    process.stderr.write = errorReal;
+    let reventó = null;
+    try {
+      /* Un archivo SÍNCRONO (todos menos uno) termina en `process.exit` y no devuelve nada.
+       Un archivo ASÍNCRONO devuelve su promesa desde el módulo (`module.exports = main()`):
+       se espera AQUÍ, con los interceptores todavía puestos, para recoger su recuento y su
+       `process.exit` igual que si fuera síncrono. Antes esto no se podía: un archivo con
+       `await` no llegaba a imprimir su resumen y el runner lo daba por mudo. */
+      const devuelto = require(path.join(DIR, archivo));
+      if (devuelto && typeof devuelto.then === 'function') {
+        try {
+          await devuelto;
+        } catch (e) {
+          if (e instanceof FinDeArchivo) code = e.code;
+          else reventó = e;
+        }
+      }
+    } catch (e) {
+      if (e instanceof FinDeArchivo) code = e.code;
+      else reventó = e;
+    } finally {
+      process.exit = exitReal;
+      process.stdout.write = writeReal;
+      process.stderr.write = errorReal;
+    }
+
+    const m = salida.match(/(\d+)\s+pasaron,\s+(\d+)\s+fallaron/);
+    const pasaron = m ? Number(m[1]) : 0;
+    const fallaron = m ? Number(m[2]) : 0;
+
+    if (reventó) {
+      console.error('\n✗ ' + archivo + ' reventó: ' + (reventó && reventó.stack ? reventó.stack : reventó));
+      code = 1;
+    } else if (!m) {
+      console.error('\n✗ ' + archivo + ' no informó de resultados (¿le falta el resumen final?)');
+      code = 1;
+    } else if (fallaron || code !== 0) {
+      console.error('\n✗ ' + archivo + ': ' + pasaron + ' pasaron, ' + fallaron + ' fallaron');
+    }
+
+    resultados.push({ archivo, pasaron, fallaron, code, reventó: !!reventó });
   }
 
-  const m = salida.match(/(\d+)\s+pasaron,\s+(\d+)\s+fallaron/);
-  const pasaron = m ? Number(m[1]) : 0;
-  const fallaron = m ? Number(m[2]) : 0;
+  const totalPasaron = resultados.reduce((n, r) => n + r.pasaron, 0);
+  const totalFallaron = resultados.reduce((n, r) => n + r.fallaron, 0);
+  const archivosMal = resultados.filter((r) => r.code !== 0 || r.fallaron || r.reventó).length;
 
-  if (reventó) {
-    console.error('\n✗ ' + archivo + ' reventó: ' + (reventó && reventó.stack ? reventó.stack : reventó));
-    code = 1;
-  } else if (!m) {
-    console.error('\n✗ ' + archivo + ' no informó de resultados (¿le falta el resumen final?)');
-    code = 1;
-  } else if (fallaron || code !== 0) {
-    console.error('\n✗ ' + archivo + ': ' + pasaron + ' pasaron, ' + fallaron + ' fallaron');
+  console.log('\n' + '─'.repeat(60));
+  console.log('Archivos: ' + resultados.length + '   Pruebas: ' + totalPasaron + ' pasaron, ' + totalFallaron + ' fallaron');
+  if (archivosMal) {
+    console.log('Archivos con fallos:');
+    for (const r of resultados) if (r.code !== 0 || r.fallaron || r.reventó) console.log('  ✗ ' + r.archivo);
   }
+  console.log('─'.repeat(60));
 
-  resultados.push({ archivo, pasaron, fallaron, code, reventó: !!reventó });
-}
-
-const totalPasaron = resultados.reduce((n, r) => n + r.pasaron, 0);
-const totalFallaron = resultados.reduce((n, r) => n + r.fallaron, 0);
-const archivosMal = resultados.filter((r) => r.code !== 0 || r.fallaron || r.reventó).length;
-
-console.log('\n' + '─'.repeat(60));
-console.log('Archivos: ' + resultados.length + '   Pruebas: ' + totalPasaron + ' pasaron, ' + totalFallaron + ' fallaron');
-if (archivosMal) {
-  console.log('Archivos con fallos:');
-  for (const r of resultados) if (r.code !== 0 || r.fallaron || r.reventó) console.log('  ✗ ' + r.archivo);
-}
-console.log('─'.repeat(60));
-
-exitReal(archivosMal || totalFallaron ? 1 : 0);
+  exitReal(archivosMal || totalFallaron ? 1 : 0);
+})();

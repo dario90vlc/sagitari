@@ -49,6 +49,19 @@ const TEST_DATA_DIR = TEST_PROFILE;
 /* El espacio de trabajo de la instancia de prueba: dentro del workspace, no en
    %TEMP% — por el mismo motivo de arriba: Electron no puede escribir en %TEMP% y
    la comprobación de la revisión del cambio escribe un archivo de verdad. */
+/* Restos de ejecuciones cortadas: el espacio de trabajo se borra al terminar, pero una
+   ejecución interrumpida (Ctrl+C, un timeout, el portapapeles de una tubería) deja la
+   carpeta con el archivo que escribe la comprobación de la revisión. Se barren ANTES de
+   crear el de esta ejecución: si no, se acumulan en el repositorio y aparecen como código
+   del proyecto en el lint y en el formateo. */
+try {
+  for (const e of fs.readdirSync(APP_DIR)) {
+    if (!/^sagi-ui-ws-/.test(e)) continue;
+    try {
+      fs.rmSync(path.join(APP_DIR, e), { recursive: true, force: true });
+    } catch {}
+  }
+} catch {}
 const WS_TEST = fs.mkdtempSync(path.join(APP_DIR, 'sagi-ui-ws-'));
 function seedTestConfig(apiPort) {
   const file = path.join(TEST_DATA_DIR, 'config.json');
@@ -90,6 +103,18 @@ function seedTestConfig(apiPort) {
     args: [path.join(APP_DIR, 'test', 'fixtures', 'mcp-echo-server.js')],
     env: {},
   };
+  /* Un proveedor guardado cuya clave NO se puede descifrar (pasa de verdad: config
+     traída de otro perfil o de otro equipo). Antes, el arranque lo trataba como fallo
+     interno y sacaba un diálogo modal antes de poder usar nada; ahora la app arranca, el
+     proveedor queda marcado y Ajustes dice qué hacer. Esta entrada es lo que hace que la
+     comprobación de interfaz cubra ese camino. */
+  const proveedorConClaveIlegible = {
+    id: 'clave-ilegible',
+    name: 'Prueba (clave ilegible)',
+    baseUrl: 'https://ejemplo.invalid/v1',
+    apiKey: 'enc:v1:ZXN0by1uby1lc3VuYS1jbGF2ZQ==',
+    models: ['modelo-x'],
+  };
   /* SIEMPRE se reescribe. Este perfil es de las pruebas: dar por bueno lo que
      hubiera dejado otro proceso hacía que el ui-check verificara un estado distinto
      cada vez (llegó a comprobar un menú con 16 modelos y otro activo, donde la
@@ -100,7 +125,7 @@ function seedTestConfig(apiPort) {
       file,
       JSON.stringify(
         {
-          providers: [{ ...dummy, id: 'ui-check', models: modelos }],
+          providers: [{ ...dummy, id: 'ui-check', models: modelos }, proveedorConClaveIlegible],
           active: dummy,
           mcp: { enabled: true, servers: [mcpServer, mcpServerConGuion] },
           // el razonamiento se muestra en las comprobaciones de la interfaz: es un ajuste
@@ -112,6 +137,16 @@ function seedTestConfig(apiPort) {
       ),
       'utf8',
     );
+    /* Y el HISTORIAL también se limpia: este perfil es de las pruebas y arrastrar las
+       conversaciones de otra ejecución (o las de una copia del perfil real, que es como
+       se descubrió) hacía que las comprobaciones del chat encontraran tarjetas y burbujas
+       de un hilo viejo. El turno que escribe cada comprobación tiene que ser el ÚNICO
+       contenido del hilo: es lo que hace que estas aserciones midan lo que dicen medir. */
+    for (const f of ['conversations.json', 'conversations.json.bak', 'memory.json', 'memory.json.bak', 'memory-tray.json']) {
+      try {
+        fs.rmSync(path.join(TEST_DATA_DIR, f), { force: true });
+      } catch {}
+    }
   } catch {}
 }
 
@@ -138,41 +173,6 @@ function freePort() {
   });
 }
 
-/* Un WAV de mentira con voz y silencios: Chromium lo usa como micrófono
-   (--use-file-for-fake-audio-capture), así que el nivel del orbe y la interrupción se
-   prueban deterministas, sin hardware y sin tono constante. */
-async function vozFalsa() {
-  const fs = require('fs');
-  const path = require('path');
-  const os = require('os');
-  const sr = 48000,
-    seg = 5,
-    n = sr * seg;
-  const buf = Buffer.alloc(44 + n * 2);
-  buf.write('RIFF', 0);
-  buf.writeUInt32LE(36 + n * 2, 4);
-  buf.write('WAVE', 8);
-  buf.write('fmt ', 12);
-  buf.writeUInt32LE(16, 16);
-  buf.writeUInt16LE(1, 20);
-  buf.writeUInt16LE(1, 22);
-  buf.writeUInt32LE(sr, 24);
-  buf.writeUInt32LE(sr * 2, 28);
-  buf.writeUInt16LE(2, 32);
-  buf.writeUInt16LE(16, 34);
-  buf.write('data', 36);
-  buf.writeUInt32LE(n * 2, 40);
-  for (let i = 0; i < n; i++) {
-    const t = i / sr;
-    const habla = (t > 1 && t < 2.2) || (t > 3.5 && t < 4.6); // silencio, voz, silencio, voz
-    const v = habla ? Math.sin(2 * Math.PI * 180 * t) * 0.35 : 0;
-    buf.writeInt16LE(Math.max(-32768, Math.min(32767, Math.round(v * 32767))), 44 + i * 2);
-  }
-  const f = path.join(os.tmpdir(), 'sagi-voz-falsa.wav');
-  fs.writeFileSync(f, buf);
-  return f;
-}
-
 /* Un «modelo» de mentira, en local: contesta cada petición con un turno SSE de una línea y
    apunta qué herramientas (`tools`) le ofreció la app. Es la ÚNICA ventana al catálogo real
    que ve el modelo (`allToolDefs`): no viaja por ningún canal de la interfaz, así que sin
@@ -189,6 +189,12 @@ function fakeLlm() {
      inventar un servidor aparte: cada petición —incluidas las del SUBAGENTE, que usa el
      mismo proveedor— consume la siguiente. */
   const guion = [];
+  /* ENRUTADO POR PETICIÓN (v4.4): el guion lineal sirve mientras haya UN solo hablante,
+     pero con dos compañeros de equipo en paralelo el orden de llegada de sus peticiones
+     no está garantizado y el guion se repartiría al azar. Un router mira el CUERPO de la
+     petición (quién pregunta: el líder o el compañero «m2») y devuelve su respuesta; si
+     no dice nada, se sigue con la cola de siempre. */
+  let router = null;
   const srv = http.createServer((req, res) => {
     let body = '';
     req.on('data', (c) => {
@@ -201,14 +207,25 @@ function fakeLlm() {
       } catch {}
       vistos.push(nombres); // null = la petición no traía `tools`
       cuerpos.push(body);
+      let respuesta = null;
+      if (router) {
+        try {
+          respuesta = router(body);
+        } catch {}
+      }
       res.writeHead(200, { 'content-type': 'text/event-stream' });
       res.write(
-        guion.length ? guion.shift() : 'data: ' + JSON.stringify({ choices: [{ delta: { content: 'listo' } }] }) + '\n\ndata: [DONE]\n\n',
+        respuesta ||
+          (guion.length
+            ? guion.shift()
+            : 'data: ' + JSON.stringify({ choices: [{ delta: { content: 'listo' } }] }) + '\n\ndata: [DONE]\n\n'),
       );
       res.end();
     });
   });
-  return new Promise((res) => srv.listen(0, '127.0.0.1', () => res({ srv, port: srv.address().port, vistos, cuerpos, guion })));
+  return new Promise((res) =>
+    srv.listen(0, '127.0.0.1', () => res({ srv, port: srv.address().port, vistos, cuerpos, guion, setRouter: (f) => (router = f) })),
+  );
 }
 
 /** Una respuesta SSE de una sola frase (o de un tool_call, ver `guionToolCall`). */
@@ -219,6 +236,23 @@ function guionToolCall(id, name, args) {
   return (
     'data: ' +
     JSON.stringify({ choices: [{ delta: { tool_calls: [{ index: 0, id, function: { name, arguments: JSON.stringify(args) } }] } }] }) +
+    '\n\ndata: [DONE]\n\n'
+  );
+}
+/** VARIAS llamadas en el MISMO mensaje (lo que necesita un líder que reparte trabajo:
+    dos compañeros se levantan a la vez, no uno detrás de otro). */
+function guionToolCalls(lista) {
+  return (
+    'data: ' +
+    JSON.stringify({
+      choices: [
+        {
+          delta: {
+            tool_calls: lista.map((c, i) => ({ index: i, id: c.id, function: { name: c.name, arguments: JSON.stringify(c.args) } })),
+          },
+        },
+      ],
+    }) +
     '\n\ndata: [DONE]\n\n'
   );
 }
@@ -241,8 +275,8 @@ const CHECKS = {
   'ningún icono se quedó sin dibujo': '[...document.querySelectorAll("[data-i]")].every(e => e.querySelector("svg"))',
   'los iconos tienen trazo real (no el punto de reserva)':
     '[...document.querySelectorAll("[data-i] svg")].filter(s => s.innerHTML.length > 20).length >= 20',
-  'sidebar: 4 grupos y 10 secciones (sin Inicio)':
-    'document.querySelectorAll(".navgroup").length === 4 && document.querySelectorAll(".navitem").length === 10',
+  'sidebar: 4 grupos y 11 secciones (sin Inicio)':
+    'document.querySelectorAll(".navgroup").length === 4 && document.querySelectorAll(".navitem").length === 11',
   'la sección MCP es propia: el ítem del sidebar abre su vista y contiene la lista':
     '(function(){ const b = document.querySelector(\'.navitem[data-view="mcp"]\'); if (!b) return false; b.click(); const v = document.querySelector("#view-mcp"); const list = document.querySelector("#mcpList"); return !!v && v.classList.contains("on") && b.classList.contains("on") && !!list && v.contains(list) && !document.querySelector("#setTabs .settab[data-set=mcp]"); })()',
   'Alt+0 sigue sin cambiar de vista':
@@ -253,9 +287,9 @@ const CHECKS = {
     '["#btnClose","#btnMin","#btnMax"].every(s => { const e = document.querySelector(s); return e && typeof e.onclick === "function"; })',
   'la navegación responde':
     '(function(){ document.querySelector(\'[data-view="tasks"]\').click(); const ok1 = document.querySelector("#view-tasks").classList.contains("on"); document.querySelector(\'[data-view="chat"]\').click(); return ok1 && document.querySelector("#view-chat").classList.contains("on"); })()',
-  'el selector de modo tiene los tres, con icono':
-    'document.querySelectorAll("#modeSeg button").length === 3 && [...document.querySelectorAll("#modeSeg button")].every(b => b.querySelector("svg"))',
-  'el chat queda teñido con su modo': '/^(act|plan|think)$/.test(document.querySelector("#view-chat").dataset.mode)',
+  'el selector de modo tiene los cuatro, con icono':
+    'document.querySelectorAll("#modeSeg button").length === 4 && [...document.querySelectorAll("#modeSeg button")].every(b => b.querySelector("svg"))',
+  'el chat queda teñido con su modo': '/^(act|plan|think|equipo)$/.test(document.querySelector("#view-chat").dataset.mode)',
   'el compositor del chat está cableado':
     'typeof document.querySelector("#chatSend").onclick === "function" && typeof document.querySelector("#btnCopyConv").onclick === "function"',
   'la interfaz no ha registrado ningún error propio': 'Array.isArray(window.__errores) && window.__errores.length === 0',
@@ -268,8 +302,8 @@ const EVENTS = [
 const AFTER = {
   'el estado vacío sigue existiendo tras vaciar los mensajes':
     '!document.querySelector("#chatEmpty").hidden && document.querySelector("#messages").children.length === 0',
-  'ofrece los tres modos, en fila':
-    '(function(){ const c = [...document.querySelectorAll("#ceModes .ce-mode")]; return c.length === 3 && new Set(c.map(x => Math.round(x.getBoundingClientRect().top))).size === 1 && c[0].getBoundingClientRect().width > 120; })()',
+  'ofrece los cuatro modos, en fila':
+    '(function(){ const c = [...document.querySelectorAll("#ceModes .ce-mode")]; return c.length === 4 && new Set(c.map(x => Math.round(x.getBoundingClientRect().top))).size === 1 && c[0].getBoundingClientRect().width > 120; })()',
   'sin vista Inicio: la app abre directamente en Chat':
     '(function(){ return !document.querySelector("#view-home") && document.querySelector("#view-chat").classList.contains("on"); })()',
   'no pisa el compositor':
@@ -285,11 +319,6 @@ const AFTER = {
   const port = await freePort();
   // --hidden: la ventana NO se muestra. Antes se abría y se cerraba sola durante
   // probar.bat, y eso se ve idéntico a «la app se cierra sola».
-  /* --use-fake-device-for-media-stream: micrófono sintético, para que las comprobaciones
-     de permiso, de nivel y de interrupción no dependan del hardware de quien ejecute esto.
-     El WAV de mentira sustituye al tono constante de la tarea anterior: con voz y
-     silencios de verdad, la interrupción y el nivel se pueden comprobar. */
-  const wavFalso = await vozFalsa();
   /* El entorno no debe heredar ELECTRON_RUN_AS_NODE: con él Electron se comporta
      como Node, no hay ventana y el puerto de depuración no existe. Y el perfil de
      pruebas tiene que ser escribible (arriba). */
@@ -306,8 +335,6 @@ const AFTER = {
          evita el proceso de GPU, que es el que falla en un escritorio sin GPU. */
       '--no-sandbox',
       '--disable-gpu',
-      '--use-fake-device-for-media-stream',
-      '--use-file-for-fake-audio-capture=' + wavFalso,
       '.',
     ],
     { cwd: APP_DIR, stdio: ['ignore', 'pipe', 'pipe'], env },
@@ -367,6 +394,20 @@ const AFTER = {
   }
 
   const ws = new WebSocket(page.webSocketDebuggerUrl);
+  /* Fallos registrados ANTES de tener ventana: aquí ya están escritos (loadConfig corre
+     al cargar el módulo). A partir de aquí, cualquier línea nueva es un fallo ocurrido
+     con la app ya en marcha, y eso es lo que se comprueba al final. */
+  const lineasCrash = () => {
+    try {
+      return fs
+        .readFileSync(path.join(TEST_DATA_DIR, 'logs', 'crash.log'), 'utf8')
+        .split('\n')
+        .filter(Boolean).length;
+    } catch {
+      return 0;
+    }
+  };
+  const crashAlArrancar = lineasCrash();
   let id = 0;
   let terminado = false; // el veredicto final ya está dado: no lo pisa el cierre
   const pending = new Map();
@@ -839,9 +880,9 @@ const AFTER = {
      Tres turnos: el orquestador delega en el investigador, el subagente cierra con su
      RESULT/EVIDENCE y el orquestador responde. El texto interno del subagente lleva una
      marca irrepetible: si esa marca aparece en la RESPUESTA (quitando el grupo de
-     herramientas), es que se ha colado en la burbuja —y con el modo voz se leería en voz
-     alta—, que es justo el defecto que esta comprobación vigila. Solo aparece en su
-     tarjeta de delegación, que es donde el usuario quiere leerla. */
+     herramientas), es que se ha colado en la burbuja, que es justo el defecto que esta
+     comprobación vigila. Solo aparece en su tarjeta de delegación, que es donde el usuario
+     quiere leerla. */
   const MARCA_SUB = 'prueba-interna-999';
   // El agente elegido es el VERIFICADOR a propósito: su clave real (`verification`)
   // no estaba en el catálogo de etiquetas de la interfaz (`verify`), así que su ficha
@@ -861,7 +902,7 @@ const AFTER = {
   };
   await evaluate('document.querySelector(\'[data-view="chat"]\').click()');
   await evaluate('document.querySelector("#chatInput").value = "investiga vuelos a Roma"; document.querySelector("#chatSend").click()');
-  const llegoLaTarjeta = await esperar('!!document.querySelector(".tcard.dcard")', 25000);
+  const llegoLaTarjeta = await esperar('!!document.querySelector("#messages .tcard.dcard")', 25000);
   if (llegoLaTarjeta) {
     console.log('  ok   la delegación pinta su tarjeta en el chat');
   } else {
@@ -870,16 +911,16 @@ const AFTER = {
   }
   await judge(
     'la tarjeta de la delegación trae estado y evidencia',
-    '(function(){ var c = document.querySelector(".tcard.dcard"); if (!c) return false; var t = c.textContent || ""; return /Verificador/.test(t) && /OK/.test(t) && t.indexOf(' +
+    '(function(){ var c = document.querySelector("#messages .tcard.dcard"); if (!c) return { tarjeta: false, ai: document.querySelectorAll("#messages .msg.ai").length, tcards: document.querySelectorAll("#messages .tcard").length, msgs: document.querySelectorAll(".msgs").length, idMessages: !!document.getElementById("messages") }; var t = c.textContent || ""; var bien = /Verificador/.test(t) && /OK/.test(t) && t.indexOf(' +
       JSON.stringify(MARCA_SUB) +
-      ') >= 0; })()',
+      ') >= 0; return bien || { texto: t.slice(0, 240) }; })()',
   );
   /* El tablero del equipo: la delegación se ve EN VIVO (una fila por subtarea, con su
      criterio) y se resuelve al acabar. Se comprueba aquí y no en el test unitario porque
      es lo único que cierra la pregunta «¿quién está trabajando ahora mismo?». */
   await judge(
     'el tablero del equipo enseña la delegación en vivo y la cierra',
-    '(function(){ var g = document.querySelector(".tgroup.team"); if (!g) return false; if (!/Equipo/.test(g.textContent || "")) return false; var chips = g.querySelectorAll(".toolchip"); if (chips.length !== 1) return false; var c = chips[0]; if (c.classList.contains("run")) return false; if (!(c.classList.contains("done") || c.classList.contains("err"))) return false; var t = c.textContent || ""; return /Verificador/.test(t) && /comprueba el informe de vuelos/.test(t); })()',
+    '(function(){ var g = document.querySelector("#messages .tgroup.team"); if (!g) return false; if (!/Equipo/.test(g.textContent || "")) return false; var chips = g.querySelectorAll(".toolchip"); if (chips.length !== 1) return false; var c = chips[0]; if (c.classList.contains("run")) return false; if (!(c.classList.contains("done") || c.classList.contains("err"))) return false; var t = c.textContent || ""; return /Verificador/.test(t) && /comprueba el informe de vuelos/.test(t); })()',
   );
   await judge(
     'Ajustes deja fijar el tope de subagentes por turno',
@@ -888,7 +929,7 @@ const AFTER = {
 
   await judge(
     'el texto interno del subagente NO entra en la respuesta',
-    '(function(){ var ms = document.querySelectorAll(".msg.ai"); var last = ms[ms.length - 1]; if (!last) return false; var copia = last.cloneNode(true); copia.querySelectorAll(".tgroup").forEach(function(g){ g.remove(); }); var t = copia.textContent || ""; return t.indexOf(' +
+    '(function(){ var ms = document.querySelectorAll("#messages .msg.ai"); var last = ms[ms.length - 1]; if (!last) return false; var copia = last.cloneNode(true); copia.querySelectorAll(".tgroup").forEach(function(g){ g.remove(); }); var t = copia.textContent || ""; return t.indexOf(' +
       JSON.stringify(MARCA_SUB) +
       ') < 0 && /Roma/.test(t); })()',
   );
@@ -896,10 +937,10 @@ const AFTER = {
   /* ---- v2.3: razonamiento visible (Ajustes ▸ Agente ▸ Conversación) ----
      El modelo de mentira manda `reasoning_content`, como DeepSeek y compañía. Se
      comprueba lo que VE el usuario: un bloque propio encima de la respuesta, plegado
-     en cuanto el agente empieza a contestar, que no se cuela en la respuesta —y por
-     tanto no se leería en voz alta— y que desaparece si apaga el ajuste. En el mismo
-     turno se fuerza UNA herramienta que falla (leer un archivo que no existe): antes,
-     con el grupo plegado, un fallo dentro era invisible hasta abrirlo a mano. */
+     en cuanto el agente empieza a contestar, que no se cuela en la respuesta y que
+     desaparece si apaga el ajuste. En el mismo turno se fuerza UNA herramienta que falla
+     (leer un archivo que no existe): antes, con el grupo plegado, un fallo dentro era
+     invisible hasta abrirlo a mano. */
   const MARCA_RAZON = 'prueba-razonamiento-777';
   await evaluate('document.querySelector("#btnClear").click()'); // conversación limpia: el separador de día se cuenta desde cero
   await new Promise((r) => setTimeout(r, 600));
@@ -907,10 +948,12 @@ const AFTER = {
     guionToolCall('r1', 'read_file', { path: 'no-existe-jamas-sagitari.txt' }),
     guionRazonamiento(MARCA_RAZON + ': ese archivo no está; lo digo tal cual.', 'Listo: no había tal archivo.'),
   );
-  const aiAntes = await evaluate('document.querySelectorAll(".msg.ai").length');
+  const aiAntes = await evaluate('document.querySelectorAll("#messages .msg.ai").length');
   await evaluate('document.querySelector("#chatInput").value = "mira ese archivo"; document.querySelector("#chatSend").click()');
   const llegoRazon = await esperar(
-    'document.querySelectorAll(".msg.ai").length > ' + aiAntes + ' && !!document.querySelector(".msg.ai:last-child .thinkblock")',
+    'document.querySelectorAll("#messages .msg.ai").length > ' +
+      aiAntes +
+      ' && !!document.querySelector("#messages .msg.ai:last-child .thinkblock")',
     25000,
   );
   if (llegoRazon) console.log('  ok   el razonamiento del modelo se pinta en su propio bloque');
@@ -922,19 +965,19 @@ const AFTER = {
      seguir el hilo sin abrir cada bloque) y abierto, la duración y cuántas líneas pensó. */
   await judge(
     'el bloque trae el razonamiento, su resumen, su botón de copiar y queda plegado',
-    '(function(){ const b = document.querySelector(".msg.ai:last-child .thinkblock"); if (!b) return { bloque: false }; const cuerpo = b.querySelector(".think-body"); const meta = () => b.querySelector(".th-meta").textContent; const plegado = meta(); const head = b.querySelector(".think-head"); head.click(); const abierto = meta(); head.click(); const otraVez = meta(); const r = { marca: !!cuerpo && cuerpo.textContent.indexOf(' +
+    '(function(){ const b = document.querySelector("#messages .msg.ai:last-child .thinkblock"); if (!b) return { bloque: false }; const cuerpo = b.querySelector(".think-body"); const meta = () => b.querySelector(".th-meta").textContent; const plegado = meta(); const head = b.querySelector(".think-head"); head.click(); const abierto = meta(); head.click(); const otraVez = meta(); const r = { marca: !!cuerpo && cuerpo.textContent.indexOf(' +
       JSON.stringify(MARCA_RAZON) +
       ') >= 0, copiar: !!b.querySelector(".th-copy"), plegadoAlLlegar: !b.classList.contains("open"), resumen: plegado, abierto: abierto, vuelve: otraVez === plegado }; return (r.marca && r.copiar && r.plegadoAlLlegar && /[a-zA-Z]/.test(plegado) && !/^pensando/.test(plegado) && /^pensó .* · \\d+ línea/.test(abierto) && r.vuelve) ? true : r; })()',
   );
   await judge(
     'el resumen plegado dice algo del razonamiento, no una etiqueta vacía',
-    '(function(){ const b = document.querySelector(".msg.ai:last-child .thinkblock"); if (!b || !b.classList.contains("closed")) return false; const t = b.querySelector(".th-meta").textContent.trim(); return t.length > 10 && !/^pensó$/.test(t) && !/^pensando/.test(t); })()',
+    '(function(){ const b = document.querySelector("#messages .msg.ai:last-child .thinkblock"); if (!b || !b.classList.contains("closed")) return false; const t = b.querySelector(".th-meta").textContent.trim(); return t.length > 10 && !/^pensó$/.test(t) && !/^pensando/.test(t); })()',
   );
   await judge(
-    'el razonamiento NO entra en la respuesta (ni se leería en voz alta)',
-    '(function(){ const m = document.querySelector(".msg.ai:last-child"); if (!m) return false; const c = m.querySelector(".bubble").cloneNode(true); c.querySelectorAll(".thinkblock,.tgroup").forEach(x => x.remove()); const t = c.textContent || ""; return t.indexOf(' +
+    'el razonamiento NO entra en la respuesta',
+    '(function(){ const m = document.querySelector("#messages .msg.ai:last-child"); if (!m) return { ai: false, msgs: document.querySelectorAll(".msgs").length, ultimo: (function(){ var n = document.querySelector(".msgs"); return n && n.lastElementChild ? n.lastElementChild.className : "vacio"; })() }; const c = m.querySelector(".bubble").cloneNode(true); c.querySelectorAll(".thinkblock,.tgroup").forEach(x => x.remove()); const t = c.textContent || ""; var bien = t.indexOf(' +
       JSON.stringify(MARCA_RAZON) +
-      ') < 0 && /no había tal archivo/.test(t); })()',
+      ') < 0 && /no había tal archivo/.test(t); return bien || { respuesta: t.slice(0, 240), nodos: (function(){ return [...document.querySelectorAll(".msgs")].map(function(n){ return (n.id||"sin-id") + (n.hidden ? " OCULTO" : " visible") + " · hijos=" + n.children.length + " · ai=" + n.querySelectorAll(".msg.ai").length; }); })(), ultimos: [...document.querySelectorAll("#messages .msg.ai")].slice(-3).map(function(n){ return (n.textContent||"").trim().slice(0, 40); }) }; })()',
   );
   /* v2.5: dentro de una tarjeta, un fallo se lee en la propia cabecera (sin desplegarla) y
      el tiempo corre mientras la herramienta trabaja. Se comprueba con una tarjeta real del
@@ -943,15 +986,15 @@ const AFTER = {
   await new Promise((r) => setTimeout(r, 900));
   await judge(
     'mientras una herramienta corre, su tarjeta enseña el tiempo en marcha',
-    '(function(){ const c = document.querySelector(".msg.ai:last-child .tcard.run:last-of-type"); if (!c) return { tarjeta: false }; const t = c.querySelector(".tcard-time").textContent.trim(); return /^[\\d,.]+ s$/.test(t) ? true : { tiempo: t }; })()',
+    '(function(){ const c = document.querySelector("#messages .msg.ai:last-child .tcard.run:last-of-type"); if (!c) return { tarjeta: false }; const t = c.querySelector(".tcard-time").textContent.trim(); return /^[\\d,.]+ s$/.test(t) ? true : { tiempo: t }; })()',
   );
   await judge(
     'un fallo se lee en la cabecera de la tarjeta, sin desplegarla',
-    '(function(){ const c = document.querySelector(".msg.ai:last-child .tcard.run:last-of-type"); if (!c) return { tarjeta: false }; completeToolCard({ name: "run_command", ok: false, result: "Error: el comando no existe en este equipo" }); const n = c.querySelector(".tcard-note"); const r = { clase: c.className, nota: n && n.textContent }; return (c.classList.contains("err") && !!n && /no existe en este equipo/.test(n.textContent) && !n.textContent.startsWith("Error:") && !c.classList.contains("open")) ? true : r; })()',
+    '(function(){ const c = document.querySelector("#messages .msg.ai:last-child .tcard.run:last-of-type"); if (!c) return { tarjeta: false }; completeToolCard({ name: "run_command", ok: false, result: "Error: el comando no existe en este equipo" }); const n = c.querySelector(".tcard-note"); const r = { clase: c.className, nota: n && n.textContent }; return (c.classList.contains("err") && !!n && /no existe en este equipo/.test(n.textContent) && !n.textContent.startsWith("Error:") && !c.classList.contains("open")) ? true : r; })()',
   );
   await judge(
     'la cabecera del grupo avisa del fallo con el grupo plegado',
-    '(function(){ const g = document.querySelector(".msg.ai:last-child .tgroup:not(.team)"); if (!g) return false; const f = g.querySelector(".tg-fails"); return !!f && !f.hidden && /1 fallo/.test(f.textContent) && g.classList.contains("has-fails"); })()',
+    '(function(){ const g = document.querySelector("#messages .msg.ai:last-child .tgroup:not(.team)"); if (!g) return { grupo: false, aiUltimo: (document.querySelector("#messages .msg.ai:last-child")||{}).className || "sin .msg.ai:last-child", grupos: document.querySelectorAll("#messages .tgroup").length, equipo: document.querySelectorAll("#messages .tgroup.team").length }; const f = g.querySelector(".tg-fails"); var bien = !!f && !f.hidden && /1 fallo/.test(f.textContent) && g.classList.contains("has-fails"); return bien || { clase: g.className, fallos: f ? f.textContent : "SIN .tg-fails", oculto: f ? f.hidden : null }; })()',
   );
   /* El separador de día: antes lo estampaba CADA respuesta del agente (doce veces en una
      tarde, entre la pregunta y la respuesta). Se mide contando: uno al empezar el hilo y
@@ -1006,14 +1049,14 @@ const AFTER = {
     // el turno anterior tiene que haber cerrado del todo: con el agente ocupado, el envío
     // se descarta (a propósito) y la espera se quedaría mirando un turno que no existe
     await esperar('(async function(){ return !(await window.sagitari.getAgentsLive()).running; })()', 15000);
-    const n = await evaluate('document.querySelectorAll(".msg.ai").length');
+    const n = await evaluate('document.querySelectorAll("#messages .msg.ai").length');
     await evaluate(
       'document.querySelector("#chatInput").value = ' + JSON.stringify(marca) + '; document.querySelector("#chatSend").click()',
     );
     const ok = await esperar(
-      'document.querySelectorAll(".msg.ai").length > ' +
+      'document.querySelectorAll("#messages .msg.ai").length > ' +
         n +
-        ' && /no había tal archivo/.test(document.querySelector(".msg.ai:last-child").textContent)',
+        ' && /no había tal archivo/.test(document.querySelector("#messages .msg.ai:last-child").textContent)',
       25000,
     );
     return ok;
@@ -1030,7 +1073,10 @@ const AFTER = {
   }
   llm.guion.push(guionRazonamiento(MARCA_RAZON + ': esto NO debería verse.', 'Listo: no había tal archivo.'));
   await enviarYEsperar('otra vez, sin razonamiento visible');
-  await judge('con el ajuste apagado el turno no trae bloque de razonamiento', '!document.querySelector(".msg.ai:last-child .thinkblock")');
+  await judge(
+    'con el ajuste apagado el turno no trae bloque de razonamiento',
+    '!document.querySelector("#messages .msg.ai:last-child .thinkblock")',
+  );
   await judge('y el turno nuevo tampoco añade otro separador de día', 'document.querySelectorAll("#messages .day").length === ' + dias1);
   const encendidoOk = await evaluate(
     '(async function(){ const sw = document.querySelector("#swThinking"); sw.click(); await new Promise(r => setTimeout(r, 400)); return sw.classList.contains("on"); })()',
@@ -1039,9 +1085,9 @@ const AFTER = {
   const envio3 = await enviarYEsperar('y ahora otra vez, con razonamiento visible');
   await judge(
     'al volver a encenderlo el bloque reaparece',
-    '(function(){ const b = document.querySelector(".msg.ai:last-child .thinkblock"); if (!b) return { encendido: document.querySelector("#swThinking").classList.contains("on"), envio: ' +
+    '(function(){ const b = document.querySelector("#messages .msg.ai:last-child .thinkblock"); if (!b) return { encendido: document.querySelector("#swThinking").classList.contains("on"), envio: ' +
       JSON.stringify(envio3) +
-      ', turnos: document.querySelectorAll(".msg.ai").length, bloques: document.querySelectorAll(".msg.ai .thinkblock").length }; return (b.querySelector(".think-body").textContent || "").indexOf(' +
+      ', turnos: document.querySelectorAll("#messages .msg.ai").length, bloques: document.querySelectorAll("#messages .msg.ai .thinkblock").length }; return (b.querySelector(".think-body").textContent || "").indexOf(' +
       JSON.stringify(MARCA_RAZON) +
       ') >= 0; })()',
   );
@@ -1079,7 +1125,7 @@ const AFTER = {
     } else await new Promise((r) => setTimeout(r, 250));
   }
   const llegoRevision = await esperar(
-    '!!document.querySelector(".tcard.dcard") && /Revisor/.test(document.querySelector("#messages").textContent)',
+    '!!document.querySelector("#messages .tcard.dcard") && /Revisor/.test(document.querySelector("#messages").textContent)',
     25000,
   );
   if (llegoRevision) console.log('  ok   la revisión del cambio deja su tarjeta en el chat');
@@ -1098,7 +1144,7 @@ const AFTER = {
      `.textContent` crudo de la última mezcla las dos cosas. */
   await judge(
     'el revisor deja su informe y el cierre final es el del modelo',
-    '(function(){ const cards = [...document.querySelectorAll(".tcard.dcard")]; const rev = cards.find(c => /Revisor/.test(c.textContent || "")); if (!rev) return { tarjeta: false }; const conTexto = [...document.querySelectorAll(".msg.ai")].slice(-2).map(m => { const c = m.cloneNode(true); c.querySelectorAll(".tgroup,.thinkblock").forEach(x => x.remove()); return c.textContent || ""; }).join(" | "); return (new RegExp(' +
+    '(function(){ const cards = [...document.querySelectorAll("#messages .tcard.dcard")]; const rev = cards.find(c => /Revisor/.test(c.textContent || "")); if (!rev) return { tarjeta: false }; const conTexto = [...document.querySelectorAll("#messages .msg.ai")].slice(-2).map(m => { const c = m.cloneNode(true); c.querySelectorAll(".tgroup,.thinkblock").forEach(x => x.remove()); return c.textContent || ""; }).join(" | "); return (new RegExp(' +
       JSON.stringify(MARCA_REV) +
       ').test(rev.textContent || "") && /sin hallazgos bloqueantes/.test(rev.textContent || "") && /pasa la revisi[oó]n/.test(conTexto)) ? true : { informe: (rev.textContent || "").slice(0, 110), cierre: conTexto.slice(0, 160) }; })()',
   );
@@ -1144,126 +1190,341 @@ const AFTER = {
   }
   await evaluate('document.querySelector(\'[data-view="chat"]\').click()');
 
-  /* El modo voz necesita micrófono y dos canales nuevos. Se prueba con el dispositivo
-     de mentira de Chromium (--use-fake-device-for-media-stream), así que pasa también
-     en una máquina sin micrófono, como el runner de CI. */
+  /* La revisión del cambio: el botón abre el panel con el diff ESTRUCTURADO del turno y
+     cada archivo deja volver atrás SÓLO ese archivo (antes solo había «Deshacer el
+     cambio»: todo el turno o nada, y a ciegas). El turno acaba de escribir un archivo de
+     verdad, así que hay diff que revisar. La expresión es idempotente porque `judge` la
+     repite si falla: solo pulsa el botón si el panel está cerrado. */
   await judge(
-    'el micrófono se concede a la app y solo a ella',
-    '(async function(){ const s = await navigator.mediaDevices.getUserMedia({ audio: true }); const ok = !!s && s.getAudioTracks().length === 1; s.getTracks().forEach(t => t.stop()); return ok; })()',
+    'la revisión del cambio abre con el diff del turno',
+    '(function(){ var b=document.querySelector("#btnDiff"); if(!b) return false; if(b.hidden) return {oculto:true}; var p=document.querySelector("#diffPanel"); if(!p) return {panel:false}; if(p.hidden) b.click(); if(p.hidden) return {panel:false}; var l=document.querySelector("#diffList"); if(!l||!l.textContent.trim()) return {vacio:true}; if(!l.querySelectorAll("[data-revert]").length) return {revert:0}; return l.textContent.indexOf("revision-")>=0; })()',
   );
   await judge(
-    'el modo voz se abre y se cierra por IPC',
-    '(async function(){ const a = await window.sagitari.voiceOpen(); const b = await window.sagitari.voiceClose(); return !!(a && a.ok) && !!(b && b.ok); })()',
+    'y se cierra devolviendo el chat',
+    '(function(){ var p=document.querySelector("#diffPanel"); if(!p) return false; if(!p.hidden){ var c=document.querySelector("#diffClose"); if(c) c.click(); } return p.hidden; })()',
   );
-
-  /* El orbe del modo voz: vive en el renderer y se pinta a mano en un canvas. Se
-     comprueban sus dos piezas frágiles. El suavizado, porque es lo que evita que el
-     orbe tiemble (sube rápido, baja despacio); y el dibujo, porque además de pintar
-     tiene que CAMBIAR DE CARA con el estado y dejar el borde del lienzo SIN pintar:
-     si el halo llegara al borde se vería un cuadrado tenue sobre el panel. */
+  /* Y la luz vuelve a la CALMA cuando el turno termina: antes quedaba en «think», así que
+     el panel lateral se quedaba encendido para siempre y parecía que el agente seguía
+     trabajando. Se comprueba aquí, con el turno ya cerrado. */
   await judge(
-    'el suavizado del orbe sube rápido y baja despacio',
-    '(function(){ const o = window.OrbKit; if (!o) return false; let v = 0; v = o.smoothLevel(v, 1, 0.05); const subida = v; v = o.smoothLevel(v, 0, 0.05); const bajada = subida - v; return subida > 0.4 && bajada < subida / 2; })()',
-  );
-  /* El borde se mira en OCHO puntos (esquinas y **medios de lado**), no en uno: el punto
-     más cercano al halo es el medio del lado, así que mirar solo la esquina deja un punto
-     ciego enorme —los dos halos defectuosos de las maquetas (R*1.6 y R*1.75) cabían dentro—
-     y la comprobación no cazaría justo la regresión que vigila. Lo cazó la revisión. */
-  await judge(
-    'la malla del orbe pinta, cambia de cara y no corta el halo en el borde',
-    '(function(){ const o = window.OrbKit; if (!o) return false; const c = document.createElement("canvas"); c.width = 200; c.height = 200; const ctx = c.getContext("2d"); const cuenta = () => { const d = ctx.getImageData(0, 0, 200, 200).data; let n = 0; for (let i = 3; i < d.length; i += 4) if (d[i] > 12) n++; return n; }; o.draw(ctx, 200, 200, 0.6, "oyendo", 1.2); const a = cuenta(); o.draw(ctx, 200, 200, 0.6, "escuchando", 1.2); const b = cuenta(); o.draw(ctx, 200, 200, 0.6, "pensando", 1.2); const e = cuenta(); const alfa = (x, y) => ctx.getImageData(x, y, 1, 1).data[3]; const borde = [alfa(0, 0), alfa(199, 0), alfa(0, 199), alfa(199, 199), alfa(100, 0), alfa(0, 100), alfa(199, 100), alfa(100, 199)]; return a > 500 && b > 500 && e > 500 && Math.abs(a - b) > 50 && borde.every((v) => v === 0); })()',
+    'al acabar el turno la luz vuelve a la calma',
+    '(function(){ var s=document.getElementById("shell"); if(!s) return false; return !/glow-(think|work|pulse)/.test(s.className || ""); })()',
   );
 
-  /* El panel del modo voz: se abre, se cierra con Esc y no deja rastro cuando está cerrado. */
+  /* ---- v4.2: órdenes de barra, medidor de contexto, revisión del cambio, registro real
+     de agentes, bifurcación del historial y el interruptor de aceptar ediciones. Todo
+     sobre la app viva y con su modelo de mentira: se comprueba el recorrido, no que los
+     elementos existan. Estas comprobaciones nacieron de la auditoría: eran justo las
+     que faltaban para que un fallo así no se colara otra vez. ---- */
+  await evaluate('document.querySelector(\'.navitem[data-view="chat"]\').click()');
+  await new Promise((r) => setTimeout(r, 300));
+
+  /* La paleta de `/` ofrece las ÓRDENES de barra por encima de las skills, y su lista
+     sale de ChatKit.COMMANDS: si alguien añade una orden y la paleta no la pinta, esto
+     lo dice. */
   await judge(
-    'el modo voz abre con el micro y cierra con Esc',
-    '(async function(){ const vm = window.VoiceMode; if (!vm) return false; await vm.abrir(); const abierto = vm.abierto() && !document.querySelector("#voiceMode").hidden; document.dispatchEvent(new KeyboardEvent("keydown", { key: "Escape", bubbles: true })); await new Promise(r => setTimeout(r, 60)); const cerrado = !vm.abierto() && document.querySelector("#voiceMode").hidden; return abierto && cerrado; })()',
+    'la paleta de «/» ofrece las órdenes de barra',
+    '(function(){ var i=document.querySelector("#chatInput"); if(!i) return false; i.value="/"; i.dispatchEvent(new Event("input",{bubbles:true})); var m=document.querySelector("#skillMenu"); if(!m||m.hidden) return false; var t=m.textContent||""; var c=(typeof ChatKit!=="undefined"&&ChatKit.COMMANDS)||[]; if(c.length<5) return {ordenes:c.length}; var faltan=c.map(function(x){return x.name}).filter(function(n){return t.indexOf("/"+n)<0}); if(faltan.length) return {faltan:faltan}; return /ÓRDENES/.test(t); })()',
+  );
+  /* Y una barra que NO es orden no puede tragarse el mensaje: es la diferencia entre
+     una orden y escribir «mira / esto». */
+  await judge(
+    'una barra que no es orden sigue siendo un mensaje',
+    '(function(){ if(typeof ChatKit==="undefined") return false; if(!ChatKit.parseCommand("/cost")) return {cost:false}; if(ChatKit.parseCommand("/zzz")) return {zzz:true}; if(ChatKit.parseCommand("mira / esto")) return {texto:true}; return !!ChatKit.parseCommand("  /HELP  "); })()',
+  );
+  await evaluate(
+    '(function(){ var i=document.querySelector("#chatInput"); if(i){ i.value=""; i.dispatchEvent(new Event("input",{bubbles:true})); } })()',
   );
 
-  /* ---- modo voz: voz sintética, sin micrófono y sin depender del hardware ----
-     Lo que ocurre EN LA PÁGINA se comprueba con `judge`; lo que tiene que LLEGAR AL
-     MODELO se comprueba aquí, en Node, mirando las peticiones que recibe el modelo de
-     mentira (el mismo patrón que usan las comprobaciones del catálogo MCP). */
-  /* El orbe tiene que LATIR, no sólo pintar: en reposo ya hay ~32.000 píxeles con algo de
-     alfa, así que contarlos no distingue una cosa de la otra (la voz añadía un 1,9 %). Se
-     cuentan los píxeles BRILLANTES (alfa > 60) y se exige que la voz inyectada multiplique
-     el reposo. Con `prefers-reduced-motion` el bucle pisa el nivel a propósito y sólo dibuja
-     el de fondo, así que ahí se mide la regla donde vive: el dibujo directo. */
-  /* El orbe tiene que NOTAR el nivel, no sólo pintar: en reposo ya hay ~32.000 píxeles con
-     algo de alfa, así que contarlos no distingue nada (la voz añadía un 1,9 %). Se cuentan
-     los BRILLANTES (alfa > 60): ~916 en reposo frente a ~5.146 con voz. Se mide sobre el
-     dibujo directo, no en el lienzo de la app, para que valga también con
-     prefers-reduced-motion (allí el bucle pisa el nivel a propósito). */
+  /* El medidor de contexto vive en el compositor y lleva el nivel en la palabra que usa
+     el motor (hola/ajustado/apretado), no en un sinónimo inventado en la interfaz. */
   await judge(
-    'el orbe late con la voz inyectada',
-    '(function(){ const o = window.OrbKit; if (!o) return false; const c = document.createElement("canvas"); c.width = 380; c.height = 380; const ctx = c.getContext("2d"); const brillantes = function (nivel) { o.draw(ctx, 380, 380, nivel, "oyendo", 1.2); const d = ctx.getImageData(0, 0, 380, 380).data; let n = 0; for (let i = 3; i < d.length; i += 4) if (d[i] > 60) n++; return n; }; const reposo = brillantes(0.05); const voz = brillantes(0.7); return reposo > 0 && voz > reposo * 1.5; })()',
+    'el medidor de contexto está en el compositor y trae su nivel',
+    '(function(){ var m=document.querySelector("#ctxMeter"); if(!m) return false; var e=m.getAttribute("data-estado"); if(["hola","ajustado","apretado"].indexOf(e)<0) return {estado:e}; var v=(m.querySelector(".ctxval")||{}).textContent||""; return /%/.test(v) && /[0-9]/.test(v); })()',
   );
 
+  /* La revisión del cambio: el botón y el diff del turno se comprueban junto al turno
+     que escribe (más arriba); aquí solo queda el registro real de agentes, la
+     bifurcación del historial y el interruptor de aceptar ediciones. */
+
+  /* El registro real de agentes: la vista enseñaba una vitrina fija que no correspondía
+     al registro usable (seis tarjetas frente a siete agentes). Ahora pinta el registro y
+     su cuenta tiene que cuadrar con él. */
+  await evaluate('document.querySelector(\'.navitem[data-view="agents"]\').click()');
   await judge(
-    'el permiso de una herramienta se contesta diciendo «sí»',
-    '(function(){ let hecho = false; window.VoiceMode.pedirConfirmacion({ texto: "¿Borro la carpeta?", si: function(){ hecho = true; }, no: function(){} }); window.VoiceMode.handle({ type: "final", text: "sí" }); return hecho && window.VoiceMode.estado() !== "confirmando"; })()',
-  );
-  /* Interrumpir de verdad, por la función de la app: el estado lo pone ELLA, no la
-     comprobación (antes se fijaba «oyendo» a mano y la comprobación se contestaba sola). */
-  await judge(
-    'interrumpir mientras habla vuelve a escuchar',
-    '(async function(){ window.VoiceMode.handle({ type: "state", state: "hablando" }); await new Promise(r => setTimeout(r, 60)); await window.VoiceMode.interrumpir(); return window.VoiceMode.estado() === "oyendo"; })()',
+    'la vista de Agentes enseña el registro real (y su cuenta cuadra)',
+    '(async function(){ var l=document.querySelector("#agentsList"); if(!l) return false; for(var i=0;i<20 && l.getAttribute("aria-busy")==="true";i++) await new Promise(function(r){setTimeout(r,200)}); var r=await window.sagitari.agentsCustom(); if(!r||!r.ok) return {ipc:(r&&r.error)||false}; var n=l.querySelectorAll(".acard").length; if(n!==r.agentes.length) return {tarjetas:n, registro:r.agentes.length}; var c=document.querySelector("#agentsCount"); return !!(c && /[0-9]/.test(c.textContent)); })()',
   );
 
-  /* Las tres que se juzgan por lo que llega al modelo: se dispara un final y se espera
-     a que el modelo de mentira reciba (o no reciba) una petición nueva. El final entra por
-     `voiceEvent`, que es el punto único del proceso principal (`VoiceManager.ingest`): ahí
-     vive el filtro de basura, así que sólo por ahí se puede comprobar que el ruido que se
-     inventa el motor no llega al agente. Llamando a `VoiceMode.handle` desde la página el
-     filtro se saltaría y la comprobación mediría una tubería que la app no tiene. */
-  /* Esperar a que el agente esté libre: desde que el modo voz no envía con el turno
-     ocupado (a propósito), disparar un dictado mientras trabaja lo dejaría sin enviar. */
-  await evaluate('window.VoiceMode.abrir()'); // el manager del proceso principal nace al abrir el modo
-  for (let i = 0; i < 60; i++) {
-    const libre = await evaluate('(async function(){ return !(await window.sagitari.getAgentsLive()).running; })()');
-    if (libre === true) break;
-    await new Promise((r) => setTimeout(r, 250));
-  }
-  const vozDice = async (texto) => {
-    const antes = llm.vistos.length;
-    await evaluate('window.sagitari.voiceEvent({ type: "final", text: ' + JSON.stringify(texto) + ' })');
-    const limite = Date.now() + 8000;
-    while (llm.vistos.length === antes && Date.now() < limite) await new Promise((r) => setTimeout(r, 150));
-    return llm.vistos.length > antes;
-  };
-  if (await vozDice('recuérdame llamar a Álvaro')) console.log('  ok   una frase dictada llega al agente por el mismo camino del chat');
+  /* El historial deja bifurcar: el botón tiene que llevar el id de la conversación. */
+  await evaluate('document.querySelector(\'.navitem[data-view="history"]\').click()');
+  await new Promise((r) => setTimeout(r, 300));
+  await judge(
+    'el historial deja duplicar una conversación',
+    '(function(){ var f=document.querySelector("#histList [data-fork]"); return !!f && !!f.getAttribute("data-fork"); })()',
+  );
+
+  /* El interruptor de aceptar ediciones vive en Seguridad y su texto dice lo que NO
+     cubre: es un ajuste de riesgo y esa frase es parte del contrato con el usuario. */
+  await evaluate('document.querySelector(\'.navitem[data-view="settings"]\').click()');
+  await new Promise((r) => setTimeout(r, 300));
+  await judge(
+    'Seguridad tiene el interruptor de aceptar ediciones y dice qué no cubre',
+    '(function(){ var p=document.querySelector("#setpanel-security"); if(!p||!p.querySelector("#swAutoEdits")) return false; return /NO cubre/.test(p.textContent); })()',
+  );
+
+  /* Y dos avisos seguidos se leen los dos: se apilan en columna de verdad. Antes cada
+     uno se posicionaba en el MISMO punto fijo, así que el segundo tapaba al primero y
+     el primero caducaba sin que nadie lo hubiera visto. */
+  await judge(
+    'dos avisos seguidos se apilan y no se tapan',
+    '(function(){ showToast("aviso uno de prueba"); showToast("aviso dos de prueba"); var t=document.querySelectorAll("#toastStack .toast"); if(t.length<2) return {avisos:t.length}; var a=t[0].getBoundingClientRect(); var b=t[t.length-1].getBoundingClientRect(); return b.top >= a.bottom - 1; })()',
+  );
+  await evaluate('document.querySelector(\'.navitem[data-view="chat"]\').click()');
+  await new Promise((r) => setTimeout(r, 200));
+
+  /* Y una clave guardada que el equipo no puede descifrar no puede ser un «fallo
+     interno» modal: la app arranca, el proveedor se marca y Ajustes dice qué hacer.
+     Antes salía un diálogo bloqueante con la clave intacta en disco. */
+  await evaluate('document.querySelector(\'.navitem[data-view="settings"]\').click()');
+  await new Promise((r) => setTimeout(r, 400));
+  await judge(
+    'una clave ilegible se explica en Ajustes y no bloquea nada',
+    '(async function(){ var n=document.getElementById("provKeyUnreadable"); var c=await window.sagitari.getConfig(); var malo=(c.providers||[]).find(function(p){return p.keyUnreadable;}); if(!n) return {aviso:false, ids:(c.providers||[]).map(function(p){return p.id+":"+!!p.keyUnreadable;})}; if(!/no puede descifrar/.test(n.textContent)) return {texto:n.textContent.slice(0,90)}; if(!malo) return {sinFlag:true}; var url=document.querySelector("#pUrl"); url.value=malo.baseUrl; url.dispatchEvent(new Event("input",{bubbles:true})); var campo=document.querySelector("#pKey"); return /no se pudo descifrar/.test((campo&&campo.placeholder)||"") ? true : {placeholder:(campo&&campo.placeholder)||""}; })()',
+  );
+  /* Sin líneas NUEVAS en crash.log: la app no puede tratarlo como fallo interno. Se
+     compara con lo que había al arrancar, porque el fichero es acumulativo entre
+     ejecuciones (una línea del pasado hacía fallar esta comprobación para siempre). */
+  const crashNuevas = lineasCrash() - crashAlArrancar;
+  if (crashNuevas === 0) console.log('  ok   una clave ilegible no se registra como fallo interno');
   else {
     failed++;
-    console.log('  FALLO una frase dictada no llegó al agente');
-  }
-  if (!(await vozDice('Gracias por ver el vídeo'))) console.log('  ok   la basura no llega al agente');
-  else {
-    failed++;
-    console.log('  FALLO la basura llegó al agente');
-  }
-  if (!(await vozDice('adiós'))) console.log('  ok   decir «adiós» cierra el modo y no envía nada');
-  else {
-    failed++;
-    console.log('  FALLO «adiós» envió algo al agente');
+    console.log('  FALLO la app registró ' + crashNuevas + ' fallo(s) con la app en marcha');
   }
 
-  /* El panel tapa el chat: la respuesta tiene que ser legible ahí también (el modelo de
-     mentira contesta «listo» a todo). */
+  /* ---- v4.4: un encargo de EQUIPO de verdad, con DOS compañeros a la vez ----
+     El proveedor se enruta POR PETICIÓN: el líder y cada compañero tienen su propio guion,
+     así que el turno es determinista aunque los dos compañeros corran en paralelo (con la
+     cola lineal, sus peticiones se repartirían las respuestas por orden de llegada). */
+  const EQUIPO_MARCA = 'EQUIPO-' + Date.now();
+  let llamadasLider = 0;
+  const llamadasMiembro = {};
+  llm.setRouter((body) => {
+    if (body.indexOf('ERES EL LÍDER') >= 0) {
+      llamadasLider++;
+      if (llamadasLider === 1)
+        return guionToolCalls([
+          { id: 'e1', name: 'team_spawn', args: { agent: 'research', task: 'busca dos fuentes ' + EQUIPO_MARCA, expect: 'dos URLs' } },
+          { id: 'e2', name: 'team_spawn', args: { agent: 'file', task: 'ordena la carpeta ' + EQUIPO_MARCA, expect: 'una lista' } },
+        ]);
+      if (llamadasLider === 2) return guionToolCall('e3', 'team_wait', { timeoutMs: 8000 });
+      return guionTexto('Encargo de equipo cerrado: fuentes y carpeta listas. ' + EQUIPO_MARCA);
+    }
+    const m = /ERES EL COMPAÑERO «(m\d)»/.exec(body);
+    if (m) {
+      const id = m[1];
+      llamadasMiembro[id] = (llamadasMiembro[id] || 0) + 1;
+      if (llamadasMiembro[id] === 1)
+        return id === 'm1'
+          ? guionToolCalls([
+              { id: 's1', name: 'team_send', args: { to: 'lider', text: 'fuentes listas ' + EQUIPO_MARCA } },
+              { id: 's2', name: 'team_board', args: { quien: id, que: 'buscar fuentes', estado: 'terminado' } },
+            ])
+          : guionToolCall('s3', 'team_board', { quien: id, que: 'ordenar carpeta', estado: 'terminado' });
+      return guionToolCall('s9', 'team_done', { resumen: id + ' terminó ' + EQUIPO_MARCA, evidencia: 'dos marcas' });
+    }
+    return null; // cualquier otra petición sigue con la cola de siempre
+  });
+  await evaluate(
+    '(function(){ var b=[...document.querySelectorAll("#modeSeg button")].find(x=>x.dataset.m==="equipo"); if(b) b.click(); return !!b; })()',
+  );
+  await new Promise((r) => setTimeout(r, 300));
+  await evaluate('document.querySelector("#chatInput").value = "reparte este encargo"; document.querySelector("#chatSend").click()');
+  const terminoElEquipo = await esperar('/Encargo de equipo cerrado/.test(document.querySelector("#messages").textContent)', 30000);
+  if (terminoElEquipo) console.log('  ok   el encargo de equipo se cierra y el líder agrega el resultado');
+  else {
+    failed++;
+    console.log('  FALLO el encargo de equipo no llegó a cerrarse');
+  }
   await judge(
-    'la respuesta del agente queda legible en el panel',
-    '(function(){ const h = document.querySelector("#vmHistorial"); return !!h && /listo/i.test(h.textContent); })()',
+    'la tarjeta del equipo enseña a sus dos compañeros',
+    '(function(){ var c=document.querySelector("#messages .tcard.dcard[data-equipo]"); if(!c) return { tarjeta:false, dcards:document.querySelectorAll("#messages .tcard.dcard").length }; var t=c.textContent||""; var filas=c.querySelectorAll(".eqmiembro"); return filas.length===2 && new Set([...filas].map(f=>f.dataset.miembro)).size===2 ? true : { filas:filas.length, texto:t.slice(0,120) }; })()',
+  );
+  await evaluate('document.querySelector(\'.navitem[data-view="equipo"]\').click()');
+  await judge(
+    'la vista Equipo enseña miembros, buzón y tablero',
+    '(function(){ var v=document.getElementById("view-equipo"); if(!v || !v.classList.contains("on")) return { vista:false }; var mi=document.querySelectorAll("#equipoMiembros .acard").length; var buz=document.querySelectorAll("#equipoBuzon .eqfila").length; var tab=document.querySelectorAll("#equipoTablero .eqitem").length; var notas=[...document.querySelectorAll("#equipoMiembros .acard")].filter(a=>/terminado|hecho/.test(a.textContent)).length; return mi===2 && buz>=1 && tab>=2 && notas===2 ? true : { miembros:mi, buzon:buz, tablero:tab, terminados:notas }; })()',
+  );
+  /* ---- v4.4: el permiso de un COMPAÑERO se atribuye a SU miembro (en vivo) ----
+     Segundo encargo: el compañero escribe en el disco, así que la app pide permiso. La barra
+     tiene que decir DE QUIÉN es el permiso, su fila en la tarjeta del equipo tiene que llevar
+     la insignia de «1 permiso» y su estado «esperando» mientras está pendiente, y al
+     concederlo el archivo tiene que estar en el disco y el encargo cerrarse. Se lee lo que la
+     pantalla dice ANTES de conceder: el compañero trabaja en segundo plano, así que la
+     confirmación puede tardar en aparecer. */
+  await evaluate('document.querySelector(\'.navitem[data-view="chat"]\').click()');
+  const PERMISO_MARCA = 'PERMISO-' + Date.now();
+  const ARCHIVO_PERMISO = 'nota-' + Date.now() + '.txt';
+  let permisoLider = 0;
+  const permisoMiembro = {};
+  llm.setRouter((body) => {
+    if (body.indexOf(PERMISO_MARCA) < 0) return null; // otro encargo: la cola de siempre
+    if (body.indexOf('ERES EL LÍDER') >= 0) {
+      permisoLider++;
+      if (permisoLider === 1)
+        return guionToolCall('p1', 'team_spawn', { agent: 'file', task: 'escribe la nota ' + PERMISO_MARCA, expect: 'un archivo' });
+      if (permisoLider === 2) return guionToolCall('p2', 'team_wait', { timeoutMs: 12000 });
+      return guionTexto('Nota escrita con el permiso concedido. ' + PERMISO_MARCA);
+    }
+    const mp = /ERES EL COMPAÑERO «(m\d)»/.exec(body);
+    if (!mp) return null;
+    const idp = mp[1];
+    permisoMiembro[idp] = (permisoMiembro[idp] || 0) + 1;
+    if (permisoMiembro[idp] === 1)
+      return guionToolCall('q1', 'write_file', { path: ARCHIVO_PERMISO, content: 'nota de ' + idp + ' ' + PERMISO_MARCA + '\n' });
+    return guionToolCall('q2', 'team_done', { resumen: idp + ' escribió la nota', evidencia: ARCHIVO_PERMISO });
+  });
+  /* La marca va EN EL MENSAJE del usuario: es lo que llega al prompt del líder, así que el
+     proveedor de mentira sabe de qué encargo es cada petición. Sin ella el router no reconoce
+     al líder, la cola vieja (ya vacía) no responde y el turno cierra sin hacer nada. */
+  await evaluate(
+    'document.querySelector("#chatInput").value = "que un compañero escriba la nota ' +
+      PERMISO_MARCA +
+      '"; document.querySelector("#chatSend").click()',
+  );
+  /* La tarjeta del equipo se busca la ÚLTIMA: el primer encargo dejó la suya en el hilo. Y el
+     estado del compañero se lee de SU fila, que es donde vive el estado y la insignia. */
+  const ESTADO_M1 =
+    '(function(){ var c=[...document.querySelectorAll("#messages .tcard.dcard[data-equipo]")].pop(); var fila=c && c.querySelector(".eqmiembro[data-miembro=m1]"); var ins=fila && fila.querySelector(".abadge.eqperm"); var est=fila && [...fila.querySelectorAll(".abadge")].filter(function(x){return !x.classList.contains("eqperm");})[0]; return { insignia: ins?(ins.textContent||"").trim():null, insigniaDe: ins?ins.getAttribute("title"):null, estado: est?(est.textContent||"").trim():null, fila: (fila?(fila.textContent||""):"").replace(/\\s+/g," ").slice(0,120) }; })()';
+  const PENDIENTE_M1 =
+    '(function(){ var b=document.querySelector("#confirmBar"); if(!b || b.hidden) return null; var e=' +
+    ESTADO_M1 +
+    '; e.titulo=(document.querySelector("#confirmTitle").textContent||""); return e; })()';
+  let permisoPendiente = null;
+  for (let i = 0; i < 120 && !permisoPendiente; i++) {
+    permisoPendiente = await evaluate(PENDIENTE_M1);
+    if (!permisoPendiente) await new Promise((r) => setTimeout(r, 250));
+  }
+  if (permisoPendiente && /quiere:/.test(permisoPendiente.titulo) && /File Agent|m1/.test(permisoPendiente.titulo)) {
+    console.log('  ok   la confirmación dice de quién es el permiso: «' + permisoPendiente.titulo.slice(0, 70) + '»');
+  } else {
+    failed++;
+    console.log('  FALLO la confirmación de un compañero no dice de quién es: ' + JSON.stringify(permisoPendiente));
+  }
+  if (permisoPendiente && permisoPendiente.insignia === '1 permiso' && /File Agent/.test(String(permisoPendiente.insigniaDe))) {
+    console.log('  ok   la fila del compañero lleva su insignia de permiso pendiente');
+  } else {
+    failed++;
+    console.log('  FALLO la fila del compañero no lleva la insignia de permiso: ' + JSON.stringify(permisoPendiente));
+  }
+  if (permisoPendiente && permisoPendiente.estado === 'esperando' && /te necesita/.test(permisoPendiente.fila)) {
+    console.log('  ok   mientras espera, el compañero se ve «esperando» y diciendo qué necesita');
+  } else {
+    failed++;
+    console.log('  FALLO el compañero no se ve esperando: ' + JSON.stringify(permisoPendiente));
+  }
+  await evaluate('document.querySelector("#confirmOk").click()');
+  /* Contestado: el compañero escribe, vuelve a hablar con el modelo y cierra SU parte. La
+     tarjeta tiene que seguirlo —un compañero puede terminar con el líder ya fuera— y la
+     insignia de permiso tiene que irse. Se espera al estado, no a un tiempo fijo. */
+  const serie = [];
+  for (let i = 0; i < 24; i++) {
+    const s = await evaluate(ESTADO_M1);
+    serie.push(s);
+    if (s.insignia === null && s.estado === 'terminado') break;
+    await new Promise((r) => setTimeout(r, 400));
+  }
+  const trasElClick = serie[serie.length - 1];
+  const cerroPermiso = await esperar(
+    '/Nota escrita con el permiso concedido/.test(document.querySelector("#messages").textContent)',
+    30000,
+  );
+  if (cerroPermiso) console.log('  ok   concedido el permiso, el compañero sigue y el encargo cierra');
+  else {
+    failed++;
+    console.log('  FALLO el encargo del compañero no cerró tras conceder el permiso');
+  }
+  if (fs.existsSync(path.join(WS_TEST, ARCHIVO_PERMISO))) {
+    console.log('  ok   el compañero escribió el archivo de verdad (con tu permiso)');
+  } else {
+    failed++;
+    console.log('  FALLO el compañero no escribió ' + ARCHIVO_PERMISO + ' en el espacio de trabajo');
+  }
+  /* Y la tarjeta lo cuenta: sin insignia (el permiso ya se contestó) y con el compañero
+     terminado. Su fila sigue viva aunque el líder ya cerrara su parte. */
+  if (trasElClick.insignia === null && trasElClick.estado === 'terminado') {
+    console.log('  ok   la insignia se descuenta al concederlo y el compañero queda terminado');
+  } else {
+    failed++;
+    console.log('  FALLO el compañero no quedó terminado tras conceder el permiso: ' + JSON.stringify(trasElClick));
+  }
+  llm.setRouter(null);
+
+  // El modo vuelve a ACT: el resto de comprobaciones no esperan un equipo en marcha.
+  await evaluate(
+    '(function(){ var b=[...document.querySelectorAll("#modeSeg button")].find(x=>x.dataset.m==="act"); if(b) b.click(); document.querySelector(\'.navitem[data-view="chat"]\').click(); return true; })()',
+  );
+  await new Promise((r) => setTimeout(r, 300));
+
+  /* Cerrar un turno tiene que dejar pintado el texto COMPLETO aunque el último frame no
+     haya llegado: el tramo abierto se acumula en cada evento pero se pinta por frames, y
+     con la ventana sin foco Chromium no repinta. El cierre sólo rellenaba el elemento si
+     estaba VACÍO, así que una respuesta «pintada a medias» se quedaba cortada en pantalla
+     mientras el mensaje guardado estaba entero (pasó: el primer saludo salía en «…¿En»). */
+  await judge(
+    'cerrar el turno pinta el texto completo aunque el último frame no llegue',
+    '(async function(){ var b = bubble("ai"); try { pendingAssistant = b; b._frozenText = ""; var A = "Primera parte de la respuesta. "; var B = "Segunda parte que antes se quedaba sin pintar."; b._openText = A; scheduleStreamRender(b); await new Promise(function(r){ requestAnimationFrame(function(){ requestAnimationFrame(r); }); }); var pintado = (b.textContent || "").trim().length; b._openText = A + B; finishAssistant(b._openText); var enPantalla = (b.textContent || "").trim(); var esperado = (A + B).trim(); if (enPantalla === esperado) return true; return { pintadoAlCerrar: pintado, quedo: enPantalla.length, esperado: esperado.length, texto: enPantalla.slice(0, 60) }; } finally { b.remove(); } })()',
   );
 
-  /* La app de prueba arranca OCULTA (--hidden) y su modelo de mentira responde «listo» a
-     todo: si además hablara, el usuario oiría una voz salida de la nada, sin ventana que
-     la explique (pasó, y se cazó con una sonda de procesos). El perfil de prueba deja el
-     TTS encendido a propósito, así que esta comprobación falla si alguien quita el
-     silencio de los arranques automatizados: con el silencio puesto, la app responde que
-     no habla y no llega a lanzar ninguna síntesis. */
-  await judge(
-    'un arranque de prueba no saca voz por los altavoces',
-    '(async function(){ const r = await window.sagitari.speak("esto no debe sonar"); return !!r && r.ok === false; })()',
+  /* ---- FASE 1 MEMORIA: un turno que aprende un hecho, aparece en «Recién aprendido»,
+     se guarda y se usa en el turno siguiente. Todo offline: la heurística no llama al
+     modelo, así que la comprobación no depende de ningún proveedor. ---- */
+  await evaluate('document.querySelector(\'.navitem[data-view="chat"]\').click()');
+  await evaluate('document.querySelector("#btnClear").click()');
+  await new Promise((r) => setTimeout(r, 600));
+  const HECHO_MARCA = 'Memoria' + Date.now();
+  const antesHecho = llm.cuerpos.length;
+  await evaluate(
+    'document.querySelector("#chatInput").value = ' +
+      JSON.stringify('recuerda que me llamo ' + HECHO_MARCA) +
+      '; document.querySelector("#chatSend").click()',
   );
+  const enBandeja = await esperar('(async function(){ const l = await window.sagitari.memoryTrayList(); return l.length > 0; })()', 20000);
+  if (enBandeja) console.log('  ok   el turno que aprende un hecho lo deja en «Recién aprendido»');
+  else {
+    failed++;
+    console.log('  FALLO el hecho aprendido no llegó a la bandeja');
+  }
+  await evaluate('document.querySelector(\'.navitem[data-view="memory"]\').click()');
+  await new Promise((r) => setTimeout(r, 400));
+  const guardadoOk = await evaluate(
+    '(function(){ var b = document.querySelector("#memBandeja [data-acc=\\"guardar\\"]"); if (!b) return false; b.click(); return true; })()',
+  );
+  if (guardadoOk) {
+    const aparece = await esperar('document.querySelector("#memList").textContent.includes(' + JSON.stringify(HECHO_MARCA) + ')', 8000);
+    if (aparece) console.log('  ok   el hecho guardado aparece en «Lo que sé de ti»');
+    else {
+      failed++;
+      console.log('  FALLO el hecho guardado no aparece en la lista');
+    }
+  } else {
+    failed++;
+    console.log('  FALLO no había botón «Guardar» en la bandeja');
+  }
+  /* Y se usa en el turno siguiente: el hecho viaja en el prompt que recibe el modelo. */
+  await evaluate('document.querySelector(\'.navitem[data-view="chat"]\').click()');
+  await evaluate('document.querySelector("#chatInput").value = "¿cómo me llamo?"; document.querySelector("#chatSend").click()');
+  let enPrompt = false;
+  const limitePrompt = Date.now() + 20000;
+  while (!enPrompt && Date.now() < limitePrompt) {
+    if (llm.cuerpos.slice(antesHecho).join('\n').includes(HECHO_MARCA)) enPrompt = true;
+    else await new Promise((r) => setTimeout(r, 250));
+  }
+  if (enPrompt) console.log('  ok   el hecho guardado viaja al prompt del turno siguiente');
+  else {
+    failed++;
+    console.log('  FALLO el hecho guardado no llegó al prompt del modelo');
+  }
 
   // errores que la propia interfaz haya detectado (red de seguridad del renderer)
   const propios = await evaluate('Array.isArray(window.__errores) ? window.__errores.slice(0, 5) : null');

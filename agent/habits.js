@@ -245,9 +245,68 @@ function reset() {
   _load();
   _save({});
 }
+
+/* ---------- «olvidar esta categoría» (vista y Ajustes) ---------- */
+
+/* Las siete cosas que el perfil observa, tal como se llaman en la app. Cada clave real
+   está cubierta por EXACTAMENTE una etiqueta: si mañana se añade una categoría
+   observada y no se traduce aquí, la prueba de cobertura de la suite falla, en vez de
+   quedarse una categoría que el usuario no puede olvidar. */
+const OLVIDO_AREAS = {
+  herramientas: ['tools'],
+  aplicaciones: ['apps'],
+  comandos: ['commands'],
+  carpetas: ['folders'],
+  webs: ['sites'],
+  modos: ['modes'],
+  permisos: ['confirms'],
+};
+const CATEGORIAS_REALES = [...CATEGORIES, 'modes', 'confirms'];
+
+/** Cuánto se va a olvidar (para poder decir «se olvidaron 12 usos»). */
+function _contar(d, cat) {
+  if (cat === 'confirms') {
+    const c = d.confirms || {};
+    return (Number(c.approved) || 0) + (Number(c.denied) || 0);
+  }
+  return Object.keys(d[cat] || {}).length;
+}
+
+/** «Olvidar esta categoría»: borra solo lo observado en esa categoría (nunca el resto). */
+function olvidar(categoria) {
+  const clave = String(categoria == null ? '' : categoria).toLowerCase();
+  const d = _load();
+  if (clave === 'todo') {
+    const borradas = CATEGORIAS_REALES.reduce((n, cat) => n + _contar(d, cat), 0);
+    _save({});
+    return { ok: true, borradas };
+  }
+  const cats = OLVIDO_AREAS[clave];
+  if (!cats || !cats.length) return { ok: false, error: 'categoria desconocida' };
+  let borradas = 0;
+  for (const cat of cats) {
+    borradas += _contar(d, cat);
+    if (cat === 'confirms') d.confirms = { approved: 0, denied: 0 };
+    else delete d[cat];
+  }
+  // las marcas de uso de esa categoría ya no sirven para nada
+  if (d.seen && typeof d.seen === 'object') {
+    for (const k of Object.keys(d.seen)) if (cats.includes(k.split('|')[0])) delete d.seen[k];
+  }
+  _save(d);
+  return { ok: true, borradas };
+}
+
 function _resetForTests(file) {
   HABITS_FILE = file;
   _tainted = false;
 }
 
-module.exports = { observe, profile, stats, reset, __test: { _resetForTests, _prune, MAX_ENTRIES, FORGET_DAYS } };
+module.exports = {
+  observe,
+  profile,
+  stats,
+  reset,
+  olvidar,
+  __test: { _resetForTests, _prune, MAX_ENTRIES, FORGET_DAYS, OLVIDO_AREAS, CATEGORIAS_REALES },
+};

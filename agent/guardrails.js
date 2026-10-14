@@ -9,13 +9,23 @@
      restricted → blocked unless the user explicitly allows it in Settings
 
    Guardrails (per run): max steps, max tool calls, max duration, max tokens,
-   max estimated cost (USD), repeated-call / loop detection, STALL detection
-   (N steps without any new tool call or assistant output = no progress) and
-   DATA-FRESHNESS (the provider stopped sending data: no LLM event for N ms
-   while the run is alive — covers hangs that the stall counter cannot see,
-   like a request that never returns). */
+   max estimated cost (USD), repeated-call / loop detection and STALL detection
+   (N steps without any new tool call or assistant output = no progress).
+
+   La FRESCURA DE DATOS —«el proveedor dejó de mandar»: N ms sin un evento del
+   modelo con la ejecución viva, que cubre cuelgues que el contador de estancamiento
+   no ve, como una petición que nunca vuelve— NO se implementa aquí: es el
+   temporizador de silencio de la respuesta SSE en protocols.js
+   (DEFAULT_SILENCE_MS, ajustable con llmTimeoutMs), que corta la lectura en vez de
+   esperar eternamente. Aquí solo se documenta porque viaja en la misma lista de
+   límites que el usuario ve en Ajustes. */
 
 const LEVELS = ['safe', 'confirm', 'restricted'];
+
+/* Para comparar rutas (¿está esta escritura dentro del proyecto?): sigue siendo lógica
+   pura, sin I/O ni Electron. */
+const path = require('path');
+const os = require('os');
 
 /* Niveles de riesgo por defecto: la tabla vive en tools.js (donde se declaran
    las herramientas) y aquí sólo se consume. Tener dos copias ya provocó que
@@ -115,6 +125,73 @@ const SENSITIVE_BROWSER_RX =
 /* Campos de datos sensibles: escribir en ellos también exige confirmación */
 const SENSITIVE_FIELD_RX = /(card|cvv|cvc|expir|iban|tarjeta|password|contrase|passwd|pin\b|cuenta.*number|account.*num|ssn|dni\b)/i;
 
+/* Herramientas que SOLO escriben archivos del proyecto. Son las únicas sobre las que
+   puede actuar «aceptar todos los cambios» (autoEdits): run_command ejecuta cosas y las
+   MCP no están aquí (su nombre empieza por mcp__), así que ninguna de las dos se abarata. */
+const TOOLS_ESCRITURA = new Set(['write_file', 'edit_file', 'apply_patch']);
+
+/* ---------- ¿la escritura cae DENTRO del espacio de trabajo? ----------
+   «Aceptar todos los cambios» es un ajuste del PROYECTO: sin esta comprobación abarataba
+   cualquier ruta absoluta del disco (Documentos, .ssh, la carpeta de Inicio…), que además
+   era lo único que el usuario veía —la tarjeta— y dejaba de ver. La comparación es por
+   CARPETA (`<raíz>/`), nunca por prefijo de texto: `C:\proj-viejo` no está dentro de
+   `C:\proj`. Si no se puede resolver (sin espacio de trabajo, sin home para `~`), se
+   pregunta: el fallo conservador es preguntar, no escribir a ciegas. */
+
+/** Normaliza una ruta para compararla (barras '/', sin barra final, minúsculas). */
+function normalizarRuta(p) {
+  return String(p == null ? '' : p)
+    .replace(/\\/g, '/')
+    .replace(/\/+$/, '')
+    .toLowerCase();
+}
+
+/** ¿`abs` cae dentro de `workspace`? */
+function dentroDelEspacio(workspace, abs) {
+  const w = String(workspace || '');
+  if (!w) return false;
+  const raiz = normalizarRuta(path.resolve(w));
+  const a = normalizarRuta(abs);
+  return a === raiz || a.startsWith(raiz + '/');
+}
+
+/** Ruta absoluta que va a tocar una escritura, resuelta como lo hace el ejecutor
+    (executors.js, `inWs`): `~` es el home, lo relativo cuelga del espacio de trabajo y lo
+    absoluto se respeta. Devuelve null si no se puede resolver. */
+function rutaDestino(workspace, p, home) {
+  const w = String(workspace || '');
+  if (!w) return null;
+  const s = String(p == null ? '' : p);
+  if (!s || s === '.' || s === './') return path.resolve(w);
+  if (/^~(?=\/|\\|$)/.test(s)) {
+    const h = String(home || '');
+    return h ? path.resolve(s.replace(/^~/, h)) : null;
+  }
+  return path.resolve(path.isAbsolute(s) ? s : path.join(w, s));
+}
+
+/** Rutas que va a escribir una herramienta (`apply_patch` lleva una por cambio). Una
+    entrada sin ruta se conserva como `null`: no se puede comprobar y entonces se pregunta. */
+function rutasDestino(name, args = {}) {
+  const a = args || {};
+  if (name === 'apply_patch') {
+    const lista = Array.isArray(a.changes) ? a.changes : [];
+    return lista.map((c) => (c && typeof c === 'object' ? c.path : null));
+  }
+  return a.path === undefined ? [] : [a.path];
+}
+
+/** ¿TODAS las rutas de esta escritura caen dentro del espacio de trabajo? */
+function escrituraDentroDelWs(name, args, workspace, home) {
+  const rutas = rutasDestino(name, args);
+  if (!rutas.length) return false;
+  return rutas.every((p) => {
+    if (p == null || p === '') return false; // sin ruta no hay nada que comprobar
+    const abs = rutaDestino(workspace, p, home);
+    return abs != null && dentroDelEspacio(workspace, abs);
+  });
+}
+
 /* Ordena las claves de un valor de forma recursiva: dos argumentos equivalentes
    deben producir la misma firma aunque el modelo cambie el orden de las claves. */
 function canonical(v) {
@@ -204,6 +281,11 @@ class Guardrails {
     this.policy = {
       permissions: { ...policy.permissions },
       modelPricing: policy.modelPricing || null,
+      /* v4.1: «aceptar todos los cambios» (Ajustes ▸ Seguridad). Es un ajuste del usuario,
+         no un permiso por herramienta: solo abarata el 'confirm' de las herramientas que
+         SOLO escriben archivos (ver decide). También se acepta anidado en `guardrails`
+         porque ese es el bloque que el usuario toca en Ajustes. */
+      autoEdits: policy.autoEdits === true || policy.guardrails?.autoEdits === true,
       guardrails: {
         maxSteps: policy.guardrails?.maxSteps ?? 60, // 0 or null = unlimited
         maxToolCalls: policy.guardrails?.maxToolCalls ?? 80, // 0 or null = unlimited
@@ -235,6 +317,15 @@ class Guardrails {
     if (policy.permissions) this.policy.permissions = { ...policy.permissions };
     if (policy.modelPricing) this.policy.modelPricing = policy.modelPricing;
     if (policy.guardrails) this.policy.guardrails = { ...this.policy.guardrails, ...policy.guardrails };
+    // el ajuste puede llegar en la política o dentro de guardrails (ver constructor)
+    if ('autoEdits' in policy || (policy.guardrails && 'autoEdits' in policy.guardrails)) {
+      this.policy.autoEdits = policy.autoEdits === true || policy.guardrails?.autoEdits === true;
+    }
+  }
+
+  /** ¿El usuario ha activado «aceptar todos los cambios» (Ajustes ▸ Seguridad)? */
+  autoEditsActivo() {
+    return this.policy.autoEdits === true || this.policy.guardrails?.autoEdits === true;
   }
 
   /* ---------- run lifecycle ---------- */
@@ -469,8 +560,10 @@ class Guardrails {
    *                       | {action:'deny', reason}.
    * v1.5: las acciones sensibles del navegador fuerzan 'confirm' aunque el
    * usuario tenga browser_control en 'safe' (la seguridad gana a la comodidad).
+   * opts.workspace (+ opts.home) es el espacio de trabajo del turno: solo con él se puede
+   * saber si una escritura escribe EN el proyecto (ver «aceptar todos los cambios»).
    */
-  decide(name, args = {}) {
+  decide(name, args = {}, opts = {}) {
     /* v3.0: hay comandos que no se ejecutan pase lo que pase. No es una pregunta
        al usuario —no hay nada que aprobar: destruyen el sistema o sus datos—. */
     if (name === 'run_command') {
@@ -529,7 +622,12 @@ class Guardrails {
         };
       }
     }
-    const level = this.levelFor(name);
+    const nivel = this.levelFor(name);
+    /* git_branch declara 'confirm' porque también CREA y CAMBIA de rama, pero `list` es
+       solo lectura: se abarata ese caso y ningún otro. El override del usuario siempre
+       gana, así que solo se aplica cuando no ha fijado un nivel para la herramienta. */
+    const esListaDeRamas = name === 'git_branch' && String(args?.action || 'list').toLowerCase() === 'list';
+    const level = esListaDeRamas && !LEVELS.includes(this.policy.permissions[name]) ? 'safe' : nivel;
     if (level === 'safe') return { action: 'allow' };
     const sig = this.signature(name, args);
     const memo = this.approvals.get(sig);
@@ -540,6 +638,24 @@ class Guardrails {
         reason: `La herramienta «${name}» está bloqueada por la configuración de seguridad del usuario.`,
       };
     }
+    /* v4.1 — «aceptar todos los cambios» (Ajustes ▸ Seguridad). Llegados aquí, la llamada
+       ha pasado por TODO lo anterior y el nivel es 'confirm' (ni 'safe' ni 'restricted'):
+         · lo sensible obligatorio (portapapeles, comandos sensibles, acciones del
+           navegador) ya habría devuelto su tarjeta, o tiene su aprobación;
+         · un comando 'prohibido' ya se denegó, así que nada que ejecute llega hasta aquí
+           por esta vía;
+         · una herramienta MCP jamás está en TOOLS_ESCRITURA (su nombre es mcp__…), así que
+           no entra por aquí.
+       Lo que SÍ abarata es exclusivamente escribir DENTRO del espacio de trabajo: lo que
+       promete el ajuste son los archivos del PROYECTO. Una ruta de fuera (o que no se
+       puede resolver) conserva su tarjeta —que es donde el usuario ve el destino—. */
+    if (
+      this.autoEditsActivo() &&
+      level === 'confirm' &&
+      TOOLS_ESCRITURA.has(name) &&
+      escrituraDentroDelWs(name, args, opts.workspace, opts.home || os.homedir())
+    )
+      return { action: 'allow' };
     return {
       action: 'confirm',
       tool: name,

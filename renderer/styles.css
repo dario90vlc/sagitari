@@ -46,29 +46,11 @@
     U+20A0-20AB, U+20AD-20C0, U+2113, U+2C60-2C7F, U+A720-A7FF;
 }
 
-/* Ángulo de rotación de las vetas del aura. Registrada con @property para que
-   interpole: así la luz gira alrededor del marco (DESIGN.md: 16s). Gira la
-   PROPIEDAD, no la capa, así que la banda enmascarada queda clavada al borde y
-   solo rota la luz por debajo de la máscara. */
-@property --giro {
-  syntax: '<angle>';
-  inherits: false;
-  initial-value: 0deg;
-}
-/* Alcance de la banda del aura (desde el filo hacia dentro). Registrada para
-   interpolar: al respirar (reachLife) la luz FLUYE borde→centro de forma
-   orgánica, en vez de pulsar la opacidad. */
-@property --reach {
-  syntax: '<length>';
-  inherits: false;
-  initial-value: 42px;
-}
-
 /* ============ SAGITARI design system ============
    El acento de la UI y el color del glow son personalizables: todo tinte
    decorativo se construye sobre TRIPLETS RGB (--acc-rgb, --acc2-rgb, --acc3-rgb)
    vía rgba(var(--acc-rgb), alfa). Los colores SEMÁNTICOS no se tocan:
-   ok/warn/danger y el color de cada modo (ACT/PLAN/THINK) siguen fijos. */
+   ok/warn/danger y el color de cada modo (ACT/PLAN/THINK/EQUIPO) siguen fijos. */
 :root {
   color-scheme: dark; /* nunca controles nativos blancos: selects, inputs, scrollbars */
   --acc-rgb: 148, 118, 255; /* acento principal: líneas, bordes, iconos */
@@ -139,7 +121,7 @@
      decisiones sueltas.
 
      RADIOS (de fuera a dentro: un radio interior nunca supera al que lo anida)
-       26px  héroe de la app: .side, .composer, #voiceMode
+       26px  héroe de la app: .side, .composer
        22px  héroe doblado: .composer.slim
        20px  panel flotante: .bubble, .acard, .tooltray, menús
        18px  puerta de navegación: .navitem, .side-status, .side-mode, .ce-mode
@@ -213,15 +195,11 @@ body {
     radial-gradient(30% 26% at 85% 8%, rgba(var(--acc-rgb), 0.1) 0%, transparent 70%), rgb(var(--bg0-rgb));
   box-shadow: inset 0 0 170px rgba(var(--acc3-rgb), calc(0.1 * var(--ambient)));
 }
-/* ===== glow INTERIOR — suave, degradado, integrado =====
-   Luz que vive DENTRO del marco y emana de él: núcleo caliente de 1px y capas
-   apiladas con alfa decreciente (nada de bandas sólidas). La caída es más larga
-   y suave que antes (140px) y TODO se escala con --glow-str, así que la
-   intensidad es una preferencia del usuario, no un valor clavado en CSS. */
-/* El marco en reposo NO brilla: sólo una línea neutra que separa la app del escritorio.
-   La luz es del aura y aparece cuando el agente hace algo — si el borde estuviera encendido
-   siempre, la señal de actividad no significaría nada. (Antes había aquí una pila de sombras
-   de color permanentes: medido, dejaban el borde a 2,25× el brillo del interior en reposo.) */
+/* La ventana en reposo NO brilla: sólo una línea neutra que la separa del escritorio.
+   Esa hairline no se toca —es el borde de la ventana, no una señal— y es la que se
+   ENCIENDE mientras hay trabajo (ver `.filo-ventana`, más abajo). (Antes había aquí una
+   pila de sombras de color permanentes: medido, dejaban el borde a 2,25× el brillo del
+   interior en reposo.) */
 .shell::before {
   content: '';
   position: absolute;
@@ -239,322 +217,289 @@ body {
   border-radius: 0;
 }
 
-/* ===== glow: un aura que respira =====
-   Un halo ancho y suave en el borde (nada de recorridos ni líneas duras). Son TRES
-   capas de luz superpuestas, cada una con su propio tono —vecinos del color elegido, no
-   un arcoíris— y su propia fase sobre los MISMOS dos ritmos (el color gira cada22s y el
-   alcance respira cada8s — el filo y el anillo no animan salvo el pulso), así la
-   mezcla rueda de forma orgánica sin que ningún tono domine. La ENERGÍA (nivel de
-   luz) es lo que cambia por estado; el color es del usuario. */
+/* ===== BORDE VIVO — la luz vive en el filo de las superficies =====
+   El estado del agente no se lee en un aura que rodea la ventana: se lee en QUÉ
+   superficie está encendida —el panel lateral al pensar, el compositor al trabajar, la
+   tarjeta concreta que corre su herramienta, el rail al leerte la respuesta—. Se retiró
+   la banda de 70px con tres halos girando: era identidad, pero no información (y cada
+   frame re-rasterizaba el degradado animado con @property).
+
+   CÓMO SALE BARATO: el filo es un degradado ESTÁTICO dentro de la superficie (anillo de
+   1px + bloom corto, ambos `inset`: nunca una capa nueva a pantalla completa) y el NIVEL
+   por estado lo aplica `opacity`, que el compositor resuelve sin repintar. El único
+   movimiento es un recorrido en `transform` —una barra de 1px con los extremos
+   transparentes— que corre UNA vez al cambiar de estado y se apaga; nada gira y nada
+   late de forma permanente.
+
+   UN SOLO SITIO: cada estado escribe aquí sus cuatro niveles; cada superficie lee el suyo
+   (una línea, más abajo). El TONO es --live-rgb, el color de glow que eligió el usuario en
+   Ajustes, así que la paleta sigue mandando sin que ningún estado la pise. */
 .shell {
-  --energy: 1;
-  --ambient: 0.26;
+  --ambient: 0.26; /* atmósfera interior del lienzo: sombra propia del marco */
+  --live-window: 0; /* la hairline de la ventana: sólo con trabajo en marcha */
+  --live-side: 0.16; /* panel lateral (y con él su puerta activa) */
+  --live-com: 0.22; /* compositor */
+  --live-rail: 0.1; /* tarjetas del rail */
+  --live-rgb: var(--glow-rgb);
 }
+/* pensar: la luz está en el panel lateral, que es donde vive el espacio de trabajo */
 .shell.glow-think {
-  --energy: 0.85;
   --ambient: 0.9;
+  --live-window: 0.34;
+  --live-side: 1;
+  --live-com: 0.3;
+  --live-rail: 0.18;
 }
+/* trabajar: la luz está en el compositor (por donde salió el encargo) y en la tarjeta
+   que está corriendo su herramienta */
 .shell.glow-work {
-  --energy: 1.15;
   --ambient: 1;
+  --live-window: 1;
+  --live-side: 0.22;
+  --live-com: 1;
+  --live-rail: 0.5;
 }
-.shell.glow-listen {
-  --energy: 0.6;
-  --ambient: 0.7;
+/* acuse de recibo (Ctrl+Shift+G): todo se enciende UNA vez, recorre la ventana y vuelve */
+.shell.glow-pulse {
+  --ambient: 1;
+  --live-window: 1;
+  --live-side: 1;
+  --live-com: 1;
+  --live-rail: 1;
 }
-.shell.glow-speak {
-  --energy: 0.95;
-  --ambient: 0.95;
-}
-/* El aura: tres luces superpuestas que ruedan. Cada capa (halo-a/b/c) tiene su tono —vecinos
-   del color elegido, no un arcoíris— y su propia fase (núcleo blanco, +120°) sobre los mismos
-   dos ritmos: así la suma se mueve de forma orgánica y se lee como luz viva.
-   Cada primitiva hace lo suyo: las SOMBRAS INTERIORES del anillo dibujan el cuerpo del halo
-   sin bordes duros; la banda de .glowFlow lleva el desenfoque y la máscara que atenúan hacia
-   dentro (la máscara se aplica después del filtro, por eso la caída es suave y no un corte);
-   y el filo de 1px es el único sitio con corte limpio, que es lo que se busca allí. */
-/* El aura, en dos capas: .glowRing lleva el cuerpo del halo (cuatro degradados que salen del
-   borde y se apagan hacia dentro) y .glow::before el filo que respira. Ninguna usa spread,
-   máscara ni filtro de capa: sólo sombras interiores centradas y difuminadas, que es lo que
-   hace que la luz no tenga bordes, cortes ni formas. El alcance va repartido en cuatro capas
-   de desenfoque moderado en vez de una larga, porque la acumulación en el vértice crece con
-   el desenfoque. */
-.glow {
-  position: absolute;
-  inset: 0;
-  border-radius: inherit;
-  pointer-events: none;
-  z-index: 401;
-  opacity: 0;
-  transition: opacity 0.7s cubic-bezier(0.16, 1, 0.3, 1);
-  /* El halo queda por encima del contenido, pero sus capas no capturan clics. */
-  isolation: isolate;
-}
-/* El anillo del aura (medido con el halo real, no con la versión de marcos). */
-.glowRing {
-  position: absolute;
-  inset: 0;
-  border-radius: inherit;
-  /* HALO: tres sombras interiores CENTRADAS y difuminadas. Centradas = sin rectángulos de
-     sombra que se crucen en las esquinas; difuminadas = luz continua. Sin spread, sin máscara,
-     sin marcos y sin filtro de capa: ninguna primitiva capaz de dibujar una forma o un
-     escalón. Cada capa es un degradado que sale del borde y se apaga hacia dentro; la de
-     fuera solo lleva un tono algo más frío para que la luz no sea plana. */
-  /* Reparto el alcance en varias capas de desenfoque MENOR en vez de una larga: la acumulación
-     en el vértice crece con el desenfoque, así que cuatro capas de 26-80px dejan el vértice
-     casi a la altura del borde (medido: 1,40× con una sola capa de 168px) y suman el mismo
-     alcance. Todo centrado y difuminado: ninguna forma, ningún escalón. */
-  box-shadow:
-    inset 0 0 5px rgba(var(--glow-a-rgb), calc(0.42 * var(--glow-str) * var(--energy))),
-    inset 0 0 18px rgba(var(--glow-a-rgb), calc(0.24 * var(--glow-str) * var(--energy))),
-    inset 0 0 48px rgba(var(--glow-b-rgb), calc(0.16 * var(--glow-str) * var(--energy))),
-    inset 0 0 86px rgba(var(--glow-b-rgb), calc(0.09 * var(--glow-str) * var(--energy))),
-    inset 0 0 132px rgba(var(--glow-c-rgb), calc(0.045 * var(--glow-str) * var(--energy)));
-  border: 1px solid rgba(var(--glow-a-rgb), calc(0.42 * var(--glow-str) * var(--energy)));
-}
-.glow::before {
+/* --- el filo: 1px dentro de la superficie ---
+   `.filo` es un <span> delante del contenido en las tres superficies fijas (ventana,
+   panel lateral, compositor) y el mismo dibujo va en `::before` cuando hay muchas o las
+   genera el JS (las tarjetas y la puerta activa del nav). Todas comparten dibujo y
+   transición, y cada una lee SU nivel de `--rim`: cambiar un estado es cambiar una línea
+   del mapa de arriba, no quince reglas. */
+.filo,
+.shell .rcard::before,
+.shell .tcard::before,
+.shell .navitem.on::before {
   content: '';
   position: absolute;
   inset: 0;
   border-radius: inherit;
-  /* Filo TRICOLOR: el borde de 1px reparte los 3 tonos por el perímetro (como
-     el filo aurora de abajo, pero con las variables del tema). Un filo de un
-     solo tono mandaba sobre los halos difusos y todo se veía de un color. */
-  border: 1px solid transparent;
-  background: conic-gradient(from 210deg, rgb(var(--glow-a-rgb)), rgb(var(--glow-b-rgb)), rgb(var(--glow-c-rgb)), rgb(var(--glow-a-rgb)))
-    border-box;
-  -webkit-mask:
-    linear-gradient(#000 0 0) padding-box,
-    linear-gradient(#000 0 0);
-  -webkit-mask-composite: xor;
-  mask-composite: exclude;
-  /* El filo brillante y su latido: es la capa que respira con el estado. */
-  box-shadow:
-    inset 0 0 4px rgba(var(--glow-a-rgb), calc(0.48 * var(--glow-str) * var(--energy))),
-    inset 0 0 16px rgba(var(--glow-c-rgb), calc(0.28 * var(--glow-str) * var(--energy))),
-    inset 0 0 42px rgba(var(--glow-b-rgb), calc(0.14 * var(--glow-str) * var(--energy)));
-  opacity: calc(0.95 * var(--glow-str) * var(--energy, 1));
-}
-/* TRES vetas de color que ROTAN alrededor del marco (16s),
-   desenfocadas y recortadas a una banda INTERIOR ESTRECHA junto al borde (caída
-   de 30px, más estrecha y luminosa que los 70px de DESIGN.md: a esa anchura la
-   luz se diluía y tapaba el contenido). Cada capa lleva un tono con distinto
-   desfase y una lleva el núcleo blanco: al girar a la vez, los colores se
-   cruzan por el borde y se MEZCLAN. La banda vive DENTRO del marco (inset:0):
-   antes era inset:-30 y .shell{overflow:hidden} la recortaba entera — por eso
-   el aura no se veía. La energía del estado la pone el padre (.glow). */
-.glowFlow {
-  position: absolute;
-  inset: 0;
-  border-radius: inherit;
   pointer-events: none;
-  /* Aura SUTIL: luz suave que emana del filo hacia dentro,
-     pastel y de baja intensidad. El ALCANCE (--reach) es el que respira
-     (borde↔centro): la luz fluye orgánica, no pulsa la opacidad. Suavidad con
-     `blur(26)`; caída ease-out sin cortes. */
-  -webkit-mask:
-    linear-gradient(
-      to bottom,
-      #000 0,
-      rgba(0, 0, 0, 0.8) calc(var(--reach) * 0.167),
-      rgba(0, 0, 0, 0.5) calc(var(--reach) * 0.381),
-      rgba(0, 0, 0, 0.26) calc(var(--reach) * 0.619),
-      rgba(0, 0, 0, 0.09) calc(var(--reach) * 0.81),
-      rgba(0, 0, 0, 0) var(--reach)
-    ),
-    linear-gradient(
-      to top,
-      #000 0,
-      rgba(0, 0, 0, 0.8) calc(var(--reach) * 0.167),
-      rgba(0, 0, 0, 0.5) calc(var(--reach) * 0.381),
-      rgba(0, 0, 0, 0.26) calc(var(--reach) * 0.619),
-      rgba(0, 0, 0, 0.09) calc(var(--reach) * 0.81),
-      rgba(0, 0, 0, 0) var(--reach)
-    ),
-    linear-gradient(
-      to right,
-      #000 0,
-      rgba(0, 0, 0, 0.8) calc(var(--reach) * 0.167),
-      rgba(0, 0, 0, 0.5) calc(var(--reach) * 0.381),
-      rgba(0, 0, 0, 0.26) calc(var(--reach) * 0.619),
-      rgba(0, 0, 0, 0.09) calc(var(--reach) * 0.81),
-      rgba(0, 0, 0, 0) var(--reach)
-    ),
-    linear-gradient(
-      to left,
-      #000 0,
-      rgba(0, 0, 0, 0.8) calc(var(--reach) * 0.167),
-      rgba(0, 0, 0, 0.5) calc(var(--reach) * 0.381),
-      rgba(0, 0, 0, 0.26) calc(var(--reach) * 0.619),
-      rgba(0, 0, 0, 0.09) calc(var(--reach) * 0.81),
-      rgba(0, 0, 0, 0) var(--reach)
-    );
-  -webkit-mask-composite: source-over;
-  mask-composite: add;
-  filter: blur(32px) saturate(1.8) brightness(1);
-  opacity: calc(0.46 * var(--glow-str, 1)); /* suave: aún más atenuado */
+  /* El NIVEL va en opacidad: el degradado se rasteriza UNA vez y a partir de ahí el
+     compositor solo mezcla. Cambiar de estado no vuelve a pintar la superficie.
+     `--glow-str` (Ajustes ▸ Intensidad del glow, 0,4–1,4) multiplica: el filo ES el glow,
+     así que la preferencia del usuario tiene que notarse aquí y no sólo en los sliders. */
+  opacity: calc(var(--rim, 0) * var(--glow-str, 1));
+  transition: opacity 0.45s cubic-bezier(0.16, 1, 0.3, 1);
+  box-shadow:
+    inset 0 0 0 1px rgba(var(--rim-rgb), 0.9),
+    inset 0 0 18px -7px rgba(var(--rim-rgb), 0.75);
 }
-/* Halo A — las tres vetas del glow girando con la paleta del tema. Si el tema
-   es aurora, applyTheme ya volcó AURORA_GLOW (azul/rosa/naranja) en
-   --glow-a/b/c-rgb, así que este mismo cono pinta el espectro aurora. */
-.glowFlow.halo-a {
-  background: conic-gradient(
-    from var(--giro),
-    rgba(var(--glow-a-rgb), 1),
-    rgba(var(--glow-b-rgb), 1),
-    rgba(var(--glow-c-rgb), 1),
-    rgba(var(--glow-a-rgb), 1)
-  );
-  animation:
-    giro 22s linear infinite,
-    reachLife 8s ease-in-out infinite;
+/* Tono por defecto del filo: el color de glow que eligió el usuario. */
+.filo,
+.shell .rcard {
+  --rim-rgb: var(--live-rgb);
 }
-/* Halo B — núcleo blanco (Siri): vetas blancas que giran al mismo compás que
-   las de color, de modo que el blanco entra y sale del cruce de los tonos. */
-.glowFlow.halo-b {
-  background: conic-gradient(
-    from var(--giro),
-    rgba(255, 255, 255, 0) 0deg,
-    rgba(255, 255, 255, 0.5) 35deg,
-    rgba(255, 255, 255, 0) 85deg,
-    rgba(255, 255, 255, 0) 205deg,
-    rgba(255, 255, 255, 0.45) 245deg,
-    rgba(255, 255, 255, 0) 300deg
-  );
-  animation:
-    giro 22s linear infinite,
-    reachLife 8s ease-in-out infinite;
+/* La hairline de la ventana es el mismo filo: en reposo con nivel 0 queda sólo la línea
+   neutra de `.shell::before` y su encendido ya significa algo. */
+.shell > .filo.filo-ventana {
+  --rim: var(--live-window);
+  z-index: 401; /* por encima del contenido: es el borde de la ventana */
 }
-/* Halo C — la misma paleta con 120° de desfase y a media opacidad: una segunda
-   capa que se monta sobre la primera y espesa la mezcla de colores. */
-.glowFlow.halo-c {
-  background: conic-gradient(
-    from calc(var(--giro) + 120deg),
-    rgba(var(--glow-c-rgb), 1),
-    rgba(var(--glow-b-rgb), 1),
-    rgba(var(--glow-a-rgb), 1),
-    rgba(var(--glow-c-rgb), 1)
-  );
-  animation:
-    giro 22s linear infinite,
-    reachLife 8s ease-in-out infinite;
-  opacity: 0.5;
+/* --- qué nivel lee cada superficie (una línea por superficie) --- */
+.side > .filo {
+  --rim: var(--live-side);
 }
-/* Rotación del aura: gira la PROPIEDAD --giro (no la capa), así que la banda
-   enmascarada queda clavada al borde y solo rota la luz bajo la máscara.
-   22s lineal: giro lento y constante, sin rebotes, que nunca deja el marco sin color. */
-@keyframes giro {
-  to {
-    --giro: 360deg;
-  }
+.composer > .filo {
+  --rim: var(--live-com);
 }
-/* Flujo orgánico del alcance: la banda respira borde↔centro — la luz fluye
-   hacia dentro y regresa (8s, lento y calmado). Es el movimiento del aura, no
-   opacidad. */
-@keyframes reachLife {
-  0%,
-  100% {
-    --reach: 36px;
-  }
-  50% {
-    --reach: 46px;
-  }
+/* El rail es una columna de tarjetas de vidrio sobre el fondo, no un panel: su filo es el
+   de SUS tarjetas. Un marco alrededor de la columna caería justo debajo de la hairline de
+   la ventana (el rail toca el borde derecho) y encima dibujaría un rectángulo vacío. */
+.shell .rail .rcard {
+  --rim: var(--live-rail);
 }
+/* la puerta activa del nav se enciende con el panel donde vive: una sola línea para las dos */
+.shell .navitem.on {
+  --rim: var(--live-side);
+  --rim-rgb: var(--live-rgb);
+}
+/* Las tarjetas de herramienta llevan su PROPIO nivel y su propio tono: mientras corren su
+   herramienta están encendidas, y al cerrarse se posan en un filo tenue del color de su
+   resultado (ok / parcial / fallo), el mismo que ya lleva su borde — dos tonos distintos en
+   el mismo filo se ven sucios. */
+.shell .tcard {
+  /* fuera del chat (traza restaurada en Historial) no hay --mode-rgb: el filo cae al tono
+     del tema en vez de quedarse sin dibujar */
+  --rim-rgb: var(--mode-rgb, var(--live-rgb));
+}
+.shell .tcard.run {
+  --rim: 1;
+}
+.shell .tcard.done {
+  --rim: 0.3;
+  --rim-rgb: 52, 211, 153;
+}
+.shell .tcard.part {
+  --rim: 0.38;
+  --rim-rgb: 251, 191, 36;
+}
+.shell .tcard.err {
+  --rim: 0.42;
+  --rim-rgb: 251, 113, 133;
+}
+/* --- EL RECORRIDO: un reflejo que corre el filo UNA vez ---
+   Es el único momento autoral del sistema: al CAMBIAR de estado un reflejo recorre el filo
+   de la superficie que importa (~450 ms) y se posa. Anima `transform` —trabajo del
+   compositor— y se apaga solo: no hay latido permanente ni nada girando.
 
-/* `.glow` también se usa como etiqueta semántica en el selector de color. Sin este
-   reset, el punto heredaba `position:absolute; inset:0; opacity:0` y se convertía en
-   una capa invisible de toda la ventana en vez de una muestra de 12px. */
-.colordot.glow {
-  position: relative;
-  inset: auto;
-  z-index: auto;
-  opacity: 1;
-  transition: none;
-  isolation: auto;
+   El reflejo es luz pegada al filo que se desvanece hacia dentro (el degradado de fondo) y
+   una máscara que la recorta en cometa: la luz va en la punta y detrás sólo queda cola. Por
+   eso viaja de fuera a dentro (de -100% a 0): entra por un extremo y sale por el otro sin
+   asomar jamás fuera de la superficie —no hace falta recortarla ni taparla—. El motivo
+   cambia con la superficie —el panel lateral lo baja, el compositor lo cruza, el rail lo
+   corre a lo ancho de sus tarjetas— porque cada una tiene su geometría y ninguna entra
+   igual. */
+.filo::after,
+.shell .rcard::after,
+.shell .tcard::after {
+  content: '';
+  position: absolute;
+  opacity: 0;
+  pointer-events: none;
+  -webkit-mask-image: linear-gradient(90deg, transparent 0%, transparent 52%, #000 80%, #000 94%, transparent 100%);
+  mask-image: linear-gradient(90deg, transparent 0%, transparent 52%, #000 80%, #000 94%, transparent 100%);
 }
-
-/* La luz del marco por estado: el NIVEL lo da la opacidad de .glow (fijo por
-   estado). El MOVIMIENTO deja de ser un latido por opacidad (se retiraron
-   frame-breathe/frame-drift a petición) y lo lleva el aura (.glowFlow): flujo
-   de alcance borde→centro (reachLife) + rotación de color (giro). */
-@keyframes frame-bloom {
+/* El recorrido vive DENTRO de la superficie que lo lanza.
+   Sin este recorte la barra arranca en `translateX(-100%)`, es decir FUERA de la
+   superficie, y como el fill-mode es `both` y la opacidad sube al 14%, durante el primer
+   tramo se veía un trazo de luz flotando al lado del compositor (y por debajo del panel
+   lateral): el fallo se cazó mirando el instante de aparecer, no el estado ya asentado.
+   El recorte respeta el `border-radius`, así que la luz entra por el filo y no por la
+   esquina. `.tcard` ya recortaba; el rail y el filo no. */
+.filo,
+.shell .rcard {
+  overflow: hidden;
+}
+/* geometría: el reflejo corre pegado al filo que le toca a cada superficie */
+.shell.glow-work .composer > .filo::after,
+.shell .tcard.run::after,
+.shell.glow-pulse > .filo.filo-ventana::after {
+  top: 0;
+  left: 0;
+  width: 100%;
+  height: 7px;
+  background: linear-gradient(to bottom, rgba(var(--rim-rgb), calc(0.95 * var(--glow-str, 1))), rgba(var(--rim-rgb), 0) 100%);
+}
+/* el encargo sale por abajo: el compositor lo cruza por su filo inferior */
+.shell.glow-work .composer > .filo::after {
+  top: auto;
+  bottom: 0;
+  background: linear-gradient(to top, rgba(var(--rim-rgb), calc(0.95 * var(--glow-str, 1))), rgba(var(--rim-rgb), 0) 100%);
+}
+/* el panel lateral es vertical: la luz baja por su filo izquierdo */
+.side > .filo::after {
+  top: 0;
+  left: 0;
+  width: 7px;
+  height: 100%;
+  background: linear-gradient(to right, rgba(var(--rim-rgb), calc(0.95 * var(--glow-str, 1))), rgba(var(--rim-rgb), 0) 100%);
+  -webkit-mask-image: linear-gradient(180deg, transparent 0%, transparent 52%, #000 80%, #000 94%, transparent 100%);
+  mask-image: linear-gradient(180deg, transparent 0%, transparent 52%, #000 80%, #000 94%, transparent 100%);
+}
+/* 1px de luz que entra, corre y se apaga: no se queda a vivir en el filo */
+@keyframes recorre-derecha {
   0% {
-    opacity: 0.1;
+    transform: translateX(-100%);
+    opacity: 0;
   }
-  20% {
+  14% {
+    opacity: 1;
+  }
+  86% {
     opacity: 1;
   }
   100% {
-    opacity: 0.8;
+    transform: translateX(0);
+    opacity: 0;
   }
 }
-.shell.glow-think .glow {
-  opacity: 0.82;
+@keyframes recorre-abajo {
+  0% {
+    transform: translateY(-100%);
+    opacity: 0;
+  }
+  14% {
+    opacity: 1;
+  }
+  86% {
+    opacity: 1;
+  }
+  100% {
+    transform: translateY(0);
+    opacity: 0;
+  }
 }
-.shell.glow-work .glow {
-  opacity: 1;
+/* El recorrido de cada estado: UNA superficie, UN filo, UN motivo. Los estados que no
+   aparecen aquí no tienen recorrido propio porque el recorrido marca el cambio, no el
+   estado. */
+.shell.glow-work .composer > .filo::after {
+  animation: recorre-derecha 0.46s cubic-bezier(0.33, 0, 0.2, 1) both;
 }
-.shell.glow-listen .glow {
-  opacity: 0.62;
+.shell.glow-think .side > .filo::after {
+  animation: recorre-abajo 0.52s cubic-bezier(0.33, 0, 0.2, 1) both;
 }
-.shell.glow-speak .glow {
-  opacity: 0.9;
+/* la tarjeta que arranca corre su propio recorrido: es su entrada, no la de la ventana */
+.shell .tcard.run::after {
+  animation: recorre-derecha 0.38s cubic-bezier(0.33, 0, 0.2, 1) both;
 }
-/* acusar recibo: un destello del aura, no un estado sostenido */
-.shell.glow-pulse .glow {
-  opacity: 1;
+/* acuse de recibo (Ctrl+Shift+G): una veta del espectro cruza la ventana entera mientras
+   todos los filos se encienden — es lo que significa «te he oído», y pasa una sola vez */
+.shell.glow-pulse > .filo.filo-ventana::after {
+  animation: recorre-derecha 0.95s cubic-bezier(0.25, 0.7, 0.3, 1) both;
+  background: linear-gradient(
+    90deg,
+    transparent 0%,
+    transparent 50%,
+    rgba(var(--glow-a-rgb), calc(0.7 * var(--glow-str, 1))) 80%,
+    rgba(var(--glow-rgb), calc(1 * var(--glow-str, 1))) 93%,
+    rgba(var(--glow-c-rgb), calc(0.6 * var(--glow-str, 1))) 98%,
+    transparent 100%
+  );
+  -webkit-mask-image: linear-gradient(to bottom, #000 0%, transparent 100%);
+  mask-image: linear-gradient(to bottom, #000 0%, transparent 100%);
 }
-.shell.glow-pulse .glow::before {
-  animation: frame-bloom 1.1s ease-out 1;
+/* ventana en segundo plano: sin luz. No es sólo ahorro de CPU —una interfaz que sigue
+   encendida cuando no la miras deja de ser una señal—: los niveles bajan a cero y con
+   ellos el compositor deja de dibujar los filos. 20-app.js pone/quita .nofocus en <body>
+   al perder/recuperar el foco. La hairline neutra de .shell::before se queda: es el borde
+   de la ventana, no una luz. */
+body.nofocus .shell {
+  --live-window: 0;
+  --live-side: 0;
+  --live-com: 0;
+  --live-rail: 0;
 }
-.shell.glow-pulse .glowRing {
-  animation: frame-bloom 1.3s ease-out 1;
+/* la tarjeta que corre no lee --live-*: su nivel es suyo, así que se apaga aparte */
+body.nofocus .shell .tcard.run {
+  --rim: 0;
 }
-/* Menos movimiento, no menos información: sin viaje ni latido, pero cada estado se
-   sigue distinguiendo por cuánta luz tiene el marco. */
-/* ventana en segundo plano: el glow no se ve, pero su animación seguiría
-   repintando el marco. 20-voz.js pone/quita .nofocus en <body> al perder/recuperar
-   el foco de la ventana. Las capas del aura son .glow, .glowRing y .glow::before:
-   .shell::before es sólo el filo en reposo y no anima. */
-body.nofocus .glow,
-body.nofocus .glow::before,
-body.nofocus .glowRing,
-body.nofocus .glowFlow {
+/* El pulso sí se ve sin foco (Ctrl+Shift+G es un atajo GLOBAL: existe para cuando NO estás
+   mirando la ventana). Es el único nivel que sobrevive a nofocus, y sólo como acuse. */
+body.nofocus .shell.glow-pulse {
+  --live-window: 1;
+  --live-side: 1;
+  --live-com: 1;
+  --live-rail: 1;
+}
+body.nofocus .filo::after,
+body.nofocus .shell .rcard::after,
+body.nofocus .shell .tcard::after {
   animation: none !important;
 }
-/* Aurora: los 3 tonos del espectro
-   (azul→rosa→naranja) + el núcleo blanco ya NO llevan reglas propias:
-   applyTheme vuelca AURORA_GLOW en --glow-a/b/c-rgb cuando el tema es aurora,
-   así que las vetas giratorias de arriba (por tono + la blanca) pintan el
-   espectro directamente. El filo nítido multicolor (.glow::before) y el
-   anillo (.glowRing) con aurora siguen debajo. */
-/* El anillo interior con aurora reparte los 3 tonos a partes iguales: si uno
-   domina las sombras pegadas al borde, todo el marco se tiñe de ese color. */
-.shell.glow-aurora .glowRing {
-  box-shadow:
-    inset 0 0 5px rgba(var(--glow-b-rgb), calc(0.48 * var(--glow-str) * var(--energy))),
-    inset 0 0 14px rgba(var(--glow-a-rgb), calc(0.34 * var(--glow-str) * var(--energy))),
-    inset 0 0 26px rgba(var(--glow-c-rgb), calc(0.24 * var(--glow-str) * var(--energy))),
-    inset 0 0 38px rgba(var(--glow-b-rgb), calc(0.14 * var(--glow-str) * var(--energy))),
-    inset 0 0 50px rgba(var(--glow-a-rgb), calc(0.07 * var(--glow-str) * var(--energy)));
-  /* Sin borde propio de un solo tono: el filo tricolor de .glow::before manda.
-     Un borde nítido monocromo aquí tapaba los halos y todo se veía naranja. */
-  border: 1px solid transparent;
+body.nofocus .shell.glow-pulse .filo::after {
+  animation: recorre-derecha 0.95s cubic-bezier(0.25, 0.7, 0.3, 1) both !important;
 }
-/* filo nítido multicolor: el borde de 1px lleva el espectro a plena fuerza —
-   fijo como el flow (el tono no cambia; respira la intensidad del padre) */
-.shell.glow-aurora .glow::before {
-  border: 1px solid transparent;
-  background: conic-gradient(from 210deg, #f5b9ea, #ffba71, #ff6778, #c686ff, #8d9fff, #bc82f3, #f5b9ea) border-box;
-  -webkit-mask:
-    linear-gradient(#000 0 0) padding-box,
-    linear-gradient(#000 0 0);
-  -webkit-mask-composite: xor;
-  mask-composite: exclude;
-  box-shadow: none;
-  opacity: calc(0.95 * var(--glow-str) * var(--energy, 1));
-}
-/* (los ritmos viven junto a la capa del glow, más arriba) */
+/* Aurora: el tema trae su propio espectro (azul→rosa→naranja) volcado en --glow-a/b/c-rgb
+   y su tono de glow en --glow-rgb, así que los filos, que leen --live-rgb, ya son suyos
+   sin una sola regla propia; el espectro asoma entero en la veta del pulso. */
 
 /* sin padding en el grid: cada columna llega hasta la esquina superior (fondo
    continuo) y se separa del titlebar con su PROPIO padding superior interno */
@@ -581,6 +526,9 @@ body.nofocus .glowFlow {
   border-radius: 26px;
   padding-top: 20px;
   border: 1px solid rgba(255, 255, 255, 0.08);
+  /* `position` explícito: su filo (.filo) se coloca dentro del panel. La capa de vidrio
+     ya lo hacía relativo por su cuenta, pero la luz no debe depender de otra hoja. */
+  position: relative;
   background: rgba(var(--field-rgb), calc(0.42 * var(--glass)));
   backdrop-filter: blur(18px) saturate(1.3);
   -webkit-backdrop-filter: blur(18px) saturate(1.3);
@@ -745,6 +693,11 @@ body.nofocus .glowFlow {
   border-top: 1px solid var(--line2);
   padding-top: 11px;
 }
+/* El rótulo de grupo iba con `opacity: 0.68`, que compone --dim con el fondo del panel
+   translúcido y lo dejaba en 3,6:1 (por debajo del 4,5:1 de texto normal; 11px no es
+   texto grande). La jerarquía la dan el tamaño, las mayúsculas y el espaciado, no una
+   opacidad: el color va limpio y el auditor de contraste mide este caso (navgroup::before)
+   en scripts/contraste.js. */
 .navgroup::before {
   content: attr(data-label);
   padding: 0 7px 4px;
@@ -752,7 +705,6 @@ body.nofocus .glowFlow {
   letter-spacing: 0.08em;
   text-transform: uppercase;
   color: var(--dim);
-  opacity: 0.68;
 }
 .navitem {
   position: relative;
@@ -1191,6 +1143,33 @@ body.nofocus .glowFlow {
   background: var(--warn);
   box-shadow: 0 0 8px var(--warn);
 }
+/* «Cargado de disco»: el tono del origen del agente, el mismo que su insignia
+   (`.abadge.custom`). No es un estado del sistema, es de dónde viene el agente. */
+.dot.custom {
+  background: var(--vio2);
+  box-shadow: 0 0 8px var(--vio2);
+}
+/* Estados de un compañero de equipo: la misma paleta que su píldora y su punto de fila
+   (ver «vista Equipo»), aquí como clases de punto porque el JS los declara como estado y
+   un estado sin regla deja el punto invisible — que es justo lo que esta comprobación
+   viene a evitar. */
+.dot.eq-trabajando {
+  background: #f59e42;
+  box-shadow: 0 0 8px #f59e42;
+}
+.dot.eq-esperando {
+  background: var(--warn);
+  box-shadow: 0 0 8px var(--warn);
+}
+.dot.eq-terminado {
+  background: var(--ok);
+  box-shadow: 0 0 8px var(--ok);
+}
+.dot.eq-fallo,
+.dot.eq-interrumpido {
+  background: var(--danger);
+  box-shadow: 0 0 8px var(--danger);
+}
 
 /* ============ Main ============ */
 /* min-height:0 permite que .main encoja hasta la fila del grid: las vistas con
@@ -1273,6 +1252,9 @@ body.nofocus .glowFlow {
   background:
     linear-gradient(115deg, rgba(255, 255, 255, 0.1) 0%, rgba(255, 255, 255, 0.02) 32%, transparent 55%),
     rgba(var(--face-rgb), calc(0.55 * var(--glass)));
+  /* El borde de acento base va a 0,7; en el chat lo pisa `#view-chat .composer` con el
+     color del modo (0,6), que es lo que identifica el compositor contra el lienzo. La luz
+     del ESTADO no va por ahí, sino por el filo vivo (.filo) que va justo dentro. */
   border: 1px solid rgba(var(--acc-rgb), 0.7);
   border-radius: 26px;
   padding: 12px 14px;
@@ -1298,6 +1280,15 @@ body.nofocus .glowFlow {
 .composer.slim {
   padding: 8px;
   border-radius: 22px;
+}
+/* disparador de la revisión del cambio (F2): comparte la primera línea del
+   compositor con el «deshacer» del turno */
+#btnDiff {
+  align-self: flex-start;
+  margin: 2px 0 6px;
+}
+#btnDiff[hidden] {
+  display: none;
 }
 /* el textarea del chat es TRANSPARENTE: sin caja propia, el marco lo dibuja
    el compositor. La regla global de textarea (abajo) le pone borde y fondo, y
@@ -1378,7 +1369,12 @@ body.nofocus .glowFlow {
   margin: 0 auto;
   width: 100%;
 }
-#messages {
+/* Cada conversación ABIERTA tiene su propio nodo de mensajes (`.msgs`). El de la
+   conversación activa es además el que lleva `id="messages"`: el identificador viaja
+   con la pestaña que se abre, así que `#messages` sigue significando «el hilo en
+   pantalla» para todo el código. Los demás siguen en #msgsArea, ocultos. */
+#messages,
+.msgs {
   flex: 1;
   overflow-y: auto;
   padding: 6px 10px 14px;
@@ -1387,22 +1383,48 @@ body.nofocus .glowFlow {
   gap: 10px;
   min-height: 0;
 }
-#messages::-webkit-scrollbar {
+/* El `[hidden]` del navegador (display:none) lo gana el `display:flex` de arriba
+   —una regla de autor manda sobre la del navegador—, así que se dice aquí. */
+.msgs[hidden] {
+  display: none;
+}
+#messages::-webkit-scrollbar,
+.msgs::-webkit-scrollbar {
   width: 6px;
 }
-#messages::-webkit-scrollbar-thumb {
+#messages::-webkit-scrollbar-thumb,
+.msgs::-webkit-scrollbar-thumb {
   background: rgba(var(--acc2-rgb), 0.3);
   border-radius: 3px;
 }
 /* El hilo se marca aria-busy mientras el agente trabaja, pero ninguna regla lo
    pintaba: el estado ocupado no se veía en la superficie donde ocurre el trabajo. */
-#messages[aria-busy='true'] {
+#messages[aria-busy='true'],
+.msgs[aria-busy='true'] {
   box-shadow:
     inset 0 0 0 1px rgba(var(--acc2-rgb), 0.26),
     inset 0 0 40px rgba(var(--acc2-rgb), 0.07);
   border-radius: 14px;
   transition: box-shadow 0.25s cubic-bezier(0.16, 1, 0.3, 1);
 }
+/* v4.3: línea del sistema dentro del hilo — la salida de /compact, /cost, /help
+   y los fallos de una orden. Habla DE la interfaz, no es un turno: va centrada,
+   en el tono de nota de la app (dim, 12px) y sin cara de burbuja (nada de borde
+   ni fondo de mensaje). `overflow-wrap` evita que un texto largo desborde. */
+.sysline {
+  align-self: center;
+  max-width: min(86%, 650px);
+  text-align: center;
+  color: var(--dim);
+  font-size: 12px;
+  line-height: 1.45;
+  padding: 4px 12px;
+  border-radius: 999px;
+  background: rgba(var(--acc2-rgb), 0.07);
+  overflow-wrap: anywhere;
+  white-space: pre-line;
+}
+
 /* La medida de lectura manda sobre el ancho disponible: con la burbuja al 86% de
    un chat de 1560px el párrafo llegaba a 97 caracteres por línea (medido), fuera
    del rango legible de 45-75. El tope en píxeles deja la columna en ~75ch a 15px,
@@ -1642,6 +1664,149 @@ body.nofocus .glowFlow {
   position: relative;
 }
 
+/* v4.3: panel de revisión del cambio (F2). NO es un diálogo modal: se abre sobre
+   el compositor, como la paleta de skills, y no bloquea el chat — el usuario
+   sigue pudiendo escribir y mirar la conversación mientras revisa. Por eso no
+   lleva aria-modal ni trampa de foco, y su cierre es un botón normal. */
+.diffpanel {
+  position: absolute;
+  left: 10px;
+  right: 10px;
+  bottom: 100%;
+  margin-bottom: 6px;
+  max-height: min(60vh, 520px);
+  display: flex;
+  flex-direction: column;
+  background: rgba(var(--deep-rgb), calc(0.86 * var(--glass)));
+  border: 1px solid rgba(255, 255, 255, 0.1);
+  border-radius: 20px;
+  box-shadow:
+    0 14px 44px rgba(0, 0, 0, 0.55),
+    inset 0 1px 0 rgba(255, 255, 255, 0.1);
+  backdrop-filter: blur(24px) saturate(1.5);
+  -webkit-backdrop-filter: blur(24px) saturate(1.5);
+  overflow: hidden;
+  z-index: 120;
+}
+.diffpanel[hidden] {
+  display: none;
+}
+.dp-head {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 10px;
+  padding: 10px 14px;
+  border-bottom: 1px solid var(--line2);
+}
+.dp-head b {
+  font: 600 13px var(--font-display);
+  letter-spacing: 0.04em;
+}
+.dplist {
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+  padding: 10px 12px 12px;
+  overflow-y: auto;
+}
+.dplist::-webkit-scrollbar {
+  width: 6px;
+}
+.dplist::-webkit-scrollbar-thumb {
+  background: rgba(var(--acc2-rgb), 0.3);
+  border-radius: 3px;
+}
+/* un archivo = una tarjeta, con la misma piel que .setcard / .acard */
+.dffile {
+  border: 1px solid var(--line2);
+  border-radius: 16px;
+  background: rgba(var(--panel-rgb), 0.5);
+  overflow: hidden;
+}
+.df-head {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  padding: 9px 12px;
+}
+.df-path {
+  flex: 1;
+  min-width: 0;
+  font: 600 13px var(--font-ui);
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+.df-counts {
+  display: flex;
+  gap: 6px;
+  font: 600 12px var(--font-ui);
+  font-variant-numeric: tabular-nums;
+}
+.df-add {
+  color: var(--ok);
+}
+.df-del {
+  color: var(--danger);
+}
+.df-norev {
+  color: var(--warn);
+  font-size: 11px;
+}
+.df-hunks {
+  border-top: 1px solid var(--line2);
+  overflow-x: auto;
+}
+.df-hunk + .df-hunk {
+  border-top: 1px dashed var(--line2);
+}
+.df-hunkhead {
+  padding: 4px 10px;
+  font: 500 11px var(--font-mono);
+  color: var(--dim);
+  background: rgba(var(--acc2-rgb), 0.06);
+}
+/* una línea por fila: número, signo y texto. El texto NUNCA desborda
+   (overflow-wrap) y mantiene los espacios del diff (pre-wrap). */
+.df-line {
+  display: flex;
+  align-items: flex-start;
+  gap: 8px;
+  padding: 0 10px;
+  font: 400 12px/1.5 var(--font-mono);
+  white-space: pre-wrap;
+  overflow-wrap: anywhere;
+}
+.df-num {
+  flex-shrink: 0;
+  width: 34px;
+  text-align: right;
+  color: var(--dim);
+  user-select: none;
+}
+.df-sign {
+  flex-shrink: 0;
+  width: 8px;
+  color: var(--dim);
+}
+.df-text {
+  flex: 1;
+  min-width: 0;
+}
+.df-line.add {
+  background: rgba(52, 211, 153, 0.09);
+}
+.df-line.del {
+  background: rgba(251, 113, 133, 0.09);
+}
+.df-line.add .df-sign {
+  color: var(--ok);
+}
+.df-line.del .df-sign {
+  color: var(--danger);
+}
+
 /* paleta de skills con "/": aparece sobre el compositor del chat */
 .skillmenu {
   position: absolute;
@@ -1704,7 +1869,7 @@ body.nofocus .glowFlow {
   margin-left: auto;
   max-width: 60%;
 }
-/* selector de modo ACT/PLAN/THINK dentro del compositor del chat: cápsula con
+/* selector de modo ACT/PLAN/THINK/EQUIPO dentro del compositor del chat: cápsula con
    segmentos; es fill, no vidrio (nada de vidrio sobre vidrio dentro del héroe) */
 .modeseg {
   display: flex;
@@ -1749,6 +1914,11 @@ body.nofocus .glowFlow {
   color: #7db4ff;
   box-shadow: inset 0 0 0 1px rgba(59, 130, 246, 0.4);
 }
+.modeseg button.on.equipo {
+  background: rgba(245, 158, 66, 0.16);
+  color: #f59e42;
+  box-shadow: inset 0 0 0 1px rgba(245, 158, 66, 0.4);
+}
 .hintbar {
   display: flex;
   justify-content: space-between;
@@ -1756,6 +1926,73 @@ body.nofocus .glowFlow {
   padding: 0 8px;
   font-size: 11px;
   color: var(--dim);
+}
+/* Los tres rótulos del pie no caben cuando el medidor de contexto está visible, y el que
+   cede es el del MODO: su píldora (ACT/PLAN/THINK/EQUIPO) ya está en el compositor, así que
+   repetirlo con una frase no aporta nada. El del modelo se queda entero, que es el dato
+   que uno va a mirar — antes se cortaba él, y sin puntos suspensivos: desaparecía media
+   línea del nombre del modelo. */
+.hintbar > span {
+  min-width: 0;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+.hintbar #modeLabel {
+  flex: 0 1 auto;
+}
+.hintbar #chatModelLabel,
+.hintbar .ctxmeter {
+  flex: 0 0 auto;
+}
+/* v4.3: medidor de contexto (F4). Sale del evento `context` del agente y se
+   queda oculto hasta el primero. El nivel viaja en data-estado con el mismo
+   vocabulario que agent/contexto.js: 'hola' (neutro), 'ajustado' y 'apretado'.
+   El detalle completo lo pone el JS en title/aria-label. */
+.ctxmeter {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  color: var(--dim);
+}
+.ctxmeter[hidden] {
+  display: none;
+}
+.ctxmeter .ctxbar {
+  display: block;
+  width: 46px;
+  height: 4px;
+  border-radius: 3px;
+  background: rgba(var(--acc-rgb), 0.18);
+  overflow: hidden;
+}
+.ctxmeter .ctxbar > i {
+  display: block;
+  height: 100%;
+  width: var(--ctx-pct, 0%);
+  background: var(--dim);
+  transition: width 0.3s ease;
+}
+.ctxmeter .ctxval {
+  font-variant-numeric: tabular-nums;
+  color: inherit;
+}
+#ctxMeter[data-estado='ajustado'] {
+  color: var(--warn);
+}
+#ctxMeter[data-estado='ajustado'] .ctxbar > i {
+  background: var(--warn);
+}
+#ctxMeter[data-estado='apretado'] {
+  color: var(--danger);
+}
+#ctxMeter[data-estado='apretado'] .ctxbar > i {
+  background: var(--danger);
+}
+@media (prefers-reduced-motion: reduce) {
+  .ctxmeter .ctxbar > i {
+    transition: none;
+  }
 }
 
 /* agents view */
@@ -1828,6 +2065,271 @@ body.nofocus .glowFlow {
   border-color: rgba(52, 211, 153, 0.35);
   box-shadow: 0 0 20px rgba(52, 211, 153, 0.15);
 }
+/* v4.3: la tarjeta de agente ahora sale del registro real, así que lleva meta
+   (origen, herramientas, modelo/pasos) y los estados de carga/vacío/error. */
+.abadge {
+  display: inline-block;
+  vertical-align: 1px;
+  padding: 2px 8px;
+  border-radius: 999px;
+  font-size: 10px;
+  letter-spacing: 0.06em;
+  background: rgba(var(--acc2-rgb), 0.14);
+  color: var(--dim);
+}
+.abadge.custom {
+  background: rgba(var(--acc3-rgb), 0.16);
+  color: var(--vio2);
+}
+/* nombre y origen en la misma línea; el resto, debajo */
+.acard .amain {
+  min-width: 0;
+}
+.acard .ahead {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  flex-wrap: wrap;
+}
+.acard .amd {
+  display: block;
+  margin-top: 3px;
+  color: var(--dim);
+  font-size: 11px;
+  line-height: 1.4;
+  overflow-wrap: anywhere;
+}
+/* el vacío/error/carga ocupa la rejilla entera, no una celda con forma de tarjeta */
+#agentsList > .listempty,
+#agentsList > .subnote {
+  grid-column: 1 / -1;
+}
+/* el recuento dice cuántos agentes hay de verdad: nada de números a mano */
+#agentsCount {
+  color: var(--dim);
+  font-size: 12px;
+}
+
+/* ============ vista Equipo (v4.4, modo EQUIPO) ============
+   Tres piezas con la MISMA piel que el resto: las tarjetas de miembro son las de la
+   vista Agentes (.acard), y el buzón y el tablero son filas dentro de un .tooltray.
+   El ámbar del equipo (245,158,66) marca lo que está vivo; los estados usan el
+   vocabulario de siempre (.dot y .abadge). */
+#equipoEstado {
+  color: var(--dim);
+  font-size: 12px;
+}
+/* la vista es del equipo: lleva su ámbar, igual que el chat en modo EQUIPO */
+#view-equipo {
+  --mode-c: #f59e42;
+  --mode-rgb: 245, 158, 66;
+}
+#equipoMiembros > .listempty,
+#equipoMiembros > .subnote {
+  grid-column: 1 / -1;
+}
+/* Dos columnas que se pliegan solas cuando la ventana se estrecha: sin media queries
+   (el ancho útil cambia con el rail y con la barra compacta). */
+.equipowrap {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(320px, 1fr));
+  gap: 14px;
+  align-items: start;
+}
+.equipowrap .tooltray {
+  margin-top: 18px;
+}
+/* el miembro que trabaja: el mismo borde y el mismo punto ámbar del equipo. El estado va en
+   la FILA (no en el punto) para que estas reglas valgan igual en la tarjeta de la vista
+   (.acard) y en la fila del rail (.ragent): un solo vocabulario, dos superficies. */
+.eq-trabajando {
+  border-color: rgba(245, 158, 66, 0.35);
+}
+.acard.eq-trabajando {
+  box-shadow: 0 0 20px rgba(245, 158, 66, 0.14);
+}
+.eq-trabajando .adot {
+  background: #f59e42;
+  box-shadow: 0 0 10px #f59e42;
+  animation: blink 1.4s infinite;
+}
+.eq-esperando .adot {
+  background: var(--warn);
+  box-shadow: 0 0 10px var(--warn);
+  animation: blink 1.2s infinite;
+}
+.eq-terminado .adot {
+  background: var(--ok);
+  box-shadow: 0 0 8px var(--ok);
+}
+.eq-fallo .adot,
+.eq-interrumpido .adot {
+  background: var(--danger);
+  box-shadow: none;
+}
+/* estados del miembro/tablero con la píldora de siempre (.abadge) */
+.abadge.eq-trabajando {
+  background: rgba(245, 158, 66, 0.16);
+  color: #f59e42;
+}
+.abadge.eq-esperando {
+  background: rgba(251, 191, 36, 0.16);
+  color: var(--warn);
+}
+.abadge.eq-terminado {
+  background: rgba(52, 211, 153, 0.14);
+  color: var(--ok);
+}
+.abadge.eq-fallo,
+.abadge.eq-interrumpido {
+  background: rgba(251, 113, 133, 0.14);
+  color: var(--danger);
+}
+/* insignia de permisos pendientes: la cuenta que el rail y la vista comparten */
+.abadge.eqperm {
+  display: inline-flex;
+  align-items: center;
+  gap: 2px;
+  margin-left: 8px;
+  background: rgba(251, 191, 36, 0.16);
+  color: var(--warn);
+  flex-shrink: 0;
+}
+.abadge.eqperm .dot {
+  margin: 0 3px 0 0;
+  width: 6px;
+  height: 6px;
+}
+.acard .eqperm {
+  margin-left: 0;
+}
+/* buzón: quién → quién, el texto y la hora. Una fila por mensaje, en orden. */
+.eqfeed {
+  display: flex;
+  flex-direction: column;
+  max-height: 340px;
+  overflow-y: auto;
+}
+.eqfila {
+  display: flex;
+  align-items: baseline;
+  gap: 7px;
+  padding: 6px 2px;
+  border-bottom: 1px solid var(--line2);
+  font-size: 12.5px;
+  line-height: 1.5;
+}
+.eqfila:last-child {
+  border-bottom: 0;
+}
+.eqfila .eqde {
+  color: var(--txt);
+  font-weight: 600;
+  flex-shrink: 0;
+}
+.eqfila .eqfl {
+  color: var(--dim);
+  flex-shrink: 0;
+}
+.eqfila .eqpara {
+  color: var(--mode-c);
+  flex-shrink: 0;
+}
+.eqfila .eqtexto {
+  flex: 1 1 auto;
+  min-width: 0;
+  color: var(--txt);
+  overflow-wrap: anywhere;
+}
+.eqfila .eqts {
+  color: var(--dim);
+  font-size: 11px;
+  font-variant-numeric: tabular-nums;
+  flex-shrink: 0;
+  margin-left: auto;
+}
+/* tablero compartido: quién · qué · estado · nota */
+.eqboard {
+  display: flex;
+  flex-direction: column;
+}
+.eqitem {
+  display: flex;
+  align-items: baseline;
+  gap: 8px;
+  padding: 7px 2px;
+  border-bottom: 1px solid var(--line2);
+  font-size: 12.5px;
+  line-height: 1.5;
+}
+.eqitem:last-child {
+  border-bottom: 0;
+}
+.eqitem .eqquien {
+  font-weight: 600;
+  flex-shrink: 0;
+}
+.eqitem .eqque {
+  flex: 1 1 auto;
+  min-width: 0;
+  overflow-wrap: anywhere;
+}
+.eqitem .eqnota {
+  display: block;
+  color: var(--dim);
+  font-size: 11.5px;
+}
+/* cierre del encargo: resumen agregado + gasto del equipo */
+.eqresumen {
+  margin-top: 14px;
+  padding: 12px 14px;
+  border: 1px solid rgba(245, 158, 66, 0.28);
+  border-radius: 16px;
+  background: rgba(245, 158, 66, 0.05);
+  font-size: 12.5px;
+  line-height: 1.55;
+  white-space: pre-wrap;
+}
+.eqresumen b {
+  display: block;
+  margin-bottom: 4px;
+}
+.eqresumen.err {
+  border-color: rgba(251, 113, 133, 0.32);
+  background: rgba(251, 113, 133, 0.06);
+}
+/* la tarjeta de equipo del chat: una fila por miembro dentro del .tcard.dcard */
+.eqmiembro {
+  display: flex;
+  align-items: baseline;
+  gap: 8px;
+  padding: 5px 0;
+  border-bottom: 1px dashed var(--line2);
+  font-size: 12px;
+  line-height: 1.5;
+}
+.eqmiembro:last-child {
+  border-bottom: 0;
+}
+.eqmiembro .eqid {
+  color: var(--dim);
+  font-variant-numeric: tabular-nums;
+  flex-shrink: 0;
+}
+.eqmiembro .eqquien {
+  font-weight: 600;
+  flex-shrink: 0;
+}
+.eqmiembro .eqque {
+  flex: 1 1 auto;
+  min-width: 0;
+  color: var(--dim);
+  overflow-wrap: anywhere;
+}
+/* el estado y la insignia de permisos de la fila no se encogen: son el dato que se mira */
+.eqmiembro .abadge {
+  flex-shrink: 0;
+}
 .tooltray {
   margin-top: 20px;
   border: 1px solid var(--line2);
@@ -1850,8 +2352,7 @@ body.nofocus .glowFlow {
 }
 
 /* projects / tools / memory */
-.projwrap,
-.setwrap {
+.projwrap {
   max-width: 860px;
 }
 /* todos los controles de formulario al tema oscuro — nada de estilos nativos del SO */
@@ -2231,6 +2732,11 @@ textarea::placeholder {
 .advbody {
   display: none;
   margin-top: 14px;
+}
+/* el anti-bucles era una tarjeta hermana dentro de .setpanel.on (gap 16px); al
+   mudarse a .advbody perdió ese hueco, así que se le devuelve aquí */
+.advbody .setcard {
+  margin-top: 16px;
 }
 .advcard.on .advbody {
   display: block;
@@ -2849,6 +3355,9 @@ textarea::placeholder {
   border: 1px solid rgba(255, 255, 255, 0.09);
   border-radius: 22px;
   padding: 15px 16px;
+  /* `relative` para que su filo (.rcard::before) se coloque dentro de la tarjeta: sin él
+     el anillo caería sobre el rail entero. Sin z-index no crea contexto de apilamiento. */
+  position: relative;
   background:
     linear-gradient(180deg, rgba(255, 255, 255, 0.07), rgba(255, 255, 255, 0.015) 40%), rgba(var(--face-rgb), calc(0.5 * var(--glass)));
   box-shadow:
@@ -3061,6 +3570,17 @@ textarea::placeholder {
 .hitem:focus-within .hdel {
   opacity: 1;
 }
+/* duplicar: mismo trato que borrar (oculto hasta hover/foco, nunca invisible
+   pero focusable) */
+.hitem .hfork {
+  opacity: 0;
+}
+.hitem:hover .hfork {
+  opacity: 1;
+}
+.hitem:focus-within .hfork {
+  opacity: 1;
+}
 
 /* misc */
 .wb:focus,
@@ -3211,21 +3731,24 @@ i[data-i] {
     grid-template-columns: 1fr;
   }
 }
-/* a partir de aquí los dos campos por fila ya no caben con holgura */
-@media (max-width: 1120px) {
-  .grid,
-  .grid2 {
-    grid-template-columns: 1fr;
-  }
-}
-
 /* toast (centered top) */
-.toast {
+/* Los avisos se apilan DE VERDAD: el contenedor los coloca en columna, así que dos
+   avisos seguidos se leen los dos. Antes cada uno se posicionaba `fixed` en el mismo
+   punto, de modo que el segundo tapaba al primero y el primero se iba sin que nadie
+   lo hubiera visto. */
+#toastStack {
   position: fixed;
   top: 52px;
   left: 50%;
   transform: translateX(-50%);
   z-index: 90;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: 8px;
+  pointer-events: none; /* no bloquea lo que hay debajo (el chat sigue clicable) */
+}
+.toast {
   display: flex;
   align-items: center;
   gap: 9px;
@@ -3293,11 +3816,6 @@ depender del color de acento elegido. */
 }
 #messages ::selection {
   background: rgba(var(--mode-rgb), 0.4);
-}
-
-/* textarea rec state */
-#chatInput.rec {
-  color: var(--warn);
 }
 /* ===== v1.1: confirmation bar, dev metrics, security panel ===== */
 .confirmbar {
@@ -3381,11 +3899,17 @@ depender del color de acento elegido. */
   max-width: 100%;
 }
 
-.grid,
 .grid2 {
   display: grid;
   grid-template-columns: 1fr 1fr;
   gap: 8px 14px;
+}
+/* a partir de aquí los dos campos por fila ya no caben con holgura: la media va
+   DESPUÉS de la base o, a igual especificidad, el orden de fuente la anulaba */
+@media (max-width: 1120px) {
+  .grid2 {
+    grid-template-columns: 1fr;
+  }
 }
 .permrow {
   display: flex;
@@ -3439,7 +3963,7 @@ depender del color de acento elegido. */
 
 /* ============================================================================
    CHAT — rediseño: identidad de modo, tarjetas de herramientas y respuestas
-   Cada modo (ACT/PLAN/THINK) tiene su color real (--mode-c) y toda la vista del
+   Cada modo (ACT/PLAN/THINK/EQUIPO) tiene su color real (--mode-c) y toda la vista del
    chat se tiñe con él: compositor, segmento, estado y badge de cada turno.
    ============================================================================ */
 #view-chat,
@@ -3454,6 +3978,12 @@ depender del color de acento elegido. */
 #view-chat[data-mode='think'] {
   --mode-c: #7db4ff;
   --mode-rgb: 125, 180, 255;
+}
+/* v4.4: modo EQUIPO. Ámbar fijo (245,158,66): el mismo valor que su segmento del
+   compositor, su tarjeta en el chat y su tablero. */
+#view-chat[data-mode='equipo'] {
+  --mode-c: #f59e42;
+  --mode-rgb: 245, 158, 66;
 }
 
 /* ---- cabecera: título + estado en vivo ---- */
@@ -3513,6 +4043,118 @@ depender del color de acento elegido. */
   text-overflow: ellipsis;
 }
 
+/* ---- pestañas de conversaciones abiertas ----
+   Viven en la cabecera del chat, entre el título y los botones. El ancho está TOPEADO
+   (no `flex:1`): con ocho conversaciones abiertas a 1000px —el ancho mínimo de la
+   ventana— la tira se queda con su franja y las que no caben se alcanzan desplazándola
+   en horizontal, en vez de empujar «Nueva conversación» fuera de la pantalla. El
+   padding vertical de 3px deja sitio al anillo de foco sin que el recorte del scroll
+   se lo coma. */
+.ctabs {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  flex: 0 1 auto;
+  min-width: 0;
+  /* Tope de la tira: ni se come la cabecera en una ventana ancha ni empuja los botones
+     fuera en la estrecha (el 45% deja sitio al título y a los tres botones). */
+  max-width: min(380px, 45%);
+  padding: 3px 2px;
+  overflow-x: auto;
+  overflow-y: hidden;
+  scrollbar-width: thin;
+}
+.ctabs::-webkit-scrollbar {
+  height: 4px;
+}
+.ctabs::-webkit-scrollbar-thumb {
+  background: rgba(var(--acc2-rgb), 0.3);
+  border-radius: 2px;
+}
+.ctab {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  flex: 0 0 auto;
+  max-width: 132px;
+  padding: 3px 4px 3px 9px;
+  border-radius: 999px;
+  border: 1px solid var(--line2);
+  background: rgba(var(--panel-rgb), 0.4);
+  color: var(--dim);
+  font: 600 12px var(--font-ui);
+  cursor: pointer;
+  transition: all 0.15s;
+}
+.ctab:hover {
+  color: var(--txt);
+  border-color: var(--line);
+}
+.ctab.on {
+  color: var(--txt);
+  border-color: rgba(var(--acc2-rgb), 0.55);
+  background: rgba(var(--acc2-rgb), 0.12);
+}
+.ctab .ctab-name {
+  overflow: hidden;
+  white-space: nowrap;
+  text-overflow: ellipsis;
+}
+/* Estado ocupado: un punto vivo (el mismo latido que el resto de la app) y el punto
+   del color del modo con el que trabaja. Se distingue de una ociosa de un vistazo,
+   sin tener que abrirla. */
+.ctab .ctab-dot {
+  width: 7px;
+  height: 7px;
+  border-radius: 50%;
+  flex: 0 0 auto;
+  background: var(--line);
+}
+.ctab.busy {
+  color: var(--txt);
+  border-color: rgba(var(--mode-rgb), 0.5);
+}
+.ctab.busy .ctab-dot {
+  background: var(--mode-c);
+  box-shadow: 0 0 8px var(--mode-c);
+  animation: blink 1.5s infinite;
+}
+.ctab .ctab-x {
+  display: grid;
+  place-items: center;
+  width: 18px;
+  height: 18px;
+  flex: 0 0 auto;
+  padding: 0;
+  border: 0;
+  border-radius: 50%;
+  background: transparent;
+  color: inherit;
+  opacity: 0.55;
+  cursor: pointer;
+}
+.ctab .ctab-x .ic {
+  width: 11px;
+  height: 11px;
+}
+.ctab .ctab-x:hover {
+  opacity: 1;
+  background: rgba(var(--acc2-rgb), 0.2);
+}
+/* El estado ocupado se MARCA también en el historial: la fila que trabaja ahora se
+   reconoce sin abrirla (el dato lo manda `conv:list`). */
+.hitem .hbusy {
+  display: inline-block;
+  padding: 1px 7px;
+  border-radius: 999px;
+  font: 700 10px var(--font-ui);
+  letter-spacing: 0.06em;
+  color: var(--mode-c);
+  background: rgba(var(--mode-rgb), 0.12);
+  border: 1px solid rgba(var(--mode-rgb), 0.35);
+  vertical-align: 1px;
+}
+
 /* ---- compositor teñido por el modo (siempre visible, sin ocupar espacio) ---- */
 #view-chat .composer {
   /* el borde toma el color del modo, y es lo que identifica el compositor contra el
@@ -3550,7 +4192,7 @@ depender del color de acento elegido. */
   color: var(--mode-c);
 }
 
-/* ---- estado vacío: qué puede hacer + los tres modos explicados ----
+/* ---- estado vacío: qué puede hacer + los modos explicados ----
    Es una capa SOBRE el área de mensajes, no parte de ella: #messages se vacía
    con innerHTML y se llevaría por delante el bloque. */
 .msgs-area {
@@ -3570,7 +4212,10 @@ depender del color de acento elegido. */
 }
 .ce-inner {
   width: 100%;
-  max-width: 620px;
+  /* v4.4: 760px y no 620 — el estado vacío enseña los CUATRO modos en una fila (la rejilla
+     pide 180px por tarjeta + los huecos) y a 620 el cuarto caía a una segunda línea. El
+     resto del héroe (título, idea y sugerencias) va centrado, así que no cambia de sitio. */
+  max-width: 760px;
   text-align: center;
   position: relative;
   z-index: 1;
@@ -3631,7 +4276,10 @@ depender del color de acento elegido. */
 /* rejilla adaptativa real: 3 columnas si caben, 2 en ventanas medianas, 1 si no */
 .ce-modes {
   display: grid;
-  grid-template-columns: repeat(auto-fit, minmax(180px, 1fr));
+  /* v4.4: mínimo 150px (antes 180) para que los CUATRO modos quepan en una sola fila también
+     en la ventana mínima (1000px): a 180 el cuarto caía a una segunda línea y el héroe
+     crecía de más. En la ventana normal las tarjetas siguen saliendo a ~182px. */
+  grid-template-columns: repeat(auto-fit, minmax(150px, 1fr));
   gap: 10px;
   margin-top: 22px;
 }
@@ -4021,6 +4669,9 @@ depender del color de acento elegido. */
   margin: 4px 0;
   background: rgba(var(--deep-rgb), 0.5);
   overflow: hidden;
+  /* `relative` para que el filo (.tcard::before) y su recorrido (::after) caigan dentro de
+     la tarjeta: sin él se colocarían sobre la burbuja que la contiene. Sin z-index. */
+  position: relative;
   transition: border-color 0.16s;
 }
 .tcard.run {
@@ -4509,7 +5160,7 @@ depender del color de acento elegido. */
     0 0 12px rgba(var(--glow-rgb), 0.55),
     inset 0 0 0 1px rgba(255, 255, 255, 0.18);
 }
-/* ===== componente slider (velocidad de voz, intensidad del glow, vidrio) =====
+/* ===== componente slider (intensidad del glow, vidrio) =====
    Canal de vidrio con relleno REAL hasta el pulgar: --fill lo pinta el JS en
    cada input, así que el valor se lee de un vistazo. El relleno se «carga»
    (alpha .55 → 1) hacia el pulgar y la canal vacía va hundida en negro, para
@@ -4687,10 +5338,12 @@ input.glowslider.compact::-webkit-slider-thumb {
   flex-shrink: 0;
   align-self: center;
 }
-/* arrastrando ficheros sobre el chat: el compositor lo anuncia */
-#view-chat.dragging /* el foco del compositor es la única señal de que el campo está activo (#chatInput
-   va sin outline): se refuerza hasta pasar 3:1 contra el lienzo */
-.composer {
+/* arrastrando ficheros sobre el chat: el compositor lo anuncia.
+   (El comentario del foco del compositor vivía METIDO dentro de este selector y lo
+   partía en dos líneas: el CSS lo toleraba, pero cualquiera que lo leyera creía que
+   esta regla era la del foco. El foco de verdad está en `#view-chat .composer:focus-within`,
+   más arriba.) */
+#view-chat.dragging .composer {
   border-color: rgba(var(--acc-rgb), 0.95);
   box-shadow:
     0 0 0 3px rgba(var(--acc-rgb), 0.45),
@@ -4755,16 +5408,16 @@ input.glowslider.compact::-webkit-slider-thumb {
 }
 
 /* ============ accesibilidad: movimiento reducido ============
-    Un solo sitio para el movimiento reducido: se va el latido y cualquier recorrido,
-    y se queda el enlace de feedback que importa —el aura sigue visible y quieta,
-    con su intensidad por estado—. Apaga las animaciones INFINITAS (glow del marco,
-    indicadores de actividad, puntos de escritorio, caret de streaming, barra de
-    confirmación), que son las que no paran nunca. Los selectores de estados del
-    glow viven aquí, no en dos bloques: tenerlos repartidos ya dejó un !important
-    obsoleto anulando el aura. */
+    Un solo sitio para el movimiento reducido: se va cualquier recorrido y se queda lo que
+    es INFORMACIÓN —el filo sigue encendido donde toca, con su nivel por estado, y la
+    ventana sigue marcando que hay trabajo—. Apaga las animaciones INFINITAS (indicadores
+    de actividad, puntos de escritorio, caret de streaming, barra de confirmación), que son
+    las que no paran nunca. */
 @media (prefers-reduced-motion: reduce) {
-  .glow::before,
-  .glowRing {
+  /* el recorrido del filo (el único movimiento del borde vivo) no se hace */
+  .filo::after,
+  .shell .rcard::after,
+  .shell .tcard::after {
     animation: none !important;
   }
   .modelmenu,
@@ -4774,8 +5427,7 @@ input.glowslider.compact::-webkit-slider-thumb {
     animation: none !important;
   }
   input[type='range'].glowslider,
-  input[type='range'].glowslider::-webkit-slider-thumb,
-  #vmOrbe {
+  input[type='range'].glowslider::-webkit-slider-thumb {
     transition: none;
   }
   /* Red de seguridad: lo arriba apaga lo que se nombró, pero la hoja lleva 27
@@ -4791,18 +5443,6 @@ input.glowslider.compact::-webkit-slider-thumb {
     transition-duration: 0.01ms !important;
     scroll-behavior: auto !important;
   }
-  .shell.glow-think .glow::before {
-    opacity: 0.42;
-  }
-  .shell.glow-work .glow::before {
-    opacity: 0.58;
-  }
-  .shell.glow-listen .glow::before {
-    opacity: 0.32;
-  }
-  .shell.glow-speak .glow::before {
-    opacity: 0.5;
-  }
   .shell::before,
   .nb.live,
   .pulse-dot,
@@ -4810,8 +5450,7 @@ input.glowslider.compact::-webkit-slider-thumb {
   .ch-status .dot,
   .plancard li.now .pl-n,
   .stream::after,
-  .confirmbar .cb-dot,
-  .glowFlow {
+  .confirmbar .cb-dot {
     animation: none !important;
   }
 }
@@ -4819,12 +5458,14 @@ input.glowslider.compact::-webkit-slider-thumb {
 /* ============ el rail solo donde aporta ============
    El panel «Live / Agentes activos / Actividad» está vacío en siete de las nueve
    vistas y se lleva 300px de la ventana (23% a 1280px). Se queda donde hay
-   actividad en vivo que mirar y desaparece en el resto, devolviendo el ancho a la
-   tarea. La actividad en vivo sigue accesible desde Agentes. */
-.app:not([data-view='chat']):not([data-view='agents']) {
+   actividad en vivo que mirar —el chat, la vista Agentes y la vista Equipo (v4.4:
+   es donde están las insignias de permisos de los compañeros)— y desaparece en el
+   resto, devolviendo el ancho a la tarea. La actividad en vivo sigue accesible
+   desde Agentes. */
+.app:not([data-view='chat']):not([data-view='agents']):not([data-view='equipo']) {
   grid-template-columns: 232px 1fr;
 }
-.app:not([data-view='chat']):not([data-view='agents']) .rail {
+.app:not([data-view='chat']):not([data-view='agents']):not([data-view='equipo']) .rail {
   display: none;
 }
 
@@ -4933,128 +5574,234 @@ input.glowslider.compact::-webkit-slider-thumb {
   }
 }
 
-/* ---- modo voz ---- */
-/* La paleta del proyecto no tiene `--accent` (el acento rico es `--vio`, que además
-   sigue el tema elegido): se define aquí, dentro del panel, para que la cabecera y el
-   nombre de quien habla pinten de acento en vez de heredar el color del texto. */
-#voiceMode {
-  --accent: var(--vio);
-  position: absolute;
-  inset: 14px;
-  z-index: 40;
-  display: flex;
-  flex-direction: column;
-  align-items: center;
-  justify-content: center;
-  gap: 10px;
-  background: rgba(var(--deep-rgb), 0.78);
-  border: 1px solid rgba(255, 255, 255, 0.1);
-  border-radius: 26px;
-  box-shadow:
-    0 24px 70px rgba(0, 0, 0, 0.6),
-    inset 0 1px 0 rgba(255, 255, 255, 0.1);
-  backdrop-filter: blur(26px) saturate(1.5);
-  -webkit-backdrop-filter: blur(26px) saturate(1.5);
-  animation: pop-in 0.3s cubic-bezier(0.34, 1.4, 0.64, 1);
-}
-#voiceMode[hidden] {
-  display: none;
-}
-#vmOrbe {
-  width: 190px;
-  height: 190px;
-} /* el lienzo va sin fondo: se ve el panel */
-.vm-cabecera {
-  letter-spacing: 0.06em;
-  text-transform: uppercase;
-  font-size: 11px;
-  color: var(--accent);
-}
-.vm-texto {
-  width: min(680px, 86%);
-  max-height: 34vh;
-  overflow: auto;
-}
-.vm-parcial {
-  opacity: 0.55;
-  font-style: italic;
-  margin: 4px 0;
-}
-.vm-fila {
-  display: flex;
-  gap: 8px;
-  margin: 4px 0;
-}
-.vm-quien {
-  min-width: 62px;
-  font-weight: 600;
-  color: var(--accent);
-}
-.vm-pasos {
-  font-size: 12px;
-  opacity: 0.85;
-  min-height: 18px;
-}
-.vm-confirm {
-  border: 1px solid rgba(251, 191, 36, 0.5);
-  background: rgba(251, 191, 36, 0.08);
-  border-radius: 10px;
-  padding: 10px;
-  width: min(560px, 84%);
-}
-.vm-botones {
-  display: flex;
-  gap: 8px;
-  margin-top: 6px;
-}
-/* Los botones de la confirmación llevan TEXTO («Sí, hazlo»), y `.cbtn` es el cuadro
-   redondo de 34×34 de los iconos del compositor: sin esta regla la etiqueta se partía en
-   dos líneas dentro de un cuadrado de 34px. */
-#voiceMode .vm-botones .cbtn {
-  width: auto;
-  height: auto;
-  border-radius: 9px;
-  padding: 7px 14px;
-  white-space: nowrap;
-}
-.vm-error {
-  border: 1px solid rgba(248, 113, 113, 0.5);
-  border-radius: 10px;
-  padding: 10px;
-  width: min(560px, 84%);
-}
-.vm-pie {
-  font-size: 11px;
-  opacity: 0.6;
-  display: flex;
-  gap: 18px;
-}
-/* Aparte del pie (y no dentro): `.vm-pie` lleva `opacity: .6` y un hijo no puede subir la
-   opacidad de su padre, así que el botón de parar quedaría casi invisible — y este botón
-   tiene que verse, porque es la única forma de detener al agente con el panel abierto. */
-.vm-parar {
-  width: auto;
-  height: auto;
-  border-radius: 9px;
-  padding: 6px 16px;
-  white-space: nowrap;
-  border-color: rgba(248, 113, 113, 0.55);
-  color: #fca5a5;
-}
-.vm-dudoso .vm-dice {
-  color: #fcd34d;
-} /* confianza baja: se ve que dudó */
-.vm-editar {
-  background: #17141f;
-  color: inherit;
-  border: 1px solid rgba(139, 92, 246, 0.5);
-  border-radius: 6px;
-  padding: 2px 6px;
-  font: inherit;
-  min-width: 60%;
-}
 kbd {
   border: 1px solid rgba(255, 255, 255, 0.25);
   border-radius: 5px;
   padding: 1px 6px;
+}
+
+/* ============ vista Memoria (fase 1) ============
+   Cinco secciones en columna + pie. Reutiliza lo que ya existe (.memlist, .memitem,
+   .hpill, .hdim, .srow, .sw, .btn) y añade solo lo propio: los grupos de hábitos, las
+   píldoras de etiqueta, el aviso de deshacer y la confirmación escrita del borrado. */
+.memsec {
+  margin: 0 0 22px;
+  max-width: 860px;
+}
+.memsec-t {
+  display: flex;
+  align-items: baseline;
+  gap: 8px;
+  font: 600 11px var(--font-display);
+  letter-spacing: 0.08em;
+  text-transform: uppercase;
+  color: var(--dim);
+  margin: 0 0 10px;
+}
+.memsec-note {
+  font: 500 11px var(--font-ui);
+  letter-spacing: 0;
+  text-transform: none;
+  color: var(--dim);
+}
+.memsec-lead {
+  color: var(--dim);
+  font-size: 12.5px;
+  line-height: 1.55;
+  margin: 0 0 12px;
+  max-width: 620px;
+}
+.memsec-nota {
+  color: var(--dim);
+  font-size: 12.5px;
+  line-height: 1.55;
+  margin: 0 0 12px;
+  max-width: 620px;
+  border-left: 2px solid var(--line2);
+  padding-left: 10px;
+}
+/* el buscador propio de la ficha respira igual que el de historial */
+.memsearch {
+  width: 100%;
+  max-width: 420px;
+  margin-bottom: 10px;
+}
+.membuscar {
+  display: flex;
+  gap: 8px;
+  align-items: center;
+  margin-bottom: 10px;
+}
+.membuscar .memsearch {
+  margin-bottom: 0;
+}
+/* píldoras de etiqueta: filtran la ficha y se leen como parte del recuerdo */
+.memfiltro {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 6px;
+  margin-bottom: 10px;
+}
+.memtag {
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+  font: 500 11px var(--font-ui);
+  padding: 2px 9px;
+  border-radius: 999px;
+  border: 1px solid var(--line2);
+  background: rgba(var(--acc2-rgb), 0.12);
+  color: var(--txt);
+  cursor: default;
+}
+.memfiltro .memtag {
+  cursor: pointer;
+}
+.memfiltro .memtag small {
+  color: var(--dim);
+  font-size: 10px;
+}
+.memfiltro .memtag.on {
+  border-color: var(--vio2);
+  background: rgba(var(--acc2-rgb), 0.26);
+}
+/* importancia en tres niveles: el activo se ve, no se adivina por el color del botón */
+.memimp {
+  display: inline-flex;
+  gap: 4px;
+}
+.memimp .btn {
+  text-transform: capitalize;
+  font-size: 11px;
+  padding: 4px 9px;
+  height: auto;
+}
+.memimp .btn.on {
+  border-color: var(--vio2);
+  background: rgba(var(--acc2-rgb), 0.24);
+  color: #fff;
+}
+/* edición en el sitio: el texto es el campo, no aparece un formulario nuevo */
+.memitem .memtxt[contenteditable='true'] {
+  display: inline-block;
+  min-width: 160px;
+  padding: 2px 6px;
+  border-radius: 8px;
+  outline: 1px solid var(--vio2);
+  background: rgba(var(--panel-rgb), 0.7);
+}
+/* deshacer un olvido, en la propia sección: un aviso del sistema se va solo */
+.memundo {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  margin-bottom: 10px;
+  padding: 8px 12px;
+  border: 1px solid var(--line);
+  border-radius: 14px;
+  background: rgba(var(--acc2-rgb), 0.14);
+  font-size: 13px;
+}
+/* hábitos: un grupo por categoría, con su «olvidar» */
+.hgrupo {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 8px;
+  margin-bottom: 8px;
+}
+.hgr-t {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  min-width: 116px;
+  color: var(--txt);
+  font-size: 13px;
+}
+.hgr-t .ic {
+  width: 14px;
+  height: 14px;
+  color: var(--vio2);
+}
+.hgr-n {
+  color: var(--dim);
+  font-size: 11px;
+  min-width: 52px;
+}
+.membarra {
+  margin-bottom: 10px;
+}
+.memresults {
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+}
+/* estados de error y de carga: nunca un panel en blanco */
+.memerror {
+  text-align: left;
+}
+.memerror .memerror-det {
+  color: var(--dim);
+  font: 400 11px var(--font-mono);
+  word-break: break-word;
+}
+.memcargando {
+  margin: 0;
+}
+/* pie */
+.mempie {
+  border-top: 1px solid var(--line2);
+  padding-top: 16px;
+  max-width: 860px;
+}
+.mempie .srow {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 14px;
+  margin-bottom: 14px;
+}
+.mempie .st {
+  display: block;
+  max-width: 560px;
+}
+.mempie .st b {
+  display: block;
+  font-size: 14px;
+  color: var(--txt);
+}
+.mempie .st small {
+  display: block;
+  color: var(--dim);
+  font-size: 12px;
+  line-height: 1.5;
+  margin-top: 3px;
+}
+.memlimites {
+  display: grid;
+  gap: 4px;
+  margin: 0 0 14px;
+  max-width: 620px;
+  color: var(--dim);
+  font-size: 12px;
+  line-height: 1.55;
+}
+.memacciones {
+  margin: 0 0 4px;
+}
+.memwipe {
+  margin-top: 12px;
+  padding: 14px;
+  border: 1px solid rgba(251, 113, 133, 0.4);
+  border-radius: 14px;
+  background: rgba(251, 113, 133, 0.08);
+  max-width: 620px;
+}
+.memwipe p {
+  font-size: 12.5px;
+  line-height: 1.55;
+  margin: 0 0 10px;
+}
+.memwipe input {
+  margin-right: 8px;
 }

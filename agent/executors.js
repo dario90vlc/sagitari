@@ -22,9 +22,14 @@ const { tipoDeImagen, decodeOut, openUrlAllowed } = require('./exec-util');
 
 /* ---- confinamiento: los datos de la app no se leen ni se escriben ----
    CONFIG_DIR (claves API, conversaciones, memoria) no es un objetivo legítimo
-   para read/write/edit del agente: attachments.js ya lo bloquea para adjuntos
+   para read/write/edit del agente: ipc-chat.js ya lo bloquea para adjuntos
    y aquí se cierra para las herramientas. Tampoco se escribe en raíces del
-   sistema. `resuelta` normaliza sin tocar disco (el archivo puede no existir). */
+   sistema. `rutaResuelta` normaliza sin tocar disco (el archivo puede no existir),
+   pero comparar solo eso deja un agujero: un junction DENTRO del espacio de trabajo
+   que apunte a %APPDATA%\SagitariAI tiene ruta normalizada «de fuera» y archivo real
+   «de dentro». Por eso, cuando la comparación barata dice «fuera», se compara el
+   camino REAL (realpath, como ipc-chat.js con los adjuntos) y, si no se puede
+   resolver, se BLOQUEA: la duda nunca se convierte en permiso. */
 const DATOS_DIR = (() => {
   try {
     return path.win32.normalize(dataDir().toLowerCase());
@@ -44,19 +49,65 @@ function dentroDe(file, dir) {
   const r = path.win32.relative(dir, file);
   return r === '' || (!r.startsWith('..') && !path.win32.isAbsolute(r));
 }
-function esDatosApp(p) {
-  if (!DATOS_DIR) return false;
-  return dentroDe(rutaResuelta(p).toLowerCase(), DATOS_DIR);
+/* Camino real de una ruta, con caché: realpath es una llamada al sistema y esto corre
+   en cada lectura/escritura del agente. Se paga UNA vez por ruta distinta. Si el
+   archivo aún no existe (write_file a algo nuevo) se resuelve el ancestro que SÍ
+   existe y se reengancha el resto — que es exactamente donde puede haber el junction.
+   Devuelve null si no se pudo resolver nada (quien pregunta bloquea). */
+const REALES = new Map(); // ruta normalizada en minúsculas -> camino real (o null)
+const MAX_REALES = 4096; // tope del caché: una sesión larga no lo hace crecer sin freno
+function caminoReal(norm) {
+  const clave = norm.toLowerCase();
+  if (REALES.has(clave)) return REALES.get(clave);
+  let real = null;
+  let actual = norm;
+  const cola = [];
+  for (let i = 0; i < 64; i++) {
+    // 64 saltos: Windows no admite cadenas de enlaces más largas, así que esto no cuelga
+    try {
+      const r = path.win32.normalize(fs.realpathSync(actual));
+      real = cola.length ? path.win32.join(r, ...cola.reverse()) : r;
+      break;
+    } catch {
+      const padre = path.win32.dirname(actual);
+      if (padre === actual) break; // raíz de la unidad: no hay nada más que resolver
+      cola.push(path.win32.basename(actual));
+      actual = padre;
+    }
+  }
+  if (REALES.size >= MAX_REALES) REALES.clear();
+  REALES.set(clave, real);
+  return real;
 }
+/** 'si' | 'no' | 'duda': si la ruta (normalizada o REAL) cae en los datos de la app. */
+function enDatosApp(p) {
+  if (!DATOS_DIR) return 'no';
+  const norm = rutaResuelta(p);
+  if (dentroDe(norm.toLowerCase(), DATOS_DIR)) return 'si'; // ya cae dentro: sin tocar disco
+  const real = caminoReal(norm);
+  if (real === null) return 'duda';
+  return dentroDe(real.toLowerCase(), DATOS_DIR) ? 'si' : 'no';
+}
+const MSG_DATOS_LECTURA = 'Error: no puedo leer el directorio de datos de la app (ahí viven tus claves y conversaciones).';
+const MSG_DATOS_ESCRITURA = 'Error: no puedo escribir en el directorio de datos de la app (ahí viven tus claves y conversaciones).';
+const MSG_DATOS_DUDA =
+  'Error: no pude comprobar dónde acaba esa ruta (no se puede resolver); una ruta que no se puede verificar no se toca.';
 const SYS_WRITE_RX = /^[a-z]:\\(windows|program files|program files \(x86\)|programdata)([\\/]|$)/i;
 function bloqueoLectura(p) {
-  if (esDatosApp(p)) return 'Error: no puedo leer el directorio de datos de la app (ahí viven tus claves y conversaciones).';
+  const v = enDatosApp(p);
+  if (v === 'si') return MSG_DATOS_LECTURA;
+  if (v === 'duda') return MSG_DATOS_DUDA;
   return null;
 }
 function bloqueoEscritura(p) {
+  const v = enDatosApp(p);
+  if (v === 'si') return MSG_DATOS_ESCRITURA;
+  if (v === 'duda') return MSG_DATOS_DUDA;
+  // el sistema también se comprueba sobre el camino REAL: un junction a C:\Windows
+  // cuela igual que uno a los datos de la app si se mira solo la ruta escrita
+  const real = caminoReal(rutaResuelta(p));
   const r = rutaResuelta(p);
-  if (esDatosApp(p)) return 'Error: no puedo escribir en el directorio de datos de la app (ahí viven tus claves y conversaciones).';
-  if (SYS_WRITE_RX.test(r.toLowerCase())) return 'Error: no puedo escribir en carpetas del sistema.';
+  if (SYS_WRITE_RX.test((real || r).toLowerCase())) return 'Error: no puedo escribir en carpetas del sistema.';
   if (/^[a-z]:[\\/]?$/i.test(r)) return 'Error: no puedo escribir en la raíz de una unidad.';
   return null;
 }
@@ -205,11 +256,16 @@ async function revisarSintaxis(absPath) {
  *  este turno ha cambiado. Un tipo que no cuadra o una variable que no existe se
  *  ven AHORA, no tres pasos después.
  *
- *  Dos reglas que evitan que esto estorbe:
+ *  Tres reglas que evitan que esto estorbe y una que evita que se convierta en una
+ *  vía de ejecución:
  *   · un comprobador que no está en el equipo o que tarda demasiado se APARTA
  *     (se recuerda y no se vuelve a intentar), porque eso no es un error del código.
  *   · los hallazgos que caen fuera de las líneas tocadas son PREEXISTENTES: se
  *     cuentan y se dicen, pero no se le exigen.
+ *   · un comprobador que vive en el proyecto —o la config que lo define— solo se lanza
+ *     si el turno NO lo ha tocado: escribir node_modules/eslint/bin/eslint.js (o un
+ *     pyproject.toml que pida ruff) y que la app lo ejecute sola tras la siguiente
+ *     escritura sería ejecución sin revisión (v3.1, ver `comprobadorDeConfianza`).
  * --------------------------------------------------------------------------- */
 
 const CHECK_APARTADO = new Set(); // 'id|espacio': no está instalado o no se pudo lanzar
@@ -224,8 +280,81 @@ function apartarCheck(ws, id, ms) {
   else CHECK_APARTADO.add(claveCheck(ws, id));
 }
 
-/** Lanza un comprobador del plan y devuelve su salida, o null si hay que saltarlo. */
-async function lanzarCheck(ws, c, archivos) {
+/* Ficheros de los que SALE el plan de comprobación (los lee diagnosticos.js para
+   decidir qué comprobador toca: package.json, requirements.txt, la config de ESLint…).
+   Si este turno ha escrito alguno, el plan ya no es «el del proyecto» sino el del
+   modelo: no se lanza nada de él. */
+const CHECK_ENTRADAS = [
+  'package.json',
+  'requirements.txt',
+  'requirements-dev.txt',
+  'dev-requirements.txt',
+  'pyproject.toml',
+  'setup.cfg',
+  'mypy.ini',
+  'ruff.toml',
+  '.ruff.toml',
+  '.flake8',
+  'eslint.config.js',
+  'eslint.config.mjs',
+  'eslint.config.cjs',
+  'eslint.config.ts',
+  '.eslintrc.js',
+  '.eslintrc.cjs',
+  '.eslintrc.mjs',
+  '.eslintrc.json',
+  '.eslintrc.yml',
+  '.eslintrc',
+];
+
+/**
+ * ¿Alguna de estas piezas (archivos del espacio de trabajo) la ha escrito ESTE turno?
+ *
+ * Es la comprobación que comparten el comprobador por archivo (`comprobadorDeConfianza`)
+ * y la puerta del cierre (`ejecutarComandoVerificacion`): las dos tienen que saber si el
+ * código que van a lanzar salió del modelo en este mismo turno. La lista de tocados es la
+ * MISMA con la que se deshace el turno (`cambios`), así que no hay que adivinar.
+ * Lo que vive FUERA del espacio de trabajo (un eslint global, ruff, el node de la app) no
+ * lo controla el proyecto: no cuenta.
+ * Si no se puede consultar, `error: true` (quien pregunta decide; en la duda, no ejecutar).
+ *
+ * @returns {{tocada: string|null, error: boolean}} la pieza tocada (tal y como llegó) o null.
+ */
+function piezaTocadaEsteTurno(ws, piezas, dueno = '') {
+  const raiz = rutaResuelta(ws).toLowerCase();
+  let tocados;
+  try {
+    tocados = new Set((cambios.archivosTocados(ws, dueno) || []).map((x) => rutaResuelta(x).toLowerCase()));
+  } catch {
+    return { tocada: null, error: true };
+  }
+  for (const pieza of piezas || []) {
+    const p = String(pieza || '');
+    if (!p) continue;
+    const abs = rutaResuelta(path.win32.isAbsolute(p) ? p : path.win32.join(ws, p)).toLowerCase();
+    if (!dentroDe(abs, raiz)) continue; // de fuera del proyecto: es del equipo
+    if (tocados.has(abs)) return { tocada: p, error: false };
+  }
+  return { tocada: null, error: false };
+}
+
+/**
+ * ¿Se puede lanzar este comprobador? Se mira lo que se ejecuta (y lo que lo define):
+ * lo que vive DENTRO del espacio de trabajo solo se lanza si el turno NO lo ha tocado.
+ * Un comprobador de FUERA (un eslint global, ruff, el node de la app) no lo controla el
+ * espacio de trabajo: se lanza como siempre.
+ * @returns {{ok: boolean, motivo?: string}}
+ */
+function comprobadorDeConfianza(ws, piezas, dueno = '') {
+  const r = piezaTocadaEsteTurno(ws, piezas, dueno);
+  if (r.error) return { ok: false, motivo: 'no se pudo comprobar si ya estaba antes de este turno' };
+  if (r.tocada) return { ok: false, motivo: 'lo ha escrito este turno (' + r.tocada + ')' };
+  return { ok: true };
+}
+
+/** Lanza un comprobador del plan y devuelve su salida, null si hay que saltarlo, o
+    `{bloqueado}` si no se lanza por seguridad (el texto lo ve el modelo). */
+async function lanzarCheck(ws, c, archivos, dueno = '') {
   const clave = claveCheck(ws, c.id);
   if (CHECK_APARTADO.has(clave)) return null;
   const hasta = CHECK_LENTO.get(clave);
@@ -241,6 +370,17 @@ async function lanzarCheck(ws, c, archivos) {
   const t0 = Date.now();
   try {
     const r = mcpTransport.resolveCommand(prog, argv);
+    /* v3.1: un comprobador que VIVE en el espacio de trabajo es código del proyecto —
+       y el proyecto lo puede haber escrito este mismo turno (node_modules/eslint/bin/
+       eslint.js). Lanzarlo sería ejecutar lo que escribió el modelo sin que nadie lo
+       revise, justo lo que este ejecutor evita con los comandos de cierre. Los del
+       EQUIPO (un eslint global, ruff, el node de la app) no dependen del espacio de
+       trabajo y siguen lanzándose igual. */
+    const conf = comprobadorDeConfianza(ws, [r.file, c.entrada, ...CHECK_ENTRADAS], dueno);
+    if (!conf.ok)
+      return {
+        bloqueado: `No he pasado ${c.etiqueta}: ${conf.motivo}. El comprobador y la configuración que lo define salen del proyecto, y este turno los ha tocado: lanzarlo sería ejecutar lo que ha escrito el propio modelo sin que nadie lo revise. Si lo quieres pasar ahora, lánzalo con run_command (esa sí pide permiso al usuario).`,
+      };
     res = await runProg(r.file, r.argv, { env: r.env, verbatim: r.verbatim, timeout: c.timeoutMs || 20000, cwd: ws });
   } catch {
     apartarCheck(ws, c.id);
@@ -259,7 +399,7 @@ async function lanzarCheck(ws, c, archivos) {
  * Pasa los comprobadores del proyecto sobre los archivos recién escritos.
  * @returns {{texto: string, errores: number}} `errores` = hallazgos NUEVOS de tipo error.
  */
-async function revisarEstatico(ws, archivos) {
+async function revisarEstatico(ws, archivos, dueno = '') {
   if (!ws) return { texto: '', errores: 0 };
   let checks = [];
   try {
@@ -268,15 +408,20 @@ async function revisarEstatico(ws, archivos) {
     return { texto: '', errores: 0 };
   }
   if (!checks.length) return { texto: '', errores: 0 };
-  const lineasDe = (abs) => cambios.lineasCambiadas(ws, abs);
+  const lineasDe = (abs) => cambios.lineasCambiadas(ws, abs, dueno);
   const partes = [];
   let errores = 0;
   for (const c of checks) {
     let res = null;
     try {
-      res = await lanzarCheck(ws, c, archivos);
+      res = await lanzarCheck(ws, c, archivos, dueno);
     } catch {
       res = null;
+    }
+    if (res && res.bloqueado) {
+      // no se lanzó por seguridad: se dice (sin contarlo como error del código)
+      partes.push('⚠ ' + res.bloqueado);
+      continue;
     }
     if (!res) continue;
     const salida = String(res.stdout || '') + (String(res.stderr || '').trim() ? '\n' + String(res.stderr) : '');
@@ -336,9 +481,71 @@ async function ejecutarHook(plantilla, { ws = '', archivos = [], timeoutMs = 600
  * Va por aquí y no por `run_command` a propósito: es la comprobación de la propia
  * app (como el chequeo de sintaxis), así que no pide confirmación al usuario ni
  * cuenta como una acción del modelo. Se ejecuta con cwd en el espacio de trabajo.
+ *
+ * v3.1: el comando sale del MANIFIESTO del proyecto (package.json, pyproject.toml,
+ * Makefile…) y ese manifiesto lo puede haber escrito el propio modelo —una escritura
+ * que el usuario confirmó como «crear un archivo», no como «ejecutar esto»—. Por eso
+ * no basta con que el comando se vea inocente: tiene que ser el MISMO que ya era la
+ * comprobación del proyecto al EMPEZAR el turno (`comandoPrevio`) y pasar además la
+ * barrera de `comandos.clasificar`. Sin las dos cosas no se ejecuta y se explica qué
+ * falta; se devuelve la misma forma que una ejecución fallida, para que quien llama
+ * (el cierre del turno) lo trate como un fallo y no como un «no había nada».
+ *
+ * v5.0: comparar el TEXTO del comando no basta en el caso «mismo nombre, otro cuerpo»
+ * (el modelo reescribe `scripts.test` o añade un `pretest`/`posttest`): el comando sigue
+ * siendo `npm test` y comparar cadenas lo dejaba pasar, ejecutando el script recién
+ * escrito sin tarjeta de ejecución. Por eso quien llama mira también si el MANIFIESTO
+ * del que sale el plan lo ha escrito el modelo este turno (`manifiestoTocado`, con la
+ * misma lista de tocados que usa `comprobadorDeConfianza`).
+ *
+ * @param {string} comando
+ * @param {{cwd?: string, timeoutMs?: number, registerKillable?: Function,
+ *          clasificado?: {nivel: string, motivo?: string}, comandoPrevio?: boolean,
+ *          manifiestoTocado?: string|null}} opts
+ *   `clasificado`: resultado de comandos.clasificar(comando) — si no se pasa, se clasifica aquí.
+ *   `comandoPrevio`: ¿este MISMO comando ya era la comprobación del proyecto antes de este
+ *   turno? `false` = lo escribió este turno → se rechaza. Ausente = quien llama no usa la
+ *   puerta (el banco de tareas: ahí el comando lo escribió el usuario, no el modelo).
+ *   `manifiestoTocado`: motivo por el que el manifiesto del plan no es de fiar (lo escribió
+ *   este turno, o no se pudo comprobar). Se pasa ya redactado para que el mensaje sea el
+ *   mismo que el del comprobador por archivo.
+ * @returns {Promise<{code: number|null, stdout: string, stderr: string}>}
  */
-async function ejecutarComandoVerificacion(comando, { cwd, timeoutMs = 300000, registerKillable } = {}) {
-  return run(String(comando), { cwd, timeout: timeoutMs, registerKillable, maxBuffer: 8 * 1024 * 1024 });
+async function ejecutarComandoVerificacion(
+  comando,
+  { cwd, timeoutMs = 300000, registerKillable, clasificado, comandoPrevio, manifiestoTocado } = {},
+) {
+  const texto = String(comando);
+  const clase = clasificado || comandos.clasificar(texto);
+  // 'permitido' es el nivel que autoriza; comandos.clasificar lo llama 'normal' (una
+  // orden sencilla y de solo lectura) y reserva 'sensible' y 'prohibido' para el resto.
+  const permitido = !clase || clase.nivel === 'normal' || clase.nivel === 'permitido';
+  const negar = (motivo) => ({
+    code: 1,
+    stdout: '',
+    stderr:
+      `Error: no he ejecutado la comprobación de cierre («${texto}»): ${motivo}.` +
+      ' Esa comprobación sale de los archivos del proyecto, y esos los puede haber escrito el propio modelo' +
+      ' en este mismo turno, así que solo se lanza si ya era la comprobación del proyecto ANTES del turno y si' +
+      ' el comando es inocuo. Para lanzarla: puedes ejecutarla con run_command (esa sí pide permiso al usuario),' +
+      ' o el usuario puede declararla en el proyecto (por ejemplo en "scripts" de package.json) para que valga' +
+      ' desde el próximo turno.',
+  });
+  if (!permitido) {
+    return negar(
+      clase.nivel === 'prohibido'
+        ? 'no voy a ejecutar un comando prohibido (' + (clase.motivo || 'destruye el sistema o los datos') + ')'
+        : 'el comando es sensible (' + (clase.motivo || 'pide confirmación') + ') y aquí no hay usuario a quien preguntar',
+    );
+  }
+  if (manifiestoTocado) {
+    // mismo texto de comando, pero el manifiesto del que sale lo escribió este turno
+    return negar(manifiestoTocado);
+  }
+  if (comandoPrevio === false) {
+    return negar('no era la comprobación del proyecto al empezar el turno, así que la ha traído este turno');
+  }
+  return run(texto, { cwd, timeout: timeoutMs, registerKillable, maxBuffer: 8 * 1024 * 1024 });
 }
 
 /**
@@ -377,7 +584,7 @@ function errorEdicion(p, texto, r) {
   return 'Error en ' + p + ' — ' + detalleEdicion('no se pudo editar', texto, r);
 }
 
-async function resultadoEscritura(absPath, okText, { checked = [], workspace = null, settings = null } = {}) {
+async function resultadoEscritura(absPath, okText, { checked = [], workspace = null, settings = null, ownerCambios = '' } = {}) {
   const archivos = [absPath, ...checked];
   const fallos = [];
   for (const f of archivos) {
@@ -413,7 +620,7 @@ async function resultadoEscritura(absPath, okText, { checked = [], workspace = n
   if (!activo || !workspace) return conHook(`OK: ${okText}`);
   let est = { texto: '', errores: 0 };
   try {
-    est = await revisarEstatico(workspace, archivos);
+    est = await revisarEstatico(workspace, archivos, ownerCambios);
   } catch {
     est = { texto: '', errores: 0 };
   }
@@ -441,6 +648,24 @@ Add-Type -Namespace J -Name K -MemberDefinition '[DllImport("user32.dll")] publi
 }
 
 // ---- File helpers -------------------------------------------------------
+
+/**
+ * Escribe un archivo con tmp + rename: `writeFile` TRUNCA el destino al abrirlo, así
+ * que un cierre de la app, un disco lleno o un antivirus a mitad dejaba el archivo del
+ * usuario cortado y sin copia. Con el temporal hermano, el archivo bueno no desaparece
+ * hasta que el contenido nuevo está entero en disco (mismo directorio → el rename es
+ * atómico y no cruza volúmenes). El temporal se borra siempre que falle.
+ */
+async function escribirAtomico(p, texto) {
+  const tmp = p + '.sagi-tmp';
+  try {
+    await fsp.writeFile(tmp, texto, 'utf8');
+    await fsp.rename(tmp, p);
+  } catch (e) {
+    await fsp.rm(tmp, { force: true }).catch(() => {});
+    throw e;
+  }
+}
 
 /** ¿Existe y es una carpeta? Para no confundir «vacío» con «no pude leerlo». */
 async function isDir(p) {
@@ -503,8 +728,14 @@ async function searchIn(dir, regex, searchContent, out, budget, depth = 0, maxDe
       if (st.size > 512 * 1024) continue;
       const buf = Buffer.alloc(8192);
       const fd = await fsp.open(full, 'r');
-      const { bytesRead } = await fd.read(buf, 0, 8192, 0);
-      await fd.close();
+      let bytesRead = 0;
+      try {
+        ({ bytesRead } = await fd.read(buf, 0, 8192, 0));
+      } finally {
+        // sin este finally, un fallo de lectura dejaba el descriptor abierto (en Windows
+        // eso bloquea reescribir o renombrar el archivo hasta cerrar la app)
+        await fd.close().catch(() => {});
+      }
       if (buf.subarray(0, bytesRead).includes(0)) continue;
       const text = await fsp.readFile(full, 'utf8');
       const lines = text.split(/\r?\n/);
@@ -542,12 +773,25 @@ async function executeTool(name, args, ctx) {
   }
   switch (name) {
     case 'remember': {
-      const m = memory.add({
-        text: args.text,
-        source: 'agent',
-        importance: Number.isFinite(Number(args.importance)) ? Number(args.importance) : 0.6,
-        confidence: Number.isFinite(Number(args.confidence)) ? Number(args.confidence) : 0.8,
-      });
+      const textoGuardar = String(args.text == null ? '' : args.text);
+      // vacío se rechaza ANTES de nada: una propuesta sin texto no es nada que aprobar
+      if (!textoGuardar.trim()) return 'Error: no pude guardar el recuerdo (texto vacío).';
+      const importance = Number.isFinite(Number(args.importance)) ? Number(args.importance) : 0.6;
+      const confidence = Number.isFinite(Number(args.confidence)) ? Number(args.confidence) : 0.8;
+      /* El ajuste «Guardar sin preguntar» (`memoryAutoSave`) manda también AQUÍ. Antes
+         `remember` escribía el hecho directo pasara lo que pasara, así que el ajuste
+         apagado no servía de nada y la vista Memoria prometía en falso que nada entra sin
+         aprobación. Apagado, el recuerdo cae en «Recién aprendido» (la bandeja, que ya
+         avisa sola a la interfaz) y el usuario decide. */
+      if (!ctx.settings || !ctx.settings.settings || ctx.settings.settings.memoryAutoSave !== true) {
+        const nuevas = memory.trayProponer([
+          { texto: textoGuardar, origen: 'agent', motivo: 'lo propuso el agente', confianza: confidence },
+        ]);
+        if (!nuevas.length)
+          return 'No se encoló ninguna propuesta nueva: ese recuerdo ya está en la memoria o ya espera aprobación en «Recién aprendido». No hace falta que lo repitas.';
+        return 'OK: propuesta guardada en «Recién aprendido», pendiente de que el usuario la apruebe. No la des por guardada ni la repitas.';
+      }
+      const m = memory.add({ text: textoGuardar, source: 'agent', importance, confidence });
       return m
         ? `OK: recuerdo guardado (importancia ${m.importance}). Estará disponible en conversaciones futuras.`
         : 'Error: no pude guardar el recuerdo (texto vacío).';
@@ -658,22 +902,16 @@ async function executeTool(name, args, ctx) {
       if (bloqW) return bloqW;
       const content = String(args.content ?? '');
       await fsp.mkdir(path.dirname(p), { recursive: true });
-      // tmp + rename: writeFile trunca el destino al abrirlo, así que un cierre o
-      // un disco lleno a mitad dejaba el fichero del usuario cortado y sin copia.
-      // Es el mismo patrón que ya usan checkpoints, memoria y hábitos.
-      const tmp = p + '.sagi-tmp';
       // v2.4: pre-imagen para poder REVISAR el cambio después (ver cambios.js)
-      cambios.recordar(workspace, p);
-      try {
-        await fsp.writeFile(tmp, content, 'utf8');
-        await fsp.rename(tmp, p);
-      } catch (e) {
-        await fsp.rm(tmp, { force: true }).catch(() => {});
-        throw e;
-      }
+      cambios.recordar(workspace, p, undefined, ctx.ownerCambios);
+      await escribirAtomico(p, content);
       repomap.invalidar(workspace);
       busqueda.invalidar(workspace); // el índice de búsqueda también se queda viejo
-      return await resultadoEscritura(p, `${content.length} bytes escritos en ${p}`, { workspace, settings });
+      return await resultadoEscritura(p, `${content.length} bytes escritos en ${p}`, {
+        workspace,
+        settings,
+        ownerCambios: ctx.ownerCambios,
+      });
     }
     case 'edit_file': {
       const p = inWs(args.path);
@@ -705,8 +943,8 @@ async function executeTool(name, args, ctx) {
         tolerar: args.tolerar_espacios === true,
       });
       if (!r.ok) return errorEdicion(p, text, r);
-      cambios.recordar(workspace, p, text);
-      await fsp.writeFile(p, r.texto, 'utf8');
+      cambios.recordar(workspace, p, text, ctx.ownerCambios);
+      await escribirAtomico(p, r.texto);
       repomap.invalidar(workspace);
       busqueda.invalidar(workspace); // el índice de búsqueda también se queda viejo
       const relato =
@@ -714,7 +952,7 @@ async function executeTool(name, args, ctx) {
         (r.modo === 'tolerante'
           ? ` — el anclaje no coincidía al carácter: aplicado sobre las líneas ${r.linea}-${r.linea + r.lineas - 1} reajustando la sangría al archivo`
           : '');
-      return await resultadoEscritura(p, relato, { workspace, settings });
+      return await resultadoEscritura(p, relato, { workspace, settings, ownerCambios: ctx.ownerCambios });
     }
     /* v2.4: mapa del repositorio e índice de símbolos. En un proyecto grande, leer
        archivo a archivo se come el contexto y aun así se pierden cosas; esto responde
@@ -740,7 +978,9 @@ async function executeTool(name, args, ctx) {
     /* v2.4: varios cambios en varios archivos, en una sola llamada y ATÓMICOS:
        primero se comprueba que TODOS los anclajes existen y son únicos y, solo
        entonces, se escribe. Antes, un refactor de cinco archivos eran cinco
-       llamadas y un archivo a medias si la tercera fallaba. */
+       llamadas y un archivo a medias si la tercera fallaba.
+       v3.1: y atómico también en el disco — se vuelca todo a temporales hermanos y se
+       renombran al final; un fallo a mitad de camino restaura lo ya escrito. */
     case 'apply_patch': {
       // OJO: la local NO puede llamarse `cambios` — sombrearía el módulo `cambios`
       // (el registrador de pre-imágenes) y `cambios.recordar` sería un TypeError.
@@ -787,9 +1027,43 @@ async function executeTool(name, args, ctx) {
       if (errores.length) {
         return `Error: no se ha escrito NADA (el parche se aplica entero o no se aplica):\n- ${errores.join('\n- ')}`;
       }
-      for (const plan of planes) {
-        cambios.recordar(workspace, plan.p, plan.antes);
-        await fsp.writeFile(plan.p, plan.despues, 'utf8');
+      /* v3.1: atómico TAMBIÉN en el disco. Antes se validaban todos los anclajes y luego
+         se escribía uno a uno: un disco lleno, un EPERM o un archivo bloqueado en el
+         tercero dejaba los dos primeros aplicados — justo lo que este parche promete
+         que no pasa. Ahora se vuelca TODO a temporales hermanos y solo cuando los N
+         están enteros se renombran; si un rename falla, se restauran los ya renombrados
+         desde su pre-imagen (la misma que se guarda para el deshacer) y se dice cuál
+         falló. Los temporales se borran siempre. */
+      const tmps = planes.map((plan) => plan.p + '.sagi-tmp');
+      for (let i = 0; i < planes.length; i++) {
+        try {
+          await fsp.writeFile(tmps[i], planes[i].despues, 'utf8');
+        } catch (e) {
+          for (const t of tmps) await fsp.rm(t, { force: true }).catch(() => {});
+          return `Error: no se ha escrito NADA (el parche se aplica entero o no se aplica): no pude preparar ${path.basename(planes[i].p)} (${e.code || e.message}). Ningún archivo se ha tocado.`;
+        }
+      }
+      const puestos = [];
+      for (let i = 0; i < planes.length; i++) {
+        cambios.recordar(workspace, planes[i].p, planes[i].antes, ctx.ownerCambios);
+        try {
+          await fsp.rename(tmps[i], planes[i].p);
+          puestos.push(planes[i]);
+        } catch (e) {
+          const sinRestaurar = [];
+          for (const plan of puestos) {
+            try {
+              await escribirAtomico(plan.p, plan.antes);
+            } catch {
+              sinRestaurar.push(path.basename(plan.p));
+            }
+          }
+          for (const t of tmps) await fsp.rm(t, { force: true }).catch(() => {});
+          const aviso = sinRestaurar.length
+            ? ` No pude restaurar ${sinRestaurar.join(', ')}: su contenido puede ser el del parche, revísalos.`
+            : '';
+          return `Error: no se ha aplicado el parche: falló al escribir en ${path.basename(planes[i].p)} (${e.code || e.message}). Se han restaurado ${puestos.length - sinRestaurar.length} de ${puestos.length} archivo(s) que ya se habían escrito.${aviso}`;
+        }
       }
       repomap.invalidar(workspace);
       busqueda.invalidar(workspace); // el índice de búsqueda también se queda viejo
@@ -800,6 +1074,7 @@ async function executeTool(name, args, ctx) {
         checked: planes.map((x) => x.p),
         workspace,
         settings,
+        ownerCambios: ctx.ownerCambios,
       });
     }
     case 'list_dir': {
@@ -914,8 +1189,43 @@ async function executeTool(name, args, ctx) {
         `Escritorio: ${path.join(home, 'Desktop')}`,
       ].join('\n');
     }
+    case 'web_fetch':
+    case 'git_status':
+    case 'git_diff':
+    case 'git_log':
+    case 'git_branch':
+    case 'git_commit':
+      return ejecutarWebOGit(name, args, ctx);
     default:
       return `Error: herramienta desconocida "${name}"`;
+  }
+}
+
+/* v4.1: web_fetch y las herramientas git_* delegan en su módulo; el ejecutor solo lleva el
+   contexto que necesitan (espacio de trabajo y el gancho de Detener). */
+async function ejecutarWebOGit(name, args, ctx) {
+  const common = { registerKillable: ctx.registerKillable };
+  if (name === 'web_fetch') {
+    try {
+      const r = await require('./web').traer(args.url, { ...common, maxChars: args.max_chars });
+      return r.texto;
+    } catch (e) {
+      return 'Error: ' + String((e && e.message) || e);
+    }
+  }
+  const git = require('./git');
+  const opts = { ...common, workspace: ctx.workspace };
+  switch (name) {
+    case 'git_status':
+      return git.status(opts);
+    case 'git_diff':
+      return git.diff(args, opts);
+    case 'git_log':
+      return git.log(args, opts);
+    case 'git_branch':
+      return git.branch(args, opts);
+    case 'git_commit':
+      return git.commit(args, opts);
   }
 }
 
@@ -924,6 +1234,7 @@ module.exports = {
   openUrlAllowed,
   ejecutarComandoVerificacion,
   ejecutarHook,
+  piezaTocadaEsteTurno,
   revisarEstatico,
   revisarSintaxis,
   /* Solo para las pruebas: el estado adaptativo (lo que se ha apartado) no debe

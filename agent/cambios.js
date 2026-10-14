@@ -20,9 +20,17 @@ const MAX_LINEAS_POR_ARCHIVO = 160; // líneas de cambio por archivo (con contex
 const MAX_CHARS = 24000; // tope duro del texto final
 const MAX_BYTES_ORIGINAL = 2 * 1024 * 1024;
 
-/* workspace -> Map(rutaAbsoluta -> contenido anterior | null si no existía) */
+/* Las DOS tablas se indexan por DUEÑO + espacio de trabajo. El dueño es la conversación
+   que escribe (el agente manda su id de sesión): dos conversaciones que compartan carpeta
+   no pueden pisarse la pre-imagen la una a la otra — el `olvidar` del arranque de turno
+   de una borraba el diff de la otra y «Revisar cambios» enseñaba archivos del turno
+   ajeno. Sin dueño (todas las llamadas de antes) la clave es la de siempre y el
+   comportamiento es idéntico. El espacio de trabajo sigue guardándose tal cual para las
+   rutas y para `nombreRel`: la clave solo indexa, no sustituye a la carpeta. */
+const claveDueno = (workspace, owner) => String(owner || '') + '\0' + String(workspace || '');
+/* clave -> Map(rutaAbsoluta -> contenido anterior | null si no existía) */
 const guardados = new Map();
-/* workspace -> Set(rutas cuya pre-imagen NO se pudo leer: no se pueden restaurar) */
+/* clave -> Set(rutas cuya pre-imagen NO se pudo leer: no se pueden restaurar) */
 const noRestaurables = new Map();
 
 /** El contenido de un archivo tal y como estaba, o null si no existía / no es texto. */
@@ -43,10 +51,11 @@ function leerAntes(absPath) {
  * escribe dos veces en el mismo turno, el diff debe partir de cómo estaba al
  * empezar, no de la escritura intermedia.
  */
-function recordar(workspace, absPath, contenidoAnterior) {
+function recordar(workspace, absPath, contenidoAnterior, owner = '') {
   if (!workspace || !absPath) return;
-  if (!guardados.has(workspace)) guardados.set(workspace, new Map());
-  const mapa = guardados.get(workspace);
+  const k = claveDueno(workspace, owner);
+  if (!guardados.has(k)) guardados.set(k, new Map());
+  const mapa = guardados.get(k);
   if (mapa.has(absPath)) return;
   if (mapa.size >= MAX_ARCHIVOS * 4) return; // un turno que toca cien archivos no se revisa así
   let antes = contenidoAnterior;
@@ -58,8 +67,8 @@ function recordar(workspace, absPath, contenidoAnterior) {
     if (antes === '') {
       try {
         if (fs.statSync(absPath).size > 0) {
-          if (!noRestaurables.has(workspace)) noRestaurables.set(workspace, new Set());
-          noRestaurables.get(workspace).add(absPath);
+          if (!noRestaurables.has(k)) noRestaurables.set(k, new Set());
+          noRestaurables.get(k).add(absPath);
         }
       } catch {}
     }
@@ -68,8 +77,8 @@ function recordar(workspace, absPath, contenidoAnterior) {
 }
 
 /** Lo que hay guardado para un espacio de trabajo (para decidir si hay algo que revisar). */
-function hay(workspace) {
-  const m = guardados.get(workspace);
+function hay(workspace, owner = '') {
+  const m = guardados.get(claveDueno(workspace, owner));
   return !!m && m.size > 0;
 }
 
@@ -77,6 +86,26 @@ function nombreRel(workspace, abs) {
   const w = String(workspace || '').replace(/[\\/]+$/, '');
   const a = String(abs);
   return a.toLowerCase().startsWith(w.toLowerCase()) ? a.slice(w.length).replace(/^[\\/]/, '') : a;
+}
+
+/** Normaliza una ruta para compararla (barras '/', sin barra final, minúsculas). */
+function normalRuta(s) {
+  return String(s == null ? '' : s)
+    .replace(/\\/g, '/')
+    .replace(/\/+$/, '')
+    .toLowerCase();
+}
+
+/** ¿`abs` cae DENTRO del espacio de trabajo? La comparación es por CARPETA (`<raíz>/`),
+    nunca por prefijo de texto: `C:\proj-viejo` no está dentro de `C:\proj`. Lo usan las
+    dos vías de deshacer (el turno entero y el panel de revisión), que antes daban
+    respuestas OPUESTAS para el mismo archivo. */
+function dentroDelEspacio(workspace, abs) {
+  const w = String(workspace || '');
+  if (!w) return false;
+  const raiz = normalRuta(w);
+  const a = normalRuta(abs);
+  return a === raiz || a.startsWith(raiz + '/');
 }
 
 /* --------------------------------------------------------------------------- *
@@ -175,8 +204,8 @@ function hunk(ops, contexto = 3, maxLineas = MAX_LINEAS_POR_ARCHIVO) {
  * un panel de cambios) y quien lo da por cerrado es `olvidar`, que el agente llama al
  * empezar el turno siguiente. Así el mapa nunca crece sin control.
  */
-function diff(workspace, opts = {}) {
-  const mapa = guardados.get(workspace);
+function diff(workspace, opts = {}, owner = '') {
+  const mapa = guardados.get(claveDueno(workspace, owner));
   if (!mapa || !mapa.size) return '';
   const partes = [];
   let usados = 0;
@@ -222,8 +251,8 @@ function diff(workspace, opts = {}) {
  * exigirle esos convierte cada comprobación en una invitación a refactorizar lo que
  * nadie le ha pedido (que es justo lo que la regla 4 de los subagentes prohíbe).
  */
-function lineasCambiadas(workspace, absPath) {
-  const mapa = guardados.get(workspace);
+function lineasCambiadas(workspace, absPath, owner = '') {
+  const mapa = guardados.get(claveDueno(workspace, owner));
   if (!mapa || !mapa.has(absPath)) return null;
   const antes = mapa.get(absPath);
   if (antes === null || antes === undefined) return null; // archivo nuevo: todo es nuevo
@@ -259,10 +288,145 @@ function lineasCambiadas(workspace, absPath) {
 }
 
 /** Resumen de una línea: qué archivos cambiaron (para logs y para el prompt). */
-function resumen(workspace) {
-  const mapa = guardados.get(workspace);
+function resumen(workspace, owner = '') {
+  const mapa = guardados.get(claveDueno(workspace, owner));
   if (!mapa) return '';
   return [...mapa.keys()].map((a) => nombreRel(workspace, a)).join(', ');
+}
+
+/* --------------------------------------------------------------------------- *
+ *  v4.1: el diff ESTRUCTURADO del panel
+ *
+ *  El texto de `diff()` está pensado para que lo lea un modelo (el revisor); el panel
+ *  necesita lo mismo, pero en datos: archivos, contadores y líneas con su tipo. Es el
+ *  MISMO differ (diffLineas + hunk), no una segunda implementación que pueda divergir:
+ *  aquí solo se cambian las etiquetas (' ', '+', '-', '~') por las del panel
+ *  ('ctx', 'add', 'del') y se parte la lista en hunks.
+ * --------------------------------------------------------------------------- */
+
+/** '~' es una marca de omisión o de cambio masivo: el panel la pinta como contexto. */
+const TIPO_PANEL = { ' ': 'ctx', '+': 'add', '-': 'del', '~': 'ctx' };
+
+/** Parte el resultado de `hunk()` en hunks: una marca '~' cierra el hunk abierto (su
+    texto se queda dentro, como línea informativa) y lo que venga después abre otro. */
+function hunksDe(cuerpo, cabecera) {
+  const hunks = [];
+  let actual = null;
+  const abrir = () => {
+    actual = { cabecera, lineas: [] };
+    hunks.push(actual);
+  };
+  for (const o of cuerpo) {
+    if (o.tipo === '~') {
+      if (!actual) abrir();
+      actual.lineas.push({ tipo: 'ctx', texto: o.texto });
+      actual = null; // la omisión separa: lo siguiente es otro hunk
+      continue;
+    }
+    if (!actual) abrir();
+    actual.lineas.push({ tipo: TIPO_PANEL[o.tipo] || 'ctx', texto: o.texto });
+  }
+  return hunks;
+}
+
+/**
+ * El diff del turno en datos, para el panel de revisión:
+ *   [{ path, rel, adds, dels, noReversible?, hunks: [{ cabecera, lineas: [{tipo, texto}] }] }]
+ * `path` es la ruta ABSOLUTA (es lo que devuelve `archivoRevertir`), `rel` la relativa al
+ * espacio de trabajo. `noReversible` solo aparece cuando el archivo no se puede restaurar
+ * (binario o enorme: su pre-imagen no se pudo leer). Devuelve [] si no hay nada guardado.
+ */
+function diffEstructurado(workspace, opts = {}, owner = '') {
+  const mapa = guardados.get(claveDueno(workspace, owner));
+  if (!mapa || !mapa.size) return [];
+  const no = noRestaurables.get(claveDueno(workspace, owner)) || new Set();
+  const out = [];
+  let n = 0;
+  for (const [abs, antes] of mapa) {
+    if (n++ >= (opts.maxArchivos || MAX_ARCHIVOS)) break;
+    let ahora = null;
+    try {
+      ahora = fs.readFileSync(abs, 'utf8');
+    } catch {}
+    if (antes === null && ahora === null) continue; // se creó y se borró en el mismo turno
+    const rel = nombreRel(workspace, abs);
+    const cabecera = antes === null ? `--- NUEVO: ${rel}` : `--- ${rel}`;
+    const ops = antes === null ? lineas(ahora).map((t) => ({ tipo: '+', texto: t })) : diffLineas(antes, ahora);
+    const corte = 120; // igual que el diff de texto: un archivo nuevo se enseña, no se copia entero
+    const cuerpo =
+      antes === null
+        ? ops.length > corte
+          ? [...ops.slice(0, corte), { tipo: '~', texto: `… (${ops.length - corte} línea(s) más)` }]
+          : ops
+        : hunk(ops, opts.contexto ?? 3, opts.maxLineasPorArchivo || MAX_LINEAS_POR_ARCHIVO);
+    if (antes !== null && !cuerpo.length) continue; // sin cambios reales (se escribió igual)
+    out.push({
+      path: abs,
+      rel,
+      adds: ops.filter((o) => o.tipo === '+').length,
+      dels: ops.filter((o) => o.tipo === '-').length,
+      ...(no.has(abs) ? { noReversible: true } : {}),
+      hunks: hunksDe(cuerpo, cabecera),
+    });
+  }
+  return out;
+}
+
+/**
+ * Vuelve atrás UN archivo del turno, dejando los demás como están.
+ *
+ * Acepta la ruta absoluta (la que da `diffEstructurado`) o la relativa (la del panel), y
+ * compara normalizando separadores: Windows mezcla `\` y `/` según quién escriba la ruta.
+ * Si la pre-imagen es `null`, el turno CREÓ el archivo y revertir es borrarlo. Al terminar,
+ * el archivo sale del estado del turno (el panel vuelve a preguntar y ya no aparece, y
+ * deshacer el turno entero tampoco lo vuelve a tocar).
+ *
+ * @returns {{ok: boolean, rel?: string, borrado?: boolean, accion?: string, error?: string}}
+ */
+function archivoRevertir(workspace, archivo, owner = '') {
+  const k = claveDueno(workspace, owner);
+  const mapa = guardados.get(k);
+  if (!mapa || !mapa.size) return { ok: false, error: 'no hay ningún cambio de este turno que revertir' };
+  const clave = normalRuta(archivo);
+  let abs = null;
+  for (const [a] of mapa) {
+    if (normalRuta(a) === clave || normalRuta(nombreRel(workspace, a)) === clave) {
+      abs = a;
+      break;
+    }
+  }
+  if (!abs) return { ok: false, error: `«${String(archivo)}» no forma parte de los cambios de este turno` };
+
+  const no = noRestaurables.get(k);
+  if (no && no.has(abs)) {
+    return {
+      ok: false,
+      error: `no puedo revertir «${nombreRel(workspace, abs)}»: no se pudo leer antes (es binario o demasiado grande) y escribir la pre-imagen lo dejaría peor`,
+    };
+  }
+  /* Solo se toca lo que está DENTRO del espacio de trabajo: la lista sale de la pre-imagen,
+     pero una entrada de fuera no se restaura ni aunque esté en el mapa. */
+  if (!dentroDelEspacio(workspace, abs))
+    return { ok: false, error: `«${nombreRel(workspace, abs)}» está fuera del espacio de trabajo: no lo toco` };
+
+  const antes = mapa.get(abs);
+  const rel = nombreRel(workspace, abs);
+  try {
+    if (antes === null) {
+      if (fs.existsSync(abs)) fs.unlinkSync(abs);
+    } else {
+      fs.writeFileSync(abs, antes, 'utf8');
+    }
+  } catch (e) {
+    return { ok: false, error: `no pude escribir «${rel}»: ${String((e && e.message) || e)}` };
+  }
+  mapa.delete(abs);
+  if (no) no.delete(abs);
+  if (!mapa.size) {
+    guardados.delete(k);
+    noRestaurables.delete(k);
+  }
+  return { ok: true, rel, borrado: antes === null, accion: antes === null ? 'borrado' : 'restaurado' };
 }
 
 /* --------------------------------------------------------------------------- *
@@ -276,15 +440,16 @@ function resumen(workspace) {
  * --------------------------------------------------------------------------- */
 
 /** ¿Hay algo que deshacer en este espacio de trabajo? */
-function puedeDeshacer(workspace) {
-  return hay(workspace);
+function puedeDeshacer(workspace, owner = '') {
+  return hay(workspace, owner);
 }
 
 /** Archivos que tocaría deshacer, con su acción ({rel, accion}). */
-function planDeshacer(workspace) {
-  const mapa = guardados.get(workspace);
+function planDeshacer(workspace, owner = '') {
+  const k = claveDueno(workspace, owner);
+  const mapa = guardados.get(k);
   if (!mapa) return [];
-  const no = noRestaurables.get(workspace) || new Set();
+  const no = noRestaurables.get(k) || new Set();
   const out = [];
   for (const [abs, antes] of mapa) {
     const rel = nombreRel(workspace, abs);
@@ -304,20 +469,18 @@ function planDeshacer(workspace) {
  *
  * @returns {{archivos: Array<{ruta, accion}>, restaurados: number, borrados: number, fallos: number}}
  */
-function deshacer(workspace, { soloRel = null } = {}) {
-  const mapa = guardados.get(workspace);
+function deshacer(workspace, { soloRel = null } = {}, owner = '') {
+  const k = claveDueno(workspace, owner);
+  const mapa = guardados.get(k);
   const vacio = { archivos: [], restaurados: 0, borrados: 0, fallos: 0 };
   if (!mapa || !mapa.size) return vacio;
-  const no = noRestaurables.get(workspace) || new Set();
-  const raiz = String(workspace || '')
-    .replace(/[\\/]+$/, '')
-    .toLowerCase();
+  const no = noRestaurables.get(k) || new Set();
   const archivos = [];
   let restaurados = 0,
     borrados = 0,
     fallos = 0;
   for (const [abs, antes] of mapa) {
-    if (!String(abs).toLowerCase().startsWith(raiz)) {
+    if (!dentroDelEspacio(workspace, abs)) {
       archivos.push({ ruta: nombreRel(workspace, abs), accion: 'fuera-del-espacio' });
       continue;
     }
@@ -344,20 +507,20 @@ function deshacer(workspace, { soloRel = null } = {}) {
     }
   }
   // lo deshecho ya no está pendiente de revisión ni de deshacer
-  olvidar(workspace);
-  noRestaurables.delete(workspace);
+  olvidar(workspace, owner);
+  noRestaurables.delete(k);
   return { archivos, restaurados, borrados, fallos };
 }
 
 /** Rutas absolutas que este turno ha tocado (para hooks, resúmenes y avisos). */
-function archivosTocados(workspace) {
-  return planDeshacer(workspace)
+function archivosTocados(workspace, owner = '') {
+  return planDeshacer(workspace, owner)
     .map((x) => x.rutaAbs)
     .filter(Boolean);
 }
 
-function olvidar(workspace) {
-  guardados.delete(workspace);
+function olvidar(workspace, owner = '') {
+  guardados.delete(claveDueno(workspace, owner));
 }
 function limpiar() {
   guardados.clear();
@@ -374,6 +537,8 @@ module.exports = {
   limpiar,
   diffLineas,
   hunk,
+  diffEstructurado,
+  archivoRevertir,
   lineasCambiadas,
   puedeDeshacer,
   planDeshacer,

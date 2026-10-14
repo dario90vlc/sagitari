@@ -14,6 +14,8 @@
  *   - app, shell, dialog, fsp, fs, path: módulos ya importados en main
  */
 
+const { validarWorkspaceRuta } = require('./workspace-ruta');
+
 function registerMiscIpc(ipcMain, ctx) {
   // config es un getter (() => config de main): el objeto es único y vivo,
   // se lee fresco en cada handler para no capturar una foto vieja.
@@ -22,7 +24,7 @@ function registerMiscIpc(ipcMain, ctx) {
   const getWin = () => ctx.getWin();
   const glow = (...a) => ctx.getGlow(...a);
 
-  ipcMain.on('glow:set', (e, { mode, color }) => glow(mode, color));
+  ipcMain.on('glow:set', (e, payload = {}) => glow(payload.mode, payload.color));
 
   // ---- misc ----
   ipcMain.handle('app:quit', () => app.quit());
@@ -67,10 +69,19 @@ function registerMiscIpc(ipcMain, ctx) {
     const err = await shell.openPath(target);
     if (err) return { ok: false, error: err };
     // Proyectos = espacio de trabajo: abrir una carpeta aquí la convierte en la activa
-    // (con campo vacío se abre el Escritorio SIN cambiar el espacio configurado)
+    // (con campo vacío se abre el Escritorio SIN cambiar el espacio configurado).
+    // Abrir NO es fijar: la ruta pasa por la MISMA validación que workspace:set —
+    // antes se asignaba solo con que existiese y fuese carpeta, así que C:\Windows o el
+    // directorio de datos de la app colaban por aquí y el agente escribía ahí.
     if (explicit) {
-      cfg().settings.workspace = target;
-      saveConfig();
+      const v = validarWorkspaceRuta(target, ctx.configDir());
+      if (v.ok) {
+        cfg().settings.workspace = v.real;
+        saveConfig();
+      } else {
+        // La carpeta se abre igual en el Explorador; solo se rechaza fijarla como workspace.
+        return { ok: true, path: target, workspace: ctx.getWorkspace(), workspaceError: v.error };
+      }
     }
     return { ok: true, path: target, workspace: ctx.getWorkspace() };
   });

@@ -90,8 +90,7 @@ function skillsDir() {
    Antes CADA prompt releía y reparseaba el almacén entero: el system prompt (por turno),
    las skills sugeridas (por turno), y otra vez los dos por cada delegación, más `use_skill`
    y la pantalla de Skills. Con 20-50 skills instaladas eso son cientos de lecturas y
-   `JSON.parse` por turno en el hilo principal de Electron —el mismo que mueve el navegador
-   y la voz—.
+   `JSON.parse` por turno en el hilo principal de Electron —el mismo que mueve el navegador—.
 
    Ahora hay UN índice en memoria que comparten el prompt, las sugerencias, `use_skill` y la
    interfaz. Se invalida de dos formas:

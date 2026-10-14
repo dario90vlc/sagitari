@@ -7,8 +7,10 @@
  * (tarjetas de herramienta + razonamiento que se guardan con el mensaje).
  * Todo lo que toca de main.js viaja en `ctx`:
  *   - config: el objeto vivo (se lee fresco vía getter)
- *   - getAgent()/ensureAgent(): agente del chat (el segundo lo crea si falta)
- *   - convsApi: { currentConv, saveConvs, ensureConv } del router ipc-convs
+ *   - runtimes: registro de agentes vivos por conversación (main/runtimes.js). Cada
+ *     handler resuelve el agente de LA conversación que manda el renderer: dos
+ *     conversaciones pueden tener un turno en vuelo a la vez.
+ *   - convsApi: { currentConv, convById, saveConvs, ensureConv } del router ipc-convs
  *   - getSkills(): módulo de skills (comando manual /skill)
  *   - getGlow(): efecto de luz glow(mode, color)
  *   - getWin(): ventana de chat (o null si está destruida)
@@ -24,11 +26,15 @@ function registerChatIpc(ipcMain, ctx) {
   // se lee fresco en cada handler para no capturar una foto vieja.
   const cfg = () => (typeof ctx.config === 'function' ? ctx.config() : ctx.config);
   const getWin = () => ctx.getWin();
-  const ag = () => ctx.getAgent();
-  const ensureAgent = () => ctx.ensureAgent();
+  const runtimes = ctx.runtimes;
   const configDir = () => ctx.configDir();
   const convsApi = ctx.convsApi;
-  const { getSkills, getGlow: glow, dialog, fsp, path, attach } = ctx;
+  const { getSkills, getGlow: glow, dialog, fsp, path, attach, memory } = ctx;
+
+  /* La conversación que pide el renderer manda. Si no llega el id (una llamada suelta,
+     o antes de que haya ninguna conversación en pantalla) se usa la que está abierta,
+     que es lo que hacía este router cuando solo había una. */
+  const convDe = (id) => (id ? convsApi.convById(id) : convsApi.currentConv());
 
   /* ---- adjuntos del chat: los límites y la extracción de texto viven en
    main/attachments.js (Node puro, con tests propios). Aquí solo se lee el fichero
@@ -169,13 +175,16 @@ function registerChatIpc(ipcMain, ctx) {
     }
   }
 
-  ipcMain.handle('chat:send', async (e, { text, imageDataUrl, attachments }) => {
+  ipcMain.handle('chat:send', async (e, { convId, text, imageDataUrl, attachments }) => {
     // el renderer manda string, pero un bug suyo no puede reventar el handler:
     // `body.slice(0,48)` asumía string y un texto no-string rompía el turno
     if (typeof text !== 'string') text = '';
-    if (!ag()) ensureAgent();
-    const c = convsApi.ensureConv();
-    if (ag()) ag().useSession(c.id); // sesión estable por conversación (OpenCode Go)
+    // La conversación destino: la que manda el renderer, o la abierta (y si no hay
+    // ninguna todavía, se estrena una como antes). El id explícito se valida: si no
+    // existe, no se contesta en otra conversación por error.
+    const c = convId ? convsApi.convById(convId) : convsApi.ensureConv();
+    if (!c) return { ok: false, error: 'Conversación no encontrada' };
+    const a = runtimes.agentFor(c.id); // su agente: se crea (e hidrata desde el hilo guardado) la primera vez
     // ---- adjuntos: texto plano inline, imágenes como partes multimodales ----
     const atts = Array.isArray(attachments) ? attachments : [];
     const imgAtts = atts.filter((a) => a && a.kind === 'image' && a.dataUrl);
@@ -191,13 +200,13 @@ function registerChatIpc(ipcMain, ctx) {
       const s = await getSkills().getSkill(sm[1]);
       if (s && s.enabled) {
         // inyecta la skill en el contexto del agente (como mensaje de sistema)
-        ag().history.push({ role: 'system', content: `SKILL ACTIVADA POR EL USUARIO: ${s.name}\n\n${s.body}` });
+        a.history.push({ role: 'system', content: `SKILL ACTIVADA POR EL USUARIO: ${s.name}\n\n${s.body}` });
         body = (sm[2] || '').trim() || `Aplica la skill ${s.name}.`;
         if (getWin() && !getWin().isDestroyed())
-          getWin().webContents.send('agent:event', { type: 'status', text: `Skill ${s.name} aplicada` });
+          getWin().webContents.send('agent:event', { type: 'status', convId: c.id, text: `Skill ${s.name} aplicada` });
       }
     }
-    trazaNueva(); // el rastro del turno anterior ya está guardado con su mensaje
+    trazaNueva(c.id); // cada conversación estrena su rastro; el anterior ya está guardado con su mensaje
     if (c.messages.length === 0) c.title = body.slice(0, 48);
     // el modo queda grabado con la pregunta: en el chat se ve con qué modo se
     // pidió cada cosa (ACT ejecuta, PLAN planifica, THINK razona)
@@ -219,25 +228,41 @@ function registerChatIpc(ipcMain, ctx) {
     glow('think');
     // afterglow: no apagar al instante al terminar el stream; deja respirar el glow
     const firstImage = imgAtts.length ? imgAtts[0].dataUrl : imageDataUrl;
-    ag()
-      .chat(body, cfg(), firstImage, { attachments: atts })
+    a.chat(body, cfg(), firstImage, { attachments: atts })
+      /* Al CERRAR el turno (no al empezarlo): la heurística mira la frase del usuario y la
+         bandeja de «Recién aprendido» se llena sola con lo que huela a hecho duradero. Con
+         el interruptor apagado no se propone nada; con «guardar sin preguntar», se guarda.
+         Es gratis: no llama al modelo. Y va dentro de su propio try: un fallo de memoria no
+         puede tumbar un turno de chat que ya terminó bien.
+         El aviso a la vista NO se emite aquí: el almacén emite 'propuesta' y el router de
+         memoria lo reenvía como `memory:nueva`. Un solo punto de emisión, un solo formato. */
+      .then(() => {
+        try {
+          const s = cfg().settings || {};
+          if (s.memoryLearn === false) return; // apagado: ni propone ni guarda
+          memory().proponerDeTurno(text || body, { convId: c.id, convTitulo: c.title, autoGuardar: s.memoryAutoSave === true });
+        } catch (err) {
+          ctx.onError('memory:proponer', err);
+        }
+      })
       .catch((err) => ctx.onError('chat:send', err)) // sin esto el fallo se perdía como promesa flotante
       .finally(() => setTimeout(() => glow('off'), 2400));
     return { ok: true };
   });
 
   // regenerar: descarta la última respuesta y vuelve a pedírsela al modelo
-  ipcMain.handle('chat:retry', async () => {
-    if (!ag()) return { ok: false, error: 'sin agente' };
+  ipcMain.handle('chat:retry', async (e, convId) => {
+    const c = convDe(convId);
+    if (!c) return { ok: false, error: 'sin conversación' };
+    const a = runtimes.agentFor(c.id);
     // regenerar durante un turno en curso lo pisaría: exigimos que esté libre
-    if (ag().isBusy()) return { ok: false, error: 'hay un turno en curso; deténlo antes de regenerar' };
-    trazaNueva(); // regenerar es un turno nuevo: su rastro se guarda con su respuesta
-    const c = convsApi.currentConv();
+    if (a.isBusy()) return { ok: false, error: 'hay un turno en curso; deténlo antes de regenerar' };
+    trazaNueva(c.id); // regenerar es un turno nuevo: su rastro se guarda con su respuesta
     // quita la última respuesta del historial guardado (y solo esa). Se busca
     // DESPUÉS del último mensaje del usuario: un turno que falló no llega a
     // guardarse (el error no emite assistant_done), así que antes se borraba la
     // respuesta de un turno anterior y el usuario perdía un mensaje por reintento.
-    if (c && c.messages.length) {
+    if (c.messages.length) {
       let lastUser = -1;
       for (let i = c.messages.length - 1; i >= 0; i--) {
         if (c.messages[i].role === 'user') {
@@ -254,18 +279,64 @@ function registerChatIpc(ipcMain, ctx) {
       c.updatedAt = Date.now();
       convsApi.saveConvs();
     }
-    return await ag().retry(cfg());
+    return await a.retry(cfg());
   });
 
-  ipcMain.handle('chat:stop', () => {
-    ag() && ag().stop();
+  ipcMain.handle('chat:stop', (e, convId) => {
+    // Detener es de ESA conversación: la otra pestaña, si también está trabajando,
+    // sigue trabajando (antes las paraba todas a la vez, porque eran la misma).
+    const c = convDe(convId);
+    const a = c ? runtimes.peek(c.id) : null;
+    if (a) a.stop();
     return { ok: true };
   });
-  ipcMain.handle('chat:pause', () => (ag() ? ag().pause() : { ok: false, error: 'sin agente' }));
-  ipcMain.handle('chat:clear', () => {
-    ag() && (ag().history = []);
-    return { ok: true };
+  ipcMain.handle('chat:pause', (e, convId) => {
+    const c = convDe(convId);
+    const a = c ? runtimes.peek(c.id) : null;
+    return a ? a.pause() : { ok: false, error: 'sin agente' };
   });
+  /* Órdenes de barra que necesitan el proceso principal. El renderer reconoce la orden y
+     NO la manda como mensaje: entra por aquí y devuelve el texto que se pinta como línea
+     de sistema. Nada de esto entra en la conversación (compactar SÍ la cambia, a propósito),
+     así que no se guarda ni se envía al modelo como si fuera un turno. */
+  ipcMain.handle('chat:command', async (e, { convId, name, args } = {}) => {
+    const c = convDe(convId);
+    if (!c) return { ok: false, error: 'la conversación todavía no está lista' };
+    // El agente de ESA conversación: /cost y /compact son de su hilo, no del de la
+    // pestaña que esté a la vista.
+    const a = runtimes.agentFor(c.id);
+    // Compactar reescribe el contexto: con un turno en vuelo eso sería pisarse.
+    if (a.isBusy()) return { ok: false, error: 'SAGITARI está trabajando ahora mismo: espera a que termine o detén la tarea' };
+    const cmd = String(name || '')
+      .toLowerCase()
+      .replace(/^\//, '');
+    if (cmd === 'compact') {
+      let r;
+      try {
+        r = await a.compact(cfg());
+      } catch (err) {
+        return { ok: false, error: 'no se pudo compactar: ' + ((err && err.message) || err) };
+      }
+      if (!r || r.ok === false) return { ok: false, error: (r && r.error) || 'no se pudo compactar' };
+      return {
+        ok: true,
+        text: `Contexto compactado: ${r.antes} mensajes → ${r.despues}. El resumen queda como punto de partida.`,
+      };
+    }
+    if (cmd === 'cost') {
+      const u = typeof a.usageResumen === 'function' ? a.usageResumen() : null;
+      if (!u || !u.turns) return { ok: true, text: 'Todavía no hay consumo que contar en esta conversación.' };
+      const tokens = Number(u.tokens || 0).toLocaleString('es-ES');
+      const turnos = u.turns === 1 ? '1 turno' : u.turns + ' turnos';
+      return {
+        ok: true,
+        text: `Esta conversación: ${tokens} tokens en ${turnos}${u.costUsd ? ' · ' + Number(u.costUsd).toFixed(4) + ' USD' : ''}.`,
+      };
+    }
+    void args;
+    return { ok: false, error: 'orden desconocida: /' + cmd };
+  });
+  /* `chat:clear` se ha eliminado: no lo llamaba nadie (ni el renderer ni el puente). */
 }
 
 module.exports = { registerChatIpc };

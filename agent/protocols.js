@@ -51,9 +51,12 @@ const OPENCODE_MODEL_FORMAT = {
   'qwen3.7-max': 'anthropic',
   'qwen3.7-plus': 'anthropic',
   'qwen3.6-plus': 'anthropic',
+  'claude-haiku-5-5': 'anthropic',
   // --- /responses (API Responses de OpenAI) ---
   'grok-4.6': 'responses',
+  'grok-4.7': 'responses',
   'gpt-5.6-luna': 'responses',
+  'gpt-6-luna': 'responses',
   'muse-spark-1.3-contributor': 'responses',
   'muse-spark-1.2-contributor': 'responses',
 };
@@ -122,7 +125,11 @@ function detectFormat(input = {}) {
   const pid = norm(input.providerId);
   const bu = norm(input.baseUrl);
   const model = norm(input.model).split('/').pop(); // admite "opencode-go/glm-5.3-flash"
-  if (pid.includes('anthropic') || bu.includes('anthropic.com')) return 'anthropic';
+  // Anthropic no solo por dominio: hay bases de terceros que sirven /messages
+  // bajo una ruta propia (p. ej. api.deepseek.com/anthropic, api.z.ai/api/anthropic,
+  // api.moonshot.ai/anthropic). Sin esto resolvían a openai → Bearer contra
+  // /messages y 401, y el proveedor no se podía ni activar.
+  if (pid.includes('anthropic') || bu.includes('anthropic.com') || /\/(anthropic|messages)(\/|$)/.test(bu)) return 'anthropic';
   if (pid.includes('opencode') || bu.includes('opencode.ai')) {
     return OPENCODE_MODEL_FORMAT[model] || 'openai';
   }
@@ -312,6 +319,23 @@ async function readSSE(resp, signal, onEvent, opts = {}) {
   return aborted;
 }
 
+/* Normaliza el uso de tokens en la FRONTERA del protocolo: a partir de aquí el
+   resto del agente puede fiarse de `total_tokens`. Muchos endpoints compatibles
+   (vLLM, LM Studio, proxies de Ollama…) solo mandan `prompt_tokens` y
+   `completion_tokens`, y el guardarraíl de tokens/coste sumaba 0 sin avisar: el
+   tope no se aplicaba y el panel de coste se quedaba a cero. */
+function normalizarUso(usage) {
+  if (!usage) return usage;
+  const prompt = Number(usage.prompt_tokens) || 0;
+  const completion = Number(usage.completion_tokens) || 0;
+  return {
+    ...usage,
+    prompt_tokens: prompt,
+    completion_tokens: completion,
+    total_tokens: Number(usage.total_tokens) || prompt + completion,
+  };
+}
+
 /* ------------------------------------------------------------------------ *
  *  Protocolo OpenAI (/chat/completions)
  * ------------------------------------------------------------------------ */
@@ -390,7 +414,7 @@ async function streamOpenAI(cfg, { fetchFn, messages, tools, signal, onText, onT
     toolCalls: toolCalls.filter(Boolean).filter((t) => t.function.name),
     reasoning: reasoning.trim(),
     aborted,
-    usage,
+    usage: normalizarUso(usage),
   };
 }
 
@@ -594,7 +618,7 @@ async function streamAnthropic(cfg, { fetchFn, messages, tools, signal, onText, 
   );
   if (failure) throw failure;
 
-  if (usage) usage = { ...usage, total_tokens: (usage.prompt_tokens || 0) + (usage.completion_tokens || 0) };
+  usage = normalizarUso(usage);
   return {
     text: text.trim(),
     toolCalls: [...blocks.values()].map((b) => ({ id: b.id, type: 'function', function: { name: b.name, arguments: b.args || '{}' } })),

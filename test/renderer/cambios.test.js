@@ -3,6 +3,8 @@
 /* Tests para agent/cambios.js — diff puro de líneas.
    Sin spawn: se ejecuta directo con node. */
 
+const fs = require('fs');
+const os = require('os');
 const path = require('path');
 const cambios = require(path.join(__dirname, '..', '..', 'agent', 'cambios.js'));
 
@@ -80,6 +82,35 @@ test('los tipos solo son " ", "+" o "-"', () => {
     ops.every((o) => [' ', '+', '-'].includes(o.tipo)),
     'tipos válidos',
   );
+});
+
+console.log('cambios.js — deshacer no toca una carpeta vecina');
+
+/* El workspace `C:\proj` y su vecina `C:\proj-viejo` comparten prefijo de TEXTO, no
+   carpeta. Deshacer clasificaba por prefijo (`startsWith(raiz)`) y escribía en la vecina,
+   mientras el panel de revisión (archivoRevertir) la rechazaba por estar fuera: dos
+   respuestas opuestas para el mismo archivo. */
+test('deshacer no restaura un archivo de la carpeta vecina', () => {
+  cambios.limpiar();
+  const ws = fs.mkdtempSync(path.join(os.tmpdir(), 'sagi-ws-'));
+  const vecina = ws + '-viejo'; // misma raíz de texto, OTRA carpeta
+  fs.mkdirSync(vecina, { recursive: true });
+  const dentro = path.join(ws, 'a.txt');
+  const fuera = path.join(vecina, 'a.txt');
+  fs.writeFileSync(dentro, 'despues\n');
+  fs.writeFileSync(fuera, 'despues\n');
+  cambios.recordar(ws, dentro, 'dentro-antes\n');
+  cambios.recordar(ws, fuera, 'fuera-antes\n');
+
+  const r = cambios.deshacer(ws);
+  assertEqual(fs.readFileSync(fuera, 'utf8'), 'despues\n', 'la carpeta vecina no se toca');
+  assertEqual(fs.readFileSync(dentro, 'utf8'), 'dentro-antes\n', 'la del proyecto sí vuelve atrás');
+  assertEqual(r.restaurados, 1, 'solo se restaura lo del proyecto');
+  const hermana = r.archivos.find((x) => x.accion === 'fuera-del-espacio');
+  assertOk(hermana, 'y el informe dice que se dejó fuera: ' + JSON.stringify(r.archivos));
+  cambios.limpiar();
+  fs.rmSync(ws, { recursive: true, force: true });
+  fs.rmSync(vecina, { recursive: true, force: true });
 });
 
 console.log(`\n${passed} pasaron, ${failed} fallaron`);

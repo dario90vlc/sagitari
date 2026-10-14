@@ -5,7 +5,10 @@
  * Undécimo router de la fase 4: deshacer el turno (cambios:*) y reglas del
  * proyecto SAGITARI.md/AGENTS.md (agent:instrucciones*).
  * Todo lo que toca de main.js viaja en `ctx`:
- *   - getAgent(): agente del chat (o null; deshacer se niega si trabaja)
+ *   - runtimes: registro de agentes vivos por conversación (main/runtimes.js): deshacer
+ *     se niega si trabaja LA conversación de esos cambios, y las pre-imágenes se buscan
+ *     con el dueño de ESA conversación (dos conversaciones sobre la misma carpeta no se
+ *     pisan; ver agent/cambios.js)
  *   - getWorkspace(): espacio de trabajo activo
  *   - cambios, repomap, instrucciones, runlog: módulos (singletons, no cambian)
  *   - fs, path: módulos ya importados en main
@@ -13,7 +16,14 @@
 
 function registerCambiosIpc(ipcMain, ctx) {
   const { cambios, repomap, instrucciones, runlog, fs, path } = ctx;
-  const ag = () => ctx.getAgent();
+  const runtimes = ctx.runtimes;
+  /* El dueño de los cambios: la conversación que los hizo. Si el renderer no manda el
+     id se resuelve la conversación abierta (lo que hacía el agente único de antes). */
+  const dueno = (convId) => runtimes.ownerOf(convId);
+  const trabaja = (convId) => {
+    const a = runtimes.peek(convId);
+    return !!(a && a.isBusy());
+  };
 
   /* Deshacer el turno: vuelve a dejar los archivos como estaban antes de que el agente
      los tocara. La pre-imagen la guarda agent/cambios.js en cada escritura (para revisar el
@@ -21,14 +31,15 @@ function registerCambiosIpc(ipcMain, ctx) {
 
      Se niega con el agente trabajando: deshacer mientras hay una escritura en vuelo
      restauraría un archivo que la herramienta está a punto de volver a escribir. */
-  ipcMain.handle('cambios:deshacer', async () => {
-    if (ag() && ag().isBusy()) return { ok: false, error: 'SAGITARI está trabajando ahora mismo: detén la tarea antes de deshacer' };
+  ipcMain.handle('cambios:deshacer', async (e, convId) => {
+    if (trabaja(convId)) return { ok: false, error: 'SAGITARI está trabajando ahora mismo: detén la tarea antes de deshacer' };
     const ws = ctx.getWorkspace();
-    if (!cambios.puedeDeshacer(ws)) return { ok: false, error: 'no hay ningún cambio de este turno que deshacer' };
-    const plan = cambios.planDeshacer(ws);
+    const d = dueno(convId);
+    if (!cambios.puedeDeshacer(ws, d)) return { ok: false, error: 'no hay ningún cambio de este turno que deshacer' };
+    const plan = cambios.planDeshacer(ws, d);
     let r;
     try {
-      r = cambios.deshacer(ws);
+      r = cambios.deshacer(ws, {}, d);
     } catch (e) {
       return { ok: false, error: 'no se pudo deshacer: ' + ((e && e.message) || e) };
     }
@@ -47,10 +58,42 @@ function registerCambiosIpc(ipcMain, ctx) {
   });
 
   /** ¿Hay algo que deshacer ahora mismo? (para que la interfaz no ofrezca un botón inútil) */
-  ipcMain.handle('cambios:estado', async () => {
+  ipcMain.handle('cambios:estado', async (e, convId) => {
     const ws = ctx.getWorkspace();
-    const plan = cambios.puedeDeshacer(ws) ? cambios.planDeshacer(ws) : [];
+    const d = dueno(convId);
+    const plan = cambios.puedeDeshacer(ws, d) ? cambios.planDeshacer(ws, d) : [];
     return { ok: true, puede: plan.length > 0, archivos: plan.map((x) => x.ruta) };
+  });
+
+  /* Revisión del cambio: el MISMO diff que ya lee el subagente revisor, pero estructurado
+     para que el panel lo pinte (archivos, contadores y hunks con líneas). Antes el usuario
+     solo tenía «Deshacer el cambio»: todo el turno o nada, y a ciegas. */
+  ipcMain.handle('cambios:diff', async (e, convId) => {
+    const ws = ctx.getWorkspace();
+    try {
+      return { ok: true, archivos: cambios.diffEstructurado(ws, {}, dueno(convId)) || [] };
+    } catch (e) {
+      return { ok: false, error: 'no se pudo preparar el diff: ' + ((e && e.message) || e), archivos: [] };
+    }
+  });
+
+  /* Vuelve atrás UN archivo del turno, dejando los demás como están. Se niega con el
+     agente trabajando por el mismo motivo que deshacer: restauraría un archivo que la
+     herramienta está a punto de volver a escribir. */
+  ipcMain.handle('cambios:revertir', async (e, convId, archivo) => {
+    if (trabaja(convId)) return { ok: false, error: 'SAGITARI está trabajando ahora mismo: detén la tarea antes de revertir' };
+    const ws = ctx.getWorkspace();
+    let r;
+    try {
+      r = cambios.archivoRevertir(ws, archivo, dueno(convId));
+    } catch (e2) {
+      return { ok: false, error: 'no se pudo revertir «' + String(archivo) + '»: ' + ((e2 && e2.message) || e2) };
+    }
+    try {
+      repomap.invalidar(ws);
+    } catch {}
+    runlog.log({ agent: 'sagitari', event: 'undo_file', archivo: String(archivo), borrado: !!(r && r.borrado) });
+    return { ok: true, ...r };
   });
 
   /* Reglas del proyecto (SAGITARI.md / AGENTS.md): la interfaz enseña CUÁLES se están

@@ -67,11 +67,32 @@ function registerUpdateIpc(ipcMain, ctx) {
       : null;
   }
 
-  function sendUpdate(ev) {
+  /* Los eventos de actualización se GUARDAN si aún no hay renderer listo para recibirlos.
+     Antes se descartaba en silencio cuando la ventana no existía o no había terminado de
+     cargar: la comprobación automática de las 12 s podía fallar sin dejar rastro. La cola se
+     vuelca en `did-finish-load` (o en el primer envío si la ventana ya está lista). */
+  const colaUpdate = [];
+  let wcEnlazado = null;
+  function volcarCola() {
+    const w = getWin();
+    if (!w || w.isDestroyed()) return;
     try {
-      const _w = getWin();
-      if (_w && !_w.isDestroyed()) _w.webContents.send('update:event', ev);
+      for (const ev of colaUpdate.splice(0)) w.webContents.send('update:event', ev);
     } catch {}
+  }
+  function sendUpdate(ev) {
+    colaUpdate.push(ev);
+    if (colaUpdate.length > 20) colaUpdate.shift(); // techo: no crecer sin fin
+    const w = getWin();
+    if (!w || w.isDestroyed()) return; // sin ventana: se entregan cuando la haya
+    if (w.webContents.isLoading()) {
+      if (wcEnlazado !== w.webContents) {
+        wcEnlazado = w.webContents;
+        wcEnlazado.once('did-finish-load', volcarCola);
+      }
+      return;
+    }
+    volcarCola();
   }
 
   async function checkUpdates({ announce = false } = {}) {
@@ -82,6 +103,18 @@ function registerUpdateIpc(ipcMain, ctx) {
       if (announce) sendUpdate({ type: 'available', version: r.latest, current: r.current, url: r.url });
     } else if (announce) {
       sendUpdate({ type: r.ok ? 'up-to-date' : 'error', version: r.latest, current: r.current, message: r.error || null });
+    }
+    // El resultado de la comprobación ANUNCIADA queda SIEMPRE en el registro, también
+    // cuando ok:false: antes un fallo (red, API) se perdía sin dejar rastro.
+    if (announce) {
+      runlog.log({
+        agent: 'sagitari',
+        event: 'update_check',
+        ok: r.ok !== false,
+        available: !!r.available,
+        latest: r.latest || null,
+        error: r.error || null,
+      });
     }
     return r;
   }
@@ -334,7 +367,7 @@ function registerUpdateIpc(ipcMain, ctx) {
     });
     const pendiente = pendingInfo();
     runlog.log({ agent: 'sagitari', event: 'update_install', version: d.version, log: logPath, via });
-    // cierre ordenado (cierra Chrome, procesos de voz, tareas). El ayudante espera
+    // cierre ordenado (cierra Chrome, tareas). El ayudante espera
     // a que la app desaparezca de verdad, así que no hace falta adivinar un margen.
     setTimeout(() => {
       try {
@@ -421,20 +454,36 @@ function registerUpdateIpc(ipcMain, ctx) {
       clearPending();
       return { ok: false, error: 'el instalador descargado ya no está en su sitio: vuelve a descargar la actualización', pending: null };
     }
-    if (p.expected && updater.sha512Of(p.path) !== p.expected) {
+    // El hash se RE-VERIFICA siempre y `expected` es OBLIGATORIO (fail-closed): antes un
+    // `expected` ausente saltaba la comprobación entera y el fichero se lanzaba sin más.
+    if (!p.expected || updater.sha512Of(p.path) !== p.expected) {
       await fsp.rm(p.path, { force: true }).catch(() => {});
       clearPending();
-      runlog.log({ agent: 'sagitari', event: 'update_verify_failed', version: p.version, reason: 'hash cambiado antes de reintentar' });
+      runlog.log({
+        agent: 'sagitari',
+        event: 'update_verify_failed',
+        version: p.version,
+        reason: p.expected ? 'hash cambiado antes de reintentar' : 'sin hash publicado',
+      });
       return {
         ok: false,
-        error: 'el instalador ya no coincide con la firma publicada: vuelve a descargar la actualización',
+        error: p.expected
+          ? 'el instalador ya no coincide con la firma publicada: vuelve a descargar la actualización'
+          : 'esta instalación pendiente no trae hash publicado: vuelve a descargar la actualización',
         pending: null,
       };
     }
-    // Misma puerta que update:install: lo pendiente de versiones anteriores no
-    // trae estado de firma (signed undefined), y eso también exige confirmación.
-    if (p.signed !== true && !(opts && opts.confirmUnsigned === true)) {
-      runlog.log({ agent: 'sagitari', event: 'update_unsigned_gate', version: p.version, signed: false, retry: true });
+    // La firma se consulta AHORA; no se confía en el `signed` guardado (foto vieja), porque
+    // el fichero vive en %TEMP% y cualquier proceso del usuario puede reescribirlo.
+    let firma = null;
+    try {
+      firma = await updater.signatureOf(p.path);
+    } catch {}
+    const firmado = !!(firma && firma.status === 'Valid');
+    // Misma puerta que update:install: lo pendiente de versiones anteriores no trae estado
+    // de firma (signed undefined), y eso también exige confirmación.
+    if (!firmado && !(opts && opts.confirmUnsigned === true)) {
+      runlog.log({ agent: 'sagitari', event: 'update_unsigned_gate', version: p.version, signed: firmado, retry: true });
       return {
         ok: false,
         needsUnsignedConfirm: true,
@@ -448,7 +497,8 @@ function registerUpdateIpc(ipcMain, ctx) {
       path: p.path,
       version: p.version,
       expected: p.expected,
-      signed: p.signed === true,
+      signed: firmado,
+      signer: (firma && firma.signer) || null,
       kind: 'nsis',
       verified: true,
     });
@@ -457,6 +507,9 @@ function registerUpdateIpc(ipcMain, ctx) {
 
   ipcMain.handle('update:page', async () => {
     const url = (lastUpdate && lastUpdate.url) || `https://github.com/${updater.REPO}/releases`;
+    // Solo http(s): `url` viene de la API de releases y no debe convertirse en una orden
+    // arbitraria a shell.openExternal (mismo límite que ipc-misc.js y ventana.js).
+    if (typeof url !== 'string' || !/^https?:\/\//i.test(url)) return { ok: false, error: 'URL no permitida' };
     try {
       await shell.openExternal(url);
       return { ok: true };

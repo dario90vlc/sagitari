@@ -8,6 +8,9 @@
 
 const fs = require('fs');
 const path = require('path');
+/* La MISMA tabla que exige confirmación al escribir en un campo sensible decide si un
+   texto tecleado se puede guardar: dos listas de qué es un campo sensible se separan. */
+const { SENSITIVE_FIELD_RX } = require('./guardrails');
 
 const LOG_DIR_DEFAULT = path.join(require('./datadir').dataDir(), 'logs');
 let LOG_DIR = LOG_DIR_DEFAULT;
@@ -153,19 +156,57 @@ function redactText(v) {
   return s;
 }
 
-/* Campos largos que inundan el log y pueden arrastrar secretos: se recortan. */
+/* Campos largos que inundan el log y pueden arrastrar secretos: se recortan aquí, que es
+   la forma «lista para guardar» de los args. El tope que NO depende de esta lista vive en
+   `log()` (ver `acotarCadenas`): es el único sitio por el que pasa todo lo que se escribe. */
 const TRUNCATE_KEYS = new Set(['content', 'text', 'body', 'result', 'output', 'command', 'error']);
 const MAX_ARG_CHARS = 300;
+
+/* --------------------------------------------------------------------------- *
+ *  Texto libre que puede ser un secreto aunque la clave no lo diga.
+ *
+ *  La clave `text` de un `browser_control` no dice nada por sí sola: escribir
+ *  «hunter2» en `#password` es una contraseña, y escribir «Madrid» en `#ciudad`
+ *  no lo es. Lo decide el CAMPO (selector/name/id) con la misma tabla que exige
+ *  confirmación al escribir (SENSITIVE_FIELD_RX), así que fuera de un campo
+ *  sensible el texto se sigue leyendo: saber QUÉ se escribió es justo lo que
+ *  hace útil el log al depurar un formulario.
+ *  El portapapeles y la expresión de `eval` no tienen campo que los blanquee:
+ *  se enmascaran siempre. Se tapa el VALOR, no la clave: `[REDACTED n chars]`
+ *  deja ver que había algo y de qué tamaño, nunca el contenido.
+ * --------------------------------------------------------------------------- */
+
+/** ¿Este texto libre puede llevar un secreto? (misma tabla que la confirmación). */
+function textoLibreSensible(tool, args, key) {
+  const accion = String((args && args.action) || '');
+  if (tool === 'clipboard') return accion === 'write' && (key === 'text' || key === 'content');
+  if (tool !== 'browser_control') return false;
+  if (accion === 'eval') return key === 'expression';
+  if (accion !== 'type' || key !== 'text') return false;
+  const campo = [args.selector, args.name, args.id].map((x) => String(x || '')).join(' ');
+  return SENSITIVE_FIELD_RX.test(campo);
+}
+
+/** Copia de los args con el texto libre potencialmente secreto enmascarado. */
+function enmascararArgs(tool, args) {
+  if (!args || typeof args !== 'object') return args;
+  let out = args;
+  for (const k of Object.keys(args)) {
+    if (typeof args[k] !== 'string') continue;
+    if (!textoLibreSensible(tool, args, k)) continue;
+    if (out === args) out = { ...args };
+    out[k] = '[REDACTED ' + args[k].length + ' chars]';
+  }
+  return out;
+}
 
 function redactValue(key, v, tool) {
   if (typeof v === 'string') {
     if (SECRET_KEYS.has(normKey(key))) return '[REDACTED]';
-    // el texto tecleado o pegado puede ser una contraseña: sin marca no se sabe
-    if ((tool === 'clipboard' && (key === 'text' || key === 'content')) || (tool === 'browser_control' && key === 'text')) {
-      return v.length > MAX_ARG_CHARS ? v.slice(0, MAX_ARG_CHARS) + '…[truncado]' : redactText(v);
-    }
     if (TRUNCATE_KEYS.has(normKey(key)) && v.length > MAX_ARG_CHARS) {
-      return redactText(v.slice(0, MAX_ARG_CHARS)) + '…[truncado]';
+      /* Primero se enmascaran los patrones y DESPUÉS se recorta: al revés, un secreto que
+         cayera justo en el corte se escribiría a medias. */
+      return redactText(v).slice(0, MAX_ARG_CHARS) + '…[truncado]';
     }
     return redactText(v);
   }
@@ -181,8 +222,9 @@ function redactValue(key, v, tool) {
 /** Args de una herramienta listos para guardar: secretos fuera, largos recortados. */
 function redactToolArgs(tool, args) {
   if (!args || typeof args !== 'object') return args;
+  const limpios = enmascararArgs(tool, args); // texto libre que puede ser un secreto
   const out = {};
-  for (const k of Object.keys(args)) out[k] = redactValue(k, args[k], tool);
+  for (const k of Object.keys(limpios)) out[k] = redactValue(k, limpios[k], tool);
   return out;
 }
 
@@ -194,12 +236,29 @@ function redactEvent(event) {
   return out;
 }
 
+/** Tope DURO a cualquier cadena del evento, esté donde esté y se llame como se llame.
+    `redactValue` recorta por lista de claves; esto recorta por tamaño, sin lista: una
+    clave nueva (`old_string`/`new_string` de una edición, o la que traiga mañana otra
+    herramienta) no puede depender de que alguien se acuerde de añadirla. Va en `log`, el
+    único sitio que escribe en disco, y DESPUÉS de enmascarar: un secreto que caiga en el
+    corte ya está fuera. */
+function acotarCadenas(v, max = MAX_ARG_CHARS) {
+  if (typeof v === 'string') return v.length > max ? v.slice(0, max) + '…[truncado]' : v;
+  if (Array.isArray(v)) return v.map((x) => acotarCadenas(x, max));
+  if (v && typeof v === 'object') {
+    const out = {};
+    for (const k of Object.keys(v)) out[k] = acotarCadenas(v[k], max);
+    return out;
+  }
+  return v;
+}
+
 /** Append one structured event. Never throws — logging must not break the agent. */
 function log(event) {
   let s = ensureStream();
   if (!s) return;
   try {
-    const line = JSON.stringify({ ts: new Date().toISOString(), ...redactEvent(event) }) + '\n';
+    const line = JSON.stringify({ ts: new Date().toISOString(), ...acotarCadenas(redactEvent(event)) }) + '\n';
     // El tope se mide en BYTES, no en caracteres: con acentos y eñes (y emojis)
     // un `line.length` en UTF-16 subestima el tamaño real hasta 3-4×, así que el
     // fichero crecía muy por encima de MAX_BYTES antes de rotar.
@@ -273,6 +332,7 @@ module.exports = {
   LOG_DIR,
   redactToolArgs,
   redactEvent,
+  enmascararArgs,
   /* Redirige el almacén y los topes para poder probar rotación y tamaño sin
      escribir 8 MB ni tocar los logs reales del usuario. */
   __test: {

@@ -39,6 +39,25 @@ const RISK = {
   use_skill: 'safe',
   todo_write: 'safe', // la lista de tareas es estado del propio agente: no toca nada del sistema
   delegate: 'safe', // v1.4: la delegación no pide permiso; las herramientas del SUBAGENTE sí (con los mismos niveles)
+  /* v4.4 — MODO EQUIPO. Ninguna de las cinco toca el sistema: levantan compañeros, hablan
+     con ellos o apuntan en el tablero. Las herramientas que EJECUTA un compañero sí piden
+     su permiso, con los mismos niveles y atribuidas a su miembro. */
+  team_spawn: 'safe',
+  team_send: 'safe',
+  team_wait: 'safe',
+  team_board: 'safe',
+  team_done: 'safe',
+  // Solo lee una página pública por GET (con filtro SSRF y topes): es lectura, como read_file
+  web_fetch: 'safe',
+  // Git de lectura: mirar no cambia nada
+  git_status: 'safe',
+  git_diff: 'safe',
+  git_log: 'safe',
+  /* git_branch LISTA (lectura) pero también CREA y CAMBIA de rama (escribe): su nivel
+     declarado es el de la peor acción. guardrails.decide abarata `action: 'list'` —y solo
+     eso— cuando el usuario no ha fijado un nivel propio para la herramienta. */
+  git_branch: 'confirm',
+  git_commit: 'confirm',
 };
 
 const defs = [
@@ -438,11 +457,14 @@ const defs = [
     function: {
       name: 'remember',
       description:
-        'Guarda un recuerdo permanente para futuras conversaciones (preferencias del usuario, datos importantes, decisiones). Úsalo cuando el usuario diga "recuerda que...", o para anotar hábitos y preferencias relevantes que descubras.',
+        'Guarda un hecho duradero sobre el usuario para futuras conversaciones: su nombre, cómo quiere que le hables, preferencias y hábitos estables, en qué proyecto o carpeta trabaja, decisiones que pidió recordar. Úsala sobre todo cuando te CORRIJA un dato suyo («en realidad me llamo…», «no, mejor dicho…», «no trabajo en esa carpeta»): guarda siempre el dato NUEVO, aunque exista uno viejo. Si ya sabía algo de ESE MISMO dato (su nombre, su idioma, dónde vive, su proyecto), la memoria se queda con el nuevo y manda el anterior a la papelera, de donde se puede recuperar; si es un dato distinto (otra preferencia, otra carpeta), se guardan los dos. No la uses para lo pasajero (qué archivo tocamos hoy, el resultado de este turno) ni para repetir un hecho que ya está en tu memoria y no ha cambiado.',
       parameters: {
         type: 'object',
         properties: {
-          text: { type: 'string', description: 'El recuerdo, en una frase clara y autónoma' },
+          text: {
+            type: 'string',
+            description: 'El hecho, en una frase clara y autónoma (por ejemplo: «El usuario prefiere respuestas cortas»)',
+          },
           importance: { type: 'number', description: '0-1: 1 = crítico (siempre relevante), 0.5 = normal, 0.2 = detalle menor' },
           confidence: { type: 'number', description: '0-1: cómo de seguro estás del recuerdo (0.8 por defecto)' },
         },
@@ -497,6 +519,166 @@ const defs = [
 
 // v1.4: la herramienta delegate se añade al final (definida en subagents.js)
 defs.push(delegateToolDef());
+/* v4.1: las definiciones viven en su módulo (como delegate) y aquí solo se registran,
+   para que esta tabla siga siendo el ÚNICO sitio donde se declaran niveles y catálogo. */
+defs.push(require('./web').webFetchDef());
+defs.push(...require('./git').gitToolDefs());
+
+/* --------------------------------------------------------------------------- *
+ *  v4.4 — MODO EQUIPO: las cinco herramientas del equipo
+ *
+ *  El LÍDER (modo EQUIPO) ve las cinco. Un COMPAÑERO ve tres: puede hablar
+ *  (team_send), apuntar en el tablero (team_board) y cerrar su encargo
+ *  (team_done), pero NO levanta gente ni espera a nadie — el tope de 4 y la
+ *  espera se quedan en el líder (`HERRAMIENTAS_EQUIPO_MIEMBRO`).
+ *
+ *  El motor (agent/equipo.js) es quien las ejecuta; aquí solo viven su texto y
+ *  su nivel de riesgo, en la MISMA tabla que el resto del catálogo.
+ * --------------------------------------------------------------------------- */
+
+const HERRAMIENTAS_EQUIPO = new Set(['team_spawn', 'team_send', 'team_wait', 'team_board', 'team_done']);
+const HERRAMIENTAS_EQUIPO_MIEMBRO = ['team_send', 'team_board', 'team_done'];
+
+const defsEquipo = [
+  {
+    type: 'function',
+    function: {
+      name: 'team_spawn',
+      description:
+        'Levanta un COMPAÑERO de equipo con una subtarea autónoma y sigue TÚ sin esperarlo: devuelve su id (m1, m2…) para poder mandarle mensajes con team_send o esperarlo con team_wait. Úsalo para repartir la orden en partes que se puedan hacer a la vez, cada una con su criterio de éxito. Máximo 4 compañeros vivos: el quinto devuelve error.',
+      parameters: {
+        type: 'object',
+        properties: {
+          agent: {
+            type: 'string',
+            description:
+              'Especialista a levantar: los del registro (research, browser, coding, file, vision, verification, review) o un agente definido por el usuario',
+          },
+          task: { type: 'string', description: 'La subtarea concreta y autónoma de ese compañero, con el contexto que necesita' },
+          expect: {
+            type: 'string',
+            description:
+              'Criterio de éxito: cómo se comprueba que esa subtarea está bien hecha (qué archivo leer, qué comando ejecutar, qué debe aparecer)',
+          },
+        },
+        required: ['agent', 'task'],
+      },
+    },
+  },
+  {
+    type: 'function',
+    function: {
+      name: 'team_send',
+      description:
+        'Entrega un mensaje al buzón de otro miembro del equipo. A un compañero en marcha se le inyecta en su siguiente paso; a uno que ya terminó se le despierta con el mensaje como nueva subtarea. Úsalo para dar un dato que le falta, corregir el rumbo o pedir lo que necesitas.',
+      parameters: {
+        type: 'object',
+        properties: {
+          to: { type: 'string', description: 'Destinatario: el id de un compañero (m1, m2…), «lider» o «todos»' },
+          text: { type: 'string', description: 'El mensaje, concreto y autónomo (quien lo recibe no ve tu conversación)' },
+        },
+        required: ['to', 'text'],
+      },
+    },
+  },
+  {
+    type: 'function',
+    function: {
+      name: 'team_wait',
+      description:
+        'Espera a que los compañeros terminen o pidan algo (un permiso, una pregunta) y devuelve su estado, su resultado y los mensajes que te hayan mandado. NO bloquea a los que no esperas: siguen trabajando. Úsalo tras repartir el trabajo, antes de agregar el resultado final.',
+      parameters: {
+        type: 'object',
+        properties: {
+          ids: { type: 'array', items: { type: 'string' }, description: 'Ids a esperar (por defecto, todos los compañeros del equipo)' },
+          timeoutMs: { type: 'number', description: 'Tiempo máximo de espera en ms (por defecto 30000, tope 300000)' },
+        },
+      },
+    },
+  },
+  {
+    type: 'function',
+    function: {
+      name: 'team_board',
+      description:
+        'El tablero compartido del equipo, que es la fuente de verdad del progreso. SIN argumentos lo lee; con «que» apunta un ítem nuevo (o actualiza el tuyo con ese mismo texto) y con «estado»/«nota» lo va actualizando mientras trabajas.',
+      parameters: {
+        type: 'object',
+        properties: {
+          quien: { type: 'string', description: 'De quién es el ítem: un id de compañero o «lider» (por defecto, quien llama)' },
+          que: { type: 'string', description: 'El ítem: qué se está haciendo o qué falta (identifica el ítem para poder actualizarlo)' },
+          estado: { type: 'string', description: 'Estado del ítem: pendiente, en_curso, hecho, fallo…' },
+          nota: { type: 'string', description: 'Detalle o resultado: qué ha salido, con qué evidencia, qué falta' },
+        },
+      },
+    },
+  },
+  {
+    type: 'function',
+    function: {
+      name: 'team_done',
+      description:
+        'Cierra tu encargo con lo que has hecho y la evidencia que lo prueba. Llámalo cuando termines (o cuando no puedas seguir): el líder deja de esperarte y agrega con tu resultado.',
+      parameters: {
+        type: 'object',
+        properties: {
+          resumen: { type: 'string', description: 'Qué has hecho y en qué ha quedado, en pocas líneas' },
+          evidencia: { type: 'string', description: 'La prueba concreta: ruta, comando ejecutado y su salida, URL, mensaje exacto' },
+        },
+        required: ['resumen'],
+      },
+    },
+  },
+];
+defs.push(...defsEquipo);
+
+/** ¿Es una herramienta del equipo? (el ejecutor y el modo EQUIPO lo consultan). */
+function esHerramientaDeEquipo(nombre) {
+  return HERRAMIENTAS_EQUIPO.has(String(nombre || ''));
+}
+
+/** Las definiciones que ve un COMPAÑERO: hablar, apuntar y cerrar — nunca levantar gente
+    ni esperar (el tope y la espera son del líder). */
+function defsEquipoParaMiembro() {
+  return defsEquipo.filter((d) => HERRAMIENTAS_EQUIPO_MIEMBRO.includes(d.function.name));
+}
+
+/** El catálogo SIN las herramientas de equipo: es el que viaja al modelo en los modos que
+    no son EQUIPO, para no ofrecerle al chat herramientas que no tienen equipo detrás.
+    Incluye las dinámicas (MCP): filtra el catálogo real, no la tabla. */
+function defsSinEquipo() {
+  return allToolDefs().filter((d) => !esHerramientaDeEquipo(d.function && d.function.name));
+}
+
+/* Qué herramientas pueden usarse en modo PLAN: SOLO leer e inspeccionar. Nada que
+   escriba, ejecute comandos, maneje el navegador, el portapapeles o la ventana. Es el
+   predicado que consulta agent.js antes de cada llamada.
+
+   La lista es EXPLÍCITA a propósito, no un patrón por prefijo: un futuro `git_reset`
+   (que reescribe la historia) no puede colarse en modo PLAN por empezar por `git_`, y
+   `git_branch` tampoco entra aunque su `list` sea lectura, porque la misma herramienta
+   crea y cambia de rama según `action`. */
+const SOLO_LECTURA = new Set([
+  'read_file',
+  'list_dir',
+  'search_files',
+  'search_code',
+  'repo_map',
+  'find_symbol',
+  'view_image',
+  'screenshot',
+  'system_info',
+  'web_fetch',
+  'git_status',
+  'git_diff',
+  'git_log',
+  'remember',
+  'todo_write',
+  'use_skill',
+]);
+function esSoloLectura(nombre) {
+  return SOLO_LECTURA.has(String(nombre || ''));
+}
 
 /* Herramientas que no vienen de la tabla: hoy, los servidores MCP del usuario.
    El proveedor lo instala main.js; si no hay ninguno, el catálogo es el nativo. */
@@ -508,4 +690,25 @@ function allToolDefs() {
   return dynamicProvider ? defs.concat(dynamicProvider()) : defs;
 }
 
-module.exports = { toolDefs: defs, allToolDefs, setDynamicToolProvider, RISK };
+module.exports = {
+  toolDefs: defs,
+  allToolDefs,
+  setDynamicToolProvider,
+  RISK,
+  esSoloLectura,
+  // v4.4 — MODO EQUIPO
+  esHerramientaDeEquipo,
+  defsEquipoParaMiembro,
+  defsSinEquipo,
+  HERRAMIENTAS_EQUIPO,
+  HERRAMIENTAS_EQUIPO_MIEMBRO,
+};
+
+/* Los agentes del usuario (carpeta de datos) entran en el registro al arrancar: es lo que
+   hace que se puedan delegar en ellos y que el enum de `delegate` los incluya sin tener
+   que abrir antes la vista de Agentes. Va AL FINAL, cuando este módulo ya exportó el
+   catálogo: subagents.js lo necesita para cruzar las herramientas de cada AGENT.md con las
+   reales. Si algo falla, los de serie siguen funcionando igual. */
+try {
+  require('./subagents').recargar();
+} catch {}

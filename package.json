@@ -1,8 +1,8 @@
 {
   "name": "sagitari",
   "productName": "SAGITARI",
-  "version": "4.1.0",
-  "description": "SAGITARI — agente de IA con control total del PC: chat, voz, navegador y automatización del sistema",
+  "version": "5.0.0",
+  "description": "SAGITARI — agente de IA con control total del PC: chat, navegador y automatización del sistema",
   "main": "main/main.js",
   "scripts": {
     "start": "electron .",
@@ -48,9 +48,6 @@
       "output": "dist",
       "buildResources": "build"
     },
-    "asarUnpack": [
-      "main/**/*.ps1"
-    ],
     "files": [
       "main/**/*",
       "agent/**/*",

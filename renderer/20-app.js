@@ -1,11 +1,8 @@
-/* SAGITARI renderer — 20-voz.js (antes app.js 1340-2752): feed de actividad, agentes, skills, voz, confirmaciones, envío y adjuntos
+/* SAGITARI renderer — 20-app.js (antes app.js 1340-2752): feed de actividad, agentes, skills, confirmaciones, envío y adjuntos
    Script clásico: comparte el scope global con los demás 1x-*.js.
    El orden de carga en index.html preserva el orden original. */
-/* global hablarEnFlujo, silenciarLecturaVoz */
-/* hablarEnFlujo y silenciarLecturaVoz están definidas en 40-vistas.js (scope compartido) */
-/* global pasosConMotor, reiniciarLecturaVoz */
-/* pasosConMotor está en 30-ajustes.js y reiniciarLecturaVoz en 40-vistas.js (scope compartido) */
-/* exported renderMarket */
+/* exported renderMarket, pintarCtxMeter, resetCtxMeter, pintarRailEquipo */
+/* global hiloActual, equipoDe, estadoEquipo, badgeEquipoPermisos, equipoEvento, equipoChat, equipoPermiso, equipoFicha */
 // ============ activity feed + live agents ============
 const FEED_MAX = 6;
 /* TABLERO: reloj de estación del rail (hora local tabular, late 1 vez por segundo
@@ -111,6 +108,34 @@ function updateAgentCount() {
   });
 }
 updateAgentCount();
+
+/** Los compañeros del EQUIPO en el rail: la vista Equipo y la tarjeta del chat comparten
+    este estado (40-vistas.js), así que el rail lo pinta quien tiene el DOM del rail. */
+function pintarRailEquipo() {
+  const rail = $('#railAgents');
+  if (!rail) return;
+  rail.querySelectorAll('.ragent.miembro').forEach((n) => n.remove());
+  const e = equipoDe(hiloActual(), false);
+  if (e && e.estado === 'vivo') {
+    const filas = [];
+    for (const id of e.orden) {
+      const m = e.miembros.get(id);
+      if (!m) continue;
+      const look = K.subagent(m.spec) || { icon: 'agents', cls: 'a-p2' };
+      const est = estadoEquipo(m.estado);
+      const d = document.createElement('div');
+      d.className = 'ragent miembro ' + est.cls;
+      d.dataset.miembro = m.id;
+      d.innerHTML = `<div class="aic ${look.cls}">${ic(look.icon)}</div>
+      <div><b>${esc(m.name || m.id)}</b><small>${esc(K.clip(m.tarea || est.label, 48))}</small></div>
+      ${badgeEquipoPermisos(m)}<span class="adot"></span>`;
+      d.title = `${m.name || m.id}${m.spec ? ' (' + m.spec + ')' : ''} · ${est.label}${m.tarea ? '\n' + m.tarea : ''}`;
+      filas.push(d);
+    }
+    rail.prepend(...filas);
+  }
+  updateAgentCount();
+}
 
 /** Paneles de la vista Agentes: se pintan al entrar y se refrescan durante el turno. */
 function refreshAgentsPanels() {
@@ -402,34 +427,38 @@ function freezeStream() {
   h._openEl = null;
 }
 
-/* ---- pasos del turno, en la franja del panel de voz --------------------------------
-   El panel TAPA el chat, así que la tarjeta de herramienta —y su «completado»— se queda
-   detrás: la franja de pasos es lo único que dice por dónde va el agente mientras
-   trabaja. Se alimenta de los mismos eventos que ya usa el chat y con LA MISMA etiqueta
-   humana (`K.tool`), para que diga lo mismo en los dos sitios. */
-const PASOS_VOZ_MAX = 5; // la franja es un estado, no un historial: sin tope, una tarea
-// de cien herramientas la haría crecer sin fin (y sin verse)
-let pasosVoz = [];
-
-function pasoVoz(ev, ok, labelCustom) {
-  const label =
-    labelCustom || K.tool(ev.name).label + (ev.subagent && K.subagent(ev.subagent) ? ' · ' + K.subagent(ev.subagent).label : '');
-  /* El `tool` abre el paso (queda «en curso») y el `tool_result` lo CIERRA marcándolo, en
-     vez de añadir una fila nueva: el mismo trabajo saldría dos veces y, con cinco huecos,
-     se comería él solo la franja. Si no hay paso abierto que cerrar —porque se recortó o
-     porque el resultado llega suelto— se añade igual, para no perder el dato. */
-  const ultimo = pasosVoz[pasosVoz.length - 1];
-  if (ok === undefined) pasosVoz.push({ label });
-  else if (ultimo && ultimo.label === label && ultimo.ok === undefined) ultimo.ok = ok;
-  else pasosVoz.push({ label, ok });
-  if (pasosVoz.length > PASOS_VOZ_MAX) pasosVoz = pasosVoz.slice(-PASOS_VOZ_MAX);
-  if (window.VoiceMode && window.VoiceMode.abierto()) window.VoiceMode.pasos(pasosConMotor(pasosVoz));
+/* ---- medidor de contexto del chat ----
+   Lo alimenta el evento `context` del agente: tokens usados sobre la ventana del modelo y
+   el estado que él mismo calcula ('hola' = holgado, 'ajustado', 'apretado'). Vive aquí
+   porque lo usan las fichas de conversación (`10-chat.js`) y el reset de la vista. */
+function pintarCtxMeter(ev) {
+  const el = document.getElementById('ctxMeter');
+  if (!el || !ev) return;
+  const pct = Number.isFinite(Number(ev.pct)) ? Math.max(0, Math.min(100, Number(ev.pct))) : 0;
+  el.hidden = false;
+  el.dataset.estado = String(ev.estado || 'hola');
+  el.style.setProperty('--ctx-pct', pct + '%');
+  const val = el.querySelector('.ctxval');
+  if (val) val.textContent = pct + '%';
+  /* La cifra exacta, a un `title` de distancia: el chat no es un panel de métricas. */
+  const tokens = Number(ev.tokens) || 0;
+  const limite = Number(ev.limite) || 0;
+  el.title = limite
+    ? K.thousands(tokens) + ' de ' + K.thousands(limite) + ' tokens de contexto'
+    : K.thousands(tokens) + ' tokens de contexto';
 }
 
-/* Turno nuevo, franja nueva: lo que hizo el anterior no dice nada de este. */
-function limpiarPasosVoz() {
-  pasosVoz = [];
-  if (window.VoiceMode && window.VoiceMode.abierto()) window.VoiceMode.pasos([]);
+/** Sin contexto que enseñar (conversación nueva, o sin evento todavía): se esconde, en vez
+    de quedarse con el porcentaje de otra conversación. */
+function resetCtxMeter() {
+  const el = document.getElementById('ctxMeter');
+  if (!el) return;
+  el.hidden = true;
+  el.dataset.estado = 'hola';
+  el.style.setProperty('--ctx-pct', '0%');
+  const val = el.querySelector('.ctxval');
+  if (val) val.textContent = '0%';
+  el.title = '';
 }
 
 window.sagitari.onAgentEvent((ev) => {
@@ -437,10 +466,6 @@ window.sagitari.onAgentEvent((ev) => {
   // interactivo (ni sus burbujas ni el estado busy/detener): solo el feed,
   // el panel de Tareas, las confirmaciones y los avisos.
   if (ev.bg) {
-    /* OJO: las tareas en segundo plano NO pintan pasos de voz. El panel tapa el chat y
-       sus guiones (investigar, codificar, navegar) usan las mismas herramientas que un
-       turno de voz: sin este filtro, una tarea que sigue corriendo pinta «Navegador» o
-       «Captura de pantalla» en el panel mientras el usuario habla de otra cosa. */
     switch (ev.type) {
       case 'status':
         feed(ev.text, 'pur');
@@ -498,12 +523,21 @@ window.sagitari.onAgentEvent((ev) => {
     }
     return;
   }
+  /* EQUIPO: los eventos se ACUMULAN por conversación (`equipoEvento`) y la tarjeta del chat
+     se pinta con ellos (`equipoChat`). Sin estos dos enganches la vista Equipo sale vacía y
+     la tarjeta no nace, aunque el motor sí mande los eventos. */
+  if (/^team_/.test(String(ev.type || ''))) {
+    equipoEvento(ev);
+    equipoChat(ev);
+    return;
+  }
   switch (ev.type) {
+    /* El contexto crece MIENTRAS el turno trabaja: si sólo se pintara al cambiar de ficha,
+       el medidor mentiría durante toda la respuesta. */
+    case 'context':
+      pintarCtxMeter(ev);
+      break;
     case 'delta': {
-      /* El texto de un SUBAGENTE es trabajo interno (acaba en su RESULT/DETAILS/EVIDENCE),
-         no la respuesta al usuario: si entra aquí se mezcla en la burbuja del asistente y,
-         peor, la lectura por frases lo pronuncia en voz alta. Su cierre se cuenta en la
-         tarjeta de la delegación (delegate_done). */
       if (ev.subagent) break;
       const b = ensureAssistantBubble();
       b._stream = (b._stream || '') + ev.text;
@@ -523,15 +557,10 @@ window.sagitari.onAgentEvent((ev) => {
         }
       }
       scheduleStreamRender(b);
-      /* Y en voz alta según se escribe (ver hablarEnFlujo): la respuesta empieza a sonar en
-         cuanto hay una frase, sin esperar a que el turno entero termine. Se pasa la
-         narración completa (tramos congelados + abierto): los offsets de lectura son
-         absolutos y así no se repite nada al congelar. */
-      hablarEnFlujo((b._frozenText || '') + (b._openText || ''), false);
       break;
     }
     /* Razonamiento del modelo (solo llega si el usuario lo activó en Ajustes). Se pinta
-       en su bloque y NUNCA en la burbuja ni en la voz: no es la respuesta. */
+       en su bloque y NUNCA en la burbuja ni en la narración: no es la respuesta. */
     case 'thinking_delta': {
       if (ev.subagent) break; // el de un subagente es trabajo interno (va en su tarjeta)
       const d = ensureThinkBlock();
@@ -579,7 +608,6 @@ window.sagitari.onAgentEvent((ev) => {
       toolCard(ev);
       setChatStatus(K.tool(ev.name).verb + (ev.subagent && K.subagent(ev.subagent) ? ' — ' + K.subagent(ev.subagent).label : '') + '…');
       feed(K.tool(ev.name).label + (ev.subagent ? ' · ' + K.subagent(ev.subagent).label : ''), 'pur');
-      pasoVoz(ev);
       agentStart(ev.name);
       break;
     case 'status':
@@ -591,7 +619,6 @@ window.sagitari.onAgentEvent((ev) => {
     case 'delegate_start':
       freezeStream(); // igual que con herramientas: intercalado cronológico
       equipoChip(ev);
-      pasoVoz({ name: 'delegate', subagent: ev.subagent }, undefined, etiquetaEquipo(ev));
       setChatStatus(etiquetaEquipo(ev) + ' — trabajando…');
       feed(etiquetaEquipo(ev), 'pur');
       break;
@@ -603,7 +630,6 @@ window.sagitari.onAgentEvent((ev) => {
     case 'delegate_done':
       delegationCard(ev);
       equipoCierra(ev);
-      pasoVoz({ name: 'delegate', subagent: ev.subagent }, String(ev.status || 'OK').toUpperCase() !== 'FAILED', etiquetaEquipo(ev));
       agentStop();
       feed(
         ((K.subagent(ev.subagent) || {}).label || 'Subagente') +
@@ -616,7 +642,6 @@ window.sagitari.onAgentEvent((ev) => {
       completeToolCard(ev);
       agentStop();
       feed(K.tool(ev.name).label + (ev.ok === false ? ' — falló' : ' — completado'), ev.ok === false ? 'err' : 'ok');
-      pasoVoz(ev, ev.ok !== false);
       setChatStatus('Herramienta completada, continuando…');
       refreshAgentsPanels();
       break;
@@ -639,31 +664,14 @@ window.sagitari.onAgentEvent((ev) => {
       break;
     }
     case 'assistant_done': {
-      /* El texto del STREAM es el que se ha estado leyendo por frases (y puede traer más
-         que el markdown final): se guarda ANTES de cerrar la burbuja, porque
-         `finishAssistant` suelta la referencia. Se pasa la narración completa
-         (tramos congelados + abierto), no solo el tramo abierto. */
-      const leidoHastaAqui =
-        (pendingAssistant && pendingAssistant._frozenText ? pendingAssistant._frozenText + '\n\n' : '') +
-        ((pendingAssistant && pendingAssistant._stream) || ev.text);
       finishAssistant(ev.text);
       busy = false;
       setSendMode();
       syncChatBadge();
       glowOffSoon();
-      /* En el modo voz la respuesta se dice SIEMPRE, aunque el TTS esté apagado en
-         Ajustes: es un modo de oído, y negarse a hablar ahí sería absurdo. La regla de
-         los arranques automatizados sigue mandando por encima (la aplica el proceso
-         principal).
-         Aquí sólo queda la COLA (lo que no hubiera cerrado frase mientras se escribía). */
-      hablarEnFlujo(leidoHastaAqui, true);
-      /* Y además se LEE: el panel tapa el chat, así que la respuesta tiene que aparecer ahí
-         también. Sin esto, con el modo voz abierto la respuesta solo se podía oír. */
-      if (window.VoiceMode && window.VoiceMode.abierto()) window.VoiceMode.respuesta(ev.text);
       setChatStatus('Listo · ' + lastTurnLabel(), 'done');
       feed('Respuesta lista', 'cy');
       if (devMode) paintMeta();
-      vaciarColaVoz();
       break;
     }
     case 'guardrail':
@@ -727,8 +735,7 @@ window.sagitari.onAgentEvent((ev) => {
         if (pendingAssistant) finishAssistant('', { interrupted: true, failed: true });
         if (devMode) paintMeta();
         refreshAgentsPanels();
-        if (!currentConfirm || !currentConfirm.runId) hideConfirm();
-        vaciarColaVoz();
+        if (!currentConfirm || !(currentConfirm.runId || currentConfirm.member)) hideConfirm();
       }
       break;
     case 'stopped':
@@ -740,15 +747,6 @@ window.sagitari.onAgentEvent((ev) => {
       agentStop();
       setChatStatus('Detenido por el usuario');
       feed('Detenido por el usuario', 'err');
-      /* Parar es también CALLAR: si el usuario detuvo el turno (con el botón del panel o
-         diciendo «para»), no tiene sentido que la voz siga leyendo lo que ya se generó.
-         Y el panel vuelve a «escuchando»: si se quedara en «pensando», el orbe y su botón
-         de parar seguirían diciendo que el agente trabaja cuando ya no hay nadie. */
-      silenciarLecturaVoz();
-      if (window.VoiceMode && window.VoiceMode.abierto()) {
-        window.sagitari.ttsStop();
-        window.VoiceMode.handle({ type: 'state', state: 'escuchando' });
-      }
       if (devMode) paintMeta();
       break;
     case 'toast':
@@ -819,37 +817,12 @@ function glowOffSoon() {
 const confirmQueue = [];
 let currentConfirm = null;
 
-/* El panel del modo voz TAPA el chat (es opaco y se superpone al área de mensajes), así
-   que la barra de confirmación de abajo queda oculta detrás: con el modo abierto el permiso
-   del agente no se podía contestar —ni con el ratón ni por voz— y el turno se quedaba
-   esperando hasta el timeout. Por eso la MISMA confirmación se pinta también en el panel
-   mientras el modo esté abierto: los dos botones del panel y su «sí»/«no» por voz acaban
-   los dos en `resolveConfirm`, que es el único sitio que responde al proceso principal.
-   No hay dos caminos de respuesta: hay uno con dos puertas. */
-function pedirConfirmacionEnVoz(ev) {
-  if (!ev || !window.VoiceMode || !window.VoiceMode.abierto()) return;
-  const texto =
-    'El agente quiere: ' +
-    (ev.description || ev.tool) +
-    (confirmQueue.length > 1 ? ' · 1 de ' + confirmQueue.length : '') +
-    (ev.summary ? ' — ' + String(ev.summary).slice(0, 240) : '');
-  window.VoiceMode.pedirConfirmacion({
-    texto,
-    si: () => resolveConfirm(true),
-    no: () => resolveConfirm(false),
-  });
-}
-
-/* Esconde la caja del panel SIN contestarla. Se llama cuando el permiso ya se ha resuelto
-   por la otra puerta (la barra del chat, o el fin del turno): si la caja se quedara a la
-   vista, sus botones seguirían armados y contestarían con una decisión que el usuario no
-   tomó la confirmación que ahora toca (la siguiente de la cola). */
-function olvidarConfirmacionEnVoz() {
-  if (window.VoiceMode && window.VoiceMode.olvidarConfirmacion) window.VoiceMode.olvidarConfirmacion();
-}
-
 function showConfirm(ev) {
   confirmQueue.push(ev);
+  /* El permiso es de QUIEN lo pide: un compañero del equipo lleva su `member`, así que se
+     cuenta en su insignia de pendientes (puede estar esperando mientras otro trabaja); el
+     líder no lleva `member` y no tiene insignia que sumar. */
+  if (ev.member) equipoPermiso(ev.convId || hiloActual(), ev.member, +1);
   if (confirmQueue.length > 1) feed('Confirmación en cola (' + confirmQueue.length + ' pendientes): ' + ev.tool, 'blu');
   paintConfirm();
 }
@@ -863,11 +836,11 @@ function paintConfirm() {
     if (bar) bar.hidden = true;
     return;
   }
-  pedirConfirmacionEnVoz(ev);
   const who = ev.runId ? ' (tarea en segundo plano)' : '';
   // con varias esperando se dice cuál se está viendo: «1 de 3»
   const prog = confirmQueue.length > 1 ? ' · 1 de ' + confirmQueue.length : '';
-  $('#confirmTitle').textContent = 'El agente quiere: ' + (ev.description || ev.tool) + who + prog;
+  $('#confirmTitle').textContent =
+    (quienPidePermiso(ev) ? quienPidePermiso(ev) + ' quiere: ' : 'El agente quiere: ') + (ev.description || ev.tool) + who + prog;
   $('#confirmDetail').textContent = ev.summary ? String(ev.summary).slice(0, 240) : 'Herramienta: ' + ev.tool;
   bar.hidden = false;
   // al mostrarse es un diálogo modal de aviso: el lector de pantalla lo anuncia
@@ -882,16 +855,37 @@ function paintConfirm() {
   feed('Esperando tu confirmación: ' + ev.tool, 'blu');
 }
 
+/* Quién pide el permiso, dicho para la barra: el compañero del equipo por su nombre, y el
+   líder cuando el turno trae equipo pero el permiso no es de ningún miembro. Sin equipo,
+   null: la barra se queda con el texto de siempre. */
+function quienPidePermiso(ev) {
+  if (!ev) return null;
+  const convId = ev.convId || hiloActual();
+  if (ev.member) {
+    const f = equipoFicha(convId, ev.member);
+    return (f && f.name) || ev.memberName || ev.member;
+  }
+  const e = equipoDe(convId, false);
+  return e && e.estado === 'vivo' ? 'el líder del equipo' : null;
+}
+
+/* El permiso ya no está pendiente: se descuenta de la insignia de su compañero. Se llama en
+   las DOS salidas —contestado o descartado al terminar el turno—: una cuenta que sólo
+   bajara por un camino acabaría mintiendo. */
+function permisoResuelto(ev) {
+  if (ev && ev.member) equipoPermiso(ev.convId || hiloActual(), ev.member, -1);
+}
+
 function hideConfirm() {
   // la que estaba a la vista ya no puede responderse (el turno acabó): se
   // descarta y, si quedaban más esperando, se muestra la siguiente
-  if (currentConfirm && confirmQueue[0] === currentConfirm) confirmQueue.shift();
+  if (currentConfirm && confirmQueue[0] === currentConfirm) {
+    confirmQueue.shift();
+    permisoResuelto(currentConfirm);
+  }
   currentConfirm = null;
   const bar = $('#confirmBar');
   if (bar) bar.hidden = true;
-  // también la del panel de voz: si no, seguiría a la vista una confirmación que
-  // ya no existe detrás (y al abrir el chat tapado ya no se puede contestar)
-  olvidarConfirmacionEnVoz();
   if (confirmQueue.length) paintConfirm();
 }
 async function resolveConfirm(allow) {
@@ -899,13 +893,16 @@ async function resolveConfirm(allow) {
   const c = confirmQueue.shift() || currentConfirm;
   currentConfirm = null;
   const bar = $('#confirmBar');
-  // la caja del panel se apaga ANTES de repintar: contestar por la barra del chat (o por
-  // voz) tiene que quitar de enmedio la puerta que ya se usó, y si queda otra confirmación
-  // en la cola, `paintConfirm` vuelve a armarla con ESA (no con la ya contestada)
-  olvidarConfirmacionEnVoz();
   if (confirmQueue.length) paintConfirm();
   else if (bar) bar.hidden = true;
-  if (c) await window.sagitari.secResolve(c.id, allow, c.runId);
+  /* La confirmación es de la conversación que la pidió: puede ser una pestaña que no está a
+     la vista (su turno espera una respuesta), así que se responde por SU id. Los argumentos
+     van en el orden del puente (`convId, id, approved, runId`): con el orden cambiado no
+     casaba ninguna confirmación y «Permitir» no reanudaba la herramienta. */
+  if (c) {
+    await window.sagitari.secResolve(c.convId || hiloActual(), c.id, allow, c.runId);
+    permisoResuelto(c);
+  }
 }
 $('#confirmOk').onclick = () => resolveConfirm(true);
 $('#confirmNo').onclick = () => resolveConfirm(false);
@@ -947,7 +944,7 @@ function askConfirm(anchor, message, detail) {
     bar.querySelector('small').textContent = detail || 'Esta acción no se puede deshacer.';
     let done = false;
     /* Las vistas se repintan con `innerHTML = ''` (renderTasks, renderHistory,
-       renderMemory, renderSkills…), lo que arrancaba la barra del DOM sin pasar
+       renderMemoria, renderSkills…), lo que arrancaba la barra del DOM sin pasar
        por finish(): la promesa quedaba pendiente para siempre (el botón que la
        espera, disabled) y el listener de teclado, vivo. El observador la cierra
        como cancelada en cuanto deja de estar conectada. */
@@ -1054,11 +1051,6 @@ function setSendMode() {
 }
 
 // ============ sending ============
-/* Enviar un texto al agente por el camino de siempre. Existe aparte de sendFrom porque
-   el modo voz manda texto que no viene del compositor, y tiene que recorrer EXACTAMENTE
-   el mismo camino: la misma burbuja, el mismo sello de modo, el mismo estado ocupado y
-   el mismo chat:send. Si hubiera dos caminos, el modo voz dejaría de heredar permisos,
-   guardarraíles e historial. */
 async function enviarTexto(text, atts = []) {
   goto('chat');
   // v2.5: el turno nuevo empieza su propia pre-imagen, así que el ofrecimiento de
@@ -1077,10 +1069,6 @@ async function enviarTexto(text, atts = []) {
   pinned = true;
   scroll(true);
   window.sagitari.glow('think');
-  // turno nuevo: la franja de pasos del panel arranca vacía (es lo del turno que empieza)
-  // y la lectura en voz alta arranca de cero (la del turno anterior ya no cuenta)
-  limpiarPasosVoz();
-  reiniciarLecturaVoz();
   // optimista: el evento `busy` del agente tarda en llegar y hasta entonces un
   // segundo Enter lanzaba otro turno que moría con «SAGITARI está ocupado» y
   // devolvía el botón a «Enviar» con el agente aún trabajando.
@@ -1088,7 +1076,7 @@ async function enviarTexto(text, atts = []) {
   setSendMode();
   syncChatBadge();
   try {
-    const r = await window.sagitari.sendChat(text, null, atts);
+    const r = await window.sagitari.sendChat(hiloActual(), text, null, atts);
     if (r && r.ok === false) throw new Error(r.error || 'no se pudo enviar');
   } catch (e) {
     busy = false;
@@ -1114,17 +1102,6 @@ async function sendFrom(elId) {
   el.value = '';
   el.style.height = '';
   clearAttachments();
-  // si el dictado estaba activo, detenerlo y limpiar su estado visual
-  if (listening) {
-    listening = false;
-    voiceBuffer = '';
-    lastPartial = '';
-    vozBase = '';
-    $$('.cbtn').forEach((b) => b.classList.remove('on'));
-    el.classList.remove('rec');
-    window.sagitari.glow('off');
-    await window.sagitari.voiceStop();
-  }
   await enviarTexto(text, atts);
 }
 
@@ -1325,23 +1302,49 @@ async function refreshSkillList() {
 }
 function renderSkillMenu(query) {
   const q = (query || '').toLowerCase();
+  /* La paleta «/» ofrece DOS cosas: las órdenes de barra (el registro de ChatKit, la misma
+     lista que las despacha) y las skills instaladas. Las órdenes van primero porque son las
+     que se escriben a mano; las skills, después, porque son las que se descubren. Antes sólo
+     salían las skills y escribir «/compact» no ofrecía nada. */
+  const ordenes = (Array.isArray(K.COMMANDS) ? K.COMMANDS : []).filter(
+    (c) =>
+      c &&
+      (!q ||
+        String(c.name || '')
+          .toLowerCase()
+          .includes(q) ||
+        String(c.descripcion || '')
+          .toLowerCase()
+          .includes(q)),
+  );
   const items = skillList.filter((s) => !q || s.name.toLowerCase().includes(q) || (s.description || '').toLowerCase().includes(q));
-  if (!items.length) {
+  if (!ordenes.length && !items.length) {
     skillMenu.hidden = true;
+    skillMenu._items = [];
     return;
   }
-  skillMenu.innerHTML =
-    `<div class="sm-head">SKILLS — escribe para filtrar</div>` +
-    items
-      .map(
-        (s, i) =>
-          `<div class="sm-item${i === skillIdx ? ' on' : ''}" data-i="${i}">
-      <span class="tc-mark">${ic('zap')}</span><span class="sm-name">${esc(s.name)}</span><span class="sm-desc">${esc(s.description || '')}</span>
+  const filas = [];
+  const seleccionables = [];
+  const fila = (nombre, marca, etiqueta, descripcion) => {
+    const i = seleccionables.length;
+    seleccionables.push({ name: nombre });
+    filas.push(
+      `<div class="sm-item${i === skillIdx ? ' on' : ''}" data-i="${i}">
+      <span class="tc-mark">${ic(marca)}</span><span class="sm-name">${esc(etiqueta)}</span><span class="sm-desc">${esc(descripcion)}</span>
     </div>`,
-      )
-      .join('');
+    );
+  };
+  if (ordenes.length) {
+    filas.push('<div class="sm-head">ÓRDENES — escribe para filtrar</div>');
+    for (const c of ordenes) fila(c.name, 'terminal', '/' + c.name, c.descripcion || '');
+  }
+  if (items.length) {
+    filas.push('<div class="sm-head">SKILLS — escribe para filtrar</div>');
+    for (const s of items) fila(s.name, 'zap', s.name, s.description || '');
+  }
+  skillMenu.innerHTML = filas.join('');
   skillMenu.hidden = false;
-  skillMenu._items = items;
+  skillMenu._items = seleccionables;
   const on = skillMenu.querySelector('.sm-item.on');
   if (on) on.scrollIntoView({ block: 'nearest' });
 }
@@ -1424,332 +1427,13 @@ $$('.ce-hint').forEach((c) =>
   }),
 );
 
-// ============ voice ============
+// ============ compositor ============
 // Auto-ajuste de altura de los composers (también al escribir a mano)
 function autoGrow(el) {
   el.style.height = 'auto';
   el.style.height = Math.min(el.scrollHeight, 140) + 'px';
 }
 $('#chatInput').addEventListener('input', () => autoGrow($('#chatInput')));
-
-// Dictado continuo y acumulativo: los finales se CONCATENAN en el input, no lo
-// sobrescriben. El micrófono sigue activo hasta que lo apagas o envías — nunca
-// se envía solo a mitad de frase.
-let voiceBuffer = ''; // texto ya confirmado (de finales anteriores)
-let lastPartial = ''; // hipótesis en curso (para reemplazar en el input)
-/* Lo que ya había escrito el usuario al empezar a dictar: el dictado se compone SOBRE
-   ello. El comentario de arriba prometía no sobrescribir el input, pero la primera
-   hipótesis parcial lo vaciaba y se comía el prompt a medio escribir. */
-let vozBase = '';
-function paintVoice(partial) {
-  const el = $('#chatInput');
-  const text = (vozBase + voiceBuffer + (partial || '')).trimStart();
-  if (el.value !== text) {
-    el.value = text;
-  }
-  el.classList.toggle('rec', true);
-  autoGrow(el);
-}
-function wireMic(btnId) {
-  const btn = $(btnId);
-  btn.addEventListener('click', async (e) => {
-    // El micro es la puerta del modo voz. Con Alt se conserva el dictado de siempre,
-    // que sigue siendo lo cómodo para escribir un prompt largo y revisarlo.
-    if (!e.altKey) {
-      if (window.VoiceMode.abierto()) {
-        await window.VoiceMode.cerrar();
-        await cerrarTapPcm();
-      } else {
-        /* La lectura del chat comparte el AudioContext de la sesión, y al abrir el modo
-           voz se reutiliza: sin soltar antes lo que estuviera sonando, una frase a medias
-           del chat seguía colgada de un buffer source sin dueño y la primera frase del
-           modo voz podía salir corrompida. Es el mismo corte que hace reproducir(). */
-        if (window.VoiceMode.audio && window.VoiceMode.audio.parar) await window.VoiceMode.audio.parar();
-        await window.VoiceMode.abrir();
-        /* Si el agente ya está esperando permiso, la barra del chat acaba de quedar tapada
-           por el panel: sin volver a armarla ahí, esta confirmación se quedaría sin poder
-           contestarse hasta que el turno muriera por timeout. */
-        if (currentConfirm) pedirConfirmacionEnVoz(currentConfirm);
-      }
-      return;
-    }
-    if (listening) {
-      listening = false;
-      btn.classList.remove('on');
-      vozBase = '';
-      window.sagitari.glow('off');
-      await window.sagitari.voiceStop();
-    } else {
-      listening = true;
-      btn.classList.add('on');
-      voiceBuffer = '';
-      lastPartial = '';
-      const ya = $('#chatInput').value.replace(/\s+$/, '');
-      vozBase = ya ? ya + ' ' : '';
-      window.sagitari.glow('listen', 'voice');
-      await window.sagitari.voiceStart();
-    }
-  });
-}
-wireMic('#chatMic');
-
-/* Modo voz: el panel es el único que sabe del modo (y su único punto de entrada es
-   `handle`), así que aquí solo se le dan las tres cosas que no puede saber por sí mismo
-   —por dónde se envía, por dónde se reproduce una frase y si hay que hablar los avisos—
-   y se le pasa todo lo que llega del proceso principal. */
-/* El turno dictado no puede salir mientras el agente trabaja: `agent.chat` lo
-   rechazaría. Antes se tiraba con un aviso y la frase se perdía (el usuario veía su
-   frase en el panel y el agente nunca la hacía: "transcribe pero no actúa"). Ahora se
-   guarda UNA frase en cola y sale sola cuando el agente queda libre. */
-let vozEnEspera = null;
-function vaciarColaVoz() {
-  if (vozEnEspera && !busy) {
-    const t = vozEnEspera;
-    vozEnEspera = null;
-    enviarTexto(t);
-  }
-}
-window.VoiceMode.setEnviar((text) => {
-  if (busy) {
-    vozEnEspera = text;
-    window.VoiceMode.handle({ type: 'notice', text: 'Te he oído; lo envío en cuanto termine lo anterior.' });
-    return;
-  }
-  return enviarTexto(text);
-});
-window.sagitari.onVoiceEvent((ev) => {
-  /* El proceso principal puede ordenar reabrir el tap (voice:rescue con whisper de
-     guardia): su captura es la única fuente de audio del dictado local. */
-  if (ev && ev.type === 'reabrir-tap') {
-    reabrirTapVoz();
-    return;
-  }
-  window.VoiceMode.handle(ev);
-  if (ev && (ev.type === 'notice' || ev.type === 'state')) actualizarEstadoMotorEscucha();
-});
-window.sagitari.onTtsPhrase((p) => window.VoiceMode.audio.reproducir(p));
-
-/* ---- Tap de micrófono para el dictado local (whisper) ----
-   El audio crudo (Int16 mono 16 kHz) viaja al proceso principal SOLO mientras el motor
-   local está de guardia: es SU única fuente (los de Windows capturan por su cuenta).
-   Va por AudioWorklet para no meter el ruido del hilo principal en la señal. Se abre y
-   se cierra con la sesión del modo voz: sin panel, no hay nadie transcribiendo. */
-let __tapPcm = null;
-let __tapFallos = 0;
-/* Float32 del micro → Int16 mono 16 kHz para whisper, con REMUESTREO.
-   Antes se forzaba el AudioContext a 16 kHz y Chromium en Windows entrega SILENCIO
-   con algunos micrófonos cuando se le pide una tasa que no es la del dispositivo:
-   el orbe latía (ese contexto es otro) y el dictado local no recibía NI UNA muestra.
-   Ahora se captura a la tasa NATIVA —la que se sabe buena— y el remuestreo lineal
-   con memoria de fracción viaja aquí, sin deriva acumulada. */
-function enviarPcmAlMotor(f, srOrigen, estadoPcm) {
-  const srDestino = 16000;
-  const comb = new Float32Array(estadoPcm.resto.length + f.length);
-  comb.set(estadoPcm.resto, 0);
-  comb.set(f, estadoPcm.resto.length);
-  const fuera = [];
-  while (estadoPcm.pos + 1 < comb.length) {
-    const i0 = Math.floor(estadoPcm.pos),
-      frac = estadoPcm.pos - i0;
-    const v0 = comb[i0],
-      v1 = comb[i0 + 1];
-    fuera.push(Math.max(-32768, Math.min(32767, Math.round((v0 + (v1 - v0) * frac) * 32767))));
-    estadoPcm.pos += RATIO_PCM(srOrigen, srDestino);
-  }
-  const corta = Math.floor(estadoPcm.pos);
-  estadoPcm.resto = comb.slice(corta);
-  estadoPcm.pos -= corta;
-  if (!fuera.length) return;
-  const b = new Int16Array(fuera.length);
-  for (let i = 0; i < fuera.length; i++) b[i] = fuera[i];
-  window.sagitari.voicePcm(b.buffer);
-}
-/* Cada muestra de SALIDA avanza pos tantas muestras de ENTRADA como dicta el cociente
-   de tasas (48k→16k: 3 de entrada por cada salida). La razón invertida estiraba el
-   audio 9× y Whisper transcribía la voz estirada como «[Música]» — cazado con la
-   telemetría pcmMs (648 s de audio en 76 s de sesión). */
-const RATIO_PCM = (srOrigen, srDestino) => srOrigen / srDestino;
-async function abrirTapPcm() {
-  if (__tapPcm) return;
-  let stream = null,
-    ctx = null;
-  try {
-    if (!window.VoiceMode || !window.VoiceMode.abierto()) return;
-    if (!(await window.sagitari.voicePcmActivo())) return;
-    actualizarEstadoMotorEscucha();
-    stream = await navigator.mediaDevices.getUserMedia({ audio: { echoCancellation: true, noiseSuppression: true, channelCount: 1 } });
-    const AudioCtx = window.AudioContext || window.webkitAudioContext;
-    /* SIN sampleRate forzado (ver enviarPcmAlMotor) y con resume: un contexto
-       suspendido no procesa el grafo ni entrega un solo chunk. */
-    ctx = new AudioCtx();
-    if (ctx.state === 'suspended') {
-      try {
-        await ctx.resume();
-      } catch {}
-    }
-    const fuente = ctx.createMediaStreamSource(stream);
-    /* Gain a CERO entre el tap y el destino: el nodo cuelga del grafo (Chromium lo
-       procesa siempre) pero devuelve ni un mito del micro a los altavoces. Antes el
-       nodo quedaba colgando solo — un grafo sin destino puede no procesarse nunca. */
-    const mudo = ctx.createGain();
-    mudo.gain.value = 0;
-    const estadoPcm = { resto: new Float32Array(0), pos: 0 };
-    const enviar = (f) => enviarPcmAlMotor(f, ctx.sampleRate, estadoPcm);
-    let nodo;
-    try {
-      await ctx.audioWorklet.addModule(
-        URL.createObjectURL(
-          new Blob(
-            [
-              'class TapPCM extends AudioWorkletProcessor {' +
-                '  process(inputs) {' +
-                '    const ch = inputs[0] && inputs[0][0];' +
-                '    if (ch) this.port.postMessage(ch.slice(0));' +
-                '    return true;' +
-                '  }' +
-                '}' +
-                'registerProcessor("tap-pcm", TapPCM);',
-            ],
-            { type: 'text/javascript' },
-          ),
-        ),
-      );
-      nodo = new AudioWorkletNode(ctx, 'tap-pcm');
-      /* Un procesador que revienta en el hilo de audio no lanza aquí: lo cuenta y
-         lo dice — sin esto, un tap muerto era un panel «Escuchando» para siempre. */
-      nodo.onprocessorerror = () => {
-        __tapFallos++;
-        showToast('Dictado local: el capturador de audio falló; cierra y reabre el modo voz.');
-      };
-      nodo.port.onmessage = (e) => enviar(e.data);
-      fuente.connect(nodo);
-    } catch (eWorklet) {
-      /* Respaldo (CSP restrictiva o Chromium viejo): ScriptProcessor hace el mismo
-         trabajo en el hilo principal — algo más de ruido, pero audio de verdad. */
-      nodo = ctx.createScriptProcessor(1024, 1, 1);
-      nodo.onaudioprocess = (ev) => {
-        const ch = ev.inputBuffer.getChannelData(0);
-        enviar(ch);
-      };
-      fuente.connect(nodo);
-    }
-    nodo.connect(mudo);
-    mudo.connect(ctx.destination);
-    __tapPcm = { stream, ctx, nodo, mudo };
-    __tapFallos = 0;
-  } catch (e) {
-    /* ANTES este catch referenciaba variables fuera de su ámbito y moría en silencio:
-       el tap moría y el panel se quedaba «Escuchando» sin una sola pista. Ahora se
-       suelta SOLO lo que se llegó a adquirir y el fallo SE MUESTRA. */
-    try {
-      if (stream) stream.getTracks().forEach((t) => t.stop());
-    } catch {}
-    try {
-      if (ctx && ctx.state !== 'closed') ctx.close();
-    } catch {}
-    __tapFallos++;
-    showToast('Dictado local: no he podido enganchar el micrófono (' + (e && e.message ? e.message : e) + ').');
-    console.error('[tap-pcm] fallo al abrir:', e);
-  }
-}
-
-/* Cierra el tap: sin panel abierto no hay nadie transcribiendo, y el micro no debe
-   quedar capturando para nadie. */
-async function cerrarTapPcm() {
-  const tap = __tapPcm;
-  __tapPcm = null;
-  if (!tap) return;
-  try {
-    tap.nodo.port.onmessage = null;
-  } catch {}
-  try {
-    tap.nodo.onaudioprocess = null;
-  } catch {}
-  try {
-    tap.nodo.disconnect();
-  } catch {}
-  try {
-    tap.mudo.disconnect();
-  } catch {}
-  try {
-    tap.stream.getTracks().forEach((t) => t.stop());
-  } catch {}
-  try {
-    if (tap.ctx.state !== 'closed') await tap.ctx.close();
-  } catch {}
-}
-
-/* El panel avisa al abrir y al cerrar (botón, Esc, «adiós»): aquí se engancha y se
-   suelta el tap de micrófono del dictado local, sea cual sea la puerta. Un único dueño
-   del ciclo de vida — el panel — evita dos micros abiertos por llamadas dobles. */
-window.__alAbrirModoVoz = () => {
-  abrirTapPcm();
-};
-window.__alCerrarModoVoz = () => {
-  cerrarTapPcm();
-};
-/* Reapertura del tap (rescate del vigía u orden del proceso principal): cerrar y
-   volver a enganchar la captura sin tocar la sesión del panel. */
-async function reabrirTapVoz() {
-  await cerrarTapPcm();
-  await abrirTapPcm();
-}
-window.__reabrirTap = reabrirTapVoz;
-window.__tapEstado = () => !!__tapPcm;
-
-/* Los avisos solo se hablan si el usuario lo ha pedido en Ajustes. La decisión se toma
-   aquí, que es donde se conocen los ajustes; el panel solo pide que se diga.
-   Y el aviso de que NO se ha podido leer no se habla nunca: lo emite el propio fallo de la
-   síntesis, así que hablarlo lo realimentaría —cada vuelta pide otra síntesis, que vuelve a
-   fallar y vuelve a avisar, y la app se queda girando—. Es el único aviso que se salta, y
-   solo ese: los demás (p. ej. «no te he entendido») sí se dicen. */
-const AVISO_SIN_VOZ = 'No he podido leer la respuesta en voz alta.';
-window.VoiceMode.setHablar((t) => {
-  if (CFG.settings.ttsNotices && t !== AVISO_SIN_VOZ) speak(t, { forzar: true });
-});
-
-/* Lo que el panel necesita saber de la app para poder parar de verdad: si el agente está
-   trabajando (para reconocer «para»/«detente» como una orden sobre el turno EN CURSO) y
-   por dónde pararlo (el mismo `stopChat` del botón Detener del compositor, que el panel
-   tapa). Antes, con el modo voz abierto, la única forma de detener al agente era esperar. */
-window.VoiceMode.setOcupado(() => busy);
-window.VoiceMode.setParar(() => {
-  feed('Deteniendo…', 'err');
-  window.sagitari.stopChat();
-});
-/* Interrupción (barge-in): lo que queda de la respuesta deja de leerse. Sin esto, callar la
-   frase en curso no callaba la lectura — la siguiente frase del stream volvía a sonar. */
-window.VoiceMode.setInterrumpido(() => silenciarLecturaVoz());
-
-/* El canal manda UN dato por evento (el puente lo aplana), no un par «clave, valor»:
-   estos manejadores declaraban dos parámetros y leían el segundo, así que el aviso de
-   «dictado activo» decía «undefined», el del motor clásico no salía nunca (comparaba
-   `undefined` con 'sapi'), las hipótesis parciales borraban el compositor —llegaban
-   vacías— y lo dictado NUNCA se acumulaba: el dictado no escribía nada. */
-window.sagitari.onVoiceReady((lang) => showToast('Dictado activo (' + lang + '). Habla ahora; pulsa el micro o envía para terminar.'));
-// motor clásico = precisión inferior: avisar que con el reconocimiento online mejora mucho
-window.sagitari.onVoiceMode((mode) => {
-  if (mode === 'sapi')
-    showToast('Motor de voz clásico activo. Activa "Reconocimiento de voz en línea" en Windows (Privacidad > Voz) para máxima precisión.');
-});
-window.sagitari.onVoiceHint((m) => showToast('Dictado: ' + m));
-window.sagitari.onVoice((text) => {
-  lastPartial = text ? text + ' ' : '';
-  paintVoice(lastPartial);
-});
-window.sagitari.onVoiceFinal((text) => {
-  if (text && text.trim()) voiceBuffer += text.trim() + ' ';
-  lastPartial = '';
-  paintVoice('');
-});
-window.sagitari.onVoiceError((m) => {
-  showToast('Dictado: ' + m);
-  listening = false;
-  vozBase = '';
-  $$('.cbtn').forEach((b) => b.classList.remove('on'));
-  const rec = document.querySelector('.rec');
-  if (rec) rec.classList.remove('rec');
-});
 
 // ============ window buttons ============
 $('#btnMin').onclick = () => window.sagitari.minimize();

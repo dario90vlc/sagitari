@@ -27,6 +27,9 @@
 
 /* ---------- definición de subagentes ---------- */
 
+const fs = require('fs');
+const path = require('path');
+
 const SUBAGENTS = {
   research: {
     key: 'research',
@@ -233,38 +236,344 @@ REGLAS
 5. Si un subagente devuelve PARTIAL o FAILED: o lo reintentas con mejor contexto, o lo haces tú, o explicas el bloqueo — pero no repitas la misma delegación igual.
 6. Usa las skills: si en el índice alguna encaja con la tarea (y no la has cargado ya), cárgala con use_skill ANTES de empezar; sus instrucciones mandan sobre tus costumbres.`;
 
-/** Definición de la herramienta delegate (va al prompt del orquestador). */
+/* ---------- guía de equipo (va al prompt del LÍDER en modo EQUIPO) ---------- */
+
+/** Guía del LÍDER de un equipo (v4.4). Igual que la de delegación, es material de prompt:
+    vive aquí, junto al registro, porque habla de los especialistas que hay. */
+const TEAM_GUIDE = `EQUIPO (herramientas team_spawn / team_send / team_wait / team_board / team_done)
+En este modo ERES EL LÍDER: la orden del usuario sigue siendo TU responsabilidad, pero el trabajo se reparte entre compañeros especialistas que trabajan A LA VEZ.
+CÓMO SE TRABAJA EN EQUIPO
+1. DESCOMPÓN la orden ANTES de levantar a nadie: 2-4 partes que se puedan hacer EN PARALELO. Si una parte necesita el resultado de otra, no la mandes a la vez: mándala después con team_send o hazla tú con ese resultado.
+2. REPARTE CON CRITERIO: una parte por compañero, con la subtarea concreta en «task» y su criterio de éxito en «expect». Un compañero NO ve esta conversación: todo lo que necesite (rutas, URLs, decisiones ya tomadas) va dentro de la subtarea.
+3. LEVANTA varios seguidos: team_spawn NO espera, devuelve el id al momento. Después ESPERA con team_wait, que no bloquea a los que sigan trabajando; mientras esperas, haz tú la parte que no se puede repartir.
+4. NO REPITAS el trabajo de un compañero ni le pidas lo que ya sabes: reparte lo que de verdad falta y apóyate en lo que devuelva.
+5. EL TABLERO es la fuente de verdad del progreso: apunta cada parte con team_board (quién, qué, estado) y mantenlo al día; el usuario lo ve.
+6. HABLA CON ELLOS: team_send con el id del compañero para darle un dato, corregir el rumbo o pedirle algo. Sigue con otra cosa si está ocupado: el mensaje le llega a su buzón.
+7. AGREGA TÚ: la respuesta final es tuya, con lo que traigan tus compañeros. Si alguno falla o se queda a medias, dilo con lo que sí traiga evidencia; no presentes como hecho lo que nadie ha comprobado.
+TOPE: 4 compañeros vivos a la vez (el quinto devuelve error).`;
+
+/** Registro de especialistas que puede levantar el líder ({ key, name, emoji, role }). */
+function rosterEquipo() {
+  asegurarCarga();
+  const out = [];
+  for (const k of SUBAGENT_KEYS) {
+    const s = SUBAGENTS[k];
+    out.push({ key: s.key, name: s.name, emoji: s.emoji, role: s.role });
+  }
+  for (const [id, s] of DISCO) out.push({ key: id, name: s.name, emoji: s.emoji, role: s.role });
+  return out;
+}
+
+/** Guía completa del líder: las reglas + a quién puede levantar y con qué nombre/emoji. */
+function teamGuide() {
+  const lineas = rosterEquipo()
+    .map((s) => `- ${s.emoji} ${s.key} — ${s.name}: ${s.role}`)
+    .join('\n');
+  return `${TEAM_GUIDE}\nESPECIALISTAS QUE PUEDES LEVANTAR (team_spawn con su id; el id de cada compañero levantado —«m1», «m2»…— te lo devuelve team_spawn). Dirígete a ellos por ese id o por su nombre:\n${lineas}`;
+}
+
+/** Definición de la herramienta delegate (va al prompt del orquestador).
+ *
+ *  Es un SINGLETON a propósito: tools.js la registra una vez al cargarse y los agentes
+ *  de usuario se leen en tiempo de ejecución, así que la única forma de que el enum los
+ *  incluya es actualizar ESTE objeto in situ (ver `refrescarDelegate`). */
+let DELEGATE_DEF = null;
 function delegateToolDef() {
-  return {
-    type: 'function',
-    function: {
-      name: 'delegate',
-      description:
-        'DELEGA una subtarea autónoma en un subagente especializado (research, browser, coding, file, vision, verification, review). El subagente NO ve la conversación: dale tarea + contexto + criterio de éxito. Devuelve un resultado estructurado con evidencia.',
-      parameters: {
-        type: 'object',
-        properties: {
-          agent: { type: 'string', enum: SUBAGENT_KEYS, description: 'Subagente especializado' },
-          task: { type: 'string', description: 'La subtarea concreta y autónoma, con todo el contexto necesario' },
-          context: {
-            type: 'string',
-            description: 'Datos ya conocidos que el subagente necesita (URLs, rutas, hallazgos previos, decisiones tomadas)',
+  if (!DELEGATE_DEF) {
+    DELEGATE_DEF = {
+      type: 'function',
+      function: {
+        name: 'delegate',
+        description: descripcionDelegate(),
+        parameters: {
+          type: 'object',
+          properties: {
+            agent: { type: 'string', enum: [...SUBAGENT_KEYS], description: 'Subagente especializado' },
+            task: { type: 'string', description: 'La subtarea concreta y autónoma, con todo el contexto necesario' },
+            context: {
+              type: 'string',
+              description: 'Datos ya conocidos que el subagente necesita (URLs, rutas, hallazgos previos, decisiones tomadas)',
+            },
+            expect: {
+              type: 'string',
+              description:
+                'Criterio de éxito: cómo se comprueba que la subtarea está bien hecha (qué archivo leer, qué comando ejecutar, qué debe aparecer)',
+            },
           },
-          expect: {
-            type: 'string',
-            description:
-              'Criterio de éxito: cómo se comprueba que la subtarea está bien hecha (qué archivo leer, qué comando ejecutar, qué debe aparecer)',
-          },
+          required: ['agent', 'task'],
         },
-        required: ['agent', 'task'],
       },
+    };
+  }
+  return DELEGATE_DEF;
+}
+
+/** Texto del enum/descripción: los de serie y, si los hay, los agentes del usuario. */
+function descripcionDelegate() {
+  const base =
+    'DELEGA una subtarea autónoma en un subagente especializado (research, browser, coding, file, vision, verification, review). El subagente NO ve la conversación: dale tarea + contexto + criterio de éxito. Devuelve un resultado estructurado con evidencia.';
+  const propios = [...DISCO.values()].map((s) => `${s.key} — ${s.role}`);
+  if (!propios.length) return base;
+  return `${base} Además, el usuario ha definido estos agentes suyos: ${propios.join('; ')}.`;
+}
+
+/** Refresca el enum y el texto de delegate con el registro actual (lo llama `recargar`). */
+function refrescarDelegate() {
+  const d = delegateToolDef();
+  d.function.description = descripcionDelegate();
+  d.function.parameters.properties.agent.enum = [...SUBAGENT_KEYS, ...DISCO.keys()];
+}
+
+/* --------------------------------------------------------------------------- *
+ *  v4.1: agentes del USUARIO (carpeta <datos>/agents/<id>/AGENT.md)
+ *
+ *  El registro de arriba es fijo (código). Aquí se le suman los que el usuario escribe
+ *  en disco, con el MISMO front-matter que las skills (una sola convención de archivo
+ *  con instrucciones). Lo que NO puede hacer un AGENT.md es darse más de lo que tiene un
+ *  integrante: sus herramientas se cruzan con el catálogo real Y con el techo de los
+ *  especialistas de serie, así que `delegate`, `notify` o `window_manage` no se pueden
+ *  auto-conceder. Un archivo mal formado se reporta y se salta: jamás tumba la app.
+ * --------------------------------------------------------------------------- */
+
+const PASOS_DEFECTO = 25;
+const PASOS_TECHO = 40; // el mismo orden de magnitud que los integrantes (máx. 30)
+const METODO_DEFECTO = [
+  'Entiende la subtarea y reúne lo que ya sabes antes de abrir nada.',
+  'Trabaja paso a paso con TUS herramientas; cada paso debe acercarte a la evidencia.',
+  'Comprueba en el mundo (leer, ejecutar, mirar) lo que afirmes: no te fíes de tu propio resumen.',
+  'No hagas trabajo que no se te ha pedido ni toques nada fuera de la subtarea.',
+];
+const ENTREGA_DEFECTO =
+  'Qué has hecho (pasos exactos), con qué evidencia (ruta, comando o salida) y qué ha quedado sin hacer o sin comprobar.';
+
+const TECHO = new Set(Object.values(SUBAGENTS).flatMap((s) => s.allowTools));
+
+let AGENTS_DIR = path.join(require('./datadir').dataDir(), 'agents');
+let DISCO = new Map(); // id -> spec (solo los del usuario)
+let AVISOS = []; // [{id, motivo}]: archivos que se saltaron y por qué
+let FIRMA = null;
+let CARGADO = false;
+
+/** Carpeta donde el usuario deja sus agentes (la abre la interfaz). */
+function carpetaUsuarios() {
+  return AGENTS_DIR;
+}
+
+/* El parser de front-matter es el de skills.js: UNA sola convención de archivo con
+   instrucciones. Hoy skills.js solo lo expone bajo `__test`, así que se reutiliza tal
+   cual en vez de duplicarlo (duplicar una tabla de este repo ya acabó con dos copias
+   divergentes). Lo correcto sería exportarlo de forma pública desde skills.js. */
+function parseFrontMatter(raw) {
+  const p = require('./skills').__test?.parseFrontMatter;
+  if (typeof p !== 'function') return null;
+  try {
+    return p(raw);
+  } catch {
+    return null;
+  }
+}
+
+/** Valor de front-matter como lista: acepta lista YAML, texto separado por comas o uno solo. */
+function listaDe(v) {
+  if (Array.isArray(v)) return v.map((x) => String(x).trim()).filter(Boolean);
+  const s = String(v == null ? '' : v).trim();
+  if (!s) return [];
+  return s
+    .split(/[,\n]/)
+    .map((x) => x.trim().replace(/^["']|["']$/g, ''))
+    .filter(Boolean);
+}
+
+/** Lee un campo del front-matter. El parser de skills normaliza las CLAVES a minúsculas
+    (`maxSteps` acaba en `maxsteps`), así que se busca tal cual y en minúsculas. */
+function campo(meta, nombre) {
+  if (Object.prototype.hasOwnProperty.call(meta, nombre)) return meta[nombre];
+  const l = String(nombre).toLowerCase();
+  return Object.prototype.hasOwnProperty.call(meta, l) ? meta[l] : undefined;
+}
+
+/** Id de carpeta aceptable: sin `..`, sin barras y sin caracteres raros. */
+function idValido(id) {
+  const s = String(id || '').trim();
+  if (!s || s === '.' || s === '..' || s.includes('..')) return 'nombre de carpeta no válido';
+  if (!/^[A-Za-z0-9][A-Za-z0-9._-]*$/.test(s)) return 'usa solo letras, números, punto, guion y guion bajo';
+  return null;
+}
+
+/** Firma barata de la carpeta (evita releer y reparsear en cada `listar`). */
+function firmaDelAlmacen(dir) {
+  let entradas = [];
+  try {
+    entradas = fs.readdirSync(dir, { withFileTypes: true });
+  } catch {
+    return '';
+  }
+  const partes = [];
+  for (const e of entradas) {
+    if (!e.isDirectory()) continue;
+    try {
+      const st = fs.statSync(path.join(dir, e.name, 'AGENT.md'));
+      partes.push(`${e.name}:${st.mtimeMs}:${st.size}`);
+    } catch {
+      partes.push(`${e.name}:sin`);
+    }
+  }
+  return partes.sort().join('|');
+}
+
+/** Convierte un AGENT.md en la spec que ya entienden el prompt y la delegación. */
+function specDeDisco(id, raw) {
+  const fm = parseFrontMatter(raw);
+  if (!fm || !fm.meta) return { ok: false, motivo: 'le falta el front-matter (--- name: … ---) al principio del archivo' };
+  const meta = fm.meta;
+  const cuerpo = String(fm.body || '').trim();
+  if (!cuerpo) return { ok: false, motivo: 'el cuerpo está vacío: ahí van las instrucciones del agente, después del front-matter' };
+
+  const pedidas = listaDe(campo(meta, 'tools'));
+  const { toolDefs: catalogo } = require('./tools');
+  const existe = new Set(catalogo.map((d) => d.function.name));
+  const tools = pedidas.filter((t) => existe.has(t) && TECHO.has(t));
+  const rechazadas = pedidas.filter((t) => !existe.has(t) || !TECHO.has(t));
+  if (!tools.length) {
+    return {
+      ok: false,
+      motivo: pedidas.length
+        ? `en «tools» no queda ninguna herramienta que un especialista de serie pueda usar (ignoradas: ${rechazadas.join(', ')})`
+        : 'falta la clave «tools» con las herramientas del agente',
+    };
+  }
+  const pasos = Math.floor(Number(campo(meta, 'maxSteps')) || 0);
+  const metodo = listaDe(campo(meta, 'method'));
+  const entrega = listaDe(campo(meta, 'deliver'));
+  return {
+    ok: true,
+    spec: {
+      key: id,
+      name:
+        String(campo(meta, 'name') || id)
+          .trim()
+          .slice(0, 60) || id,
+      emoji: '🧩', // agent.js lo pinta en el estado; sin él saldría «undefined Agente»
+      role:
+        String(campo(meta, 'description') || '')
+          .trim()
+          .slice(0, 200) || 'agente definido por ti',
+      allowTools: tools,
+      maxSteps: Math.min(pasos > 0 ? pasos : PASOS_DEFECTO, PASOS_TECHO),
+      maxStepsExplicito: pasos > 0,
+      model:
+        String(campo(meta, 'model') || '')
+          .trim()
+          .slice(0, 80) || null,
+      systemExtra: cuerpo,
+      method: metodo.length >= 2 ? metodo : METODO_DEFECTO,
+      deliver: entrega.length ? entrega.join(' ') : ENTREGA_DEFECTO,
+      origen: 'disco',
+      ignoradas: rechazadas,
     },
   };
+}
+
+/** Lee la carpeta entera y deja el registro vivo (SUBAGENTS) en sincronía. */
+function cargarDisco() {
+  const dir = carpetaUsuarios();
+  const firma = firmaDelAlmacen(dir);
+  const avisos = [];
+  const nuevos = new Map();
+  let entradas = [];
+  try {
+    entradas = fs.readdirSync(dir, { withFileTypes: true });
+  } catch {} // sin carpeta no hay agentes de usuario: los de serie siguen funcionando igual
+  for (const e of entradas.slice().sort((a, b) => a.name.localeCompare(b.name))) {
+    if (!e.isDirectory()) continue;
+    const id = e.name;
+    const malo = idValido(id);
+    if (malo) {
+      avisos.push({ id, motivo: malo });
+      continue;
+    }
+    if (SUBAGENT_KEYS.includes(id)) {
+      avisos.push({ id, motivo: 'ese id ya lo usa un agente de serie: renombra la carpeta' });
+      continue;
+    }
+    if (nuevos.has(id)) {
+      avisos.push({ id, motivo: 'id repetido: se ignora' });
+      continue;
+    }
+    let raw;
+    try {
+      raw = fs.readFileSync(path.join(dir, id, 'AGENT.md'), 'utf8');
+    } catch {
+      avisos.push({ id, motivo: 'no encuentro AGENT.md dentro de la carpeta' });
+      continue;
+    }
+    const s = specDeDisco(id, raw);
+    if (!s.ok) {
+      avisos.push({ id, motivo: s.motivo });
+      continue;
+    }
+    if (s.spec.ignoradas.length) avisos.push({ id, motivo: `herramientas ignoradas: ${s.spec.ignoradas.join(', ')}` });
+    nuevos.set(id, s.spec);
+  }
+  for (const id of DISCO.keys()) delete SUBAGENTS[id]; // los que ya no están salen del registro
+  for (const [id, spec] of nuevos) SUBAGENTS[id] = spec;
+  DISCO = nuevos;
+  AVISOS = avisos;
+  FIRMA = firma;
+  CARGADO = true;
+  refrescarDelegate(); // el enum de `delegate` se entera aquí, tanto al arrancar como al recargar
+}
+
+/** Relee la carpeta solo si cambió (huella barata): `listar` es síncrono y lo llama la UI. */
+function asegurarCarga() {
+  const firma = firmaDelAlmacen(carpetaUsuarios());
+  if (CARGADO && firma === FIRMA) return;
+  cargarDisco();
+}
+
+/** Ficha para la interfaz. `origen` es 'integrante' (de serie) o 'disco' (del usuario). */
+function fichaDe(spec, origen) {
+  return {
+    id: spec.key,
+    nombre: spec.name,
+    descripcion: spec.role || '',
+    tools: [...(spec.allowTools || [])],
+    modelo: spec.model || null,
+    // null = usa el presupuesto por defecto (solo puede pasar con un agente de disco)
+    maxSteps: spec.maxStepsExplicito === false ? null : spec.maxSteps || null,
+    origen,
+  };
+}
+
+/** Registro COMPLETO (de serie + del usuario), en orden estable. Nunca lanza. */
+function listar() {
+  try {
+    asegurarCarga();
+  } catch {
+    AVISOS = [{ id: '(carpeta de agentes)', motivo: 'no se pudo leer la carpeta de agentes del usuario' }];
+  }
+  const out = [];
+  for (const k of SUBAGENT_KEYS) out.push(fichaDe(SUBAGENTS[k], 'integrante'));
+  for (const [, spec] of DISCO) out.push(fichaDe(spec, 'disco'));
+  return out;
+}
+
+/** Vuelve a leer los AGENT.md del usuario y devuelve el registro actualizado. */
+function recargar() {
+  cargarDisco(); // ya refresca el enum de `delegate` y las specs
+  return listar();
+}
+
+/** Archivos de agente que se saltaron y por qué (para poder avisar al usuario). */
+function avisos() {
+  asegurarCarga();
+  return AVISOS.map((a) => ({ ...a }));
 }
 
 /** Recorta toolDefs a las herramientas permitidas de un subagente.
     (require diferido de tools.js para evitar la dependencia circular) */
 function toolDefsFor(key) {
+  asegurarCarga(); // un agente de disco también tiene catálogo
   const spec = SUBAGENTS[key];
   if (!spec) return [];
   const { toolDefs } = require('./tools');
@@ -275,6 +584,7 @@ function toolDefsFor(key) {
     opts: { skillsIndex, suggested } — índice de skills de SU especialidad y las
     que encajan con esta subtarea (v2.1: las skills viajan dentro del agente). */
 function subagentSystemPrompt(key, workspace, opts = {}) {
+  asegurarCarga(); // el prompt de un agente del usuario sale de su AGENT.md
   const spec = SUBAGENTS[key];
   const wsLine = workspace ? `\n\nESPACIO DE TRABAJO: ${workspace} (rutas relativas resuelven aquí).` : '';
   const tools = spec.allowTools.join(', ');
@@ -315,12 +625,25 @@ function subagentSystemPrompt(key, workspace, opts = {}) {
 /**
  * Brief (mensaje de usuario) de una subtarea. El subagente no ve la conversación:
  * todo lo que necesita viaja aquí.
- * opts: { task, context, expect, board, budget: { steps, note } }
+ * opts: { task, context, expect, board, budget: { steps, note }, equipo }
+ *   `equipo` (v4.4) solo va con un COMPAÑERO de MODO EQUIPO: { id, lider, companeros }.
+ *   Es lo que le dice quién es, quién es el líder y cómo dirigirse a los demás; sin él
+ *   (delegación de siempre) el brief es exactamente el de antes.
  */
 function buildSubagentBrief(opts = {}) {
   const parts = [];
   const context = String(opts.context || '').trim();
   const board = String(opts.board || '').trim();
+  const eq = opts.equipo && opts.equipo.id ? opts.equipo : null;
+  if (eq) {
+    const jefe = String(eq.lider || 'lider');
+    const otros = (eq.companeros || []).filter((c) => c && c.id && c.id !== eq.id);
+    parts.push(
+      `ERES EL COMPAÑERO «${eq.id}» DE UN EQUIPO (el LÍDER es «${jefe}»).` +
+        (otros.length ? ` Tus compañeros: ${otros.map((c) => `${c.id} (${c.name || c.spec || c.id})`).join(', ')}.` : '') +
+        ` Trabajas a la vez que ellos: no repitas su trabajo. Habla solo por las herramientas del equipo: team_send (to: «${jefe}» o el id de un compañero) para mandar un dato o pedir lo que te falte, team_board para apuntar tu progreso y team_done para cerrar tu encargo con evidencia.`,
+    );
+  }
   if (context) parts.push(`CONTEXTO DEL ORQUESTADOR (ya conocido — no lo vuelvas a averiguar):\n${context}`);
   if (board) parts.push(`LO QUE YA HIZO EL EQUIPO EN ESTA TAREA (no lo repitas; apóyate en ello):\n${board}`);
   parts.push(`SUBTAREA:\n${String(opts.task || '').slice(0, 4000)}`);
@@ -409,10 +732,37 @@ module.exports = {
   SUBAGENTS,
   SUBAGENT_KEYS,
   DELEGATION_GUIDE,
+  TEAM_GUIDE,
+  teamGuide,
+  rosterEquipo,
   delegateToolDef,
   toolDefsFor,
   subagentSystemPrompt,
   buildSubagentBrief,
   formatDelegationBoard,
   parseSubagentResult,
+  // v4.1: agentes del usuario (carpeta <datos>/agents/<id>/AGENT.md)
+  listar,
+  recargar,
+  carpetaUsuarios,
+  avisos,
+  /* Para las pruebas: apuntar la carpeta a un directorio temporal, como skills.js. */
+  __test: {
+    _resetForTests: (dir) => {
+      if (dir !== undefined) AGENTS_DIR = dir;
+      for (const id of DISCO.keys()) delete SUBAGENTS[id];
+      DISCO = new Map();
+      AVISOS = [];
+      FIRMA = null;
+      CARGADO = false;
+    },
+    cargarDisco,
+    asegurarCarga,
+    firmaDelAlmacen,
+    specDeDisco,
+    parseFrontMatter,
+    listaDe,
+    idValido,
+    estado: () => ({ ids: [...DISCO.keys()], avisos: AVISOS.map((a) => ({ ...a })), cargado: CARGADO }),
+  },
 };

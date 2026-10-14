@@ -9,3 +9,7 @@ docs/
 anuncio/
 *.min.js
 package-lock.json
+# Espacios de trabajo temporales del arnés de interfaz (ui-check los crea y los borra;
+# si una ejecución se corta, no deben romper el formateo ni el lint)
+sagi-ui-ws-*/
+.perfil-*/

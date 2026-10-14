@@ -55,6 +55,40 @@ test('detecta formato responses para grok', () => {
   assertEqual(protocols.detectFormat({ baseUrl: 'https://opencode.ai', model: 'grok-4.6' }), 'responses');
 });
 
+test('detecta formato anthropic para claude-haiku-5-5 de OpenCode Go', () => {
+  assertEqual(protocols.detectFormat({ baseUrl: 'https://opencode.ai/zen/go/v1', model: 'claude-haiku-5-5' }), 'anthropic');
+});
+
+test('detecta formato responses para grok-4.7 de OpenCode Go', () => {
+  assertEqual(protocols.detectFormat({ baseUrl: 'https://opencode.ai/zen/go/v1', model: 'grok-4.7' }), 'responses');
+});
+
+test('detecta formato responses para gpt-6-luna de OpenCode Go', () => {
+  assertEqual(protocols.detectFormat({ baseUrl: 'https://opencode.ai/zen/go/v1', model: 'gpt-6-luna' }), 'responses');
+});
+
+test('detecta anthropic por la ruta /anthropic de una base de terceros', () => {
+  assertEqual(protocols.detectFormat({ baseUrl: 'https://api.deepseek.com/anthropic' }), 'anthropic');
+  assertEqual(protocols.detectFormat({ baseUrl: 'https://api.z.ai/api/anthropic' }), 'anthropic');
+  assertEqual(protocols.detectFormat({ baseUrl: 'https://api.moonshot.ai/anthropic' }), 'anthropic');
+});
+
+test('detecta anthropic por la ruta /messages de la base', () => {
+  assertEqual(protocols.detectFormat({ baseUrl: 'https://gateway.example.com/messages' }), 'anthropic');
+});
+
+test('un format explícito gana sobre la ruta /anthropic', () => {
+  assertEqual(protocols.detectFormat({ baseUrl: 'https://api.deepseek.com/anthropic', format: 'openai' }), 'openai');
+});
+
+test('un providerId anthropic gana sobre una base neutra', () => {
+  assertEqual(protocols.detectFormat({ baseUrl: 'https://api.fireworks.ai/inference', providerId: 'fireworks-anthropic' }), 'anthropic');
+});
+
+test('una base normal no se confunde con una ruta anthropic', () => {
+  assertEqual(protocols.detectFormat({ baseUrl: 'https://api.openai.com/v1' }), 'openai');
+});
+
 test('usa el formato proporcionado si está especificado', () => {
   assertEqual(protocols.detectFormat({ baseUrl: 'https://api.openai.com/v1', model: 'gpt-4', format: 'anthropic' }), 'anthropic');
 });

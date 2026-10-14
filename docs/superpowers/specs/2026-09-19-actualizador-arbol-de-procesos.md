@@ -109,7 +109,7 @@ Leído en las plantillas NSIS del propio electron-builder
   en la misma carpeta.
 
 Aun así el asistente espera a que la app desaparezca: cerrar nosotros significa cierre
-ordenado (se matan los PowerShell del motor de voz, los servidores MCP y el navegador), y
+ordenado (se matan los servidores MCP y el navegador), y
 eso es mejor que dejar que un instalador nos mate.
 
 ---

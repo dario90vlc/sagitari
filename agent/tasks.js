@@ -244,7 +244,7 @@ class TaskManager {
   stopAll() {
     // Marca primero: los agentes abortados resuelven chat() de inmediato, así que el
     // .finally de cada uno llama a _pump() al salir y arrancaba tareas nuevas durante
-    // el apagado (cuando el navegador y la voz ya se habían matado).
+    // el apagado (cuando el navegador ya se había matado).
     this._stopped = true;
     for (const [runId, a] of this.agents) {
       try {

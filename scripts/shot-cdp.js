@@ -25,7 +25,81 @@ const path = require('path');
 const WebSocket = require('ws');
 
 const APP_DIR = path.join(__dirname, '..');
-const TODAS = ['chat', 'tasks', 'projects', 'agents', 'memory', 'skills', 'mcp', 'tools', 'history', 'settings'];
+const TODAS = [
+  'chat',
+  'tasks',
+  'projects',
+  'agents',
+  'equipo',
+  'memory',
+  'skills',
+  'mcp',
+  'tools',
+  'history',
+  'settings',
+  'slash',
+  'diffs',
+];
+
+/* Dos capturas de ESTADO, no de sección: la paleta de órdenes abierta y la revisión del
+   cambio con su diff. Se montan sobre el chat con el renderer de verdad —la paleta con
+   su propia lista (`ChatKit.COMMANDS`) y el panel con su propio pintor (`pintarDiff`)—,
+   no con HTML imitado, por el mismo motivo que la conversación de demostración. */
+const SHOT_SLASH = `(function () {
+  var nav = document.querySelector('.navitem[data-view="chat"]');
+  if (nav) nav.click();
+  var i = document.getElementById('chatInput');
+  if (!i) return 'NO_INPUT';
+  i.value = '/';
+  i.dispatchEvent(new Event('input', { bubbles: true }));
+  i.focus();
+  return 'OK';
+})()`;
+
+const DEMO_DIFF = `[{
+  path: 'renderer/styles.css',
+  rel: 'renderer/styles.css',
+  adds: 6,
+  dels: 1,
+  hunks: [{
+    cabecera: '@@ -1188,6 +1188,12 @@',
+    lineas: [
+      { tipo: 'ctx', texto: '  box-shadow: 0 0 8px var(--warn);' },
+      { tipo: 'ctx', texto: '}' },
+      { tipo: 'del', texto: '.dot.custom { /* sin regla: el punto salía invisible */ }' },
+      { tipo: 'add', texto: '.dot.custom {' },
+      { tipo: 'add', texto: '  background: var(--vio2);' },
+      { tipo: 'add', texto: '  box-shadow: 0 0 8px var(--vio2);' },
+      { tipo: 'add', texto: '}' }
+    ]
+  }]
+}, {
+  path: 'SAGITARI.md',
+  rel: 'SAGITARI.md',
+  adds: 3,
+  dels: 0,
+  noReversible: true,
+  hunks: [{
+    cabecera: '@@ -0,0 +1,3 @@',
+    lineas: [
+      { tipo: 'add', texto: '# Reglas del proyecto' },
+      { tipo: 'add', texto: 'Las pruebas se lanzan con npm test.' },
+      { tipo: 'add', texto: 'No toques la carpeta de datos.' }
+    ]
+  }]
+}]`;
+
+const SHOT_DIFFS = `(function () {
+  var nav = document.querySelector('.navitem[data-view="chat"]');
+  if (nav) nav.click();
+  if (typeof pintarDiff !== 'function') return 'NO_PAINTER';
+  var l = document.getElementById('diffList');
+  var p = document.getElementById('diffPanel');
+  if (!l || !p) return 'NO_PANEL';
+  pintarDiff(${DEMO_DIFF}, l);
+  p.hidden = false;
+  return 'OK';
+})()`;
 
 /* Conversación de demostración, dibujada con las propias funciones del renderer
    (bubble, scroll) para que la captura enseñe el markdown, el código y el
@@ -192,11 +266,42 @@ async function esperarCdp(port, intentos = 60) {
     quedan = lista.length;
     for (const vista of lista) {
       console.error('  [cdp] vista ' + vista);
+      /* Las dos capturas de estado se montan sobre el chat con el renderer de verdad y
+         no tienen `.navitem` propio: se resuelven aquí y no en el pulso de navegación. */
+      if (vista === 'slash' || vista === 'diffs') {
+        const r = await send('Runtime.evaluate', {
+          expression: vista === 'slash' ? SHOT_SLASH : SHOT_DIFFS,
+          returnByValue: true,
+        });
+        const v = r.result && r.result.value;
+        if (v !== 'OK') {
+          console.error('  OMITIDA ' + vista + ': ' + String(v));
+          quedan--;
+          continue;
+        }
+        await sleep(900);
+        /* Un aviso, no un fallo: esto es una herramienta de captura. La paleta se pinta
+           tras un viaje de IPC (las skills se piden al proceso principal), así que el
+           estado se comprueba DESPUÉS de esperar, no en la misma llamada. */
+        const comp = await send('Runtime.evaluate', {
+          expression:
+            vista === 'slash'
+              ? '(function(){ var m=document.getElementById("skillMenu"); return !!m && !m.hidden; })()'
+              : '(function(){ var p=document.getElementById("diffPanel"); return !!p && !p.hidden; })()',
+          returnByValue: true,
+        });
+        if (!(comp.result && comp.result.value)) console.error('  aviso: ' + vista + ' no llegó a su estado antes de la captura');
+        const shot = await send('Page.captureScreenshot', { format: 'png' });
+        fs.writeFileSync(path.join(OUT_DIR, vista + '.png'), Buffer.from(shot.data, 'base64'));
+        quedan--;
+        console.log('  ' + vista + '.png');
+        continue;
+      }
       if (vista === 'chat' && DEMO) {
         // La conversación se siembra con las funciones del renderer, no con HTML
         // imitado: así la captura enseña la burbuja, el markdown y el código reales.
         const r = await send('Runtime.evaluate', { expression: DEMO_CHAT, returnByValue: true });
-        const v = r.result && r.result.result && r.result.result.value;
+        const v = r.result && r.result.value;
         if (v && v.indexOf('OK') !== 0) console.error('  demo no sembrada:', v);
         await sleep(700);
       }

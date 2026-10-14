@@ -4,7 +4,15 @@
  * razonamiento que se cuelgan del mensaje del asistente).
  * Estado COMPARTIDO entre agentEmit (main.js, cierra el turno) y los handlers
  * chat:send/retry (router ipc-chat.js, abren el turno). Un solo módulo = un
- * solo rastro: antes vivía duplicado y podían divergir. */
+ * solo rastro: antes vivía duplicado y podían divergir.
+ *
+ * UN rastro POR CONVERSACIÓN: con varias conversaciones a la vez, un único rastro
+ * global mezclaría las tarjetas del turno de una pestaña con las del turno de otra
+ * (y el cierre de una cerraría el rastro de la que está trabajando). Todo el estado
+ * se indexa por el id de conversación; sin id (los usos de antes) la clave es '' y el
+ * comportamiento es el de siempre. */
+
+const { enmascararArgs } = require('../agent/runlog'); // texto libre que puede ser un secreto
 
 /* ---- rastro del turno: lo que el usuario ve en las tarjetas ----
    Las tarjetas de herramienta, el razonamiento y sus tiempos NO se guardaban en la
@@ -22,29 +30,40 @@ const clipTraza = (s, n) => {
   const t = String(s == null ? '' : s);
   return t.length > n ? t.slice(0, n) + '\n… (recortado: ' + (t.length - n) + ' caracteres más)' : t;
 };
-function argsTraza(args) {
+function argsTraza(name, args) {
   if (!args || typeof args !== 'object') return {};
   const out = {};
-  for (const [k, v] of Object.entries(args)) {
-    if (typeof v !== 'string') {
-      out[k] = v;
-      continue;
-    }
-    // una imagen en base64 o el contenido entero de un archivo no pintan nada en una
-    // tarjeta y multiplicarían el tamaño del historial guardado
-    out[k] = /^data:[\w/+.-]+;base64,/.test(v) ? '(imagen adjunta, no guardada)' : clipTraza(v, 1200);
-  }
+  /* Recorta TAMBIÉN los argumentos que no son cadenas: `apply_patch` recibe
+     `changes: [{path, old_string, new_string}]` con el texto entero de cada cambio, y la
+     rama anterior los guardaba tal cual. El rastro se cuelga del mensaje y se persiste en
+     conversations.json (que se lee ENTERO al arrancar), así que el mismo contenido que un
+     `write_file` sí recortaba entraba por la puerta de al lado sin ningún tope. */
+  const clipArg = (v) => {
+    if (typeof v === 'string')
+      // una imagen en base64 o el contenido entero de un archivo no pintan nada en una
+      // tarjeta y multiplicarían el tamaño del historial guardado
+      return /^data:[\w/+.-]+;base64,/.test(v) ? '(imagen adjunta, no guardada)' : clipTraza(v, 1200);
+    if (Array.isArray(v)) return v.map(clipArg);
+    if (v && typeof v === 'object') return Object.fromEntries(Object.entries(v).map(([k, x]) => [k, clipArg(x)]));
+    return v;
+  };
+  // una contraseña tecleada en la web o escrita en el portapapeles no viaja al
+  // historial: el rastro se guarda en conversations.json, así que lleva la misma
+  // máscara que el log (misma tabla de campos sensibles, un solo sitio que decida).
+  for (const [k, v] of Object.entries(enmascararArgs(name, args))) out[k] = clipArg(v);
   return out;
 }
-let turnTrace = null;
-function trazaNueva() {
-  turnTrace = { tools: [], think: null, todos: null };
+const turnTraces = new Map(); // convId -> rastro del turno en curso
+const claveTraza = (convId) => String(convId == null ? '' : convId);
+function trazaNueva(convId) {
+  turnTraces.set(claveTraza(convId), { tools: [], think: null, todos: null });
 }
-function trazaApunta(e) {
+function trazaApunta(convId, e) {
+  const turnTrace = turnTraces.get(claveTraza(convId));
   if (!turnTrace) return;
   if (e.type === 'tool') {
     if (turnTrace.tools.length < MAX_TRAZA) {
-      turnTrace.tools.push({ name: e.name, args: argsTraza(e.args), subagent: e.subagent || null });
+      turnTrace.tools.push({ name: e.name, args: argsTraza(e.name, e.args), subagent: e.subagent || null });
     }
     return;
   }
@@ -90,11 +109,11 @@ function trazaApunta(e) {
       : [];
   }
 }
-function trazaActual() {
-  return turnTrace;
+function trazaActual(convId) {
+  return turnTraces.get(claveTraza(convId)) || null;
 }
-function trazaCerrar() {
-  turnTrace = null;
+function trazaCerrar(convId) {
+  turnTraces.delete(claveTraza(convId));
 }
 
 module.exports = { MAX_TRAZA, clipTraza, argsTraza, trazaNueva, trazaApunta, trazaActual, trazaCerrar };

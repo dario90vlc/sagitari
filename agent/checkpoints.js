@@ -32,8 +32,24 @@ function dirFor(status) {
   return TASKS_DIR;
 }
 
+/* El runId es el ÚNICO id que llega del renderer y termina dentro de una ruta
+   (`tasks/<status>/<runId>/run.json`). Sin comprobarlo, un `..\..\..\Temp\victima`
+   hacía que `remove()` borrara recursivamente una carpeta cualquiera del disco y que
+   pause/cancel reescribieran un `run.json` de fuera. Mismo trato que los demás ids que
+   también acaban en una ruta: `safeSkillDir` (skills), `rawId` (MCP) y el hash de los
+   perfiles de navegador. Rechaza separadores, `..`, rutas absolutas y nombres vacíos.
+   @returns {string|null} el id normalizado, o null si no es un runId. */
+const RUN_ID_RX = /^[A-Za-z0-9][A-Za-z0-9_-]{3,63}$/;
+function safeRunId(id) {
+  const s = String(id == null ? '' : id).trim();
+  if (!s || s === '.' || s === '..') return null;
+  if (s.includes('..') || /[\\/]/.test(s) || path.isAbsolute(s) || path.win32.isAbsolute(s)) return null;
+  return RUN_ID_RX.test(s) ? s : null;
+}
+
 function fileFor(run) {
-  return path.join(dirFor(run.status), run.runId, 'run.json');
+  const id = safeRunId(run && run.runId);
+  return id ? path.join(dirFor(run.status), id, 'run.json') : null;
 }
 
 /** Escritura atómica: escribe a .tmp y renombra, conservando el .bak anterior. */
@@ -50,8 +66,10 @@ function atomicWrite(file, text) {
 /** Copias persistidas de un run (puede haber más de una si un save anterior murió a medias). */
 function copiesOf(runId) {
   const out = [];
+  const id = safeRunId(runId);
+  if (!id) return out; // un id con recorrido no puede leer fuera del almacén
   for (const s of ALL_STATUS) {
-    const file = path.join(dirFor(s), runId, 'run.json');
+    const file = path.join(dirFor(s), id, 'run.json');
     try {
       out.push({ file, run: JSON.parse(fs.readFileSync(file, 'utf8')) });
     } catch {}
@@ -117,6 +135,7 @@ function save(run) {
   run.updatedAt = new Date().toISOString();
   try {
     const dest = fileFor(run);
+    if (!dest) return run; // runId no válido: no se escribe fuera del almacén
     const destDir = path.dirname(dest);
     fs.mkdirSync(destDir, { recursive: true });
     const copy = { ...run };
@@ -333,14 +352,16 @@ function recoverable() {
  * recrearía la carpeta. El TaskManager usa remove() tras detener el agente.
  */
 function remove(runId) {
-  const run = read(runId);
+  const id = safeRunId(runId);
+  if (!id) return { ok: false, error: 'Identificador de tarea no válido.' };
+  const run = read(id);
   if (!run) return { ok: false, error: 'Tarea no encontrada.' };
   if (LIVE_STATUS.includes(run.status)) {
     return { ok: false, error: 'La tarea está ' + run.status + ': deténla o cancélala antes de borrarla.' };
   }
   for (const s of ALL_STATUS) {
     try {
-      fs.rmSync(path.join(dirFor(s), runId), { recursive: true, force: true });
+      fs.rmSync(path.join(dirFor(s), id), { recursive: true, force: true });
     } catch {}
   }
   return { ok: true };
@@ -370,6 +391,7 @@ module.exports = {
   setStatus,
   recoverable,
   remove,
+  safeRunId,
   _dir,
   __test: { _resetForTests, ALL_STATUS, LIVE_STATUS, ARCHIVED_STATUS, ARCHIVE_KEEP, copiesOf, pruneArchived },
 };

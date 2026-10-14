@@ -84,8 +84,8 @@ reales, ya corregidos:
 
 - **El texto del subagente se colaba en la respuesta.** Su stream viaja etiquetado con
   `subagent`, pero el caso `delta` del renderer no miraba esa etiqueta: su razonamiento
-  interno —y su `RESULT/DETAILS/EVIDENCE`— acababa dentro de la burbuja del asistente y,
-  con el modo voz, **se leía en voz alta**. Ahora se descarta antes de tocar la burbuja.
+  interno —y su `RESULT/DETAILS/EVIDENCE`— acababa dentro de la burbuja del asistente.
+  Ahora se descarta antes de tocar la burbuja.
 - **El verificador no tenía ficha en la interfaz**: el catálogo de etiquetas usaba `verify`
   y la clave real es `verification`, así que `subagent('verification')` devolvía null y
   leer `.label` sobre ese null lanzaba un TypeError en cada paso de verificación. Además,
@@ -162,8 +162,7 @@ Cinco mejoras de fondo, todas con guardia en la suite y en la app viva:
 - **Tablero del equipo en el chat.** Una tira de chips sobre el grupo de herramientas: se
   pinta al EMPEZAR la delegación (con su subtarea y su criterio) y se resuelve al acabar
   con OK, «· a medias» o fallo; la cabecera dice cuántos siguen en marcha. Responde a
-  «¿quién está trabajando ahora mismo?» sin leer todas las tarjetas, y la franja del modo
-  voz cuenta la delegación con su subtarea.
+  «¿quién está trabajando ahora mismo?» sin leer todas las tarjetas.
 - **Modelo por agente** (opcional, **apagado** por defecto). El router ya clasifica la
   tarea: con `agentRouting` activo, los subagentes que solo leen, mueven archivos o miran
   capturas usan el modelo más ligero de la lista real del proveedor (mini/flash/haiku…)
@@ -180,9 +179,9 @@ Cinco mejoras de fondo, todas con guardia en la suite y en la app viva:
   ellos solos. El agente lo PIDE solo donde hay que pedirlo y solo si el usuario lo
   activó; los subagentes nunca (su proceso es interno, y en Anthropic costaría dinero).
   Se emite por su propio canal (`thinking_delta` → `thinking_done` → `thinking_reset`),
-  nunca por el del texto: la lectura por frases del modo voz no lo toca, copiar un mensaje
-  o la conversación no lo incluye (tiene su propio botón) y el bloque se pliega solo al
-  empezar la respuesta. Si el proveedor falla y la cadena salta de modelo, un
+  nunca por el del texto: copiar un mensaje o la conversación no lo incluye (tiene su
+  propio botón) y el bloque se pliega solo al empezar la respuesta. Si el proveedor falla
+  y la cadena salta de modelo, un
   `thinking_reset` vacía el bloque: lo que pensó el que falló no se mezcla con lo nuevo.
   Caveat asumido: el razonamiento ampliado de Anthropic se envía sin la cabecera beta de
   *interleaved thinking* (haría falta para pensar ENTRE llamadas a herramientas); el resto

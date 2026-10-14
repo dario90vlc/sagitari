@@ -81,6 +81,51 @@ test('incluye OpenCode Go y Anthropic', () => {
   assertOk(ids.includes('anthropic'), 'debe incluir anthropic');
 });
 
+console.log('providers.js — invariantes');
+
+test('el listado de presets es estable (22, con los nuevos)', () => {
+  assertEqual(providers.PRESETS.length, 22, 'número de presets');
+  const ids = providers.PRESETS.map((p) => p.id);
+  assertEqual(ids[ids.length - 1], 'custom', 'custom debe ir el último');
+  for (const id of [
+    'gemini',
+    'deepseek',
+    'xai',
+    'mistral',
+    'moonshot',
+    'cerebras',
+    'nvidia',
+    'sambanova',
+    'llamacpp',
+    'vllm',
+    'jan',
+    'koboldcpp',
+    'textgen',
+    'localai',
+  ]) {
+    assertOk(ids.includes(id), 'falta el preset ' + id);
+  }
+});
+
+test('orden: nubes nuevas tras groq y locales nuevos antes de los existentes', () => {
+  const ids = providers.PRESETS.map((p) => p.id);
+  assertOk(ids.indexOf('groq') < ids.indexOf('gemini'), 'gemini va tras groq');
+  assertOk(ids.indexOf('sambanova') < ids.indexOf('llamacpp'), 'los locales nuevos van tras las nubes');
+  assertOk(ids.indexOf('localai') < ids.indexOf('ollama'), 'los locales nuevos van antes de ollama');
+});
+
+test('invariantes de cada preset', () => {
+  for (const p of providers.PRESETS) {
+    assertOk(p.id, 'id vacío');
+    assertOk(typeof p.name === 'string' && p.name.trim(), p.id + ': name vacío');
+    assertOk(['openai', 'anthropic', 'responses'].includes(p.format), p.id + ': format inválido ' + p.format);
+    if (p.id === 'custom') continue;
+    const local = /^https?:\/\/(localhost|127\.0\.0\.1)(:\d+)?([/?#]|$)/i.test(p.baseUrl);
+    assertOk(/^https?:\/\//i.test(p.baseUrl) || local, p.id + ': baseUrl no es http(s) ni localhost: ' + p.baseUrl);
+    if (p.needsKey === false) assertOk(local, p.id + ': needsKey=false pero la base no es localhost: ' + p.baseUrl);
+  }
+});
+
 console.log('providers.js — isVisionModel');
 
 test('reconoce un modelo con visión', () => {

@@ -21,6 +21,7 @@ const {
   skills,
   pricingFor,
   memory,
+  MEM_DIR,
   checkpoints,
   TASKS_TMP,
   executeTool,
@@ -256,6 +257,562 @@ test('memory update clamps importance and removes work', () => {
   ok(!memory.list().find((x) => x.id === id));
 });
 
+/* ---------- memoria v2: migración, fusión y almacén en disco ---------- */
+
+test('memory: un memory.json v1 (array) se migra a v2 fusionando los duplicados', () => {
+  const dir = tmpDir('sagi-memv2-');
+  const f = path.join(dir, 'memory.json');
+  fs.writeFileSync(
+    f,
+    JSON.stringify([
+      { id: 'a', text: 'El usuario se llama Darío', date: '2026-10-12T10:00:00.000Z' },
+      { id: 'b', text: 'Recuerda que me llamo Dario', date: '2026-10-13T10:00:00.000Z' },
+    ]),
+    'utf8',
+  );
+  memory.__test._resetForTests(f);
+  const list = memory.list();
+  eq(list.length, 1, 'las dos entradas del usuario quedan en una');
+  ok(list[0].origen, 'trae el origen v2');
+  ok(fs.existsSync(f + '.bak'), 'se conserva una copia .bak antes de migrar');
+  ok(fs.existsSync(f.replace(/\.json$/, '') + '.bak-v1'), 'y el original v1 como .bak-v1');
+  const enDisco = JSON.parse(fs.readFileSync(f, 'utf8'));
+  eq(enDisco.version, 2, 'el fichero se reescribe en el esquema v2');
+  memory.__test._resetForTests(path.join(MEM_DIR, 'memory.json')); // vuelve al almacén de la suite
+});
+
+test('memory: la migración de las dos entradas REALES del perfil deja una sola', () => {
+  /* Copia literal de %APPDATA%/SagitariAI/memory.json del 14 oct 2026: las dos entradas
+     dicen lo mismo («El usuario se llama Darío» / «Recuerda que me llamo Dario») y la
+     aceptación de la fase 1 es que queden en UNA, con los usos sumados. */
+  const dir = tmpDir('sagi-memreal-');
+  const f = path.join(dir, 'memory.json');
+  fs.writeFileSync(
+    f,
+    JSON.stringify([
+      {
+        id: 'mmu5rk15nr5hq',
+        text: 'El usuario se llama Darío.',
+        date: '2026-09-17T16:48:15.323Z',
+        lastUsed: '2026-10-01T10:58:25.849Z',
+        uses: 53,
+        importance: 0.8,
+        confidence: 0.8,
+        source: 'agent',
+      },
+      {
+        id: 'mmtxa7yco1m8n',
+        text: 'Recuerda que me llamo Dario',
+        date: '2026-09-11T18:20:48.936Z',
+        lastUsed: '2026-10-01T10:58:25.849Z',
+        uses: 49,
+        importance: 1,
+        confidence: 0.8,
+        source: 'user',
+      },
+    ]),
+    'utf8',
+  );
+  memory.__test._resetForTests(f);
+  const vivos = memory.list();
+  const tapados = memory.listTrash();
+  eq(vivos.length + tapados.length, 1, 'un solo hecho (vivo o en la papelera)');
+  const enDisco = JSON.parse(fs.readFileSync(f, 'utf8'));
+  eq(enDisco.version, 2);
+  eq(enDisco.hechos.length, 1, 'el fichero migrado tiene un hecho, no dos');
+  eq(enDisco.hechos[0].uses, 103, '53 + 49 usos, más el refuerzo de la propia fusión');
+  eq(enDisco.hechos[0].text, 'El usuario se llama Darío.', 'gana el texto del dato más reciente');
+  eq(enDisco.hechos[0].importance, 1, 'gana la importancia mayor');
+  eq(enDisco.hechos[0].origen, 'herramienta', 'el `source: agent` de la v1 se traduce a origen');
+  memory.__test._resetForTests(path.join(MEM_DIR, 'memory.json'));
+});
+
+test('memory: añadir un hecho parecido lo consolida en vez de duplicarlo', () => {
+  const dir = tmpDir('sagi-memcon-');
+  memory.__test._resetForTests(path.join(dir, 'memory.json'));
+  const a = memory.add({ text: 'Prefiero informes en PDF', importance: 0.5 });
+  const b = memory.add({ text: 'Prefiero los informes en PDF', importance: 0.7 });
+  eq(memory.list().length, 1, 'no hay dos entradas parecidas');
+  ok(b.fusionado, 'se informa de la fusión');
+  eq(b.antes.id, a.id, 'se puede deshacer sobre el hecho anterior');
+  eq(memory.list()[0].importance, 0.7, 'gana la importancia mayor');
+  memory.__test._resetForTests(path.join(MEM_DIR, 'memory.json'));
+});
+
+/* ---------- memoria v2: el valor manda en la fusión ----------
+   La similitud léxica sola fusionaba «prefiero el té» con «prefiero el café» y el primero
+   desaparecía sin rastro. Aquí se fija la regla: mismo dato → se consolida; valor distinto
+   de un dato único (nombre, idioma, dónde vives) → sustituye mandando el viejo a la
+   PAPELERA; valor distinto de algo que admite varios (preferencias) → conviven. */
+
+test('memory: el mismo dato escrito de otra forma se consolida, no se duplica', () => {
+  const dir = tmpDir('sagi-memmismo-');
+  memory.__test._resetForTests(path.join(dir, 'memory.json'));
+  const a = memory.add({ text: 'El usuario se llama Darío' });
+  const b = memory.add({ text: 'Me llamo Dario' });
+  eq(memory.list().length, 1, 'un solo nombre: ' + JSON.stringify(memory.list().map((m) => m.text)));
+  ok(b.fusionado, 'se informa de la fusión');
+  eq(b.antes.id, a.id, 'sobre el hecho anterior');
+  eq(memory.list()[0].text, 'Me llamo Dario', 'gana el texto reciente');
+  memory.__test._resetForTests(path.join(MEM_DIR, 'memory.json'));
+});
+
+test('memory: dos preferencias distintas no se fusionan y no se pierde ninguna', () => {
+  const dir = tmpDir('sagi-memdist-');
+  memory.__test._resetForTests(path.join(dir, 'memory.json'));
+  memory.add({ text: 'Prefiero el té' });
+  memory.add({ text: 'Prefiero el café' });
+  const vivos = memory.list();
+  eq(vivos.length, 2, 'las dos preferencias siguen ahí: ' + JSON.stringify(vivos.map((m) => m.text)));
+  eq(memory.listTrash().length, 0, 'ninguna se tira por parecerse a la otra');
+  memory.__test._resetForTests(path.join(MEM_DIR, 'memory.json'));
+});
+
+test('memory: una preferencia no se pierde al decir una contraria de otro objeto', () => {
+  const dir = tmpDir('sagi-memgjust-');
+  memory.__test._resetForTests(path.join(dir, 'memory.json'));
+  memory.add({ text: 'Al usuario le gusta el té' });
+  memory.add({ text: 'No me gusta el café' });
+  const textos = memory.list().map((m) => m.text);
+  ok(textos.includes('Al usuario le gusta el té'), 'el té sigue: ' + JSON.stringify(textos));
+  ok(textos.includes('No me gusta el café'), 'y el café también: ' + JSON.stringify(textos));
+  memory.__test._resetForTests(path.join(MEM_DIR, 'memory.json'));
+});
+
+test('memory: corregir el valor de un dato único sustituye y el viejo va a la papelera', () => {
+  const dir = tmpDir('sagi-memsust-');
+  memory.__test._resetForTests(path.join(dir, 'memory.json'));
+  const a = memory.add({ text: 'Vivo en Barcelona' });
+  const b = memory.add({ text: 'Vivo en Madrid' });
+  const vivos = memory.list();
+  eq(vivos.length, 1, 'un solo sitio donde vives: ' + JSON.stringify(vivos.map((m) => m.text)));
+  eq(vivos[0].text, 'Vivo en Madrid', 'gana el dato nuevo');
+  ok(b.sustituido, 'se informa de que sustituye a otro hecho');
+  eq(b.antes.id, a.id, 'y de cuál (para poder deshacer)');
+  const pap = memory.listTrash();
+  eq(pap.length, 1, 'el viejo NO se borra: queda en la papelera');
+  eq(pap[0].text, 'Vivo en Barcelona');
+  memory.__test._resetForTests(path.join(MEM_DIR, 'memory.json'));
+});
+
+test('memory: la polaridad invertida del mismo objeto sustituye, no duplica', () => {
+  const dir = tmpDir('sagi-mempol-');
+  memory.__test._resetForTests(path.join(dir, 'memory.json'));
+  memory.add({ text: 'Me gusta el té' });
+  memory.add({ text: 'No me gusta el té' });
+  const vivos = memory.list();
+  eq(vivos.length, 1, 'una sola versión: ' + JSON.stringify(vivos.map((m) => m.text)));
+  eq(vivos[0].text, 'No me gusta el té', 'gana la última');
+  eq(memory.listTrash().length, 1, 'la versión anterior queda recuperable');
+  memory.__test._resetForTests(path.join(MEM_DIR, 'memory.json'));
+});
+
+test('memory: dos datos distintos que se parecen («vive en» / «trabaja en») no se pisan', () => {
+  const dir = tmpDir('sagi-memotro-');
+  memory.__test._resetForTests(path.join(dir, 'memory.json'));
+  memory.add({ text: 'El usuario vive en Madrid' });
+  memory.add({ text: 'El usuario trabaja en Madrid' });
+  const textos = memory
+    .list()
+    .map((m) => m.text)
+    .sort();
+  eq(textos.length, 2, 'conviven los dos, no se fusionan por parecerse: ' + JSON.stringify(textos));
+  eq(memory.listTrash().length, 0, 'y ninguno se tira');
+  memory.__test._resetForTests(path.join(MEM_DIR, 'memory.json'));
+});
+
+test('memory: el techo del almacén no borra en silencio (lo que sobra va a la papelera)', () => {
+  const dir = tmpDir('sagi-memtecho-');
+  const f = path.join(dir, 'memory.json');
+  const hechos = [];
+  const ahora = new Date().toISOString();
+  for (let i = 0; i < memory.__test.MAX_MEMORIES; i++) hechos.push({ id: 'm' + i, text: 'Hecho ' + i, date: ahora, lastUsed: ahora });
+  fs.writeFileSync(f, JSON.stringify({ version: 2, hechos }), 'utf8');
+  memory.__test._resetForTests(f);
+  memory.add({ text: 'Un hecho más que desborda el techo' });
+  eq(memory.list().length, memory.__test.MAX_MEMORIES, 'la lista viva se queda en el techo');
+  eq(memory.listTrash().length, 1, 'y lo que sobra está en la papelera, no borrado');
+  memory.__test._resetForTests(path.join(MEM_DIR, 'memory.json'));
+});
+
+/* ---------- memoria v2: un almacén que no se puede leer NO se pisa ----------
+   Un error de E/S (fichero bloqueado por antivirus u otro proceso, EBUSY/EPERM típicos de
+   Windows) dejaba la memoria vacía todo el proceso y la siguiente escritura machacaba
+   memory.json. Ahora el almacén se declara no disponible (la vista lo dice y ofrece
+   «Restaurar copia»), se reintenta la lectura y NUNCA se escribe encima. */
+
+test('memory: un error de E/S al leer no vacía la memoria ni deja pisar el fichero', () => {
+  const dir = tmpDir('sagi-memio-');
+  const f = path.join(dir, 'memory.json');
+  /* Un fichero que existe pero no se puede leer como texto: un DIRECTORIO con ese nombre
+     (readFileSync lanza EISDIR, igual que un EBUSY: no es ENOENT, así que no es «no hay
+     memoria»). */
+  fs.mkdirSync(f);
+  fs.writeFileSync(path.join(f, 'dentro.txt'), 'no tocar', 'utf8');
+  memory.__test._resetForTests(f);
+
+  eq(memory.list().length, 0, 'sin poder leerlo no hay hechos que enseñar');
+  const est = memory.estado();
+  eq(est.ok, false, 'el almacén se declara no disponible: ' + JSON.stringify(est));
+  ok(/no se pudo leer/.test(est.error), 'y dice por qué: ' + est.error);
+
+  eq(memory.add({ text: 'Un hecho nuevo' }), null, 'no se acepta un hecho que no se puede guardar');
+  eq(memory.wipe().ok, false, 'olvidarlo todo tampoco: escribir sería perder lo que no hemos leído');
+  eq(fs.readdirSync(f).join(','), 'dentro.txt', 'el almacén original sigue intacto');
+
+  /* Cuando el problema desaparece, la lectura se reintenta sola y la memoria vuelve. */
+  fs.rmSync(f, { recursive: true, force: true });
+  fs.writeFileSync(f, JSON.stringify({ version: 2, hechos: [{ id: 'ok1', text: 'Hecho de antes' }] }), 'utf8');
+  eq(memory.list().length, 1, 'el reintento recupera lo que había: ' + JSON.stringify(memory.list().map((m) => m.text)));
+  eq(memory.estado().ok, true, 'y el almacén vuelve a estar disponible');
+  memory.__test._resetForTests(path.join(MEM_DIR, 'memory.json'));
+});
+
+test('memory: un memory.json ilegible no se disfraza de memoria vacía (avisa y conserva)', () => {
+  const dir = tmpDir('sagi-memcor-');
+  const f = path.join(dir, 'memory.json');
+  fs.writeFileSync(f, '{{{', 'utf8');
+  memory.__test._resetForTests(f);
+
+  eq(memory.list().length, 0);
+  const est = memory.estado();
+  eq(est.ok, false, 'el almacén avisa en vez de fingir que no sabe nada: ' + JSON.stringify(est));
+  ok(/interpretar/.test(est.error), 'con el motivo: ' + est.error);
+  ok(
+    fs.readdirSync(dir).some((n) => /^memory\.corrupt-\d+\.json$/.test(n)),
+    'el fichero ilegible se conserva aparte',
+  );
+  /* El original está a salvo en cuarentena: escribir de nuevo no borra nada, y el
+     almacén vuelve a estar disponible en cuanto hay algo que guardar. */
+  const m = memory.add({ text: 'Un hecho escrito después' });
+  ok(m && m.id, 'se puede volver a escribir');
+  eq(memory.estado().ok, true, 'y el almacén vuelve a estar disponible');
+  eq(memory.list().length, 1);
+  memory.__test._resetForTests(path.join(MEM_DIR, 'memory.json'));
+});
+
+test('memory: la bandeja no admite propuestas sin texto', () => {
+  const dir = tmpDir('sagi-memtrayvacio-');
+  memory.__test._resetTray(path.join(dir, 'memory-tray.json'));
+  memory.__test._resetForTests(path.join(dir, 'memory.json'));
+  eq(memory.trayProponer([{ texto: '' }, { texto: '   ' }, {}]).length, 0, 'nada que aprobar');
+  eq(memory.trayList().length, 0, 'una propuesta sin texto no es una propuesta');
+  memory.__test._resetForTests(path.join(MEM_DIR, 'memory.json'));
+  memory.__test._resetTray(path.join(MEM_DIR, 'memory-tray.json'));
+});
+
+test('memory: la bandeja no se recorta por detrás: al llenarse deja de admitir propuestas', () => {
+  const dir = tmpDir('sagi-memtraylleno-');
+  memory.__test._resetTray(path.join(dir, 'memory-tray.json'));
+  memory.__test._resetForTests(path.join(dir, 'memory.json'));
+  const tope = memory.__test.MAX_BANDEJA;
+  const props = [];
+  for (let i = 0; i < tope + 2; i++) props.push({ texto: 'Propuesta distinta número ' + i });
+  memory.trayProponer(props);
+  const lista = memory.trayList();
+  eq(lista.length, tope, 'la bandeja se queda en su tope');
+  eq(lista[0].texto, 'Propuesta distinta número 0', 'y no se tira la más antigua por detrás');
+  eq(lista[tope - 1].texto, 'Propuesta distinta número ' + (tope - 1), 'ni se cuela una de más');
+  memory.__test._resetForTests(path.join(MEM_DIR, 'memory.json'));
+  memory.__test._resetTray(path.join(MEM_DIR, 'memory-tray.json'));
+});
+
+test('memory: ni el hecho ni la frase de la que salió guardan una clave', () => {
+  const dir = tmpDir('sagi-memsec-');
+  memory.__test._resetTray(path.join(dir, 'memory-tray.json'));
+  memory.__test._resetForTests(path.join(dir, 'memory.json'));
+  const clave = 'sk-abcdefgh12345678';
+  const m = memory.add({ text: 'Mi token de la API es ' + clave, origenTexto: 'recuerda que mi token es ' + clave });
+  ok(m && !m.text.includes(clave), 'el hecho no guarda la clave: ' + m.text);
+  ok(!m.origenTexto.includes(clave), 'ni la frase literal: ' + m.origenTexto);
+  memory.trayProponer([{ texto: 'Mi clave es ' + clave, origenTexto: 'mi clave es ' + clave }]);
+  const p = memory.trayList()[0];
+  ok(!(p.texto + p.origenTexto).includes(clave), 'la bandeja tampoco: ' + JSON.stringify(p));
+  ok(!JSON.stringify(memory.exportar()).includes(clave), 'y el volcado de exportación tampoco');
+  /* La redacción enmascara patrones, no recorta: un hecho largo se guarda entero (la
+     lista de recortes de runlog es para el registro, no para la memoria). */
+  const larga = 'El usuario prefiere que le explique las cosas con detalle: ' + 'x'.repeat(300);
+  eq(memory.add({ text: larga }).text, larga, 'un hecho largo se guarda completo');
+  memory.__test._resetForTests(path.join(MEM_DIR, 'memory.json'));
+  memory.__test._resetTray(path.join(MEM_DIR, 'memory-tray.json'));
+});
+
+/* ---------- memoria v2: olvido no destructivo, papelera y copias ---------- */
+
+test('memory: olvidar mueve a la papelera, no borra', () => {
+  const dir = tmpDir('sagi-mempap-');
+  memory.__test._resetForTests(path.join(dir, 'memory.json'));
+  const años = new Date(Date.now() - 400 * 86400000).toISOString();
+  const h = memory.add({ text: 'Dato antiquísimo sin usar', importance: 0.9 });
+  memory.update(h.id, {}); // asegura que el almacén está cargado
+  // se falsifica la antigüedad por la puerta de tests: el hecho lleva 400 días sin usarse
+  const almacen = JSON.parse(fs.readFileSync(path.join(dir, 'memory.json'), 'utf8'));
+  almacen.hechos[0].lastUsed = años;
+  almacen.hechos[0].date = años;
+  fs.writeFileSync(path.join(dir, 'memory.json'), JSON.stringify(almacen), 'utf8');
+  memory.__test._resetForTests(path.join(dir, 'memory.json'));
+  memory.prune();
+  eq(memory.list().length, 0, 'sale de la lista de activos');
+  eq(memory.listTrash().length, 1, 'pero está en la papelera');
+  const r = memory.restore(h.id);
+  ok(r.ok, 'se puede restaurar');
+  eq(memory.list().length, 1, 'vuelve a los activos');
+  memory.__test._resetForTests(path.join(MEM_DIR, 'memory.json'));
+});
+
+test('memory: borrar un hecho lo manda a la papelera y se puede deshacer', () => {
+  const dir = tmpDir('sagi-membor-');
+  memory.__test._resetForTests(path.join(dir, 'memory.json'));
+  const h = memory.add({ text: 'Un dato que voy a borrar', importance: 0.6 });
+  eq(memory.remove(h.id).ok, true);
+  ok(!memory.list().some((m) => m.id === h.id), 'sale de la lista viva');
+  eq(memory.listTrash().length, 1, 'no se borró: está en la papelera');
+  eq(memory.restore(h.id).ok, true);
+  ok(
+    memory.list().some((m) => m.id === h.id),
+    'vuelve con deshacer',
+  );
+  eq(memory.listTrash().length, 0);
+  memory.__test._resetForTests(path.join(MEM_DIR, 'memory.json'));
+});
+
+test('memory: exportar incluye activos y papelera, y wipe lo borra todo (bandeja incluida)', () => {
+  const dir = tmpDir('sagi-memexp-');
+  const f = path.join(dir, 'memory.json');
+  const ft = path.join(dir, 'memory-tray.json');
+  memory.__test._resetForTests(f);
+  memory.__test._resetTray(ft);
+  memory.add({ text: 'Un hecho para exportar' });
+  memory.add({ text: 'Otro hecho exportable' });
+  memory.remove(memory.list()[0].id);
+  memory.proponerDeTurno('me llamo Darío', { convId: 'c1' });
+  ok(memory.trayList().length === 1, 'la bandeja tiene una propuesta antes de olvidarlo todo');
+  const exp = memory.exportar();
+  eq(exp.version, 2);
+  eq(exp.hechos.length, 1, 'los vivos');
+  eq(exp.papelera.length, 1, 'y los de la papelera: el volcado no filtra nada');
+  ok(exp.hechos[0].origen, 'el volcado lleva el origen');
+  eq(JSON.parse(JSON.stringify(exp)).version, 2, 'serializable tal cual a JSON');
+  const w = memory.wipe();
+  ok(w.ok);
+  eq(memory.list().length, 0);
+  eq(memory.listTrash().length, 0);
+  /* «Olvídalo todo» promete hechos, papelera y bandeja: la bandeja también se vacía (y,
+     en el router, el perfil de hábitos: `habits.reset()` desde `memory:wipe`). */
+  eq(memory.trayList().length, 0, 'la bandeja queda vacía');
+  eq(JSON.parse(fs.readFileSync(ft, 'utf8')).propuestas.length, 0, 'y en disco no queda ninguna propuesta');
+  memory.__test._resetForTests(path.join(MEM_DIR, 'memory.json'));
+  memory.__test._resetTray(path.join(MEM_DIR, 'memory-tray.json'));
+});
+
+test('memory: vaciar la papelera borra de verdad lo que había dentro', () => {
+  const dir = tmpDir('sagi-memvac-');
+  memory.__test._resetForTests(path.join(dir, 'memory.json'));
+  const años = new Date(Date.now() - 400 * 86400000).toISOString();
+  memory.add({ text: 'Dato que se olvidará del todo' });
+  const almacen = JSON.parse(fs.readFileSync(path.join(dir, 'memory.json'), 'utf8'));
+  almacen.hechos[0].lastUsed = años;
+  almacen.hechos[0].date = años;
+  fs.writeFileSync(path.join(dir, 'memory.json'), JSON.stringify(almacen), 'utf8');
+  memory.__test._resetForTests(path.join(dir, 'memory.json'));
+  memory.prune(); // lo mueve a la papelera
+  const r = memory.trashEmpty();
+  ok(r.ok);
+  eq(r.borradas, 1);
+  eq(memory.listTrash().length, 0);
+  memory.__test._resetForTests(path.join(MEM_DIR, 'memory.json'));
+});
+
+test('memory: restaurar copia recupera el almacén y conserva el fichero roto', () => {
+  const dir = tmpDir('sagi-memres-');
+  const f = path.join(dir, 'memory.json');
+  fs.writeFileSync(f, '{ esto no es JSON', 'utf8'); // el almacén ilegible de partida
+  fs.writeFileSync(f.replace(/\.json$/, '') + '.bak-v1', JSON.stringify([{ id: 'a', text: 'Hecho rescatado de la copia' }]), 'utf8');
+  memory.__test._resetForTests(f);
+  memory.list(); // carga: como no se puede leer, dispara la cuarentena
+  const r = memory.restaurarCopia();
+  ok(r.ok, 'se restaura');
+  ok(r.restaurado >= 1, 'trae al menos un hecho');
+  ok(/bak-v1|corrupt/.test(r.origen), 'dice de dónde salió: ' + r.origen);
+  ok(
+    memory.list().some((m) => /Hecho rescatado/.test(m.text)),
+    'el hecho está en la memoria',
+  );
+  const rotos = fs.readdirSync(dir).filter((n) => n.startsWith('memory.json.roto-'));
+  ok(rotos.length >= 1, 'el fichero ilegible se conserva como .roto-…');
+  eq(memory.list().length, 1, 'una segunda lectura no explota');
+  memory.__test._resetForTests(path.join(MEM_DIR, 'memory.json'));
+});
+
+test('memory: sin ninguna copia, restaurar avisa en vez de inventarse la memoria', () => {
+  const dir = tmpDir('sagi-memsin-');
+  const f = path.join(dir, 'memory.json');
+  fs.writeFileSync(f, 'roto del todo', 'utf8');
+  memory.__test._resetForTests(f);
+  const r = memory.restaurarCopia();
+  eq(r.ok, false);
+  ok(/copia/.test(r.error), 'el error habla de la copia: ' + r.error);
+  memory.__test._resetForTests(path.join(MEM_DIR, 'memory.json'));
+});
+
+test('memory: restaurar copia usa la copia fresca cuando la hay', () => {
+  const dir = tmpDir('sagi-memres3-');
+  const f = path.join(dir, 'memory.json');
+  fs.writeFileSync(f, '{ roto', 'utf8');
+  fs.writeFileSync(f + '.bak', JSON.stringify({ version: 2, hechos: [{ text: 'Lo último que sabía' }] }), 'utf8');
+  fs.writeFileSync(f.replace(/\.json$/, '') + '.bak-v1', JSON.stringify([{ text: 'Lo antiguo' }]), 'utf8');
+  memory.__test._resetForTests(f);
+  const r = memory.restaurarCopia();
+  ok(r.ok);
+  ok(/memory\.json\.bak$/.test(r.origen), 'usa la copia fresca: ' + r.origen);
+  ok(
+    memory.list().some((m) => /Lo último/.test(m.text)),
+    'no vuelve al estado de la migración',
+  );
+  memory.__test._resetForTests(path.join(MEM_DIR, 'memory.json'));
+});
+
+test('memory: una copia ilegible no impide recuperar la siguiente', () => {
+  const dir = tmpDir('sagi-memres4-');
+  const f = path.join(dir, 'memory.json');
+  fs.writeFileSync(f, '{ roto', 'utf8');
+  fs.writeFileSync(f + '.bak', 'también roto', 'utf8'); // la copia más reciente está rota
+  fs.writeFileSync(f.replace(/\.json$/, '') + '.bak-v1', JSON.stringify([{ text: 'Hecho del original v1' }]), 'utf8');
+  memory.__test._resetForTests(f);
+  const r = memory.restaurarCopia();
+  ok(r.ok, 'se recupera igual: ' + r.error);
+  ok(/bak-v1/.test(r.origen), 'baja a la copia v1: ' + r.origen);
+  ok(memory.list().some((m) => /original v1/.test(m.text)));
+  memory.__test._resetForTests(path.join(MEM_DIR, 'memory.json'));
+});
+
+/* ---------- memoria v2: identidad siempre presente ---------- */
+
+test('relevantMemories incluye siempre los hechos de identidad', () => {
+  const dir = tmpDir('sagi-memid-');
+  memory.__test._resetForTests(path.join(dir, 'memory.json'));
+  // el de Blender entra primero en la lista; la identidad tiene que adelantársele
+  memory.add({ text: 'Trabajo con proyectos de Blender y renders' });
+  memory.add({ text: 'El usuario se llama Darío', etiquetas: ['identidad'] });
+  const rel = memory.relevantMemories('cuéntame un chiste de cocina', { minScore: 0.99, limit: 1 });
+  eq(rel.length, 1, 'el tope manda');
+  ok(/se llama Darío/.test(rel[0].mem.text), 'la identidad entra aunque no solape y sin hueco de sobra');
+  memory.__test._resetForTests(path.join(MEM_DIR, 'memory.json'));
+});
+
+/* ---------- memoria v2: bandeja de aprobación y extracción al cerrar turno ---------- */
+
+test('memory: la bandeja propone, acepta y descarta', () => {
+  const dir = tmpDir('sagi-memtray-');
+  memory.__test._resetTray(path.join(dir, 'memory-tray.json'));
+  memory.__test._resetForTests(path.join(dir, 'memory.json'));
+  const props = memory.proponerDeTurno('recuerda que me llamo Darío', { convId: 'c1', convTitulo: 'Prueba' });
+  eq(props.length, 1, 'la frase propone un hecho');
+  eq(props[0].origen, 'mensaje');
+  eq(props[0].convId, 'c1', 'la propuesta recuerda de qué conversación salió');
+  eq(memory.trayList().length, 1);
+  const r = memory.trayAceptar(props[0].id);
+  ok(r.ok, 'se acepta');
+  eq(memory.trayList().length, 0, 'sale de la bandeja');
+  ok(
+    memory.list().some((m) => m.text.includes('Darío')),
+    'entra en la memoria',
+  );
+  ok(
+    memory.list().some((m) => (m.etiquetas || []).includes('identidad')),
+    'la etiqueta viaja con el hecho',
+  );
+  memory.__test._resetForTests(path.join(MEM_DIR, 'memory.json'));
+  memory.__test._resetTray(path.join(MEM_DIR, 'memory-tray.json'));
+});
+
+test('memory: descartar una propuesta la quita sin guardarla', () => {
+  const dir = tmpDir('sagi-memdis-');
+  memory.__test._resetTray(path.join(dir, 'memory-tray.json'));
+  memory.__test._resetForTests(path.join(dir, 'memory.json'));
+  const props = memory.proponerDeTurno('prefiero las respuestas cortas');
+  eq(props.length, 1);
+  memory.trayDescartar(props[0].id);
+  eq(memory.trayList().length, 0);
+  eq(memory.list().length, 0, 'no se guardó nada');
+  memory.__test._resetForTests(path.join(MEM_DIR, 'memory.json'));
+  memory.__test._resetTray(path.join(MEM_DIR, 'memory-tray.json'));
+});
+
+test('memory: con guardar-sin-preguntar la propuesta se guarda sola', () => {
+  const dir = tmpDir('sagi-memauto-');
+  memory.__test._resetTray(path.join(dir, 'memory-tray.json'));
+  memory.__test._resetForTests(path.join(dir, 'memory.json'));
+  const guardados = memory.proponerDeTurno('me llamo Darío', { autoGuardar: true });
+  eq(memory.trayList().length, 0, 'no pasa por la bandeja');
+  eq(guardados.length, 1);
+  eq(memory.list().length, 1);
+  memory.__test._resetForTests(path.join(MEM_DIR, 'memory.json'));
+  memory.__test._resetTray(path.join(MEM_DIR, 'memory-tray.json'));
+});
+
+test('memory: aceptar una propuesta parecida a un hecho vivo lo consolida, no lo duplica', () => {
+  const dir = tmpDir('sagi-memtrayf-');
+  memory.__test._resetTray(path.join(dir, 'memory-tray.json'));
+  memory.__test._resetForTests(path.join(dir, 'memory.json'));
+  memory.add({ text: 'El usuario prefiere informes en PDF', importance: 0.9 });
+  const props = memory.proponerDeTurno('prefiero los informes en PDF');
+  eq(props.length, 1);
+  memory.trayAceptar(props[0].id);
+  eq(memory.list().length, 1, 'sigue habiendo un solo hecho');
+  eq(memory.list()[0].text, 'El usuario prefiere los informes en PDF', 'gana el texto recién aprobado');
+  eq(memory.list()[0].importance, 0.9, 'consolidar no rebaja la importancia que ya tenía');
+  memory.__test._resetForTests(path.join(MEM_DIR, 'memory.json'));
+  memory.__test._resetTray(path.join(MEM_DIR, 'memory-tray.json'));
+});
+
+test('memory: proponerDeTurno no repite lo que ya sabe', () => {
+  const dir = tmpDir('sagi-memdup-');
+  memory.__test._resetTray(path.join(dir, 'memory-tray.json'));
+  memory.__test._resetForTests(path.join(dir, 'memory.json'));
+  eq(memory.proponerDeTurno('me llamo Darío').length, 1);
+  eq(memory.proponerDeTurno('me llamo Darío').length, 0, 'ya está en la bandeja');
+  eq(memory.trayList().length, 1);
+  memory.trayAceptar(memory.trayList()[0].id);
+  eq(memory.proponerDeTurno('me llamo Darío').length, 0, 'y ya vive en la memoria');
+  eq(memory.trayList().length, 0);
+  eq(memory.list().length, 1);
+  memory.__test._resetForTests(path.join(MEM_DIR, 'memory.json'));
+  memory.__test._resetTray(path.join(MEM_DIR, 'memory-tray.json'));
+});
+
+test('memory: el evento propuesta avisa una vez por propuesta nueva', () => {
+  const dir = tmpDir('sagi-memevento-');
+  memory.__test._resetTray(path.join(dir, 'memory-tray.json'));
+  memory.__test._resetForTests(path.join(dir, 'memory.json'));
+  const vistas = [];
+  const escucha = (p) => vistas.push(p);
+  memory.on('propuesta', escucha);
+  memory.proponerDeTurno('me llamo Darío');
+  memory.proponerDeTurno('me llamo Darío'); // ya está en la bandeja: no vuelve a avisar
+  memory.proponerDeTurno('prefiero el té');
+  memory.off('propuesta', escucha);
+  memory.proponerDeTurno('trabajo en C:\\proyectos\\web'); // nadie escucha
+  eq(vistas.length, 2, 'una vez por propuesta nueva');
+  eq(vistas[0].texto, 'El usuario se llama Darío');
+  eq(vistas[0].etiquetas.join(','), 'identidad');
+  eq(vistas[0].origen, 'mensaje');
+  ok(
+    memory.trayList().some((p) => p.id === vistas[0].id),
+    'el aviso lleva la propuesta que está en la bandeja',
+  );
+  for (const id of memory.trayList().map((p) => p.id)) memory.trayDescartar(id);
+  memory.__test._resetForTests(path.join(MEM_DIR, 'memory.json'));
+  memory.__test._resetTray(path.join(MEM_DIR, 'memory-tray.json'));
+});
+
+test('ipc-chat: el cierre de turno propone memoria con el interruptor encendido', () => {
+  const src = fs.readFileSync(path.join(__dirname, '..', 'main', 'ipc-chat.js'), 'utf8');
+  ok(/proponerDeTurno\(/.test(src), 'el router llama a proponerDeTurno');
+  ok(/memoryLearn/.test(src), 'respeta el interruptor de aprendizaje');
+  ok(/memoryAutoSave/.test(src), 'respeta el guardar-sin-preguntar');
+});
+
 /* ---------- v1.2: checkpoints (directorio aislado en tmp) ---------- */
 
 test('checkpoints: newRun + save + read roundtrip', () => {
@@ -353,17 +910,68 @@ test('checkpoints: la poda del histórico conserva los más recientes', () => {
   checkpoints.__test._resetForTests(TASKS_TMP); // el resto de la sección usa su directorio
 });
 
-/* ---------- v1.2: herramienta remember (integración con executors) ---------- */
-test('remember tool stores a memory via executeTool', async () => {
-  const before = memory.list().length;
+/* ---------- v1.2: herramienta remember (integración con executors) ----------
+   `remember` respeta el ajuste «Guardar sin preguntar»: apagado (lo normal) el recuerdo
+   cae en «Recién aprendido» y espera al usuario; encendido, se guarda directo. */
+
+test('remember: con «guardar sin preguntar» apagado la propuesta espera en la bandeja', async () => {
+  const dir = tmpDir('sagi-remember-');
+  memory.__test._resetForTests(path.join(dir, 'memory.json'));
+  memory.__test._resetTray(path.join(dir, 'memory-tray.json'));
+  const antes = memory.list().length;
   const out = await executeTool('remember', { text: 'Prefiero respuestas concisas', importance: 0.7 }, {});
   ok(out.startsWith('OK'), out);
-  eq(memory.list().length, before + 1);
+  eq(memory.list().length, antes, 'sin el visto bueno del usuario no entra en la memoria');
+  const bandeja = memory.trayList();
+  eq(bandeja.length, 1, 'espera en «Recién aprendido»');
+  eq(bandeja[0].texto, 'Prefiero respuestas concisas');
+  memory.trayDescartar(bandeja[0].id);
+  memory.__test._resetForTests(path.join(MEM_DIR, 'memory.json'));
+  memory.__test._resetTray(path.join(MEM_DIR, 'memory-tray.json'));
+});
+
+test('remember: con «guardar sin preguntar» encendido se guarda directo', async () => {
+  const dir = tmpDir('sagi-rememberauto-');
+  memory.__test._resetForTests(path.join(dir, 'memory.json'));
+  memory.__test._resetTray(path.join(dir, 'memory-tray.json'));
+  const antes = memory.list().length;
+  const out = await executeTool(
+    'remember',
+    { text: 'Prefiero respuestas concisas', importance: 0.7 },
+    { settings: { settings: { memoryAutoSave: true } } },
+  );
+  ok(out.startsWith('OK'), out);
+  eq(memory.list().length, antes + 1, 'entra directo, sin pasar por la bandeja');
+  eq(memory.trayList().length, 0);
+  memory.__test._resetForTests(path.join(MEM_DIR, 'memory.json'));
+  memory.__test._resetTray(path.join(MEM_DIR, 'memory-tray.json'));
+});
+
+test('remember: la descripción de la herramienta cuenta lo que el almacén hace de verdad', () => {
+  /* La descripción prometía «el sistema los fusiona y se queda con el reciente», que no
+     era cierto para un cambio de valor (quedaban dos hechos contradictorios) ni para las
+     preferencias (se perdía una). Ahora el almacén sustituye el mismo dato (mandando el
+     viejo a la papelera) y deja convivir los datos distintos: la descripción lo dice. */
+  const def = require('../agent/tools').toolDefs.find((t) => t.function && t.function.name === 'remember');
+  ok(def, 'no encontré la herramienta remember');
+  const desc = def.function.description;
+  ok(/papelera/.test(desc), 'dice a dónde va el dato viejo: ' + desc);
+  ok(/se guardan los dos/.test(desc), 'y que un dato distinto no borra el otro: ' + desc);
+  ok(!/se queda con el reciente\./.test(desc), 'ya no promete una fusión solo por parecerse: ' + desc);
 });
 
 test('remember tool rejects empty text', async () => {
-  const out = await executeTool('remember', { text: '' }, {});
-  ok(out.startsWith('Error'));
+  const dir = tmpDir('sagi-remembervacio-');
+  memory.__test._resetForTests(path.join(dir, 'memory.json'));
+  memory.__test._resetTray(path.join(dir, 'memory-tray.json'));
+  for (const texto of ['', '   ']) {
+    const out = await executeTool('remember', { text: texto }, {});
+    ok(out.startsWith('Error'), out);
+  }
+  eq(memory.trayList().length, 0, 'una propuesta sin texto no llega a la bandeja');
+  eq(memory.list().length, 0, 'ni a la memoria');
+  memory.__test._resetForTests(path.join(MEM_DIR, 'memory.json'));
+  memory.__test._resetTray(path.join(MEM_DIR, 'memory-tray.json'));
 });
 
 /* ---------- edición anclada y lectura por rangos ---------- */
@@ -759,7 +1367,7 @@ test('classify detects task categories', () => {
   eq(modelsMod.classify('analiza esto', { hasImage: true }), 'vision');
 });
 
-test('fallbackChain: primary → manual → others → locals', () => {
+test('fallbackChain: primario → manual → locales (el automático es opt-in)', () => {
   const cfg = {
     providers: [
       {
@@ -778,17 +1386,23 @@ test('fallbackChain: primary → manual → others → locals', () => {
   };
   const chain = modelsMod.fallbackChain(cfg, 'coding');
   eq(chain[0].model, 'gpt-5', 'primario primero');
-  ok(
-    chain.some((c) => c.providerId === 'groq'),
-    'secundario incluido',
-  );
+  /* Un proveedor guardado que el usuario NO eligió no puede responder en su lugar:
+     la petición entera (prompt, resultados, archivos) iría a un tercero que no
+     escogió. El README promete que el modelo elegido manda. */
+  ok(!chain.some((c) => c.providerId === 'groq'), 'un guardado que no está en el fallbackChain no entra en silencio');
   const locals = chain.filter((c) => c.role === 'local');
   eq(locals.length, 1, 'ollama como red de salvamento');
   eq(locals[0].providerId, 'ollama');
+  // con el opt-in explícito, el resto de guardados vuelve a entrar
+  const conAuto = modelsMod.fallbackChain({ ...cfg, settings: { fallbackAutomatico: true } }, 'coding');
+  ok(
+    conAuto.some((c) => c.providerId === 'groq'),
+    'con fallbackAutomatico los demás guardados entran como secundarios',
+  );
   // sin duplicados y con modelo siempre definido
-  const ids = chain.map((c) => c.providerId);
+  const ids = conAuto.map((c) => c.providerId);
   eq(new Set(ids).size, ids.length);
-  ok(chain.every((c) => c.model));
+  ok(conAuto.every((c) => c.model));
 });
 
 test('pickModelFor prefers adequate models per category', () => {
@@ -901,6 +1515,80 @@ test('habits: single occurrences do not become habits (MIN_COUNT)', () => {
   ok(!habits.profile().toLowerCase().includes('regedit'), 'no es hábito todavía');
   habits.reset();
   eq(habits.profile(), '');
+});
+
+test('habits: cada categoría real del perfil la cubre exactamente una etiqueta de olvido', () => {
+  const areas = Object.values(habits.__test.OLVIDO_AREAS);
+  const cubiertas = areas.reduce((todas, claves) => todas.concat(claves), []);
+  eq(new Set(cubiertas).size, cubiertas.length, 'ninguna clave real puede estar en dos etiquetas');
+  const reales = habits.__test.CATEGORIAS_REALES;
+  ok(reales.length > 0, 'el perfil observa algo');
+  for (const k of reales) ok(cubiertas.includes(k), 'sin etiqueta de olvido para «' + k + '» (el usuario no podría olvidarla)');
+  eq(cubiertas.length, reales.length, 'ni etiquetas de más ni de menos');
+  eq(Object.keys(habits.__test.OLVIDO_AREAS).length, 7, 'siete categorías y «todo»');
+});
+
+test('habits: olvidar una categoría borra solo esa categoría', () => {
+  habits.reset();
+  habits.observe('tool', { name: 'open_app', args: { name: 'spotify.exe' } });
+  habits.observe('tool', { name: 'run_command', args: { command: 'git status' } });
+  const r = habits.olvidar('aplicaciones');
+  ok(r.ok, 'devuelve ok');
+  eq(r.borradas, 1, 'dice cuántos usos olvidó');
+  const s = habits.stats();
+  eq(s.apps.length, 0, 'se olvidaron las apps');
+  ok(
+    s.commands.some((c) => c.name === 'git'),
+    'los comandos siguen ahí',
+  );
+  habits.reset();
+});
+
+test('habits: olvidar una categoría desconocida no rompe', () => {
+  const r = habits.olvidar('inventada');
+  eq(r.ok, false);
+  eq(r.error, 'categoria desconocida');
+  eq(habits.olvidar('apps').ok, false, 'la clave interna en inglés tampoco vale');
+  habits.reset();
+});
+
+test('habits: olvidar las webs no toca los modos ni los permisos', () => {
+  habits.reset();
+  habits.observe('tool', { name: 'browser_control', args: { url: 'https://github.com/x/y' } });
+  habits.observe('tool', { name: 'browser_control', args: { url: 'https://github.com/a/b' } });
+  habits.observe('mode', { mode: 'plan' });
+  habits.observe('mode', { mode: 'plan' });
+  habits.observe('confirm', { approved: true });
+  ok(habits.olvidar('webs').ok);
+  const s = habits.stats();
+  eq(s.sites.length, 0, 'las webs se olvidan');
+  eq(s.modes.plan, 2, 'los modos siguen');
+  eq(s.confirms.approved, 1, 'los permisos siguen');
+  ok(habits.olvidar('todo').ok, 'olvidarlo todo vale');
+  eq(habits.stats().modes.plan, undefined, 'y deja el perfil vacío');
+  habits.reset();
+});
+
+test('habits: olvidar herramientas, comandos y carpetas va por separado', () => {
+  habits.reset();
+  habits.observe('tool', { name: 'write_file', args: { path: 'C:/proyectos/web/index.html' } });
+  habits.observe('tool', { name: 'run_command', args: { command: 'git status', cwd: 'C:/proyectos/web' } });
+  ok(habits.olvidar('carpetas').ok);
+  const sinCarpetas = habits.stats();
+  eq(sinCarpetas.folders.length, 0, 'las carpetas se olvidan');
+  ok(
+    sinCarpetas.commands.some((c) => c.name === 'git'),
+    'los comandos siguen',
+  );
+  ok(
+    sinCarpetas.tools.some((t) => t.name === 'run_command'),
+    'las herramientas siguen',
+  );
+  ok(habits.olvidar('comandos').ok);
+  eq(habits.stats().commands.length, 0, 'los comandos se olvidan');
+  ok(habits.olvidar('herramientas').ok);
+  eq(habits.stats().tools.length, 0, 'las herramientas se olvidan');
+  habits.reset();
 });
 
 /* ---------- OpenCode Go: sesión/identificación (cabeceras obligatorias) ---------- */
@@ -2392,7 +3080,9 @@ test('tareas: Detener mata también el comando en curso de un subagente', async 
   const { Agent } = require('../agent/agent');
   const parent = new Agent({ emit: () => {} });
   const killed = [];
-  parent.runningTool = { stop: () => killed.push('herramienta') };
+  // los killables viven en runningTools (el campo suelto runningTool se eliminó
+  // por muerto): el contrato es el registro, no la ranura antigua
+  parent.runningTools.set('cmd', { stop: () => killed.push('herramienta') });
   parent.subagent = { stop: () => killed.push('subagente') };
   parent.stop();
   eq(killed.join(','), 'herramienta,subagente', 'sin esto el comando del subagente seguía vivo tras pulsar Detener');

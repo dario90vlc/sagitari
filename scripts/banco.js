@@ -28,34 +28,54 @@ const electron = require('electron'); // en un proceso Node normal: la ruta del 
 const path = require('path');
 
 const APP_DIR = path.join(__dirname, '..');
-const args = process.argv.slice(2);
-const quiereJson = args.includes('--json');
 
-const hijo = spawn(electron, ['.', '--banco', ...args.filter((a) => a !== '--json')], {
-  cwd: APP_DIR,
-  stdio: ['ignore', 'pipe', 'pipe'],
-  env: { ...process.env, ELECTRON_RUN_AS_NODE: '' },
-});
+/* Argumentos del hijo. El `--json` viaja TAMBIÉN al hijo: el informe en una línea lo
+   imprime la app (`if (hay('--json')) log.info(JSON.stringify(informe))`) y filtrarlo aquí
+   dejaba stdout sin ninguna línea JSON, así que este lanzador no tenía nada que extraer. */
+function argsHijo(argv) {
+  return ['.', '--banco', ...argv];
+}
 
-let salida = '';
-hijo.stdout.on('data', (d) => {
-  salida += String(d);
-  if (!quiereJson) process.stdout.write(d); // el progreso se ve en vivo
-});
-hijo.stderr.on('data', (d) => {
-  salida += String(d);
-  if (!quiereJson) process.stderr.write(d);
-});
+/* Última línea con un objeto JSON del hijo: es el informe en una línea (el lanzador lo
+   relee así porque el resto de stdout es el progreso humano). */
+function informeDeSalida(salida) {
+  const linea = String(salida || '')
+    .split('\n')
+    .reverse()
+    .find((l) => l.trim().startsWith('{'));
+  return linea ? linea.trim() : null;
+}
 
-hijo.on('close', (codigo) => {
-  if (quiereJson) {
-    // El informe es la última línea con llaves: se busca y se saca sola.
-    const ultimo = salida
-      .split('\n')
-      .reverse()
-      .find((l) => l.trim().startsWith('{'));
-    if (ultimo) process.stdout.write(ultimo + '\n');
-    else process.stderr.write(salida);
-  }
-  process.exit(codigo === null ? 1 : codigo);
-});
+function lanzar() {
+  const args = process.argv.slice(2);
+  const quiereJson = args.includes('--json');
+
+  const hijo = spawn(electron, argsHijo(args), {
+    cwd: APP_DIR,
+    stdio: ['ignore', 'pipe', 'pipe'],
+    env: { ...process.env, ELECTRON_RUN_AS_NODE: '' },
+  });
+
+  let salida = '';
+  hijo.stdout.on('data', (d) => {
+    salida += String(d);
+    if (!quiereJson) process.stdout.write(d); // el progreso se ve en vivo
+  });
+  hijo.stderr.on('data', (d) => {
+    salida += String(d);
+    if (!quiereJson) process.stderr.write(d);
+  });
+
+  hijo.on('close', (codigo) => {
+    if (quiereJson) {
+      const informe = informeDeSalida(salida);
+      if (informe) process.stdout.write(informe + '\n');
+      else process.stderr.write(salida);
+    }
+    process.exit(codigo === null ? 1 : codigo);
+  });
+}
+
+if (require.main === module) lanzar();
+
+module.exports = { argsHijo, informeDeSalida };

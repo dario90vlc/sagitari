@@ -1,11 +1,19 @@
 /* SAGITARI renderer — 10-chat.js (antes app.js 1-1339): utilidades, burbujas del chat, tarjetas de herramienta, traza y equipo
    Script clásico: comparte el scope global con los demás 1x-*.js.
    El orden de carga en index.html preserva el orden original. */
-/* global renderTools, initAboutPanel */
-/* renderTools está en 40-vistas.js e initAboutPanel en 30-ajustes.js (scope compartido) */
+/* global renderTools, initAboutPanel, pintarDiff, resetChatView, setChatTitle, resetCtxMeter,
+   pintarCtxMeter, setSendMode, openConversation, renderEquipo, cargarLimiteEquipo, equipoDe,
+   equipoFicha, estadoEquipo, badgeEquipoPermisos, nombreEquipo, resumenEquipo */
+/* renderTools está en 40-vistas.js e initAboutPanel en 30-ajustes.js (scope compartido);
+   pintarDiff, resetChatView, setChatTitle y openConversation están en 40-vistas.js;
+   resetCtxMeter, pintarCtxMeter y setSendMode en 20-app.js; y el estado, las fichas y el
+   vocabulario del EQUIPO (equipoDe, equipoFicha, estadoEquipo, badgeEquipoPermisos,
+   nombreEquipo, renderEquipo, cargarLimiteEquipo) en 40-vistas.js (v4.4). */
 /* exported showEmpty, lastTurnLabel, setChatStatus, ensureThinkBlock, scheduleThinkRender,
-   completeToolCard, delegationCard, restaurarTraza, equipoChip, equipoCierra,
-   mostrarDeshacer, toolChip, todosCard, pinImage, listening */
+   completeToolCard, delegationCard, restaurarTraza, equipoChip, equipoCierra, equipoChat,
+   refrescarEquipoChat, mostrarDeshacer, toolChip, todosCard, pinImage, currentConvId, hiloActual,
+   cerrarDiffPanel, abrirRuntime, pintarHiloActivo, fijarTurno, eventoDeOtraPestana,
+   rtActual, reflejarTurno, pintarPestanas */
 'use strict';
 
 const $ = (s) => document.querySelector(s);
@@ -16,23 +24,433 @@ const ic = (n, c) => window.SAGI_ICONS.icon(n, c);
 testearlas de verdad desde Node. */
 const K = window.ChatKit;
 
-/* CFG, busy y mode se reasignan desde otros scripts del renderer (30-ajustes.js,
-   40-vistas.js, 20-voz.js): tienen que ser let. Un commit de lint los dejó como
+/* CFG y mode se reasignan desde otros scripts del renderer (30-ajustes.js,
+   40-vistas.js, 20-app.js): tienen que ser let. Un commit de lint los dejó como
    const y desde entonces fillSettings() y enviarTexto() rompían con «Assignment
    to constant variable». ESLint no ve las reasignaciones entre ficheros, así que
-   se le apaga la regla en estas tres líneas. */
+   se le apaga la regla en estas líneas. */
 // eslint-disable-next-line prefer-const
 let CFG = { providers: [], active: null, settings: {}, presets: [] };
 // eslint-disable-next-line prefer-const
-let busy = false;
-let pendingAssistant = null;
-var listening = false;
-// eslint-disable-next-line prefer-const
 let mode = 'act';
-let currentRunMode = 'act'; // modo con el que se lanzó el turno en curso
-let lastAssistantEl = null; // último bloque de respuesta (para regenerar/copiar)
-let pendingTurn = null; // estado del turno: grupo de herramientas, plan…
-let lastTurnSummary = ''; // resumen del último turno («3 herramientas · 1,4 s»)
+
+/* ============ conversaciones abiertas: un runtime por pestaña ============
+   Antes había UN juego de estado para toda la app (busy, pendingAssistant, pendingTurn,
+   lastAssistantEl, lastTurnSummary, currentRunMode) y un solo nodo de mensajes. Por eso
+   cambiar de conversación con el agente trabajando estaba PROHIBIDO —la respuesta y su
+   guardado acababan en el hilo equivocado—. Ahora cada conversación ABIERTA tiene su
+   runtime: su nodo de mensajes dentro de #msgsArea y su propio estado de turno.
+
+   Las variables de siempre pasan a ser una VISTA del runtime activo (ver los accessors
+   de más abajo), así que los cuatro scripts siguen leyendo y escribiendo `busy` o
+   `pendingTurn` igual que antes, y cada uno opera sobre la conversación que está a la
+   vista. Es la superficie mínima para que una pestaña pueda trabajar mientras se usa
+   otra, sin reescribir el chat entero. */
+const MAX_PESTANAS = 8; // tope de pestañas: al pasarse se cierra la más vieja que no trabaje
+const runtimes = new Map(); // id de conversación (null = la de arranque, aún sin id) → runtime
+let rtActivo = null;
+
+/** Identificador del nodo de mensajes de una conversación que NO está a la vista. El de
+    la activa es `messages` (ver `activarRuntime`). */
+function idDeNodo(rt) {
+  return 'msgs-' + (rt.id || 'inicial');
+}
+
+/** Crea el nodo de mensajes y el estado de turno de una conversación. `el` permite
+    adoptar el nodo que ya venía en index.html (la conversación de arranque). */
+function crearRuntime(id, el) {
+  const cont = el || document.createElement('div');
+  cont.className = 'msgs';
+  cont.setAttribute('role', 'log');
+  cont.setAttribute('aria-live', 'polite');
+  cont.setAttribute('aria-relevant', 'additions text');
+  cont.setAttribute('aria-label', 'Conversación');
+  cont.setAttribute('aria-busy', 'false');
+  if (!el) {
+    cont.hidden = true;
+    ($('#msgsArea') || document.body).appendChild(cont);
+  }
+  const rt = {
+    id: id || null, // id de la conversación en el proceso principal
+    el: cont, // su nodo de mensajes
+    tab: null, // su pestaña en el strip (la crea `pintarPestanas`)
+    titulo: '', // nombre visible: lo fijan setChatTitle y quien abre el hilo
+    usado: Date.now(), // última vez que se puso a la vista (desempate de la poda)
+    busy: false, // ¿su turno sigue en vuelo?
+    pendingAssistant: null, // burbuja del turno en curso
+    pendingTurn: null, // estado del turno: grupo de herramientas, plan…
+    lastAssistantEl: null, // último bloque de respuesta (para regenerar/copiar)
+    lastTurnSummary: '', // resumen del último turno («3 herramientas · 1,4 s»)
+    currentRunMode: 'act', // modo con el que se lanzó su turno en curso
+    estado: null, // último {texto, tipo} de la barra de estado
+    ctx: null, // último evento `context` (el medidor es de cada conversación)
+    cambios: [], // archivos que tocó su turno (barra de deshacer)
+    pinned: true, // ¿la vista seguía el final del hilo?
+    stampDia: null, // último separador de día estampado en ESTE hilo
+    ro: null, // ResizeObserver de su nodo: se desconecta al cerrar la pestaña
+  };
+  /* El desplazamiento es del NODO, no de la app: «seguir el stream sólo si estabas
+     abajo» se decide con el `pinned` de la conversación a la que pertenece el nodo. El
+     botón de bajar se busca aquí dentro porque los runtimes se crean al vuelo, incluso
+     antes de que este archivo termine de cargarse. */
+  cont.addEventListener('scroll', () => {
+    rt.pinned = cont.scrollHeight - cont.scrollTop - cont.clientHeight < 70;
+    const jd = $('#jumpDown');
+    if (rt === rtActivo && jd) jd.hidden = rt.pinned;
+  });
+  if (window.ResizeObserver) {
+    /* Se guarda en el runtime para poder desconectarlo al cerrar la pestaña: un
+       ResizeObserver mantiene su target —el nodo con todo el hilo dentro— vivo hasta
+       que se desconecta. */
+    rt.ro = new ResizeObserver(() => {
+      if (rt.pinned) cont.scrollTop = cont.scrollHeight;
+    });
+    rt.ro.observe(cont);
+  }
+  return rt;
+}
+
+/** El runtime de la conversación que está a la vista. Se crea al vuelo la primera vez:
+    la app arranca con el nodo `#messages` de index.html y todavía sin id. */
+function rtActual() {
+  if (!rtActivo) {
+    const rt = crearRuntime(null, $('#messages'));
+    runtimes.set(null, rt);
+    activarRuntime(rt);
+  }
+  return rtActivo;
+}
+
+/** Pone `rt` a la vista: su nodo pasa a ser `#messages` y el de la anterior se queda
+    oculto en #msgsArea. `#messages` sigue significando «el hilo en pantalla» porque el
+    identificador VIAJA con la pestaña que se abre: nunca hay dos nodos con él. */
+function activarRuntime(rt) {
+  const previo = rtActivo;
+  if (previo && previo !== rt) {
+    previo.el.hidden = true;
+    if (previo.el.id === 'messages') previo.el.id = idDeNodo(previo);
+  }
+  rtActivo = rt;
+  rt.usado = Date.now();
+  rt.el.hidden = false;
+  rt.el.id = 'messages';
+  pintarPestanas();
+  return rt;
+}
+
+/** Refleja el estado de turno de una conversación donde se ve: la pestaña y el
+    `aria-busy` de SU nodo (los lectores de pantalla esperan a que termine el turno de
+    esa conversación, no el de la que estés mirando). */
+function reflejarTurno(rt) {
+  if (!rt || !rt.el) return;
+  rt.el.setAttribute('aria-busy', rt.busy ? 'true' : 'false');
+  if (rt.tab) {
+    rt.tab.classList.toggle('busy', rt.busy);
+    if (rt.tab.isConnected) pintarPestana(rt);
+  }
+}
+
+/* El estado del turno y de la vista del hilo es el de la conversación ACTIVA. Se define
+   como propiedad del objeto global —los demás scripts son clásicos y comparten ese
+   objeto— para no tocar NINGUNO de sus usos: `busy = true` sigue siendo una asignación,
+   pero va al runtime de la conversación abierta, no a una variable de toda la app. */
+for (const campo of ['pendingAssistant', 'pendingTurn', 'lastAssistantEl', 'lastTurnSummary', 'currentRunMode', 'pinned', 'stampDia']) {
+  Object.defineProperty(window, campo, {
+    configurable: true,
+    get: () => rtActual()[campo],
+    set: (v) => {
+      rtActual()[campo] = v;
+    },
+  });
+}
+Object.defineProperty(window, 'busy', {
+  configurable: true,
+  get: () => rtActual().busy,
+  set: (v) => {
+    const rt = rtActual();
+    rt.busy = !!v;
+    reflejarTurno(rt); // su pestaña y su nodo dicen «trabajando» al instante
+  },
+});
+/* Y el nodo de mensajes, con el mismo truco: `msgs` sigue siendo el hilo que se pinta,
+   pero ahora es el de la conversación abierta (no siempre el mismo nodo). */
+Object.defineProperty(window, 'msgs', {
+  configurable: true,
+  get: () => rtActual().el,
+});
+
+/* ---- pestañas de conversaciones abiertas -------------------------------------------
+   Mismo patrón que las pestañas de Ajustes (role=tablist en el contenedor, role=tab en
+   cada pestaña, aria-selected, roving tabindex —sólo la abierta entra en el orden de
+   tabulación— y flechas/Inicio/Fin para moverse). Aquí cada pestaña lleva DENTRO su
+   botón de cerrar, así que la pestaña es un div con role=tab (un button dentro de otro
+   button no es HTML válido) y el cierre queda fuera del orden de tabulación: se cierra
+   con el ratón o con Supr desde la pestaña enfocada. */
+
+/** Crea la pestaña de un runtime (la cuelga del strip). */
+function crearPestana(rt) {
+  const strip = $('#convTabs');
+  const t = document.createElement('div');
+  t.className = 'ctab';
+  t.setAttribute('role', 'tab');
+  t.dataset.conv = rt.id || '';
+  const dot = document.createElement('span');
+  dot.className = 'ctab-dot';
+  dot.setAttribute('aria-hidden', 'true');
+  const nombre = document.createElement('span');
+  nombre.className = 'ctab-name';
+  const x = document.createElement('button');
+  x.type = 'button';
+  x.className = 'ctab-x';
+  x.tabIndex = -1; // la tira es UNA parada de tabulación, no ocho
+  x.innerHTML = ic('close');
+  t.append(dot, nombre, x);
+  t.addEventListener('click', (ev) => {
+    if (ev.target.closest('.ctab-x')) return; // cerrar no es abrir
+    if (rt === rtActivo || !rt.id) return;
+    /* Cambiar de hilo lleva el foco al compositor (lo hace `goto('chat')`), y la tira es
+       un tablist: si el cambio vino de aquí, el foco se devuelve a la pestaña, o la
+       siguiente flecha no tendría dónde apoyarse. */
+    Promise.resolve(openConversation(rt.id, rt.titulo)).then(() => {
+      if (rt.tab && rt.tab.isConnected) rt.tab.focus();
+    });
+  });
+  t.addEventListener('keydown', (ev) => {
+    // un div con role=tab no se activa solo: Enter y espacio son suyos
+    if (ev.key !== 'Enter' && ev.key !== ' ') return;
+    ev.preventDefault();
+    t.click();
+  });
+  x.addEventListener('click', (ev) => {
+    ev.stopPropagation();
+    cerrarPestana(rt);
+  });
+  if (strip) strip.appendChild(t);
+  rt.tab = t;
+  return t;
+}
+
+/** Pone al día una pestaña: nombre, ocupada y seleccionada. El nombre lo controla el
+    usuario, así que va por textContent (nunca por HTML). */
+function pintarPestana(rt) {
+  const t = rt.tab;
+  if (!t) return;
+  const nombre = rt.titulo || 'Nueva conversación';
+  const on = rt === rtActivo;
+  t.classList.toggle('busy', rt.busy);
+  t.classList.toggle('on', on);
+  t.setAttribute('aria-selected', on ? 'true' : 'false');
+  /* Roving tabindex: sólo la pestaña abierta entra en el orden de tabulación; para
+     moverse entre pestañas están las flechas (ver el keydown del strip). */
+  t.setAttribute('tabindex', on ? '0' : '-1');
+  // señala el nodo que controla (el de la activa es el `#messages` de la vista)
+  t.setAttribute('aria-controls', on ? 'messages' : idDeNodo(rt));
+  t.setAttribute('aria-label', 'Conversación «' + nombre + '»' + (rt.busy ? ' — trabajando ahora' : ''));
+  t.title = nombre;
+  // el id se fija también aquí: la pestaña de arranque se ADOPTA (pasa de no tener id a
+  // tenerlo) y su pestaña ya estaba creada
+  t.dataset.conv = rt.id || '';
+  const etiqueta = t.querySelector('.ctab-name');
+  if (etiqueta) etiqueta.textContent = nombre;
+  const x = t.querySelector('.ctab-x');
+  if (x) x.setAttribute('aria-label', 'Cerrar la pestaña de «' + nombre + '» (la conversación sigue en Historial)');
+}
+
+/** Pinta el strip. Se pone al día EN SU SITIO (no se rehace el innerHTML) para no perder
+    el foco al cambiar de pestaña con las flechas. */
+function pintarPestanas() {
+  if (!$('#convTabs')) return;
+  for (const rt of runtimes.values()) {
+    if (!rt.tab) crearPestana(rt);
+    pintarPestana(rt);
+  }
+}
+
+/** Pone a la vista la conversación `id`, creando su pestaña si es la primera vez. NO
+    repinta su historial: eso es cosa de quien conoce el camino (openConversation, con
+    `conv:open`). Devuelve su runtime. */
+function abrirRuntime(id) {
+  const clave = id || null;
+  let rt = runtimes.get(clave);
+  if (!rt) {
+    const arranque = runtimes.get(null);
+    if (clave && runtimes.size === 1 && arranque) {
+      /* La pestaña de arranque (todavía sin id) se ADOPTA cuando llega el primer hilo:
+         es la misma vista vacía con la que se abrió la app; no hay dos. */
+      runtimes.delete(null);
+      arranque.id = clave;
+      rt = arranque;
+    } else {
+      rt = crearRuntime(clave);
+    }
+    runtimes.set(clave, rt);
+  }
+  activarRuntime(rt);
+  podarPestanas();
+  pintarPestanas();
+  return rt;
+}
+
+/** Cierra la pestaña de un runtime. La conversación NO se borra —borrar es cosa del
+    Historial—: sólo se sueltan su nodo y su estado. Si era la que estaba a la vista,
+    pasa a la más reciente de las que quedan. */
+function cerrarPestana(rt) {
+  if (!rt || runtimes.get(rt.id) !== rt) return;
+  if (runtimes.size <= 1) {
+    showToast('Es la única conversación abierta: cambia a otra o abre una nueva');
+    return;
+  }
+  const otras = [...runtimes.values()].filter((r) => r !== rt);
+  /* Si la que se cierra es la que está a la vista, la siguiente se pone YA —sin esperar
+     a que llegue su historial—: el hilo abierto no puede quedarse ni un momento sin nodo
+     montado, o lo que se escribiera en ese hueco acabaría en un nodo suelto. */
+  if (rt === rtActivo) {
+    const siguiente = otras.sort((a, b) => b.usado - a.usado)[0];
+    currentConvId = siguiente.id; // el hilo abierto es ya el siguiente
+    activarRuntime(siguiente);
+    pintarHiloActivo();
+    if (siguiente.id) openConversation(siguiente.id, siguiente.titulo); // y su historial
+  }
+  if (rt.tab) rt.tab.remove();
+  /* El observador se desconecta ANTES de soltar el nodo: mientras siga vivo mantiene
+     su target —el árbol de mensajes entero— retenido, aunque ya no esté en el documento. */
+  if (rt.ro) {
+    rt.ro.disconnect();
+    rt.ro = null;
+  }
+  rt.el.remove();
+  runtimes.delete(rt.id);
+  pintarPestanas();
+}
+
+/** Tope de pestañas ABIERTAS: por encima de MAX_PESTANAS se cierra la menos usada de las
+    que NO estén trabajando —una que trabaja no se cierra nunca: su turno sigue vivo en
+    el proceso principal—. Cerrar una pestaña no borra nada: la conversación sigue en el
+    Historial y se vuelve a abrir desde ahí. */
+function podarPestanas() {
+  while (runtimes.size > MAX_PESTANAS) {
+    const cand = [...runtimes.values()].filter((r) => r !== rtActivo && !r.busy).sort((a, b) => a.usado - b.usado)[0];
+    if (!cand) return; // todas las demás están trabajando: se quedan abiertas
+    cerrarPestana(cand);
+  }
+}
+
+/* Flechas del tablist: mueven el foco Y activan (el mismo modelo que el clic), igual que
+   en las pestañas de Ajustes. Supr cierra la pestaña enfocada: es la única forma de
+   cerrar por teclado (el botón × está fuera del orden de tabulación a propósito). */
+if ($('#convTabs'))
+  $('#convTabs').addEventListener('keydown', (e) => {
+    const tabs = [...$('#convTabs').querySelectorAll('.ctab')];
+    const i = tabs.indexOf(document.activeElement);
+    if (i < 0) return;
+    if (e.key === 'Delete' || e.key === 'Backspace') {
+      const rt = [...runtimes.values()].find((r) => r.tab === tabs[i]);
+      if (rt) {
+        e.preventDefault();
+        cerrarPestana(rt);
+      }
+      return;
+    }
+    let j = null;
+    if (e.key === 'ArrowRight') j = (i + 1) % tabs.length;
+    else if (e.key === 'ArrowLeft') j = (i - 1 + tabs.length) % tabs.length;
+    else if (e.key === 'Home') j = 0;
+    else if (e.key === 'End') j = tabs.length - 1;
+    if (j === null) return;
+    e.preventDefault();
+    tabs[j].focus();
+    tabs[j].click();
+  });
+
+/** Atiende un evento que es de OTRA conversación abierta. No pinta nada en el chat que
+    está a la vista —ese chat es de otro hilo—, pero deja al día SU pestaña (ocupada, con
+    cambios que deshacer) para que diga la verdad; su historial se repinta desde el
+    proceso principal al volver a ella. Devuelve true: el evento ya está atendido. */
+function eventoDeOtraPestana(ev) {
+  const rt = runtimes.get(ev.convId);
+  if (!rt) return true; // su pestaña no está abierta: ni que pintar ni que marcar
+  switch (ev.type) {
+    case 'busy':
+      rt.busy = !!ev.busy;
+      if (ev.busy && ev.mode) rt.currentRunMode = K.mode(ev.mode).key;
+      reflejarTurno(rt);
+      break;
+    case 'assistant_done':
+    case 'stopped':
+    case 'paused':
+    case 'error':
+      // el turno de esa conversación ya no sigue: deja de estar ocupada
+      rt.busy = false;
+      reflejarTurno(rt);
+      break;
+    case 'can_undo':
+      // sus cambios son suyos: la barra de deshacer se ofrecerá al volver a su pestaña
+      rt.cambios = Array.isArray(ev.files) ? ev.files : [];
+      break;
+    case 'context':
+      rt.ctx = ev;
+      break;
+    default:
+      break;
+  }
+  return true;
+}
+
+/** Devuelve el compositor y la insignia del sidebar al estado de turno que dice el
+    proceso principal: al volver a una pestaña que siguió trabajando, su botón tiene que
+    volver a ser «Detener». */
+function fijarTurno(hay) {
+  busy = !!hay;
+  setSendMode();
+  syncChatBadge();
+}
+
+/** Pinta lo que NO vive en el nodo de mensajes —título, barra de estado, medidor de
+    contexto y barra de deshacer— con lo de la conversación que está a la vista: son
+    cuatro sitios únicos para toda la app, y al cambiar de pestaña tienen que contar lo
+    de la que entra. */
+function pintarHiloActivo() {
+  const rt = rtActual();
+  setChatTitle(rt.titulo || 'Nueva conversación', false); // su nombre ya está guardado
+  if (rt.estado) setChatStatus(rt.estado.texto, rt.estado.tipo);
+  else setChatStatus('');
+  if (rt.ctx) pintarCtxMeter(rt.ctx);
+  else resetCtxMeter();
+  // el estado vacío es una capa compartida: se enseña el de ESTA conversación
+  if (rt.el.querySelector('.msg')) hideEmpty();
+  else showEmpty();
+  cerrarDiffPanel(); // el panel enseña los archivos de un turno: los de la otra pestaña no valen
+  sincronizarDeshacer();
+  fijarTurno(rt.busy); // el botón del compositor: «Enviar» o «Detener», según SU turno
+}
+
+/** La barra de deshacer es de la conversación que hizo los cambios: al cambiar de
+    pestaña se pregunta por los SUYOS (los de la otra no se ofrecen aquí). */
+async function sincronizarDeshacer() {
+  const rt = rtActual();
+  let archivos = rt.cambios || [];
+  if (rt.id && window.sagitari.undoState) {
+    try {
+      const r = await window.sagitari.undoState(rt.id);
+      if (r && r.ok) archivos = r.puede ? r.archivos || [] : [];
+    } catch {}
+  }
+  if (rt !== rtActivo) return; // mientras se preguntaba, el usuario cambió otra vez
+  if (archivos.length) mostrarDeshacer(archivos);
+  else ocultarDeshacer();
+}
+
+/* Hilo abierto. Se declara AQUÍ y sólo aquí: los scripts comparten el ámbito global, así
+   que una segunda declaración (let/const/var) en otro fichero es un SyntaxError que deja
+   la app entera sin arrancar. Lo fijan los tres caminos que cambian de conversación
+   (conv:new, conv:open y conv:fork, en 40-vistas.js) y lo leen el rebobinado y /compact. */
+let currentConvId = null;
+
+/** El hilo abierto tal y como lo dejó el último cambio de conversación. `null` cuando
+    todavía no se sabe: el proceso principal cae entonces a SU conversación actual. */
+function hiloActual() {
+  return typeof currentConvId === 'string' && currentConvId ? currentConvId : null;
+}
 
 // ============ icon injection ============
 $$('[data-i]').forEach((el) => {
@@ -49,10 +467,10 @@ function reportarError(origen, detalle) {
   const msg = String((detalle && (detalle.message || (detalle.reason && detalle.reason.message))) || detalle || 'desconocido');
   window.__errores.push(origen + ': ' + msg);
   try {
-    feed('Fallo en la interfaz — ' + msg.slice(0, 80), 'err');
+    feed('Fallo en la interfaz — ' + K.clip(msg, 80), 'err');
   } catch {}
   try {
-    showToast('La interfaz encontró un problema: ' + msg.slice(0, 120));
+    showToast('La interfaz encontró un problema: ' + K.clip(msg, 120));
   } catch {}
   try {
     const b = ensureAssistantBubble();
@@ -94,7 +512,7 @@ function goto(view, opts) {
       h.focus();
     }
   }
-  if (view === 'memory') renderMemory();
+  if (view === 'memory') renderMemoria();
   if (view === 'tasks') renderTasks();
   if (view === 'tools') renderTools();
   if (view === 'mcp') renderMcp();
@@ -111,6 +529,11 @@ function goto(view, opts) {
     window.sagitari.workspaceGet().then((w) => {
       $('#projPath').value = w;
     });
+  if (view === 'equipo') {
+    renderEquipo(); // lo que ya se sabe, al instante
+    // el tope de compañeros vive en el motor (meta:get): cuando llegue, se completa la nota
+    cargarLimiteEquipo().then(renderEquipo);
+  }
   if (view === 'history') renderHistory();
   if (view === 'settings') {
     showSetTab(setTabName);
@@ -172,7 +595,7 @@ function setSideActive() {
   const sm = $('#sideModeBtn');
   if (!sm) return;
   const m = MODE_META[mode] || MODE_META.act;
-  sm.classList.remove('act', 'plan', 'think');
+  sm.classList.remove('act', 'plan', 'think', 'equipo');
   sm.classList.add(mode);
   const d = sm.querySelector('.dot');
   if (d) d.className = 'dot ' + m.dot;
@@ -185,13 +608,13 @@ async function refreshSidebar() {
   if (document.hidden) return; // sin ventana visible no hay nada que pintar
   syncChatBadge();
   try {
-    const tasks = await window.sagitari.tasksList();
+    // las tres lecturas son independientes: lanzarlas en paralelo hace que el
+    // sondeo cueste una latencia en vez de tres encadenadas cada 3s
+    const [tasks, mem, sk] = await Promise.all([window.sagitari.tasksList(), window.sagitari.memoryList(), window.sagitari.skillsList()]);
     const live = ['running', 'pending', 'scheduled', 'paused', 'interrupted'];
     const n = tasks.filter((t) => live.includes(t.status)).length;
     setBadge('#nbTasks', n, { hot: tasks.some((t) => t.status === 'running') });
-    const mem = await window.sagitari.memoryList();
     setBadge('#nbMemory', mem.length);
-    const sk = await window.sagitari.skillsList();
     setBadge('#nbSkills', sk.length);
     sideBadgeErr = false;
   } catch (e) {
@@ -199,8 +622,8 @@ async function refreshSidebar() {
     if (!sideBadgeErr) {
       sideBadgeErr = true;
       const msg = String((e && e.message) || e || 'error desconocido');
-      feed('No se pudo leer el estado lateral — ' + msg.slice(0, 80), 'err');
-      showToast('No se pudo leer el estado: ' + msg.slice(0, 120));
+      feed('No se pudo leer el estado lateral — ' + K.clip(msg, 80), 'err');
+      showToast('No se pudo leer el estado: ' + K.clip(msg, 120));
     }
   }
 }
@@ -217,7 +640,8 @@ window.addEventListener('keydown', (e) => {
     $('#sideToggle').click();
     return;
   }
-  // Alt+0 no tiene vista asignada: VIEW_HOTKEY sólo llega hasta Alt+9
+  // Alt+0 sigue sin vista asignada: VIEW_HOTKEY llega hasta Alt+9 y la vista Equipo de v4.4
+  // se abre como MCP, desde su sección del menú (sin atajo propio)
   if (/^[1-9]$/.test(e.key)) {
     e.preventDefault();
     goto(VIEW_HOTKEY[parseInt(e.key, 10) - 1], { focus: true });
@@ -405,17 +829,15 @@ document.addEventListener('click', (e) => {
 });
 
 // ============ chat rendering ============
-const msgs = $('#messages');
+/* `msgs` (el nodo del hilo a la vista) y `pinned` (si la vista seguía el final) son de
+   la conversación ABIERTA: los define el runtime de 10-chat.js (arriba). El nodo de
+   arranque es el `#messages` de index.html y lo adopta el primer runtime. */
 const chatEmpty = $('#chatEmpty');
 const jumpDownBtn = $('#jumpDown');
 
 /* --- desplazamiento inteligente: seguir el stream SÓLO si estás abajo del
-todo. Si te has ido a leer hacia arriba, la vista no te arrastra. --- */
-let pinned = true;
-msgs.addEventListener('scroll', () => {
-  pinned = msgs.scrollHeight - msgs.scrollTop - msgs.clientHeight < 70;
-  jumpDownBtn.hidden = pinned;
-});
+todo. Si te has ido a leer hacia arriba, la vista no te arrastra. El listener vive en
+cada nodo (lo engancha `crearRuntime`): aquí sólo queda el botón de bajar. --- */
 jumpDownBtn.onclick = () => {
   pinned = true;
   jumpDownBtn.hidden = true;
@@ -435,11 +857,6 @@ function pinImage(img) {
   img.addEventListener('load', fix);
   img.addEventListener('error', fix);
 }
-if (window.ResizeObserver) {
-  new ResizeObserver(() => {
-    if (pinned) scroll();
-  }).observe(msgs);
-}
 function nowClock(ts) {
   return new Date(ts || Date.now()).toLocaleTimeString('es', { hour: '2-digit', minute: '2-digit' });
 }
@@ -453,9 +870,9 @@ function etiquetaDia(ts) {
 /* Separador de día: se estampa cuando CAMBIA el día, no antes de cada turno.
    Antes cada respuesta del agente metía un «Hoy · 14:32» entre la pregunta y la
    respuesta —doce veces en una tarde—, y eso se lee como un corte del hilo, no
-   como un separador temporal. Al cambiar de conversación se olvida (`stampDia`),
-   así que el primero de cada hilo vuelve a salir. */
-let stampDia = null;
+   como un separador temporal. `stampDia` es del hilo abierto (lo define su runtime),
+   así que cada conversación estampa el suyo y al cambiar de pestaña no se arrastra
+   el día de la anterior. */
 function dayStamp(ts) {
   const dia = new Date(ts || Date.now()).toDateString();
   if (stampDia === dia) return null;
@@ -472,8 +889,15 @@ function dayStamp(ts) {
 function hideEmpty() {
   if (chatEmpty) chatEmpty.hidden = true;
 }
+/* `showEmpty` lo llaman DOS sitios: `resetChatView` (40-vistas.js) cuando la conversación
+   que se acaba de pintar está vacía —o sea, al empezar una nueva— y `pintarHiloActivo`
+   al cambiar de pestaña a una que lo esté. Es el punto exacto para tirar lo que era del
+   hilo anterior: el medidor de contexto (todavía no se ha enviado nada que medir) y la
+   revisión de cambios (no hay turno que revisar). */
 function showEmpty() {
   if (chatEmpty) chatEmpty.hidden = false;
+  resetCtxMeter();
+  cerrarDiffPanel();
 }
 
 /** Chip con el modo que produjo un turno: ACT / PLAN / THINK. */
@@ -494,9 +918,12 @@ function lastTurnLabel() {
   return lastTurnSummary;
 }
 
-/** Barra de estado en vivo junto al título: qué está haciendo y en qué modo. */
+/** Barra de estado en vivo junto al título: qué está haciendo y en qué modo.
+    Es una sola para toda la app, así que el texto se guarda en el runtime de la
+    conversación abierta: al volver a su pestaña se rehace con lo que decía la suya. */
 function setChatStatus(text, kind) {
   const box = $('#chatStatus');
+  rtActual().estado = text ? { texto: text, tipo: kind || null } : null;
   if (!box) return;
   if (!text) {
     box.hidden = true;
@@ -547,7 +974,9 @@ function bubble(role, opts) {
   const av = document.createElement('div');
   av.className = 'avatar';
   if (role === 'user') {
-    av.textContent = (CFG.settings.userName || 'Tú').slice(0, 1).toUpperCase();
+    // la inicial es el primer PUNTO DE CÓDIGO: cortar por unidades UTF-16 partía el
+    // emoji de un nombre y dejaba media mitad en el avatar
+    av.textContent = (Array.from(CFG.settings.userName || 'Tú')[0] || 'T').toUpperCase();
   } else {
     const img = document.createElement('img');
     img.className = 'avimg';
@@ -571,11 +1000,15 @@ function bubble(role, opts) {
   col.append(head, body);
   m.append(av, col);
   msgs.appendChild(m);
+  /* Sobre el mensaje del usuario también se puede volver atrás (rebobinar tira ese turno y
+     todo lo posterior: es lo que se quiere al reescribir una petición). Sólo eso: copiar su
+     propio mensaje no aporta nada que no esté ya en pantalla. */
+  if (role === 'user') msgActions(body, '', { onlyRewind: true });
   scroll();
   return b;
 }
 
-/** Acciones al pie de un turno: copiar, regenerar (sólo el último) y voz. */
+/** Acciones al pie de un turno: copiar, regenerar (sólo el último) y volver atrás. */
 function msgActions(holder, text, opts) {
   const o = opts || {};
   const row = document.createElement('div');
@@ -590,18 +1023,30 @@ function msgActions(holder, text, opts) {
   };
   // copiar SIEMPRE el texto visible ya renderizado (igual que «Copiar toda la
   // conversación»): copiar el markdown crudo daba **negritas** y vallas
-  row.appendChild(
-    mk('copy', 'Copiar este mensaje', () => {
-      const bub = holder.querySelector('.bubble') || holder;
-      // el razonamiento es interno: al copiar el mensaje se copia la respuesta, no
-      // lo que el modelo pensó por el camino (el bloque tiene su propio botón)
-      const copia = bub.cloneNode(true);
-      copia.querySelectorAll('.thinkblock').forEach((x) => x.remove());
-      copyText(copia.innerText, 'Mensaje copiado');
-    }),
-  );
+  if (!o.onlyRewind)
+    row.appendChild(
+      mk('copy', 'Copiar este mensaje', () => {
+        const bub = holder.querySelector('.bubble') || holder;
+        // el razonamiento es interno: al copiar el mensaje se copia la respuesta, no
+        // lo que el modelo pensó por el camino (el bloque tiene su propio botón)
+        const copia = bub.cloneNode(true);
+        copia.querySelectorAll('.thinkblock').forEach((x) => x.remove());
+        copyText(copia.innerText, 'Mensaje copiado');
+      }),
+    );
   if (o.retry) row.appendChild(mk('refresh', 'Regenerar esta respuesta', regenerate));
-  if (o.speak) row.appendChild(mk('volume', 'Leer en voz alta', () => speak(text)));
+  /* F7: volver el hilo hasta aquí — se conserva lo anterior y se tira este mensaje con
+     todo lo que venga después. Sólo se ofrece en mensajes que existen de verdad en el
+     hilo guardado (el índice sale del DOM: ver `indiceMensaje`). */
+  const idx = indiceMensaje(holder);
+  if (idx >= 0) {
+    const rb = mk('history', 'Volver el hilo hasta aquí', () => rebobinarHilo(idx, rb));
+    rb.dataset.rewind = String(idx);
+    rb.setAttribute('aria-label', 'Volver el hilo hasta aquí');
+    row.appendChild(rb);
+  }
+  // una fila sin nada que ofrecer no se pinta: el mensaje se queda sin pie
+  if (!row.children.length) return null;
   holder.appendChild(row);
   return row;
 }
@@ -624,6 +1069,55 @@ function refreshMsgActions() {
   });
 }
 
+/**
+ * Índice de un mensaje dentro del hilo guardado, sacado del propio DOM.
+ * #messages va EN ORDEN: `resetChatView` pinta los mensajes del hilo de uno en uno y las
+ * burbujas de un turno en vivo se añaden al final, así que la posición entre los `.msg`
+ * es la posición en la conversación. Devuelve -1 si el elemento no es un mensaje del hilo
+ * (una burbuja que no se ha guardado, por ejemplo el saludo de arranque sin modelo).
+ */
+function indiceMensaje(holder) {
+  const m = holder.closest ? holder.closest('.msg') : null;
+  if (!m || !msgs.contains(m)) return -1;
+  return [...msgs.querySelectorAll(':scope > .msg')].indexOf(m);
+}
+
+/**
+ * F7: rebobina el hilo hasta el mensaje `idx` — se conserva lo anterior y se tira ese
+ * mensaje con todo lo posterior. Trunca de verdad (no hay vuelta atrás), así que pasa por
+ * la confirmación de la casa; y al terminar se repinta la conversación por el MISMO camino
+ * que abrirla, para que los sellos de día, las tarjetas y los pies de acciones se rehagan.
+ */
+async function rebobinarHilo(idx, btn) {
+  // la barra de confirmación se inserta justo debajo del mensaje que se va a tirar
+  const ancla = btn.closest ? btn.closest('.msg') : null;
+  btn.disabled = true;
+  try {
+    const ok = await askConfirm(
+      ancla,
+      '¿Volver el hilo hasta aquí?',
+      'Se descartarán este mensaje y todos los siguientes. Lo anterior se conserva y sigues en la misma conversación.',
+    );
+    if (!ok) return;
+    const r = await window.sagitari.convRebobinar(hiloActual(), idx);
+    if (!r || r.ok === false) {
+      showToast('No se pudo rebobinar: ' + ((r && r.error) || 'error desconocido'));
+      return;
+    }
+    const mensajes = r.messages || [];
+    cerrarDiffPanel();
+    resetCtxMeter();
+    // el hilo YA está truncado en main: si el chat no puede repintarse ahora (ejecución en
+    // vuelo), se dice y no se pinta un título que no corresponde al hilo guardado
+    if (resetChatView(mensajes) === false) return;
+    setChatTitle((mensajes.find((m) => m.role === 'user') || {}).content || 'Nueva conversación');
+    feed('Hilo rebobinado a un punto anterior', 'blu');
+    showToast('Hilo rebobinado');
+  } finally {
+    btn.disabled = false;
+  }
+}
+
 async function regenerate() {
   if (busy) {
     showToast('Espera a que termine la ejecución actual');
@@ -638,7 +1132,7 @@ async function regenerate() {
   showToast('Regenerando respuesta…');
   let r;
   try {
-    r = await window.sagitari.retryChat();
+    r = await window.sagitari.retryChat(hiloActual());
   } catch (e) {
     r = { ok: false, error: (e && e.message) || e };
   }
@@ -784,7 +1278,7 @@ function primeraLineaUtil(texto, max = 130) {
     )
     .filter((l) => l.length >= 18);
   const t = lineas[0] || '';
-  return t.length > max ? t.slice(0, max - 1).trimEnd() + '…' : t;
+  return K.clip(t, max);
 }
 
 /** Cuántas líneas tiene el razonamiento (dato barato que da idea de su profundidad). */
@@ -935,12 +1429,19 @@ function buildToolCard(ev) {
   const card = document.createElement('div');
   card.className = 'tcard run';
   card.dataset.tool = ev.name;
-  const sub = ev.subagent && K.subagent(ev.subagent);
+  /* v4.4: la herramienta de un COMPAÑERO del equipo se atribuye a SU miembro —la píldora
+     lleva el nombre del compañero, no el del especialista del registro—; el `subagent` de
+     siempre se sigue usando para las delegaciones. El nombre sale del equipo acumulado y,
+     si aún no se conoce a ese miembro, de `memberName` (lo pone el motor) o del propio id. */
+  const ficha = ev.member ? equipoFicha(hiloActual(), ev.member) : null;
+  const miembro = ev.member ? { id: ev.member, name: (ficha && ficha.name) || ev.memberName || ev.member } : null;
+  const sub = !miembro && ev.subagent && K.subagent(ev.subagent);
   const args = K.summarizeArgs(ev.name, ev.args);
   card.innerHTML = `
     <div class="tcard-head">
       <span class="tcard-ic">${ic(meta.icon)}</span>
       <span class="tcard-name">${esc(meta.label)}</span>
+      ${miembro ? `<span class="tcard-sub" title="Compañero del equipo (${esc(ev.member)})">${esc(miembro.name)}</span>` : ''}
       ${sub ? `<span class="tcard-sub" title="Subagente">${esc(sub.label)}</span>` : ''}
       <span class="tcard-args" title="${esc(JSON.stringify(ev.args || {}))}">${esc(args)}</span>
       <span class="tcard-time"></span>
@@ -1018,8 +1519,8 @@ function pintarResultadoTarjeta(card, ev) {
           .split(/\r?\n/)
           .map((s) => s.trim())
           .find(Boolean) || 'falló sin decir por qué';
-      note.textContent = linea.replace(/^Error:\s*/i, '').slice(0, 160);
-      note.title = String(ev.result || '').slice(0, 2000);
+      note.textContent = K.clip(linea.replace(/^Error:\s*/i, ''), 160);
+      note.title = K.clip(String(ev.result || ''), 2000);
       head.insertBefore(note, head.querySelector('.tcard-time'));
     }
   }
@@ -1202,10 +1703,12 @@ function restaurarTraza(bubbleEl, trace, html) {
    está haciendo cada subagente sin esperar al cierre del turno. */
 function etiquetaEquipo(ev) {
   const who = (K.subagent(ev.subagent) || {}).label || 'Subagente';
-  const tarea = String(ev.task || '')
-    .replace(/\s+/g, ' ')
-    .trim()
-    .slice(0, 40);
+  const tarea = K.clip(
+    String(ev.task || '')
+      .replace(/\s+/g, ' ')
+      .trim(),
+    40,
+  );
   return who + (tarea ? ' · ' + tarea : '');
 }
 
@@ -1256,7 +1759,7 @@ function equipoChip(ev) {
   const chip = document.createElement('div');
   chip.className = 'toolchip run';
   chip.dataset.subagent = String(ev.subagent || '');
-  chip.title = etiquetaEquipo(ev) + (ev.expect ? '\n\nCriterio de éxito: ' + String(ev.expect).slice(0, 300) : '');
+  chip.title = etiquetaEquipo(ev) + (ev.expect ? '\n\nCriterio de éxito: ' + K.clip(ev.expect, 300) : '');
   chip.innerHTML = `<span class="tc-mark"><span class="pulse-dot"></span></span><span class="tc-txt">${esc(etiquetaEquipo(ev))}</span>`;
   board.body.appendChild(chip);
   board.chips.push({ subagent: String(ev.subagent || ''), el: chip, cerrado: false });
@@ -1288,6 +1791,201 @@ function equipoCierra(ev) {
   pendingTurn.team.meta.textContent = enMarcha ? `${enMarcha} en marcha` : 'todos han terminado';
 }
 
+/* ---------- v4.4: tarjeta del EQUIPO (modo EQUIPO) ----------
+   Un encargo de equipo en UNA tarjeta: el reparto del líder (quién hace qué, con el estado
+   de cada compañero) mientras corre y el resultado agregado cuando termina. Por fuera es la
+   tarjeta de la delegación (`.tcard.dcard`: cabecera plegable, píldora de estado, tiempo),
+   porque el usuario ya sabe leerla; por dentro lleva una fila por compañero. El tablero
+   compartido y el buzón completos viven en su vista (renderer/40-vistas.js): aquí se cuenta
+   el reparto, no se duplica el tablero. */
+function buildEquipoCard() {
+  const card = document.createElement('div');
+  /* Abierta desde el principio y sin cerrarse sola al acabar: mientras corre es donde se lee
+     el REPARTO (quién hace qué) y al cerrar, el resultado agregado y el gasto. Es la misma
+     decisión que la tarjeta de tareas (que tampoco se pliega): es el resumen del encargo,
+     no una lista de detalles. */
+  card.className = 'tcard dcard run open';
+  card.dataset.equipo = '1';
+  card.innerHTML = `
+    <div class="tcard-head">
+      <span class="tcard-ic">${ic('agents')}</span>
+      <span class="tcard-name">Equipo</span>
+      <span class="dcard-status part" title="Estado del equipo">en marcha</span>
+      <span class="tcard-args"></span>
+      <span class="tcard-time"></span>
+      <span class="tcard-chev">${ic('chevron')}</span>
+    </div>
+    <div class="tcard-body">
+      <div class="tb-label">REPARTO DEL LÍDER</div>
+      <div class="eqmiembros"></div>
+    </div>`;
+  const head = card.querySelector('.tcard-head');
+  head.setAttribute('role', 'button');
+  head.setAttribute('tabindex', '0');
+  head.setAttribute('aria-expanded', 'true');
+  const toggle = () => {
+    const open = card.classList.toggle('open');
+    head.setAttribute('aria-expanded', open ? 'true' : 'false');
+  };
+  head.onclick = toggle;
+  head.addEventListener('keydown', (e) => {
+    if (e.key === 'Enter' || e.key === ' ') {
+      e.preventDefault();
+      toggle();
+    }
+  });
+  card._t0 = Date.now();
+  return card;
+}
+
+/** Una fila del reparto: quién, con qué encargo y en qué estado (su permiso pendiente
+    incluido, que es lo que explica que uno esté parado y otro trabajando). */
+function equipoFilaMiembro(m) {
+  const est = estadoEquipo(m.estado);
+  return `<div class="eqmiembro" data-miembro="${esc(m.id)}">
+    <span class="eqid">${esc(m.id)}</span>
+    <span class="eqquien">${esc(m.name || m.id)}</span>
+    <span class="eqque">${esc(m.tarea || 'sin encargo todavía')}${
+      m.estado === 'esperando' && m.atencion ? ' — te necesita: ' + esc(K.clip(m.atencion, 90)) : ''
+    }${m.estado === 'terminado' && m.resumen ? ' — ' + esc(K.clip(m.resumen, 160)) : ''}</span>
+    ${badgeEquipoPermisos(m)}
+    <span class="abadge ${est.cls}">${esc(est.label)}</span>
+  </div>`;
+}
+
+/** Repinta el reparto (y, si el encargo cerró, su resultado) desde el estado ACUMULADO del
+    equipo: los eventos cuentan el mismo hecho que la vista, así que se pinta de la misma
+    fuente y la tarjeta no puede discrepar de ella. */
+function pintarEquipoCard(card, e) {
+  if (!card || !card.isConnected || !e) return;
+  const miembros = e.orden.map((id) => e.miembros.get(id)).filter(Boolean);
+  const enMarcha = miembros.filter((m) => m.estado === 'trabajando').length;
+  const esperan = miembros.filter((m) => m.estado === 'esperando').length;
+  const reparto = card.querySelector('.eqmiembros');
+  if (reparto)
+    reparto.innerHTML = miembros.length ? miembros.map(equipoFilaMiembro).join('') : '<div class="subnote">Sin reparto todavía.</div>';
+  const args = card.querySelector('.tcard-args');
+  /* El equipo puede estar cerrado y un compañero seguir vivo (esperando tu permiso, o
+     trabajando después de concederlo): mientras quede alguien, la tarjeta no puede decir
+     «terminado» ni enseñar el resultado agregado —el trabajo no ha acabado—. */
+  const fin = e.estado === 'fin' && enMarcha + esperan === 0;
+  if (args)
+    args.textContent = fin
+      ? K.clip(resumenEquipo(e), 110)
+      : `${miembros.length} ${miembros.length === 1 ? 'compañero' : 'compañeros'} · ${enMarcha} en marcha${esperan ? ' · ' + esperan + ' esperando' : ''}`;
+  const pill = card.querySelector('.dcard-status');
+  if (pill) {
+    pill.textContent = fin ? (e.ok === false ? 'se detuvo' : 'terminado') : 'en marcha';
+    pill.className = 'dcard-status ' + (fin ? (e.ok === false ? 'fail' : 'ok') : 'part');
+  }
+  if (!fin) return;
+  // cierre: fuera «en marcha», con su tiempo real y el resultado agregado + el gasto
+  card.classList.remove('run');
+  card.classList.add(e.ok === false ? 'err' : 'done');
+  const t = card.querySelector('.tcard-time');
+  if (t && !t.textContent) t.textContent = K.fmtDuration((e.fin || Date.now()) - e.inicio);
+  const body = card.querySelector('.tcard-body');
+  if (body && !body.querySelector('[data-result]')) {
+    const wrap = document.createElement('div');
+    wrap.dataset.result = '1';
+    const g = e.gasto || {};
+    const gasto = [];
+    if (Number.isFinite(Number(g.tokens)) && Number(g.tokens) > 0) gasto.push(K.thousands(g.tokens) + ' tokens');
+    if (Number.isFinite(Number(g.costUsd)) && Number(g.costUsd) > 0) gasto.push('$' + Number(g.costUsd).toFixed(4));
+    wrap.innerHTML =
+      `<div class="tb-label">${e.ok === false ? 'EL EQUIPO SE DETUVO' : 'RESULTADO AGREGADO'}</div>` +
+      `<pre>${esc(resumenEquipo(e))}</pre>` +
+      (gasto.length ? `<div class="tb-label">GASTO DEL EQUIPO</div><pre>${esc(gasto.join(' · '))}</pre>` : '');
+    body.appendChild(wrap);
+  }
+}
+
+/** Enganche del turno para los eventos del equipo: la tarjeta se crea con el team_start y
+    se repinta con cada evento. Sólo lo llama el manejador de eventos del renderer
+    (20-app.js), y sólo para la conversación que está a la vista. */
+function equipoChat(ev) {
+  const e = equipoDe(ev.convId, false);
+  const tipo = String((ev && ev.type) || '');
+  /* El chat cuenta por dónde va el equipo con una línea de estado (que se reemplaza) y sólo
+     los HITOS en el feed: el buzón entero vive en su vista, y volcarlo aquí taparía el
+     resto de la actividad del turno. */
+  const n = e ? e.orden.length : 0;
+  switch (tipo) {
+    case 'team_start':
+      setChatStatus(`Equipo · ${n === 1 ? '1 compañero' : n + ' compañeros'} repartiendo el trabajo…`);
+      feed(`Equipo: ${n === 1 ? '1 compañero' : n + ' compañeros'}`, 'a-y');
+      break;
+    case 'team_member': {
+      const m = e && e.miembros.get(String(ev.id || ''));
+      if (m) setChatStatus(`Equipo · ${m.name}: ${K.clip(m.tarea || 'sin encargo todavía', 70)}`);
+      break;
+    }
+    case 'team_message':
+      setChatStatus(`Equipo · ${nombreEquipo(e, ev.de)} escribe a ${nombreEquipo(e, ev.para)}`);
+      break;
+    case 'team_done': {
+      const f = e && e.miembros.get(String(ev.id || ''));
+      feed(
+        `${(f && f.name) || ev.id} — ${ev.ok === false ? 'no pudo con el encargo' : 'terminó su parte'}`,
+        ev.ok === false ? 'err' : 'ok',
+      );
+      break;
+    }
+    case 'team_end': {
+      const mal = e ? e.ok === false : false;
+      setChatStatus('Equipo · ' + (mal ? 'se detuvo' : 'encargo cerrado'));
+      feed(mal ? 'El equipo se detuvo' : 'Equipo: encargo cerrado', mal ? 'err' : 'ok');
+      break;
+    }
+    default:
+      break;
+  }
+  if (tipo === 'team_start') {
+    /* La burbuja del turno se crea AQUÍ si este evento llegó antes que cualquier otra cosa
+       del turno (el líder puede levantar compañeros antes de su primera herramienta):
+       exigir un `pendingTurn` previo dejaría el encargo sin tarjeta. */
+    ensureAssistantBubble();
+    if (!pendingTurn) return; // turno ya cerrado: no hay dónde colgar la tarjeta
+    const card = buildEquipoCard();
+    const grupo = pendingTurn.group ? pendingTurn.group.el : null;
+    if (grupo) pendingAssistant.insertBefore(card, grupo);
+    else pendingAssistant.appendChild(card);
+    pendingTurn.cards.push(card); // el turno la cierra igual que las demás
+    pendingTurn.equipo = card;
+    e.card = card; // …y el EQUIPO la recuerda: sigue viva cuando el turno ya cerró
+    pintarEquipoCard(card, e);
+    scroll();
+    return;
+  }
+  /* La tarjeta se repinta AUNQUE el turno ya haya cerrado: un compañero puede estar esperando
+     un permiso con el líder fuera (su vuelta sigue viva), y al contestarlo tiene que verse que
+     sigue y que termina. Mirando sólo el turno abierto, la tarjeta se quedaba congelada en
+     «esperando» y con la insignia puesta para siempre. */
+  const card = tarjetaEquipoAbierta();
+  if (!card) return;
+  pintarEquipoCard(card, e);
+  if (tipo === 'team_end') scroll();
+}
+
+/** La tarjeta del equipo de ESTA conversación: la del turno abierto o, si el turno ya cerró,
+    la última que se pintó para ese equipo. La usan los dos caminos que cambian el estado —los
+    eventos del equipo y el alta/baja de un permiso pendiente—: la insignia de un compañero
+    vive en su fila, y el compañero sigue vivo después del turno si espera al usuario. */
+function tarjetaEquipoAbierta() {
+  if (pendingTurn && pendingTurn.equipo && pendingTurn.equipo.isConnected) return pendingTurn.equipo;
+  const e = equipoDe(hiloActual(), false);
+  return e && e.card && e.card.isConnected ? e.card : null;
+}
+
+/** Repinta la tarjeta del equipo de esta conversación, si la hay. La usan los dos caminos que
+    cambian el estado: los eventos del equipo y el alta/baja de un permiso pendiente (la
+    insignia de un compañero vive en su fila de la tarjeta). */
+function refrescarEquipoChat() {
+  const card = tarjetaEquipoAbierta();
+  if (!card) return;
+  pintarEquipoCard(card, equipoDe(hiloActual(), false));
+}
+
 /* ---- v2.5: deshacer el cambio del turno ---------------------------------- */
 
 /** Ofrece deshacer los archivos que ha tocado el turno ({files} son rutas relativas). */
@@ -1304,11 +2002,25 @@ function mostrarDeshacer(archivos) {
         : 'Se han cambiado ' + lista.length + ' archivos (' + muestra + ').';
   }
   bar.hidden = false;
+  // los cambios son de la conversación que los hizo: quedan apuntados en SU runtime para
+  // que la barra vuelva con ellos si se sale de la pestaña y se vuelve
+  rtActual().cambios = lista;
+  /* Hay cambios que revisar: el disparador de la revisión aparece y desaparece CON la
+     barra. La señal es la misma (el `can_undo` del turno), así que no puede quedar un
+     botón «revisar» sin nada que revisar ni al revés. */
+  const bt = $('#btnDiff');
+  if (bt) bt.hidden = false;
 }
 
 function ocultarDeshacer() {
   const bar = $('#undoBar');
   if (bar) bar.hidden = true;
+  const bt = $('#btnDiff');
+  if (bt) bt.hidden = true;
+  rtActual().cambios = [];
+  // sin cambios del turno no hay nada que revisar, y un panel abierto seguiría enseñando
+  // los archivos de un turno que ya no está en juego
+  cerrarDiffPanel();
 }
 
 if ($('#undoBtn'))
@@ -1317,7 +2029,7 @@ if ($('#undoBtn'))
     if (btn.disabled) return;
     btn.disabled = true;
     try {
-      const r = await window.sagitari.undoChanges();
+      const r = await window.sagitari.undoChanges(hiloActual());
       if (!r || r.ok === false) {
         // si el motor dice que ya no hay nada que deshacer, el botón no debe quedarse ahí
         if (r && /no hay ningún cambio/.test(String(r.error || ''))) ocultarDeshacer();
@@ -1337,6 +2049,79 @@ if ($('#undoBtn'))
       btn.disabled = false;
     }
   };
+
+/* ---- F2: revisión de los cambios del turno, archivo a archivo -------------
+   `#undoBtn` deshace el turno ENTERO de una vez; `#btnDiff` abre la revisión para ver
+   qué cambió en cada archivo y revertir sólo uno. El panel no guarda estado propio: se
+   llena pidiendo los cambios al proceso principal (que es quien los tiene) y se cierra
+   en cuanto dejan de existir. */
+const diffPanel = $('#diffPanel');
+const diffList = $('#diffList');
+
+function cerrarDiffPanel() {
+  if (diffPanel) diffPanel.hidden = true;
+}
+
+/** Abre el panel con los cambios que haya ahora mismo (el pintado es de 40-vistas.js). */
+async function abrirDiffPanel() {
+  if (!diffPanel || !diffList) return;
+  const r = await window.sagitari.cambiosDiff(hiloActual());
+  if (!r || r.ok === false) {
+    showToast('No se pudieron leer los cambios: ' + ((r && r.error) || 'error desconocido'));
+    return;
+  }
+  pintarDiff(r.archivos || [], diffList);
+  diffPanel.hidden = false;
+}
+
+/** Vuelve a pedir los cambios y pone al día el panel y la barra de deshacer con lo que
+    QUEDA (después de revertir un archivo, el turno ya no toca lo mismo). */
+async function refrescarDiffPanel() {
+  const r = await window.sagitari.cambiosDiff(hiloActual());
+  const archivos = r && r.ok !== false ? r.archivos || [] : [];
+  if (!archivos.length) {
+    // ya no queda nada del turno: se va también la barra de deshacer (y con ella el panel)
+    ocultarDeshacer();
+    return;
+  }
+  if (diffList) pintarDiff(archivos, diffList);
+  mostrarDeshacer(archivos.map((a) => a.rel || a.path));
+}
+
+if ($('#btnDiff')) {
+  $('#btnDiff').hidden = true; // sin cambios del turno no hay nada que revisar
+  // alterna, como el menú de modelos: un segundo clic sobre el disparador cierra
+  $('#btnDiff').onclick = () => (diffPanel && !diffPanel.hidden ? cerrarDiffPanel() : abrirDiffPanel());
+}
+if ($('#diffClose')) $('#diffClose').onclick = cerrarDiffPanel;
+/* Un solo escucha delegado para todos los botones de revertir: el pintado rehace las filas
+   enteras en cada refresco, así que engancharlos uno a uno se quedaría viejo al primer
+   refresco. */
+if (diffList)
+  diffList.addEventListener('click', async (e) => {
+    const btn = e.target.closest('[data-revert]');
+    if (!btn || btn.disabled) return;
+    const archivo = btn.dataset.revert;
+    btn.disabled = true;
+    try {
+      const r = await window.sagitari.cambiosRevertir(hiloActual(), archivo);
+      if (!r || r.ok === false) {
+        btn.disabled = false;
+        showToast('No se pudo revertir «' + archivo + '»: ' + ((r && r.error) || 'error desconocido'));
+        return;
+      }
+      showToast('«' + archivo + '» vuelto a como estaba antes del turno');
+      feed('Archivo revertido: ' + archivo, 'blu');
+      await refrescarDiffPanel();
+    } catch (err) {
+      btn.disabled = false;
+      showToast('No se pudo revertir «' + archivo + '»: ' + ((err && err.message) || err));
+    }
+  });
+// Escape cierra el panel: es el mismo gesto con el que se cierran los menús de la casa
+document.addEventListener('keydown', (e) => {
+  if (e.key === 'Escape' && diffPanel && !diffPanel.hidden) cerrarDiffPanel();
+});
 
 function toolChip(text, state) {
   const b = ensureAssistantBubble();
@@ -1531,11 +2316,17 @@ function finishAssistant(finalText, opts) {
     // solo se retira si llegó vacío (congelado antes del primer frame)
     if (holder._openText) {
       stream.className = 'stream-done';
-      /* …y se asegura en pantalla: con la ventana oculta Chromium no dispara
-         requestAnimationFrame y el tramo abierto llegaría vacío (los congelados
-         sí están, que se pintan en el evento). Sin esto, en oculto la respuesta
-         quedaba sin su último tramo. */
-      if (!(stream.textContent || '').trim()) stream.innerHTML = fmt(holder._openText);
+      /* …y se asegura el texto COMPLETO en pantalla. El tramo abierto se acumula en CADA
+         evento (`_openText`), pero se PINTA por frames: si el último frame no llega —la
+         ventana no tiene el foco y Chromium no repinta— el elemento se queda con lo del
+         frame ANTERIOR y la respuesta se veía cortada a media frase, mientras el mensaje
+         guardado (que lo acumula el proceso principal, sin frames de por medio) estaba
+         entero. Antes esto sólo rellenaba el elemento si estaba VACÍO: cubría «no se pintó
+         nada», pero no «se pintó a medias». Y si el stream se quedó corto respecto al
+         texto del turno, manda el del turno. */
+      const abierto = (holder._openText || '').trim();
+      if (fin && abierto && fin.startsWith(abierto) && fin.length > abierto.length) holder._openText = fin;
+      stream.innerHTML = fmt(holder._openText);
     } else stream.remove();
   } else if (!planConTarjeta && holder._openText) {
     // Sin elemento porque ningún frame llegó a crearlo (ventana oculta): el
@@ -1612,9 +2403,9 @@ function finishAssistant(finalText, opts) {
   } else {
     lastTurnSummary = 'respuesta entregada';
   }
-  // el pie ofrece copiar/leer también lo que quedó a medias
+  // el pie ofrece copiar también lo que quedó a medias
   const said = narrativa || keptText;
-  if (said) msgActions(holder.closest('.msg-body') || holder, said, { speak: true });
+  if (said) msgActions(holder.closest('.msg-body') || holder, said, {});
   lastAssistantEl = holder;
   refreshMsgActions();
   pendingAssistant = null;

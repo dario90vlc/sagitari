@@ -16,53 +16,26 @@ contextBridge.exposeInMainWorld('sagitari', {
   getConfig: () => ipcRenderer.invoke('config:get'),
   saveProvider: (p) => ipcRenderer.invoke('provider:save', p),
   deleteProvider: (id) => ipcRenderer.invoke('provider:delete', id),
-  listModels: (baseUrl, apiKey) => ipcRenderer.invoke('provider:models', { baseUrl, apiKey }),
+  /* `opts` (format/providerId/model) es opcional y viaja a main para que la detección
+     use el protocolo elegido: las llamadas de dos argumentos de siempre siguen valiendo. */
+  listModels: (baseUrl, apiKey, opts) => ipcRenderer.invoke('provider:models', { baseUrl, apiKey, ...(opts || {}) }),
   activateProvider: (cfg) => ipcRenderer.invoke('provider:activate', cfg),
   setSettings: (patch) => ipcRenderer.invoke('settings:set', patch),
-  sendChat: (text, imageDataUrl, attachments) => ipcRenderer.invoke('chat:send', { text, imageDataUrl, attachments }),
+  /* El primer argumento de todo lo que trabaja POR conversación es su id (convId):
+     con varias conversaciones abiertas a la vez, el proceso principal no puede
+     adivinar a cuál se refiere la llamada (mandar un mensaje, detener, deshacer…).
+     Si no llega (llamadas de antes), main usa la conversación abierta. */
+  sendChat: (convId, text, imageDataUrl, attachments) => ipcRenderer.invoke('chat:send', { convId, text, imageDataUrl, attachments }),
   attachmentsPick: () => ipcRenderer.invoke('attachments:pick'),
   attachmentsRead: (p) => ipcRenderer.invoke('attachments:read', p),
-  stopChat: () => ipcRenderer.invoke('chat:stop'),
-  retryChat: () => ipcRenderer.invoke('chat:retry'),
-  clearChat: () => ipcRenderer.invoke('chat:clear'),
+  stopChat: (convId) => ipcRenderer.invoke('chat:stop', convId),
+  retryChat: (convId) => ipcRenderer.invoke('chat:retry', convId),
+  /* Órdenes de barra (/compact, /cost): el renderer las reconoce y NO las manda como
+     mensaje; las que necesitan el proceso principal entran por aquí. */
+  chatCommand: (convId, name, args) => ipcRenderer.invoke('chat:command', { convId, name, args }),
   glow: (mode, color) => ipcRenderer.send('glow:set', { mode, color }),
   onAgentEvent: on('agent:event', ([ev]) => [ev]),
   onGlow: on('glow:set', ([v]) => [v]),
-  voiceStart: () => ipcRenderer.invoke('voice:start'),
-  voiceStop: () => ipcRenderer.invoke('voice:stop'),
-  onVoice: on('voice:partial', ([t]) => ['partial', t]),
-  onVoiceFinal: on('voice:final', ([t]) => ['final', t]),
-  onVoiceReady: on('voice:ready', ([t]) => ['ready', t]),
-  onVoiceMode: on('voice:mode', ([t]) => ['mode', t]),
-  onVoiceHint: on('voice:hint', ([t]) => ['hint', t]),
-  onVoiceStopped: on('voice:stopped', () => ['stopped']),
-  onVoiceError: on('voice:error', ([t]) => ['error', t]),
-  /* Modo voz (fase 1) del VoiceManager. Los `voiceStart`/`voiceStop` de arriba siguen
-     siendo el dictado al compositor (Alt+clic): son cosas distintas y no se tocan. */
-  voiceOpen: () => ipcRenderer.invoke('voice:open'),
-  voiceClose: () => ipcRenderer.invoke('voice:close'),
-  /* Rescate del motor sordo: el renderer detecta voz real del micro sin ningún texto
-     y pide el cambio al motor clásico (idempotente en el proceso principal). */
-  voiceRescue: () => ipcRenderer.invoke('voice:rescue'),
-  /* Dictado local (whisper): el tap del micrófono del renderer viaja al motor local;
-     y Ajustes puede instalarlo (con progreso por evento). */
-  voicePcm: (pcm) => ipcRenderer.send('voice:pcm', pcm),
-  voicePcmActivo: () => ipcRenderer.invoke('voice:pcmActivo'),
-  voiceInstallStatus: () => ipcRenderer.invoke('voice:installStatus'),
-  voiceInstall: () => ipcRenderer.invoke('voice:install'),
-  onVoiceInstall: on('voice:installProgress', ([p]) => [p]),
-  voiceEvent: (ev) => ipcRenderer.send('voice:event', ev),
-  onVoiceEvent: on('voice:event', ([ev]) => [ev]),
-  /* `opts.forzar` = el modo voz pide hablar aunque el TTS esté apagado en Ajustes. */
-  speak: (text, opts) => ipcRenderer.invoke('tts:speak', text, opts),
-  ttsList: () => ipcRenderer.invoke('tts:list'),
-  ttsInstall: () => ipcRenderer.invoke('tts:install'),
-  onTtsInstall: on('tts:installProgress', ([p]) => [p]),
-  onTtsPhrase: on('tts:phrase', ([p]) => [p]), // { id, bytes }
-  ttsPlayed: (id) => ipcRenderer.send('tts:played', id),
-  ttsStop: () => ipcRenderer.send('tts:stop'),
-  ttsReset: () => ipcRenderer.send('tts:reset'),
-  onTtsDone: on('tts:done', () => []),
   onThemeChanged: on('theme:changed', ([v]) => [v]),
   quit: () => ipcRenderer.invoke('app:quit'),
   openExternal: (url) => ipcRenderer.invoke('app:openExternal', url),
@@ -79,13 +52,30 @@ contextBridge.exposeInMainWorld('sagitari', {
   memoryAdd: (text, importance) => ipcRenderer.invoke('memory:add', { text, importance }),
   memoryUpdate: (id, patch) => ipcRenderer.invoke('memory:update', { id, patch }),
   memoryRemove: (id) => ipcRenderer.invoke('memory:remove', id),
+  /* Memoria v2 — bandeja de aprobación («Recién aprendido»): las propuestas de hechos
+     que aún no se han guardado. Aceptar consolida (fusiona si ya se sabía algo parecido). */
+  memoryTrayList: () => ipcRenderer.invoke('memory:tray:list'),
+  memoryTrayAccept: (id) => ipcRenderer.invoke('memory:tray:accept', { id }),
+  memoryTrayDiscard: (id) => ipcRenderer.invoke('memory:tray:discard', { id }),
+  /* Papelera: lo olvidado, recuperable 30 días. */
+  memoryTrashList: () => ipcRenderer.invoke('memory:trash:list'),
+  memoryTrashRestore: (id) => ipcRenderer.invoke('memory:trash:restore', { id }),
+  memoryTrashEmpty: () => ipcRenderer.invoke('memory:trash:empty'),
+  /* Exportar (JSON legible), olvidarlo todo y recuperar la copia si el almacén no se pudo leer. */
+  memoryExport: () => ipcRenderer.invoke('memory:export'),
+  memoryWipe: () => ipcRenderer.invoke('memory:wipe'),
+  memoryRestoreBackup: () => ipcRenderer.invoke('memory:restore-backup'),
+  /* Olvidar una categoría de hábitos (herramientas, webs, modos, permisos; 'todo' = el perfil entero). */
+  habitsForget: (categoria) => ipcRenderer.invoke('habits:forget', { categoria }),
+  /* Aviso en vivo de que la extracción ha dejado una propuesta nueva en la bandeja. */
+  onMemoriaNueva: on('memory:nueva', ([p]) => [p]),
   tasksList: () => ipcRenderer.invoke('tasks:list'),
   taskEnqueue: (data) => ipcRenderer.invoke('tasks:enqueue', data),
   taskPause: (runId) => ipcRenderer.invoke('tasks:pause', runId),
   taskResume: (runId) => ipcRenderer.invoke('tasks:resume', runId),
   taskCancel: (runId) => ipcRenderer.invoke('tasks:cancel', runId),
   taskRemove: (runId) => ipcRenderer.invoke('tasks:remove', runId),
-  pauseChat: () => ipcRenderer.invoke('chat:pause'),
+  pauseChat: (convId) => ipcRenderer.invoke('chat:pause', convId),
   skillsList: () => ipcRenderer.invoke('skills:list'),
   skillsToggle: (id, enabled) => ipcRenderer.invoke('skills:toggle', { id, enabled }),
   skillsImport: (repo, opts) => ipcRenderer.invoke('skills:import', opts && typeof opts === 'object' ? { repo, ...opts } : repo),
@@ -106,19 +96,30 @@ contextBridge.exposeInMainWorld('sagitari', {
   convOpen: (id) => ipcRenderer.invoke('conv:open', id),
   convRename: (title) => ipcRenderer.invoke('conv:rename', title),
   convDel: (id) => ipcRenderer.invoke('conv:del', id),
+  /* Bifurcar (copia con hilo propio) y rebobinar (volver el hilo a un punto). */
+  convFork: (id) => ipcRenderer.invoke('conv:fork', id),
+  convRebobinar: (id, index) => ipcRenderer.invoke('conv:rebobinar', { id, index }),
   setMode: (m) => ipcRenderer.invoke('mode:set', m),
-  getAgentsLive: () => ipcRenderer.invoke('agents:live'),
-  secResolve: (id, approved, runId) => ipcRenderer.invoke('sec:resolve', { id, approved, runId }),
+  getAgentsLive: (convId) => ipcRenderer.invoke('agents:live', convId),
+  /* Registro de agentes: los de serie y los que el usuario define en disco. */
+  agentsCustom: () => ipcRenderer.invoke('agents:list'),
+  agentsCustomRecargar: () => ipcRenderer.invoke('agents:reload'),
+  secResolve: (convId, id, approved, runId) => ipcRenderer.invoke('sec:resolve', { convId, id, approved, runId }),
   secSetToolPerm: (tool, level) => ipcRenderer.invoke('sec:setToolPerm', { tool, level }),
   secSetGuardrail: (patch) => ipcRenderer.invoke('sec:setGuardrail', patch),
-  metaGet: () => ipcRenderer.invoke('meta:get'),
+  metaGet: (convId) => ipcRenderer.invoke('meta:get', convId),
   logsRecent: (n) => ipcRenderer.invoke('logs:recent', n),
   updateCheck: () => ipcRenderer.invoke('update:check'),
   updateDownload: () => ipcRenderer.invoke('update:download'),
   updateInstall: (opts) => ipcRenderer.invoke('update:install', opts || {}),
   updateRetry: (opts) => ipcRenderer.invoke('update:retry', opts || {}),
-  undoChanges: () => ipcRenderer.invoke('cambios:deshacer'),
-  undoState: () => ipcRenderer.invoke('cambios:estado'),
+  undoChanges: (convId) => ipcRenderer.invoke('cambios:deshacer', convId),
+  undoState: (convId) => ipcRenderer.invoke('cambios:estado', convId),
+  /* Revisión del cambio: el diff estructurado del turno para el panel, y la vuelta
+     atrás de UN archivo (no de todo el turno, que es `undoChanges`). Los tres van por
+     conversación: los cambios de una pestaña no son los de otra. */
+  cambiosDiff: (convId) => ipcRenderer.invoke('cambios:diff', convId),
+  cambiosRevertir: (convId, archivo) => ipcRenderer.invoke('cambios:revertir', convId, archivo),
   instruccionesInfo: () => ipcRenderer.invoke('agent:instrucciones'),
   instruccionesCrear: () => ipcRenderer.invoke('agent:instrucciones-crear'),
   updatePage: () => ipcRenderer.invoke('update:page'),

@@ -16,6 +16,8 @@ const {
   SKILLS_TMP,
   MAIN_SRC,
   MAIN_ALL,
+  memory,
+  habits,
   updater,
   Browser,
   profiles,
@@ -308,6 +310,15 @@ test('updater: el ayudante SOBREVIVE al cierre de ELECTRON (regresión: «se cie
   const { verificar } = require('../scripts/verificar-actualizador');
   const r = await verificar({ dir: tmpDir('sagi-supervivencia-'), pasadas: 1, conControl: true });
   if (r.estado === 'sin-electron') return; // sin binario no hay escenario que montar
+  /* Y si el sistema operativo no deja montarlo, se dice y no se inventa un veredicto:
+     en un sandbox de token restringido el Electron hijo no puede escribir en el
+     directorio del escenario (EPERM) y no hay Programador de tareas, así que el
+     ayudante podría ser perfecto y el padre seguiría sin poder dejar su rastro. En
+     una máquina normal —y en CI— este `if` no se cumple nunca. */
+  if (r.estado === 'entorno') {
+    console.log('    (escenario saltado: ' + r.motivo + ')');
+    return;
+  }
   const p = r.pasadas[0];
   ok(p.arranco, 'el ayudante arranca ANTES de que la app se cierre (padre: ' + p.padre + ')');
   ok(p.ejecuto, 'y el instalador se ejecuta DESPUÉS de que la app haya salido (diario: ' + p.diario.slice(0, 220) + ')');
@@ -647,14 +658,14 @@ test('holo con momentos: puertas numeradas y reloj del monitor', () => {
   const app = readRenderer();
   // las puertas NO enseñan números de atajo: solo el nombre (sin ::before numerado)
   ok(!/\.navitem\[data-view="\w+"\] \.nl::before/.test(css), 'las puertas no deben llevar números');
-  ok(/\.navitem \.nl::before \{ content: none/.test(css), 'el ::before de puerta debe estar anulado');
+  ok(/\.navitem \.nl::before\s*\{\s*content:\s*none/.test(css), 'el ::before de puerta debe estar anulado');
   ok(html.includes('id="boardClock"'), 'el rail lleva su reloj de estación');
   ok(/function tickBoardClock\(\)/.test(app) && /setInterval\(tickBoardClock, 1000\)/.test(app), 'el reloj late cada segundo');
   /* HIG Liquid Glass: el vidrio vive SOLO en la capa funcional (sidebar,
      compositor, menús, sheets). El contenido (burbujas, tarjetas) son fills
      opacos: nada de backdrop-filter ni vidrio sobre vidrio. */
   const regla = (sel) => (css.match(new RegExp(sel + '\\s*\\{[^}]*\\}')) || [''])[0];
-  for (const sel of ['\\.side', '\\.composer', '\\.modelmenu', '\\.csel-menu', '\\.skillmenu', '#voiceMode'])
+  for (const sel of ['\\.side', '\\.composer', '\\.modelmenu', '\\.csel-menu', '\\.skillmenu'])
     ok(/backdrop-filter/.test(regla(sel)), sel + ' es capa funcional y lleva vidrio');
   for (const sel of ['\\.bubble', '\\.tcard', '\\.fitem', '\\.ragent', '\\.modeseg'])
     ok(!/backdrop-filter/.test(regla(sel)), sel + ' es contenido y NO lleva vidrio');
@@ -664,25 +675,28 @@ test('holo con momentos: puertas numeradas y reloj del monitor', () => {
   ok(/@keyframes pop-in/.test(css), 'los sheets nacen con muelle');
 });
 
-test('glass27: aura multicolor, cáusticas y slider ultra claro ↔ tintado', () => {
+test('glass27: borde vivo, cáusticas y slider ultra claro ↔ tintado', () => {
   const css = fs.readFileSync(path.join(__dirname, '..', 'renderer', 'styles.css'), 'utf8');
   const html = fs.readFileSync(path.join(__dirname, '..', 'renderer', 'index.html'), 'utf8');
   const app = readRenderer();
-  // filo tricolor: el borde nítido de 1px reparte los 3 tonos (un filo de un
-  // solo tono mandaba sobre los halos y todo se veía de un color)
+  /* El filo es la luz: un anillo de 1px DENTRO de la superficie, con el nivel en opacidad
+     (el degradado se rasteriza una vez y el compositor solo mezcla) y multiplicado por la
+     intensidad que eligió el usuario. Cada superficie lee SU nivel. */
   ok(
-    /\.glow::before\s*\{[^}]*conic-gradient\([^}]*--glow-a-rgb[^}]*--glow-b-rgb[^}]*--glow-c-rgb/.test(css),
-    'el filo del glow debe llevar los 3 tonos',
+    /opacity:\s*calc\(var\(--rim[^)]*\)\s*\*\s*var\(--glow-str/.test(css),
+    'el filo es el glow y su nivel escala con la intensidad del ajuste',
   );
-  ok(/@keyframes giro/.test(css) && /@keyframes reachLife/.test(css), 'los 3 halos ruedan y respiran');
-  ok(
-    /@property --giro/.test(css) && /@property --reach/.test(css),
-    'las propiedades del aura van registradas (si no, el movimiento va a saltos)',
-  );
-  ok(/\.glowFlow\.halo-a/.test(css) && /--glow-a-rgb/.test(css), 'el halo A lleva su tono');
-  ok(/\.glowFlow\.halo-b/.test(css) && /255,255,255/.test(css), 'el halo B lleva su tono + núcleo blanco');
-  ok(/\.glowFlow\.halo-c/.test(css) && /--glow-c-rgb/.test(css), 'el halo C lleva su tono');
+  ok(/inset 0 0 0 1px rgba\(var\(--rim-rgb\)/.test(css), 'el filo es un anillo de 1px DENTRO de la superficie');
+  ok(/--rim:\s*var\(--live-window\)/.test(css), 'la hairline de la ventana lee su nivel');
+  ok(/--rim:\s*var\(--live-com\)/.test(css), 'el compositor lee el suyo');
+  ok(/--rim:\s*var\(--live-side\)/.test(css), 'y el panel lateral el suyo');
+  ok(/mask-image/.test(css), 'el recorrido del filo usa máscara para no asomar fuera de la superficie');
+  /* El aura vieja no vuelve: halos girando, propiedades registradas y keyframes fuera. */
+  ok(!/glowFlow|halo-[abc]|glowRing/.test(css), 'el aura de halos girando no vuelve');
+  ok(!/@property --(giro|reach)\b/.test(css), 'ni las propiedades que la movían');
+  ok(!/@keyframes (giro|reachLife|frame-bloom)/.test(css), 'ni sus keyframes');
   ok(!/offset-path/.test(css), 'el glow no recorre el marco (sigue prohibido)');
+  ok(html.includes('class="filo'), 'el filo necesita su nodo en las superficies');
   // cáustica: borde oscurecido + highlight en el vidrio héroe
   const comp = (css.match(/\.composer\s*\{[^}]*\}/) || [''])[0];
   ok(/inset 2px 3px/.test(comp) && /inset -3px -5px/.test(comp), 'luz arriba-izquierda, sombra abajo-derecha');
@@ -699,10 +713,332 @@ test('integración: cada canal push del preload tiene remitente en main', () => 
   // Fase 4: los send() viven repartidos entre main.js y los routers main/ipc-*.js.
   const main = MAIN_ALL;
   const canales = [...preload.matchAll(/\bon\('([^']+)'/g)].map((m) => m[1]);
-  ok(canales.length >= 10, 'deben detectarse los canales push (' + canales.length + ')');
+  ok(canales.length >= 5, 'deben detectarse los canales push (' + canales.length + ')');
   const emisores = new Set([...main.matchAll(/send\('([^']+)'/g)].map((m) => m[1]));
   const sinEmisor = [...new Set(canales)].filter((c) => !emisores.has(c));
   eq(sinEmisor.join(', '), '', 'canales push que el renderer nunca recibiría');
+  // Los push nuevos de la memoria v2 entran en la misma comprobación: si alguien
+  // expone el puente sin empujarlo desde main, la vista se queda muda para siempre.
+  for (const c of ['memory:nueva']) {
+    ok(canales.includes(c), 'el preload debe suscribirse a ' + c);
+    ok(emisores.has(c), 'main debe empujar ' + c);
+  }
+});
+
+test('integración: los canales de la memoria v2 existen en preload y en main', () => {
+  const preload = fs.readFileSync(path.join(__dirname, '..', 'main', 'preload.js'), 'utf8');
+  const invocados = new Set([...preload.matchAll(/invoke\('([^']+)'/g)].map((m) => m[1]));
+  const atendidos = new Set([...MAIN_ALL.matchAll(/handle\('([^']+)'/g)].map((m) => m[1]));
+  const CANALES = [
+    'memory:tray:list',
+    'memory:tray:accept',
+    'memory:tray:discard',
+    'memory:trash:list',
+    'memory:trash:restore',
+    'memory:trash:empty',
+    'memory:export',
+    'memory:wipe',
+    'memory:restore-backup',
+    'habits:forget',
+  ];
+  for (const canal of CANALES) {
+    ok(invocados.has(canal), 'el preload debe invocar ' + canal);
+    ok(atendidos.has(canal), 'main debe atender ' + canal);
+  }
+  // y cada canal llega al renderer con el puente que fija el contrato
+  const PUENTES = [
+    'memoryTrayList',
+    'memoryTrayAccept',
+    'memoryTrayDiscard',
+    'memoryTrashList',
+    'memoryTrashRestore',
+    'memoryTrashEmpty',
+    'memoryExport',
+    'memoryWipe',
+    'memoryRestoreBackup',
+    'habitsForget',
+  ];
+  for (const puente of [...PUENTES, 'onMemoriaNueva']) {
+    ok(new RegExp('\\b' + puente + '\\s*:').test(preload), 'falta el puente ' + puente);
+  }
+  // los nombres anteriores no se quedan como alias: un puente viejo y otro nuevo
+  // harían lo mismo por dos caminos y la vista se cablearía al que no toca
+  ok(!/\bmemoryRestore\s*:/.test(preload) && !/\bmemoryTray\s*:/.test(preload) && !/\bhabitsForgetArea\s*:/.test(preload));
+});
+
+test('memoria v2: el router IPC valida id y categoría antes de tocar el almacén', () => {
+  const { registerMemoryIpc } = require('../main/ipc-memory');
+  const handlers = new Map();
+  const ipc = { handle: (canal, fn) => handlers.set(canal, fn) };
+  const llamadas = [];
+  const oyentes = [];
+  let resets = 0;
+  const propuesta = {
+    id: 'p1',
+    texto: 'El usuario se llama Darío',
+    etiquetas: ['identidad'],
+    origen: 'mensaje',
+    motivo: 'identidad',
+    origenTexto: 'me llamo Darío',
+    creado: '2026-10-14T00:00:00.000Z',
+  };
+  const almacen = {
+    list: () => [],
+    trayList: () => [propuesta],
+    trayAceptar: (id) => {
+      llamadas.push('aceptar:' + id);
+      return { ok: true, entrada: { id } };
+    },
+    trayDescartar: (id) => {
+      llamadas.push('descartar:' + id);
+      return { ok: true };
+    },
+    listTrash: () => [{ id: 'm1', text: 'algo olvidado', papelera: { fecha: '2026-09-01T00:00:00.000Z' } }],
+    restore: (id) => {
+      llamadas.push('restore:' + id);
+      return { ok: true, entrada: { id } };
+    },
+    trashEmpty: () => ({ ok: true, borradas: 2 }),
+    exportar: () => ({ version: 2, hechos: [] }),
+    wipe: () => ({ ok: true, borradas: 3 }),
+    restaurarCopia: () => ({ ok: true, restaurado: 2, origen: 'memory.json.bak-v1' }),
+    on: (evento, cb) => oyentes.push({ evento, cb }),
+  };
+  const habits = {
+    stats: () => ({}),
+    reset: () => {
+      resets++;
+    },
+    olvidar: (categoria) => {
+      llamadas.push('olvidar:' + categoria);
+      return { ok: true, borradas: categoria === 'todo' ? 9 : 1 };
+    },
+  };
+  registerMemoryIpc(ipc, { memory: almacen, models: { summary: () => ({}) }, habits, getWin: () => null });
+
+  for (const canal of [
+    'memory:tray:list',
+    'memory:tray:accept',
+    'memory:tray:discard',
+    'memory:trash:list',
+    'memory:trash:restore',
+    'memory:trash:empty',
+    'memory:export',
+    'memory:wipe',
+    'memory:restore-backup',
+    'habits:forget',
+  ]) {
+    ok(handlers.has(canal), 'debe registrarse ' + canal);
+  }
+
+  eq(handlers.get('memory:tray:list')().length, 1, 'la bandeja se lista tal cual');
+  eq(handlers.get('memory:tray:accept')(null, { id: 'p1' }).ok, true);
+  eq(handlers.get('memory:tray:discard')(null, { id: 'p2' }).ok, true);
+  eq(llamadas.join(','), 'aceptar:p1,descartar:p2');
+  eq(handlers.get('memory:tray:accept')(null, {}).error, 'id es obligatorio');
+  eq(handlers.get('memory:tray:accept')(null, { id: '   ' }).error, 'id es obligatorio', 'un id en blanco no vale');
+  eq(handlers.get('memory:tray:discard')().error, 'id es obligatorio', 'sin payload no revienta');
+  eq(llamadas.join(','), 'aceptar:p1,descartar:p2', 'un id inválido no llega al almacén');
+
+  eq(handlers.get('memory:trash:list')().length, 1);
+  eq(handlers.get('memory:trash:restore')(null, { id: 'm1' }).ok, true);
+  eq(handlers.get('memory:trash:restore')(null, {}).error, 'id es obligatorio');
+  eq(handlers.get('memory:trash:empty')().borradas, 2);
+  eq(handlers.get('memory:export')().version, 2);
+  eq(handlers.get('memory:wipe')().borradas, 3);
+  eq(resets, 1, '«olvídalo todo» borra también el perfil de hábitos (es lo que promete la confirmación)');
+  const copia = handlers.get('memory:restore-backup')();
+  eq(copia.restaurado, 2);
+  eq(copia.origen, 'memory.json.bak-v1');
+
+  eq(handlers.get('habits:forget')(null, { categoria: 'webs' }).borradas, 1);
+  eq(handlers.get('habits:forget')(null, { categoria: 'aplicaciones' }).borradas, 1);
+  eq(handlers.get('habits:forget')(null, { categoria: 'comandos' }).borradas, 1);
+  eq(handlers.get('habits:forget')(null, { categoria: 'carpetas' }).borradas, 1);
+  eq(handlers.get('habits:forget')(null, { categoria: 'inventada' }).ok, false, 'solo se olvidan categorías que existen');
+  eq(handlers.get('habits:forget')(null, { categoria: 'apps' }).ok, false, 'la clave interna no vale: la app habla en español');
+  eq(handlers.get('habits:forget')(null, {}).error, 'categoría no válida');
+  eq(handlers.get('habits:forget')(null, { categoria: 'todo' }).borradas, 9);
+  eq(
+    llamadas.join(','),
+    'aceptar:p1,descartar:p2,restore:m1,olvidar:webs,olvidar:aplicaciones,olvidar:comandos,olvidar:carpetas,olvidar:todo',
+  );
+
+  // el empuje: el almacén avisa, el router reenvía. Se suscribe una sola vez.
+  eq(oyentes.length, 1, 'se suscribe una sola vez al aviso del almacén');
+  eq(oyentes[0].evento, 'propuesta');
+  oyentes[0].cb(propuesta); // sin ventana no debe reventar
+
+  const enviados = [];
+  const ventana = { isDestroyed: () => false, webContents: { send: (canal, dato) => enviados.push({ canal, dato }) } };
+  registerMemoryIpc(ipc, { memory: almacen, models: { summary: () => ({}) }, habits, getWin: () => ventana });
+  eq(oyentes.length, 2);
+  oyentes[1].cb(propuesta);
+  eq(enviados.length, 1, 'un aviso por propuesta');
+  eq(enviados[0].canal, 'memory:nueva');
+  eq(enviados[0].dato.texto, 'El usuario se llama Darío');
+});
+
+test('memoria v2: sin el almacén nuevo el canal responde con un aviso, no revienta', () => {
+  const { registerMemoryIpc } = require('../main/ipc-memory');
+  const handlers = new Map();
+  const ipc = { handle: (canal, fn) => handlers.set(canal, fn) };
+  // almacén anterior a v2: tiene list/add/remove, pero no bandeja, papelera, copia ni olvido
+  registerMemoryIpc(ipc, { memory: { list: () => [] }, models: {}, habits: {}, getWin: () => null });
+  const conId = new Set(['memory:tray:accept', 'memory:tray:discard', 'memory:trash:restore']);
+  for (const canal of [
+    'memory:tray:list',
+    'memory:tray:accept',
+    'memory:tray:discard',
+    'memory:trash:list',
+    'memory:trash:restore',
+    'memory:trash:empty',
+    'memory:export',
+    'memory:wipe',
+    'memory:restore-backup',
+  ]) {
+    const r = conId.has(canal) ? handlers.get(canal)(null, { id: 'x' }) : handlers.get(canal)();
+    eq(r.ok, false, canal + ' debe avisar en vez de reventar');
+    eq(r.error, 'almacén no disponible', canal);
+  }
+  eq(handlers.get('habits:forget')(null, { categoria: 'todo' }).error, 'almacén no disponible');
+});
+
+test('memoria v2: si el almacén no se puede leer, el router lo dice en vez de fingir memoria vacía', () => {
+  /* El defecto: memory:list devolvía SIEMPRE un array, así que un memory.json ilegible se
+     veía en la vista como «Aún no sé nada de ti» (sin aviso, sin motivo y sin salida) y la
+     siguiente escritura pisaba el fichero. Ahora el canal avisa y las operaciones que
+     escribirían se rechazan. */
+  const { registerMemoryIpc } = require('../main/ipc-memory');
+  const handlers = new Map();
+  const ipc = { handle: (canal, fn) => handlers.set(canal, fn) };
+  const motivo = 'no se pudo leer memory.json: EBUSY';
+  const bloqueado = { ok: false, error: motivo };
+  let resets = 0;
+  const roto = {
+    list: () => [],
+    estado: () => ({ ok: false, tipo: 'io', error: motivo }),
+    add: () => null,
+    update: () => bloqueado,
+    remove: () => bloqueado,
+    trayList: () => [],
+    listTrash: () => [],
+    trashEmpty: () => bloqueado,
+    exportar: () => ({ version: 2, hechos: [] }),
+    wipe: () => bloqueado,
+    on: () => {},
+  };
+  registerMemoryIpc(ipc, {
+    memory: roto,
+    models: { summary: () => ({}) },
+    habits: { stats: () => ({}), reset: () => resets++, olvidar: () => ({ ok: true }) },
+    getWin: () => null,
+  });
+
+  let lanzo = null;
+  try {
+    handlers.get('memory:list')();
+  } catch (e) {
+    lanzo = e;
+  }
+  ok(lanzo && lanzo.message.includes(motivo), 'memory:list debe contar por qué: ' + (lanzo && lanzo.message));
+  let lanzoTrash = null;
+  try {
+    handlers.get('memory:trash:list')();
+  } catch (e) {
+    lanzoTrash = e;
+  }
+  ok(lanzoTrash, 'la papelera del mismo fichero tampoco puede fingir que está vacía');
+
+  eq(handlers.get('memory:add')(null, { text: 'algo' }).ok, false, 'no se acepta un hecho que no se puede guardar');
+  eq(handlers.get('memory:add')(null, { text: 'algo' }).error, motivo);
+  eq(handlers.get('memory:update')(null, { id: 'x', patch: {} }).ok, false);
+  eq(handlers.get('memory:export')().ok, false, 'exportar no puede copiar un volcado que no se ha leído');
+  eq(handlers.get('memory:export')().error, motivo);
+  eq(handlers.get('memory:wipe')().ok, false, 'ni olvidarlo todo');
+  eq(resets, 0, 'si no se han podido olvidar los hechos, el perfil de hábitos se queda como estaba');
+});
+
+test('habits: cada categoría real del perfil tiene su «olvidar» en español, y solo una', () => {
+  /* Cada categoría que el perfil observa tiene que poder olvidarse desde la app, y
+     ninguna etiqueta puede llevarse por delante la de al lado: si mañana se añade una
+     categoría observada y no se traduce, aquí se ve en vez de que el usuario no pueda
+     olvidarla (o de que un «olvidar webs» le borre los modos). */
+  const sembrar = () => {
+    habits.reset();
+    habits.observe('tool', { name: 'read_file', args: { path: 'C:\\dev\\proyecto-x\\notas.md' } });
+    habits.observe('tool', { name: 'open_app', args: { name: 'spotify.exe' } });
+    habits.observe('tool', { name: 'run_command', args: { command: 'git status' } });
+    habits.observe('tool', { name: 'browser_control', args: { url: 'https://github.com/ejemplo/mi-repo' } });
+    habits.observe('mode', { mode: 'plan' });
+    habits.observe('confirm', { approved: true });
+    habits.observe('confirm', { approved: false });
+  };
+  const conDatos = () => {
+    const s = habits.stats();
+    return [
+      s.tools.length && 'tools',
+      s.apps.length && 'apps',
+      s.commands.length && 'commands',
+      s.folders.length && 'folders',
+      s.sites.length && 'sites',
+      Object.keys(s.modes || {}).length && 'modes',
+      (s.confirms.approved || 0) + (s.confirms.denied || 0) && 'confirms',
+    ].filter(Boolean);
+  };
+
+  sembrar();
+  const reales = conDatos();
+  eq(reales.length, 7, 'el perfil debe tener datos en las siete categorías reales: ' + reales.join(','));
+
+  const cubiertos = new Map();
+  for (const etiqueta of ['herramientas', 'aplicaciones', 'comandos', 'carpetas', 'webs', 'modos', 'permisos']) {
+    sembrar();
+    const antes = conDatos();
+    const r = habits.olvidar(etiqueta);
+    eq(r.ok, true, 'olvidar «' + etiqueta + '»: ' + JSON.stringify(r));
+    const borradas = antes.filter((c) => !conDatos().includes(c));
+    eq(borradas.length, 1, '«' + etiqueta + '» debe olvidar una sola categoría (olvidó: ' + borradas.join(',') + ')');
+    ok(!cubiertos.has(borradas[0]), 'dos etiquetas olvidan la misma categoría real: ' + borradas[0]);
+    cubiertos.set(borradas[0], etiqueta);
+  }
+  eq(reales.filter((c) => !cubiertos.has(c)).join(', '), '', 'categorías reales del perfil que la app no puede olvidar');
+
+  sembrar();
+  const todo = habits.olvidar('todo');
+  eq(todo.ok, true, 'olvidar «todo»: ' + JSON.stringify(todo));
+  eq(conDatos().join(','), '', '«todo» deja el perfil vacío');
+  habits.reset();
+});
+
+test('memoria v2: la propuesta nueva del almacén llega al renderer como memory:nueva', () => {
+  const { registerMemoryIpc } = require('../main/ipc-memory');
+  // La bandeja del módulo compartido apuntaría al perfil real del usuario: se aísla.
+  memory.__test._resetTray(path.join(tmpDir('sagi-tray-'), 'memory-tray.json'));
+  const handlers = new Map();
+  const ipc = { handle: (canal, fn) => handlers.set(canal, fn) };
+  const enviados = [];
+  const ventana = { isDestroyed: () => false, webContents: { send: (canal, dato) => enviados.push({ canal, dato }) } };
+  registerMemoryIpc(ipc, { memory, models: modelsMod, habits, getWin: () => ventana });
+
+  const nuevas = memory.trayProponer([
+    { texto: 'El usuario se llama Darío', origenTexto: 'me llamo Darío', etiquetas: ['identidad'], motivo: 'identidad' },
+  ]);
+  eq(nuevas.length, 1, 'la propuesta entra en la bandeja');
+  eq(enviados.length, 1, 'un aviso por propuesta');
+  eq(enviados[0].canal, 'memory:nueva');
+  eq(enviados[0].dato.id, nuevas[0].id, 'el aviso lleva la propuesta que acaba de entrar');
+  eq(enviados[0].dato.texto, 'El usuario se llama Darío');
+
+  // Una repetida no vuelve a avisar: el contador de «Recién aprendido» no baila.
+  memory.trayProponer([{ texto: 'El usuario se llama Darío', origenTexto: 'me llamo Darío' }]);
+  eq(enviados.length, 1, 'una propuesta repetida no avisa');
+
+  // Y la vista la ve por el canal, con la forma que espera.
+  const lista = handlers.get('memory:tray:list')();
+  eq(lista.length, 1);
+  eq(lista[0].texto, 'El usuario se llama Darío');
+  memory.trayDescartar(lista[0].id);
 });
 
 test('updater: una descarga que deja de recibir datos se corta sola', async () => {

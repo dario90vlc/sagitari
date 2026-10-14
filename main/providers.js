@@ -44,6 +44,118 @@ const PRESETS = [
     hint: 'Ultrarrápido, Llama 3.x gratis con límites',
   },
   {
+    id: 'gemini',
+    name: 'Google Gemini (compatibilidad OpenAI)',
+    baseUrl: 'https://generativelanguage.googleapis.com/v1beta/openai',
+    needsKey: true,
+    format: 'openai',
+    hint: 'Nivel gratuito; herramientas, visión y streaming documentados en la misma página',
+  },
+  {
+    id: 'deepseek',
+    name: 'DeepSeek',
+    baseUrl: 'https://api.deepseek.com',
+    needsKey: true,
+    format: 'openai',
+    hint: 'Modelos de código potentes y baratos; visión solo en deepseek-flash',
+  },
+  {
+    id: 'xai',
+    name: 'xAI (Grok)',
+    baseUrl: 'https://api.x.ai/v1',
+    needsKey: true,
+    format: 'openai',
+    hint: 'Modelos de código de Grok; su shim de Anthropic está obsoleto',
+  },
+  {
+    id: 'mistral',
+    name: 'Mistral AI',
+    baseUrl: 'https://api.mistral.ai/v1',
+    needsKey: true,
+    format: 'openai',
+    hint: 'Host de la UE disponible (api.eu.mistral.ai/v1); tool calling compatible con OpenAI',
+  },
+  {
+    id: 'moonshot',
+    name: 'Moonshot (Kimi)',
+    baseUrl: 'https://api.moonshot.ai/v1',
+    needsKey: true,
+    format: 'openai',
+    hint: 'Kimi serie K, contexto largo; también tiene base /anthropic, pero usa /v1 para el selector de modelos',
+  },
+  {
+    id: 'cerebras',
+    name: 'Cerebras',
+    baseUrl: 'https://api.cerebras.ai/v1',
+    needsKey: true,
+    format: 'openai',
+    hint: 'Los tokens/s más rápidos; la visión solo acepta base64, no URLs de imagen',
+  },
+  {
+    id: 'nvidia',
+    name: 'NVIDIA NIM',
+    baseUrl: 'https://integrate.api.nvidia.com/v1',
+    needsKey: true,
+    format: 'openai',
+    hint: 'Nivel gratuito; su /models es público; los ids llevan prefijo del publicador (meta/…, openai/…)',
+  },
+  {
+    id: 'sambanova',
+    name: 'SambaNova Cloud',
+    baseUrl: 'https://api.sambanova.ai/v1',
+    needsKey: true,
+    format: 'openai',
+    hint: 'Muy rápido; ignora presence_penalty/frequency_penalty',
+  },
+  {
+    id: 'llamacpp',
+    name: 'llama.cpp (servidor)',
+    baseUrl: 'http://localhost:8080/v1',
+    needsKey: false,
+    format: 'openai',
+    hint: 'llama-server; en builds recientes de master el puerto por defecto es 9931',
+  },
+  {
+    id: 'vllm',
+    name: 'vLLM',
+    baseUrl: 'http://localhost:8000/v1',
+    needsKey: false,
+    format: 'openai',
+    hint: 'Necesita --enable-auto-tool-choice y un --tool-call-parser para tool calling',
+  },
+  {
+    id: 'jan',
+    name: 'Jan (local)',
+    baseUrl: 'http://127.0.0.1:1337/v1',
+    needsKey: false,
+    format: 'openai',
+    hint: 'Hay que habilitar el servidor de API en Jan',
+  },
+  {
+    id: 'koboldcpp',
+    name: 'KoboldCpp',
+    baseUrl: 'http://localhost:5001/v1',
+    needsKey: false,
+    format: 'openai',
+    hint: 'Runtime local de un solo archivo',
+  },
+  {
+    id: 'textgen',
+    name: 'text-generation-webui',
+    baseUrl: 'http://127.0.0.1:5000/v1',
+    needsKey: false,
+    format: 'openai',
+    hint: 'Ejecútalo con --api',
+  },
+  {
+    id: 'localai',
+    name: 'LocalAI',
+    baseUrl: 'http://localhost:8080/v1',
+    needsKey: false,
+    format: 'openai',
+    hint: 'Runtime autoalojado compatible con OpenAI',
+  },
+  {
     id: 'ollama',
     name: 'Ollama (local)',
     baseUrl: 'http://localhost:11434/v1',
@@ -108,16 +220,24 @@ async function readCappedText(resp, max) {
 
 /**
  * Lista los modelos de un proveedor con el formato/cabeceras correctos.
- * (OpenCode Go exige sesión también aquí: sin ella responde 400 MissingSessionID.)
+ * El header de sesión de OpenCode Go/Zen se sigue mandando (es inocuo), pero
+ * GET /models NO lo exige: solo los POST lo comprueban.
+ * `opts` permite forzar el protocolo (format/providerId/model) para bases
+ * Anthropic de terceros, cuyo path no basta para deducir el formato.
  */
-async function listModels(baseUrl, apiKey, fetchFn = fetch) {
+async function listModels(baseUrl, apiKey, fetchFn = fetch, opts = {}) {
   const base = String(baseUrl || '').replace(/\/+$/, '');
   // fetch solo habla http(s), pero un esquema raro o una ruta local no debe ni
   // intentarse: la misma regla que al guardar/activar proveedores.
   if (!/^https?:\/\//i.test(base) && !/^(localhost|127\.0\.0\.1)(:\d+)?([/?#]|$)/i.test(base)) {
     throw new Error('baseUrl debe ser http(s) o localhost');
   }
-  const format = protocols.detectFormat({ baseUrl: base });
+  const format = protocols.detectFormat({
+    baseUrl: base,
+    providerId: opts.providerId,
+    model: opts.model,
+    format: opts.format,
+  });
   const url = base + '/models';
   const resp = await fetchFn(url, {
     headers: protocols.authHeaders({ baseUrl: base, apiKey }, format),

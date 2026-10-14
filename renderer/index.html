@@ -4,7 +4,7 @@
     <meta charset="UTF-8" />
     <meta
       http-equiv="Content-Security-Policy"
-      content="default-src 'self' data: blob:; style-src 'self' 'unsafe-inline'; font-src 'self'; script-src 'self' blob:"
+      content="default-src 'self' data: blob:; style-src 'self' 'unsafe-inline'; font-src 'self'; script-src 'self' blob:; object-src 'none'; base-uri 'self'; frame-ancestors 'none'"
     />
     <link rel="stylesheet" href="styles.css" />
     <link rel="stylesheet" href="liquid-glass.css" />
@@ -12,11 +12,9 @@
   </head>
   <body>
     <div class="shell" id="shell">
-      <!-- capa del aura: dentro va el anillo que respira; el desenfoque lo lleva la capa de fuera -->
-      <span class="glow" aria-hidden="true"
-        ><span class="glowRing"></span><span class="glowFlow halo-a"></span><span class="glowFlow halo-b"></span
-        ><span class="glowFlow halo-c"></span
-      ></span>
+      <!-- filo de la ventana: mantiene la hairline de 1px y la enciende sólo mientras hay
+           trabajo. Es una capa de un píxel, no un marco. -->
+      <span class="filo filo-ventana" aria-hidden="true"></span>
 
       <!-- Titlebar: franja de arrastre a todo el ancho. Los botones son DESCENDIENTES
        del área drag, por lo que su no-drag sí anula la región (regla Electron). -->
@@ -31,6 +29,8 @@
       <div class="app" id="app" data-view="chat">
         <!-- ===== Sidebar ===== -->
         <aside class="side" id="side">
+          <!-- filo del panel lateral: la luz de este panel al pensar (ver styles.css) -->
+          <span class="filo" aria-hidden="true"></span>
           <div class="brand drag">
             <div class="brandlogo"><img src="assets/sagitari-sidebar.png" alt="SAGITARI" draggable="false" /></div>
             <button class="sidecollapse" id="sideToggle" title="Compactar la barra lateral (Alt+B)" aria-label="Compactar barra lateral">
@@ -54,6 +54,13 @@
               </button>
               <button class="navitem" data-view="agents" title="Agentes (Alt+4)">
                 <span class="ni"><i data-i="agents"></i></span><span class="nl">Agentes</span>
+              </button>
+              <!-- el equipo (modo EQUIPO) tiene su propia vista: compañeros vivos, buzón y
+                   tablero. Sin atajo propio (los Alt+N llegan hasta Alt+9 y Alt+0 se queda
+                   sin vista): se abre desde su sección, como MCP. -->
+              <button class="navitem" data-view="equipo" title="Equipo">
+                <span class="ni"><i data-i="team"></i></span><span class="nl">Equipo</span>
+                <span class="nb" id="nbEquipo" hidden></span>
               </button>
             </div>
 
@@ -111,19 +118,24 @@
             <div class="viewhead chathead">
               <div class="ch-left">
                 <h2 id="chatTitle">Nueva conversación</h2>
-                <div class="ch-status" id="chatStatus" hidden>
+                <div class="ch-status" id="chatStatus" role="status" hidden>
                   <span class="dot" id="chatStatusDot"></span>
                   <span class="ch-mode" id="chatStatusMode">ACT</span>
                   <span class="ch-txt" id="chatStatusText"></span>
                 </div>
               </div>
+              <!-- Pestañas de las conversaciones ABIERTAS. Cada una tiene su propio nodo
+                   de mensajes y su propio turno, así que una puede seguir trabajando
+                   mientras se usa la otra. El strip se pinta desde el renderer
+                   (10-chat.js): aquí sólo vive el contenedor con el rol de tablist. -->
+              <div class="ctabs" id="convTabs" role="tablist" aria-label="Conversaciones abiertas"></div>
               <div class="vh-actions">
                 <button class="btn ghost sq" id="btnCopyConv" title="Copiar toda la conversación"><i data-i="copy"></i></button>
                 <button class="btn" id="btnClear">Nueva conversación</button>
                 <button class="btn ghost" id="btnGoHistory">Historial</button>
               </div>
             </div>
-            <div id="confirmBar" class="confirmbar" hidden>
+            <div id="confirmBar" class="confirmbar" aria-labelledby="confirmTitle" aria-describedby="confirmDetail" hidden>
               <span class="cb-dot"></span>
               <div class="cb-txt">
                 <b id="confirmTitle">Confirmación requerida</b>
@@ -165,11 +177,27 @@
               </button>
               <footer class="chatfoot">
                 <div id="skillMenu" class="skillmenu" hidden></div>
+                <!-- revisión del cambio: panel NO modal (no bloquea el chat) -->
+                <div id="diffPanel" class="diffpanel" role="region" aria-label="Cambios del turno" hidden>
+                  <div class="dp-head">
+                    <b id="diffCount">Cambios del turno</b>
+                    <button class="btn ghost sq" id="diffClose" title="Cerrar" aria-label="Cerrar la revisión de cambios">
+                      <i data-i="close"></i>
+                    </button>
+                  </div>
+                  <div id="diffList" class="dplist"></div>
+                </div>
                 <div class="composer slim" id="composer">
+                  <!-- filo del compositor: la luz de la superficie que trabaja -->
+                  <span class="filo" aria-hidden="true"></span>
                   <div id="undoBar" class="btnrow" hidden style="align-items: center; gap: 10px">
                     <span class="subnote" id="undoText" style="margin: 0"></span>
                     <button class="btn ghost" id="undoBtn">Deshacer el cambio</button>
                   </div>
+                  <!-- revisión del turno: se enseña sólo cuando hay algo que revisar -->
+                  <button class="btn ghost" id="btnDiff" hidden>
+                    <span class="bi"><i data-i="file"></i></span> Revisar los cambios
+                  </button>
                   <div id="attachStrip" class="attachstrip" hidden></div>
                   <div class="compline">
                     <div class="modeseg" id="modeSeg" title="Modo del agente (Alt+M para cambiar)"></div>
@@ -177,7 +205,7 @@
                       id="chatInput"
                       aria-label="Mensaje para Sagitari"
                       rows="1"
-                      placeholder="Escribe a Sagitari… (/ para usar una skill)"
+                      placeholder="Escribe a Sagitari… (/ para órdenes y skills)"
                     ></textarea>
                     <button
                       class="cbtn"
@@ -187,9 +215,6 @@
                     >
                       <i data-i="clip"></i>
                     </button>
-                    <button class="cbtn" id="chatMic" title="Dictado por voz" aria-label="Dictado por voz" aria-pressed="false">
-                      <i data-i="mic"></i>
-                    </button>
                     <button class="cbtn" id="chatPause" title="Pausar la tarea (guarda el punto de control)" aria-label="Pausar tarea">
                       <i data-i="pause"></i>
                     </button>
@@ -197,7 +222,14 @@
                   </div>
                 </div>
                 <div id="devMeta" class="devmeta" hidden></div>
-                <div class="hintbar"><span id="modeLabel">Modo Act</span><span id="chatModelLabel"></span></div>
+                <div class="hintbar">
+                  <span id="modeLabel">Modo Act</span>
+                  <span id="ctxMeter" class="ctxmeter" role="status" aria-label="Contexto de la conversación" data-estado="hola" hidden>
+                    <span class="ctxbar" aria-hidden="true"><i></i></span>
+                    <span class="ctxval">0%</span>
+                  </span>
+                  <span id="chatModelLabel"></span>
+                </div>
               </footer>
             </div>
           </section>
@@ -218,39 +250,17 @@
           <!-- AGENTS -->
           <section class="view" id="view-agents">
             <h1 class="sr-only">Agentes</h1>
-            <div class="viewhead"><h2>Agentes</h2></div>
-            <div class="agents-grid">
-              <div class="acard" id="agentCard-researcher">
-                <div class="aic a-b"><i data-i="search"></i></div>
-                <div><b>Investigador</b><small>Busca, lee y sintetiza información</small></div>
-                <span class="adot"></span>
-              </div>
-              <div class="acard" id="agentCard-coder">
-                <div class="aic a-p"><i data-i="code"></i></div>
-                <div><b>Programador</b><small>Escribe y ejecuta código</small></div>
-                <span class="adot"></span>
-              </div>
-              <div class="acard" id="agentCard-analyst">
-                <div class="aic a-b2"><i data-i="chart"></i></div>
-                <div><b>Analista</b><small>Procesa datos y capturas</small></div>
-                <span class="adot"></span>
-              </div>
-              <div class="acard" id="agentCard-navigator">
-                <div class="aic a-c"><i data-i="compass"></i></div>
-                <div><b>Navegador</b><small>Controla Chrome y Edge por ti</small></div>
-                <span class="adot"></span>
-              </div>
-              <div class="acard" id="agentCard-file">
-                <div class="aic a-y"><i data-i="folder"></i></div>
-                <div><b>Archivador</b><small>Gestiona archivos y carpetas</small></div>
-                <span class="adot"></span>
-              </div>
-              <div class="acard" id="agentCard-ops">
-                <div class="aic a-p2"><i data-i="terminal"></i></div>
-                <div><b>Operador</b><small>Comandos, apps y multimedia</small></div>
-                <span class="adot"></span>
+            <div class="viewhead">
+              <h2>Agentes</h2>
+              <div class="vh-actions">
+                <span id="agentsCount" class="md"></span>
+                <button class="btn ghost" id="agentsReload">
+                  <span class="bi"><i data-i="refresh"></i></span> Recargar
+                </button>
               </div>
             </div>
+            <!-- la lista sale del registro real (agentsCustom): nada de escaparate -->
+            <div id="agentsList" class="agents-grid" aria-busy="false"></div>
             <div class="tooltray">
               <div class="tt-head">ACTIVIDAD DE HERRAMIENTAS · SESIÓN ACTUAL</div>
               <div id="toolTrayList" class="tt-list"></div>
@@ -263,6 +273,31 @@
               <div class="tt-head">HÁBITOS OBSERVADOS · v2.0 APRENDIZAJE</div>
               <div id="habitsList" class="tt-list"></div>
             </div>
+          </section>
+
+          <!-- EQUIPO (v4.4, modo EQUIPO): compañeros vivos con su encargo, el buzón por el
+               que se hablan y el tablero compartido. Todo sale de los eventos team_* de la
+               conversación: no hay canal de lectura, así que sin eventos no hay equipo que
+               enseñar (esa es la verdad, no una carga que se quedó colgada). -->
+          <section class="view" id="view-equipo">
+            <h1 class="sr-only">Equipo</h1>
+            <div class="viewhead">
+              <h2>Equipo</h2>
+              <div class="vh-actions"><span id="equipoEstado" class="md"></span></div>
+            </div>
+            <p class="subnote" id="equipoNota" style="margin-top: 0"></p>
+            <div id="equipoMiembros" class="agents-grid" aria-busy="false"></div>
+            <div class="equipowrap">
+              <div class="tooltray">
+                <div class="tt-head">BUZÓN · QUIÉN ESCRIBE A QUIÉN</div>
+                <div id="equipoBuzon" class="eqfeed"></div>
+              </div>
+              <div class="tooltray">
+                <div class="tt-head">TABLERO COMPARTIDO</div>
+                <div id="equipoTablero" class="eqboard"></div>
+              </div>
+            </div>
+            <div id="equipoCierre"></div>
           </section>
 
           <!-- TASKS (v1.3: cola en segundo plano, programadas, pausa/cancelar) -->
@@ -465,7 +500,133 @@
                 </button>
               </div>
             </div>
-            <div id="memList" class="memlist"></div>
+
+            <div class="memwrap">
+              <!-- 1. Lo que sé de ti -->
+              <div class="memsec">
+                <h3 class="memsec-t">Lo que sé de ti <span class="memsec-note" id="memFichaCuenta"></span></h3>
+                <p class="memsec-lead">
+                  Hechos duraderos que uso cuando encajan con lo que me pides. Corrígelos, cámbiales la importancia o bórralos cuando
+                  quieras: son tuyos.
+                </p>
+                <div id="memFiltro" class="memfiltro" role="group" aria-label="Filtrar por etiqueta"></div>
+                <label class="sr-only" for="memSearch">Buscar en lo que sé de ti</label>
+                <input
+                  type="search"
+                  id="memSearch"
+                  class="memsearch"
+                  placeholder="Buscar en lo que sé de ti…"
+                  aria-label="Buscar en lo que sé de ti"
+                />
+                <div id="memUndoBox" class="memundo" role="status" hidden></div>
+                <div id="memList" class="memlist" aria-live="polite"></div>
+              </div>
+
+              <!-- 2. Recién aprendido -->
+              <div class="memsec">
+                <h3 class="memsec-t">Recién aprendido <span class="memsec-note" id="memBandejaCuenta"></span></h3>
+                <p class="memsec-lead">
+                  Lo que se aprende de tus mensajes cae aquí y espera tu aprobación. Solo se guarda sin preguntar si activas «Guardar sin
+                  preguntar».
+                </p>
+                <div id="memBandeja" class="memlist" aria-live="polite"></div>
+              </div>
+
+              <!-- 3. Cómo trabajas conmigo -->
+              <div class="memsec">
+                <h3 class="memsec-t">Cómo trabajas conmigo</h3>
+                <p class="memsec-lead">
+                  Lo que he ido observando de tu forma de trabajar: qué herramientas, webs y carpetas repites. Vive en un fichero local de
+                  este equipo, viaja al modelo configurado dentro del prompt y puedes olvidar un grupo entero.
+                </p>
+                <div id="memHabitos" class="habitprev" aria-live="polite"></div>
+              </div>
+
+              <!-- 4. Buscar en lo que hemos hablado -->
+              <div class="memsec">
+                <h3 class="memsec-t">Buscar en lo que hemos hablado</h3>
+                <p class="memsec-lead">Encontrará una decisión o un dato de cualquier conversación anterior, aunque sea de hace semanas.</p>
+                <form class="membuscar" id="memBuscarForm">
+                  <label class="sr-only" for="memBuscar">Buscar en nuestras conversaciones</label>
+                  <input type="search" id="memBuscar" class="memsearch" placeholder="¿Qué decidimos sobre…?" />
+                  <button class="btn" id="memBuscarBtn" type="submit">
+                    <span class="bi"><i data-i="search"></i></span> Buscar
+                  </button>
+                </form>
+                <p class="memsec-nota" id="memBuscarNota" hidden></p>
+                <div id="memBuscarOut" class="memresults" aria-live="polite"></div>
+              </div>
+
+              <!-- 5. Papelera -->
+              <div class="memsec">
+                <h3 class="memsec-t">Papelera <span class="memsec-note" id="memPapeleraCuenta"></span></h3>
+                <p class="memsec-lead">
+                  Lo que he olvidado. Se queda aquí 30 días por si lo quieres de vuelta; después se borra de verdad.
+                </p>
+                <div class="membarra" id="memPapeleraBarra" hidden>
+                  <button class="btn ghost danger" id="memPapeleraVaciar" type="button">Vaciar la papelera</button>
+                </div>
+                <div id="memPapelera" class="memlist" aria-live="polite"></div>
+              </div>
+
+              <!-- Pie: aprendizaje, exportar, olvidarlo todo -->
+              <div class="memsec mempie">
+                <div class="srow">
+                  <span class="st"
+                    ><b>Que aprenda de nuestras conversaciones</b
+                    ><small
+                      >Al cerrar cada turno propone hechos duraderos que ve en tus frases y los deja en «Recién aprendido». Tú decides qué
+                      se guarda. Con esto apagado, la memoria solo cambia cuando la escribes tú.</small
+                    ></span
+                  >
+                  <div
+                    class="sw"
+                    id="swMemLearn"
+                    role="switch"
+                    tabindex="0"
+                    aria-checked="true"
+                    aria-label="Que aprenda de nuestras conversaciones"
+                  ></div>
+                </div>
+                <div class="srow">
+                  <span class="st"
+                    ><b>Guardar sin preguntar</b><small>Lo que proponga se guarda solo, sin pasar por «Recién aprendido».</small></span
+                  >
+                  <div class="sw" id="swMemAuto" role="switch" tabindex="0" aria-checked="false" aria-label="Guardar sin preguntar"></div>
+                </div>
+                <p class="memlimites">
+                  <span
+                    >Tu memoria vive en un fichero local de este equipo. Los recuerdos y los hábitos que encajan con la conversación se
+                    envían al modelo que tengas configurado, igual que el resto del mensaje.</span
+                  >
+                  <span
+                    >Nada entra sin tu aprobación (salvo que enciendas «guardar sin preguntar»), y todo lo que sé lo puedes leer, corregir,
+                    exportar o borrar desde esta pantalla.</span
+                  >
+                </p>
+                <div class="btnrow memacciones">
+                  <button class="btn ghost" id="memExport" type="button">
+                    <span class="bi"><i data-i="download"></i></span> Exportar mi memoria
+                  </button>
+                  <button class="btn ghost" id="memOlvidarTodo" type="button">
+                    <span class="bi"><i data-i="wave"></i></span> Olvidar todo lo observado
+                  </button>
+                  <button class="btn ghost danger" id="memWipe" type="button">
+                    <span class="bi"><i data-i="trash"></i></span> Olvídalo todo
+                  </button>
+                </div>
+                <div class="memwipe" id="memWipeBox" hidden>
+                  <p>
+                    Esto borra <b>todos</b> los hechos, la papelera, la bandeja y tus hábitos, y no se puede deshacer. Escribe
+                    <b>OLVIDAR</b> para confirmar.
+                  </p>
+                  <label class="sr-only" for="memWipeInput">Escribe OLVIDAR para confirmar</label>
+                  <input id="memWipeInput" type="text" autocomplete="off" spellcheck="false" placeholder="OLVIDAR" />
+                  <button class="btn danger" id="memWipeGo" type="button" disabled>Olvidar todo</button>
+                  <button class="btn ghost" id="memWipeCancel" type="button">Cancelar</button>
+                </div>
+              </div>
+            </div>
           </section>
 
           <!-- SKILLS -->
@@ -582,22 +743,82 @@
               <div class="wz-body" id="wzBody"></div>
             </div>
 
-            <div class="settabs" id="setTabs">
-              <button class="settab on" data-set="model"><i data-i="spark"></i> Modelo</button>
-              <button class="settab" data-set="prefs"><i data-i="gear"></i> Preferencias</button>
-              <button class="settab" data-set="security"><i data-i="key"></i> Seguridad</button>
-              <button class="settab" data-set="agent"><i data-i="agents"></i> Agente</button>
-              <button class="settab" data-set="data"><i data-i="history"></i> Datos y atajos</button>
-              <button class="settab" data-set="about"><i data-i="spark"></i> Acerca de</button>
+            <div class="settabs" id="setTabs" role="tablist">
+              <button
+                class="settab on"
+                data-set="model"
+                id="tab-model"
+                role="tab"
+                aria-controls="setpanel-model"
+                aria-selected="true"
+                tabindex="0"
+              >
+                <i data-i="spark"></i> Modelo
+              </button>
+              <button
+                class="settab"
+                data-set="apariencia"
+                id="tab-apariencia"
+                role="tab"
+                aria-controls="setpanel-apariencia"
+                aria-selected="false"
+                tabindex="-1"
+              >
+                <i data-i="eye"></i> Apariencia
+              </button>
+              <button
+                class="settab"
+                data-set="security"
+                id="tab-security"
+                role="tab"
+                aria-controls="setpanel-security"
+                aria-selected="false"
+                tabindex="-1"
+              >
+                <i data-i="key"></i> Seguridad
+              </button>
+              <button
+                class="settab"
+                data-set="agent"
+                id="tab-agent"
+                role="tab"
+                aria-controls="setpanel-agent"
+                aria-selected="false"
+                tabindex="-1"
+              >
+                <i data-i="agents"></i> Agente
+              </button>
+              <button
+                class="settab"
+                data-set="data"
+                id="tab-data"
+                role="tab"
+                aria-controls="setpanel-data"
+                aria-selected="false"
+                tabindex="-1"
+              >
+                <i data-i="history"></i> Datos
+              </button>
+              <button
+                class="settab"
+                data-set="about"
+                id="tab-about"
+                role="tab"
+                aria-controls="setpanel-about"
+                aria-selected="false"
+                tabindex="-1"
+              >
+                <i data-i="spark"></i> Acerca de
+              </button>
             </div>
 
             <div class="setwrap" id="setWrap">
               <!-- ===== MODELO ===== -->
-              <div class="setpanel on" data-panel="model">
+              <div class="setpanel on" data-panel="model" id="setpanel-model" role="tabpanel" aria-labelledby="tab-model">
                 <div class="setcard">
                   <div class="sc-head"><b>Proveedor y modelo</b><span class="sc-hint">La API que usará Sagitari</span></div>
                   <div class="field srow" data-keys="preset proveedor api plantilla">
-                    <label for="presetSel">Preset</label>
+                    <label for="presetSel">Proveedor predefinido</label>
                     <select id="presetSel"></select>
                     <div class="subnote" id="presetHint"></div>
                   </div>
@@ -606,13 +827,18 @@
                       <label for="pName">Nombre</label><input type="text" id="pName" />
                     </div>
                     <div class="field srow" data-keys="formato api protocolo endpoint anthropic responses openai">
-                      <label for="apiFormat">Formato de API</label>
+                      <label for="apiFormat">Protocolo de la API</label>
                       <select id="apiFormat">
-                        <option value="auto">Automático (detectar)</option>
+                        <option value="auto">Automático (deducirlo)</option>
                         <option value="openai">OpenAI — /chat/completions</option>
                         <option value="anthropic">Anthropic — /messages</option>
                         <option value="responses">OpenAI Responses — /responses</option>
                       </select>
+                      <div class="subnote">
+                        Cómo habla Sagitari con este servidor. «Automático» lo deduce por proveedor y modelo (en OpenCode Go, los Qwen y
+                        MiniMax usan /messages y Grok o GPT-Luna usan /responses); fíjalo a mano si tu servidor habla Anthropic sin decirlo
+                        en la dirección. Se guarda al cambiarlo y también lo usa «Detectar modelos».
+                      </div>
                     </div>
                   </div>
                   <div class="field srow" data-keys="base url endpoint servidor direccion">
@@ -622,7 +848,14 @@
                     <label for="pKey">API key</label>
                     <div class="keyrow">
                       <input type="password" id="pKey" placeholder="sk-… (vacío para Ollama o LM Studio)" />
-                      <button class="btn ghost sq" id="apiKeyReveal" type="button" title="Mostrar u ocultar la clave">
+                      <button
+                        class="btn ghost sq"
+                        id="apiKeyReveal"
+                        type="button"
+                        title="Mostrar u ocultar la clave"
+                        aria-label="Mostrar la clave"
+                        aria-pressed="false"
+                      >
                         <i data-i="eye"></i>
                       </button>
                     </div>
@@ -639,16 +872,10 @@
                     </div>
                   </div>
                   <div class="field srow" data-keys="modelo model id elegir">
-                    <label for="modelSel">MODELO</label
+                    <label for="modelSel">Modelo</label
                     ><select id="modelSel">
                       <option value="">— detecta modelos primero —</option>
                     </select>
-                  </div>
-                  <div class="srow" data-keys="formato endpoint protocolo">
-                    <div class="subnote" id="formatHint">
-                      El formato «Automático» deduce el endpoint por proveedor y modelo: en OpenCode Go, los Qwen y MiniMax usan /messages y
-                      Grok o GPT-Luna usan /responses.
-                    </div>
                   </div>
                   <div class="srow" data-keys="activar modelo usar">
                     <div class="btnrow">
@@ -667,14 +894,24 @@
                   <div class="provlist"><div id="provList"></div></div>
                 </div>
               </div>
-              <!-- ===== PREFERENCIAS ===== -->
-              <div class="setpanel" data-panel="prefs">
+              <!-- ===== APARIENCIA ===== -->
+              <div class="setpanel" data-panel="apariencia" id="setpanel-apariencia" role="tabpanel" aria-labelledby="tab-apariencia">
                 <div class="setcard">
-                  <div class="sc-head"><b>Personal</b><span class="sc-hint">Tu identidad y el comportamiento visual</span></div>
-                  <div class="swrow srow" data-keys="nombre usuario como te llamas identidad">
-                    <span class="st"><b>Tu nombre</b><small>Sagitari lo usa para dirigirse a ti.</small></span>
+                  <div class="sc-head"><b>Personal</b><span class="sc-hint">Cómo apareces en la conversación</span></div>
+                  <div class="swrow srow" data-keys="nombre usuario como te llamas identidad mensajes avatar">
+                    <span class="st"
+                      ><b>Tu nombre</b
+                      ><small
+                        >Etiqueta tus mensajes en la conversación y da la inicial de tu avatar. También se le dice al modelo —en una sola
+                        línea, saneado— para que se dirija a ti por tu nombre; si lo dejas vacío, no se le envía nada.</small
+                      ></span
+                    >
                     <input type="text" id="setUserName" aria-label="Tu nombre" style="width: 160px" />
                   </div>
+                </div>
+
+                <div class="setcard">
+                  <div class="sc-head"><b>Apariencia</b><span class="sc-hint">Color y luz de la interfaz; se aplica al momento</span></div>
                   <div class="swrow srow" data-keys="glow resplandor bordes luz ambiental">
                     <span class="st"
                       ><b>Glow ambiental en los bordes</b
@@ -682,77 +919,6 @@
                     >
                     <div class="sw on" id="swGlow" aria-label="Glow ambiental en los bordes"></div>
                   </div>
-                  <div class="swrow srow" data-keys="voz tts leer hablar respuestas">
-                    <span class="st"><b>Leer en voz alta (TTS)</b><small>Sagitari pronuncia sus respuestas.</small></span>
-                    <div class="sw on" id="swTts" aria-label="Leer en voz alta (TTS)"></div>
-                  </div>
-                  <div class="swrow srow" data-keys="idioma voz dictado reconocimiento">
-                    <span class="st"><b>Idioma de voz</b><small>Para el dictado y la lectura en voz alta.</small></span>
-                    <select id="voiceLang" aria-label="Idioma de voz" style="width: 200px">
-                      <option value="es-ES">Español (España)</option>
-                      <option value="es-MX">Español (México)</option>
-                      <option value="es-AR">Español (Argentina)</option>
-                      <option value="en-US">English (US)</option>
-                      <option value="en-GB">English (UK)</option>
-                    </select>
-                  </div>
-                  <div class="swrow srow" data-keys="voz altavoz voz del sistema leer">
-                    <span class="st"><b>Voz de la lectura</b><small>Cuál de las voces instaladas usa SAGITARI.</small></span>
-                    <select id="ttsVoice" aria-label="Voz de la lectura" style="width: 240px"></select>
-                  </div>
-                  <div class="swrow srow" data-keys="piper voz local natural ligera offline instalar">
-                    <span class="st"
-                      ><b>Voz local de alta calidad (Piper)</b
-                      ><small>Neuronal, 100% local y ligera (≈80 MB). Se usa sola cuando está instalada; si no, Windows.</small></span
-                    >
-                    <div style="display: flex; flex-direction: column; gap: 6px; align-items: flex-end">
-                      <button class="wb" id="btnInstalarPiper" title="Instalar la voz local" style="min-width: 150px">Instalar voz</button>
-                      <small id="lblPiperEstado" style="max-width: 260px; text-align: right; opacity: 0.75"
-                        >no instalada — se usa la voz de Windows</small
-                      >
-                    </div>
-                  </div>
-                  <div class="swrow srow" data-keys="velocidad voz ritmo leer">
-                    <span class="st"><b>Velocidad de la voz</b><small>De más lenta a más rápida.</small></span>
-                    <input type="range" id="ttsRate" min="-40" max="40" step="5" class="glowslider" aria-label="Velocidad de la voz" />
-                  </div>
-                  <div class="swrow srow" data-keys="avisos voz leer todo permisos">
-                    <span class="st"
-                      ><b>Leer también los avisos</b><small>Permisos, errores y avisos cortos, además de la respuesta.</small></span
-                    >
-                    <div class="sw" id="swAvisos" aria-label="Leer también los avisos"></div>
-                  </div>
-                  <div class="swrow srow" data-keys="motor clasico dictado escucha reconocimiento micro sordo oye">
-                    <span class="st"
-                      ><b>Motor de escucha clásico</b
-                      ><small
-                        >Si al dictar no se escribe nada aunque el orbe se mueva, enciéndelo: usa el reconocedor clásico de Windows, que por
-                        donde escucha es distinto del moderno.</small
-                      ></span
-                    >
-                    <div class="sw" id="swSttClasico" aria-label="Motor de escucha clásico"></div>
-                  </div>
-                  <div class="swrow srow" data-keys="whisper dictado local transcribir preciso inteligencia artificial offline">
-                    <span class="st"
-                      ><b>Dictado local (Whisper)</b
-                      ><small
-                        >Transcripción de alta precisión, 100% local y sin internet, con transcripción en vivo mientras hablas. Instala el
-                        motor (≈190 MB) y SAGITARI lo usará automáticamente para entender mucho mejor lo que dices.</small
-                      ></span
-                    >
-                    <div style="display: flex; flex-direction: column; gap: 6px; align-items: flex-end">
-                      <button class="wb" id="btnInstalarWhisper" title="Instalar el motor de dictado local" style="min-width: 150px">
-                        Instalar motor
-                      </button>
-                      <small id="lblWhisperEstado" style="max-width: 260px; text-align: right; opacity: 0.75"
-                        >no instalado — se usa el motor de Windows</small
-                      >
-                    </div>
-                  </div>
-                </div>
-
-                <div class="setcard">
-                  <div class="sc-head"><b>Apariencia</b><span class="sc-hint">Color de la interfaz y del resplandor</span></div>
                   <div class="themerow" data-keys="color tema apariencia acento interfaz">
                     <span class="st"><b>Color de la interfaz</b><small>Teñe bordes, menús, botones y detalles de toda la app.</small></span>
                     <span class="colordot" id="dotUiColor"></span>
@@ -816,46 +982,10 @@
                     </div>
                   </div>
                 </div>
-
-                <div class="setcard">
-                  <div class="sc-head"><b>Espacio de trabajo</b><span class="sc-hint">Dónde trabaja el agente con tus archivos</span></div>
-                  <div class="srow" data-keys="espacio trabajo carpeta workspace proyectos ruta">
-                    <div class="btnrow" style="margin: 0">
-                      <input type="text" id="wsPath" aria-label="Ruta del espacio de trabajo" readonly style="flex: 1; min-width: 200px" />
-                      <button class="btn" id="wsPick">
-                        <span class="bi"><i data-i="folder"></i></span> Elegir…
-                      </button>
-                    </div>
-                    <div class="subnote">
-                      Carpeta donde Sagitari crea y modifica archivos, y donde se ejecutan los comandos. Las rutas relativas («informe.md»)
-                      aterrizan aquí.
-                    </div>
-                  </div>
-                </div>
-
-                <div class="setcard">
-                  <div class="sc-head"><b>Atajos de teclado</b><span class="sc-hint">Disponibles en toda la app</span></div>
-                  <div class="swrow srow" data-keys="atajo mostrar ocultar ventana ctrl alt s">
-                    <span class="st"><b>Mostrar u ocultar la ventana</b></span
-                    ><span class="kbdrow"><kbd class="kbd">Ctrl</kbd><kbd class="kbd">Alt</kbd><kbd class="kbd">S</kbd></span>
-                  </div>
-                  <div class="swrow srow" data-keys="atajo traer al frente primer plano ventana alt shift s">
-                    <span class="st"><b>Traer la ventana al frente</b></span
-                    ><span class="kbdrow"><kbd class="kbd">Alt</kbd><kbd class="kbd">Shift</kbd><kbd class="kbd">S</kbd></span>
-                  </div>
-                  <div class="swrow srow" data-keys="atajo pulso glow resplandor">
-                    <span class="st"><b>Pulso de resplandor</b></span
-                    ><span class="kbdrow"><kbd class="kbd">Ctrl</kbd><kbd class="kbd">Shift</kbd><kbd class="kbd">G</kbd></span>
-                  </div>
-                  <div class="swrow srow" data-keys="atajo modo act plan think agente">
-                    <span class="st"><b>Cambiar de modo (Act / Plan / Think)</b></span
-                    ><span class="kbdrow"><kbd class="kbd">Alt</kbd><kbd class="kbd">M</kbd></span>
-                  </div>
-                </div>
               </div>
 
               <!-- ===== SEGURIDAD ===== -->
-              <div class="setpanel" data-panel="security">
+              <div class="setpanel" data-panel="security" id="setpanel-security" role="tabpanel" aria-labelledby="tab-security">
                 <div class="setcard">
                   <div class="sc-head">
                     <b>Permisos por herramienta</b><span class="sc-hint">Qué puede hacer el agente sin preguntarte</span>
@@ -879,6 +1009,24 @@
                   </div>
                 </div>
 
+                <div class="setcard">
+                  <div class="sc-head">
+                    <b>Ediciones de archivos</b><span class="sc-hint">El «sí» automático para crear, editar y parchear archivos</span>
+                  </div>
+                  <div class="swrow srow" data-keys="ediciones automaticas aceptar cambios archivos escribir sin preguntar">
+                    <span class="st"
+                      ><b>Aceptar las ediciones de archivos sin preguntar</b
+                      ><small
+                        >SAGITARI crea, edita y parchea archivos sin pedirte permiso en cada cambio. NO cubre los comandos de terminal, ni
+                        abrir programas, ni el navegador: eso sigue pidiendo confirmación. Y manda la tabla de permisos de arriba: una
+                        herramienta puesta en «Bloqueado» sigue bloqueada, y esto solo le quita la pregunta a las que están en «Preguntar
+                        antes» (escribir un archivo, editarlo y aplicar parches).</small
+                      ></span
+                    >
+                    <div class="sw" id="swAutoEdits" aria-label="Aceptar las ediciones de archivos sin preguntar"></div>
+                  </div>
+                </div>
+
                 <!-- avanzado: límites finos y protección anti-bucles, plegados por defecto -->
                 <div class="setcard advcard" id="advLimitsCard">
                   <div
@@ -890,8 +1038,8 @@
                     aria-controls="advLimitsBody"
                   >
                     <div class="sc-head">
-                      <b>Avanzado · límites y anti-bucles</b
-                      ><span class="sc-hint">Tope de pasos, minutos, tokens y coste de cada tarea</span>
+                      <b>Avanzado · límites de cada tarea</b
+                      ><span class="sc-hint">Cuánto puede durar y gastar una tarea antes de pararse</span>
                     </div>
                     <span class="chev"><i data-i="chevron"></i></span>
                   </div>
@@ -901,7 +1049,7 @@
                         <label for="grSteps">Pasos máximos (0 = sin límite)</label><input type="number" id="grSteps" min="0" />
                       </div>
                       <div class="field srow" data-keys="herramientas maximas limite llamadas tools">
-                        <label for="grToolCalls">LLAMADAS A HERRAMIENTAS (0 = sin límite)</label
+                        <label for="grToolCalls">Llamadas a herramientas (0 = sin límite)</label
                         ><input type="number" id="grToolCalls" min="0" />
                       </div>
                       <div class="field srow" data-keys="minutos tiempo maximo duracion">
@@ -913,36 +1061,49 @@
                       <div class="field srow" data-keys="coste dinero dolares presupuesto gasto">
                         <label for="grCost">Coste máximo $ (0 = sin límite)</label><input type="number" id="grCost" min="0" step="0.1" />
                       </div>
-                      <div class="field srow" data-keys="timeout sin respuesta silencio espera datos modelo">
-                        <label for="grLlmTimeout">SIN RESPUESTA DEL MODELO, SEGUNDOS (0 = sin límite)</label
-                        ><input type="number" id="grLlmTimeout" min="0" step="30" />
-                      </div>
                     </div>
                     <div class="subnote">
-                      Al alcanzar cualquiera de estos límites la ejecución se detiene y queda como tarea recuperable desde el panel Tareas.
+                      Al alcanzar cualquiera de estos límites la ejecución se detiene y queda como tarea recuperable desde la vista Tareas.
                     </div>
-                  </div>
 
-                  <div class="setcard">
-                    <div class="sc-head">
-                      <b>Protección anti-bucles</b><span class="sc-hint">Que el agente no se quede dando vueltas</span>
-                    </div>
-                    <div class="grid2">
-                      <div class="field srow" data-keys="repeticiones bucle loop identicas">
-                        <label for="grLoop">Repeticiones de una acción = bucle</label><input type="number" id="grLoop" min="2" />
+                    <div class="setcard">
+                      <div class="sc-head">
+                        <b>Espera del modelo</b><span class="sc-hint">Cuánto aguanta Sagitari sin recibir respuesta</span>
                       </div>
-                      <div class="field srow" data-keys="pasos sin progreso estancado stall">
-                        <label for="grStall">Pasos sin progreso (0 = sin límite)</label><input type="number" id="grStall" min="0" />
-                      </div>
-                    </div>
-                    <div class="srow">
-                      <div class="btnrow" style="margin: 6px 0 0">
-                        <button class="btn ghost" id="secResetGuardrails">
-                          <span class="bi"><i data-i="history"></i></span> Restablecer límites recomendados
-                        </button>
+                      <div class="grid2">
+                        <div class="field srow" data-keys="timeout sin respuesta silencio espera datos modelo">
+                          <label for="grLlmTimeout">Segundos de espera de una respuesta (0 = sin límite)</label
+                          ><input type="number" id="grLlmTimeout" min="0" step="30" />
+                        </div>
                       </div>
                       <div class="subnote">
-                        Si el agente repite la misma acción sin avanzar, Sagitari detiene la ejecución sola para proteger el sistema.
+                        Es la espera máxima sin recibir nada del modelo <em>mientras</em> responde: al pasarse, la petición se corta con un
+                        error en vez de quedarse colgada esperando para siempre. Súbelo con modelos lentos o proveedores que tardan en
+                        arrancar, y ponlo a 0 para esperar sin límite.
+                      </div>
+                    </div>
+
+                    <div class="setcard">
+                      <div class="sc-head">
+                        <b>Protección anti-bucles</b><span class="sc-hint">Que el agente no se quede dando vueltas</span>
+                      </div>
+                      <div class="grid2">
+                        <div class="field srow" data-keys="repeticiones bucle loop identicas">
+                          <label for="grLoop">Repeticiones de una acción = bucle</label><input type="number" id="grLoop" min="2" />
+                        </div>
+                        <div class="field srow" data-keys="pasos sin progreso estancado stall">
+                          <label for="grStall">Pasos sin progreso (0 = sin límite)</label><input type="number" id="grStall" min="0" />
+                        </div>
+                      </div>
+                      <div class="srow">
+                        <div class="btnrow" style="margin: 6px 0 0">
+                          <button class="btn ghost" id="secResetGuardrails">
+                            <span class="bi"><i data-i="history"></i></span> Restablecer límites recomendados
+                          </button>
+                        </div>
+                        <div class="subnote">
+                          Si el agente repite la misma acción sin avanzar, Sagitari detiene la ejecución sola para proteger el sistema.
+                        </div>
                       </div>
                     </div>
                   </div>
@@ -952,26 +1113,24 @@
               </div>
 
               <!-- ===== AGENTE ===== -->
-              <div class="setpanel" data-panel="agent">
+              <div class="setpanel" data-panel="agent" id="setpanel-agent" role="tabpanel" aria-labelledby="tab-agent">
                 <div class="setcard">
-                  <div class="sc-head"><b>Memoria</b><span class="sc-hint">Cuánta memoria entra en cada conversación</span></div>
+                  <div class="sc-head"><b>Memoria</b><span class="sc-hint">Cuánto de lo que sabe de ti entra en cada respuesta</span></div>
                   <div class="swrow srow" data-keys="memoria sensibilidad relevancia recuerdos contexto">
                     <span class="st"
-                      ><b>Sensibilidad de relevancia (0-3)</b
-                      ><small>0 = entran más recuerdos · 3 = solo coincidencias muy claras.</small></span
+                      ><b>Memoria que entra en cada respuesta</b
+                      ><small
+                        >Cuántos recuerdos tuyos se añaden al contexto. «Solo lo más claro» deja fuera todo lo que no encaje de lleno con lo
+                        que pides; «Casi todo» trae también lo parecido. Más memoria da mejores respuestas y gasta más tokens por
+                        turno.</small
+                      ></span
                     >
-                    <input
-                      type="number"
-                      id="memSens"
-                      aria-label="Sensibilidad de relevancia (0-3)"
-                      min="0"
-                      max="3"
-                      step="1"
-                      style="width: 80px"
-                    />
-                  </div>
-                  <div class="subnote">
-                    La memoria irrelevante no se inyecta en el contexto: solo lo que encaja con lo que estás pidiendo.
+                    <select id="memSens" aria-label="Memoria que entra en cada respuesta" style="width: 170px">
+                      <option value="0">Casi todo</option>
+                      <option value="1">Bastante</option>
+                      <option value="2">Normal</option>
+                      <option value="3">Solo lo más claro</option>
+                    </select>
                   </div>
                 </div>
 
@@ -980,8 +1139,14 @@
                     <b>Tareas en segundo plano</b><span class="sc-hint">Sagitari puede trabajar mientras sigues hablando</span>
                   </div>
                   <div class="swrow srow" data-keys="tareas simultaneas concurrencia background paralelo">
-                    <span class="st"><b>Tareas simultáneas (1-4)</b><small>Cuántas tareas puede ejecutar a la vez.</small></span>
-                    <input type="number" id="setMaxTasks" aria-label="Tareas simultáneas (1-4)" min="1" max="4" style="width: 80px" />
+                    <span class="st"
+                      ><b>Tareas a la vez</b
+                      ><small
+                        >Cuántas tareas de la cola pueden avanzar al mismo tiempo mientras sigues hablando (de 1 a 4). Cómo va cada una se
+                        ve en la vista Tareas.</small
+                      ></span
+                    >
+                    <input type="number" id="setMaxTasks" aria-label="Tareas a la vez (1-4)" min="1" max="4" style="width: 80px" />
                   </div>
                   <div class="swrow srow" data-keys="recuperar tareas interrumpidas arrancar reanudar">
                     <span class="st"
@@ -1072,11 +1237,7 @@
                     >
                     <div class="sw" id="swCache" aria-label="Aprovechar el caché de prompt"></div>
                   </div>
-                  <div class="subnote">
-                    Cada subagente tiene su propio presupuesto de pasos, así que sin este tope un turno largo acaba en una cadena de
-                    delegaciones. Al alcanzarlo, SAGITARI no se detiene: termina la tarea con lo que ya tiene.
-                  </div>
-                  <!-- avanzado: paralelismo e intentos de reintento, plegados por defecto -->
+                  <!-- avanzado: paralelismo y reintentos, plegados por defecto -->
                   <div class="setcard advcard" id="advAgentCard">
                     <div
                       class="advhead"
@@ -1087,30 +1248,48 @@
                       aria-controls="advAgentBody"
                     >
                       <div class="sc-head">
-                        <b>Avanzado · paralelismo, reintentos y hooks</b
-                        ><span class="sc-hint">Para ajustar el comportamiento fino del agente</span>
+                        <b>Avanzado · paralelismo y reintentos</b
+                        ><span class="sc-hint">Cuánto trabajo va a la vez y cuántas veces se reintenta un fallo</span>
                       </div>
                       <span class="chev"><i data-i="chevron"></i></span>
                     </div>
                     <div class="advbody" id="advAgentBody">
                       <div class="grid2">
                         <div class="field srow" data-keys="subagentes delegaciones limite equipo tope">
-                          <label for="grDelegations">SUBAGENTES POR TURNO (0 = sin tope)</label
+                          <label for="grDelegations">Subagentes por turno (0 = sin tope)</label
                           ><input type="number" id="grDelegations" min="0" />
                         </div>
                         <div class="field srow" data-keys="paralelo simultaneo concurrencia herramientas rapidez">
                           <label for="parTools">Herramientas en paralelo (1-4)</label><input type="number" id="parTools" min="1" max="4" />
                         </div>
                       </div>
+                      <div class="subnote">
+                        Cada subagente tiene su propio presupuesto de pasos, así que sin este tope un turno largo acaba en una cadena de
+                        delegaciones. Al alcanzarlo, SAGITARI no se detiene: termina la tarea con lo que ya tiene.
+                      </div>
                       <div class="grid2">
                         <div class="field srow" data-keys="intentos arreglo fallo pruebas reintentos vueltas">
-                          <label for="verAttempts">INTENTOS DE ARREGLAR UN FALLO (0-5)</label
+                          <label for="verAttempts">Intentos de arreglar un fallo (0-5)</label
                           ><input type="number" id="verAttempts" min="0" max="5" />
                         </div>
                       </div>
                       <div class="subnote">
                         Varias órdenes del mismo mensaje se ejecutan a la vez cuando no chocan: el navegador es uno solo, la escritura en
                         disco va en cola y la terminal admite dos comandos. Con 1, todo va en orden.
+                      </div>
+                      <!-- v4.4: presupuesto del equipo (modo EQUIPO). Al agotarlo el equipo
+                           para a TODOS: los que trabajan y los que esperan un permiso. -->
+                      <div class="grid2">
+                        <div class="field srow" data-keys="equipo presupuesto tope gasto coste dolares limite compañeros miembros">
+                          <label for="eqPresupuesto">Presupuesto del equipo en USD (0 = sin tope propio)</label
+                          ><input type="number" id="eqPresupuesto" min="0" step="0.5" />
+                        </div>
+                      </div>
+                      <div class="subnote">
+                        Gasto máximo de un encargo en modo EQUIPO (el líder y todos sus compañeros juntos). Al alcanzarlo, el equipo
+                        <b>para a todos</b>: se detienen los compañeros que están trabajando y los que esperan un permiso, el tablero se
+                        queda tal y como estaba en ese momento y te lo dice en el chat. Con 0 no hay tope propio del equipo: siguen contando
+                        los límites de gasto de arriba.
                       </div>
                     </div>
                     <!-- /advbody -->
@@ -1163,8 +1342,8 @@
                       ><b>Mostrar el razonamiento del modelo</b
                       ><small
                         >Los modelos que razonan (Claude, la serie o y GPT-5, DeepSeek R1…) enseñan su proceso antes de responder. Aparece
-                        plegado encima de la respuesta y se pliega solo al empezar a contestar. Nunca se lee en voz alta. Puede costar
-                        tokens extra en algunos proveedores.</small
+                        plegado encima de la respuesta y se pliega solo al empezar a contestar. Puede costar tokens extra en algunos
+                        proveedores.</small
                       ></span
                     >
                     <div class="sw" id="swThinking" aria-label="Mostrar el razonamiento del modelo"></div>
@@ -1183,7 +1362,44 @@
               </div>
 
               <!-- ===== DATOS ===== -->
-              <div class="setpanel" data-panel="data">
+              <div class="setpanel" data-panel="data" id="setpanel-data" role="tabpanel" aria-labelledby="tab-data">
+                <div class="setcard">
+                  <div class="sc-head"><b>Espacio de trabajo</b><span class="sc-hint">Dónde trabaja el agente con tus archivos</span></div>
+                  <div class="srow" data-keys="espacio trabajo carpeta workspace proyectos ruta">
+                    <div class="btnrow" style="margin: 0">
+                      <button class="btn" id="wsPick">
+                        <span class="bi"><i data-i="folder"></i></span> Cambiar carpeta…
+                      </button>
+                    </div>
+                    <div class="subnote">Ahora mismo: <b id="wsPathLabel">—</b></div>
+                    <div class="subnote">
+                      Carpeta donde Sagitari crea y modifica archivos, y donde se ejecutan los comandos: las rutas relativas («informe.md»)
+                      aterrizan aquí. Es el mismo espacio que abre la vista <b>Espacio de trabajo</b>, donde también se puede escribir la
+                      ruta a mano.
+                    </div>
+                  </div>
+                </div>
+
+                <div class="setcard">
+                  <div class="sc-head"><b>Atajos de teclado</b><span class="sc-hint">Disponibles en toda la app</span></div>
+                  <div class="swrow srow" data-keys="atajo mostrar ocultar ventana ctrl alt s">
+                    <span class="st"><b>Mostrar u ocultar la ventana</b></span
+                    ><span class="kbdrow"><kbd class="kbd">Ctrl</kbd><kbd class="kbd">Alt</kbd><kbd class="kbd">S</kbd></span>
+                  </div>
+                  <div class="swrow srow" data-keys="atajo traer al frente primer plano ventana alt shift s">
+                    <span class="st"><b>Traer la ventana al frente</b></span
+                    ><span class="kbdrow"><kbd class="kbd">Alt</kbd><kbd class="kbd">Shift</kbd><kbd class="kbd">S</kbd></span>
+                  </div>
+                  <div class="swrow srow" data-keys="atajo pulso glow resplandor">
+                    <span class="st"><b>Pulso de resplandor</b></span
+                    ><span class="kbdrow"><kbd class="kbd">Ctrl</kbd><kbd class="kbd">Shift</kbd><kbd class="kbd">G</kbd></span>
+                  </div>
+                  <div class="swrow srow" data-keys="atajo modo act plan think equipo agente">
+                    <span class="st"><b>Cambiar de modo (Act / Plan / Think / Equipo)</b></span
+                    ><span class="kbdrow"><kbd class="kbd">Alt</kbd><kbd class="kbd">M</kbd></span>
+                  </div>
+                </div>
+
                 <div class="setcard">
                   <div class="sc-head">
                     <b>Hábitos aprendidos</b><span class="sc-hint">Lo que Sagitari ha deducido de cómo trabajas</span>
@@ -1214,7 +1430,7 @@
               </div>
 
               <!-- ===== ACERCA DE ===== -->
-              <div class="setpanel" data-panel="about">
+              <div class="setpanel" data-panel="about" id="setpanel-about" role="tabpanel" aria-labelledby="tab-about">
                 <div class="setcard">
                   <div class="sc-head"><b>Actualizaciones</b><span class="sc-hint">Desde GitHub, y solo cuando tú lo pidas</span></div>
                   <div class="swrow srow" data-keys="actualizacion actualizar version update ultima comprobar estado">
@@ -1306,49 +1522,16 @@
             <div id="activityFeed" class="feed"></div>
           </div>
         </aside>
-
-        <!-- Modo voz: se superpone al área del chat. El orbe es decorativo (aria-hidden) y
-           todo lo que importa es texto, para que quien use lector de pantalla no dependa
-           del dibujo. `hidden` de verdad cuando está cerrado: nada animando de fondo. -->
-        <div id="voiceMode" hidden>
-          <div class="vm-cabecera"><span id="vmEstado">Escuchando</span></div>
-          <canvas id="vmOrbe" width="380" height="380" aria-hidden="true"></canvas>
-          <div class="vm-texto">
-            <p id="vmParcial" class="vm-parcial" aria-live="polite"></p>
-            <div id="vmHistorial"></div>
-          </div>
-          <div id="vmPasos" class="vm-pasos"></div>
-          <div id="vmConfirm" class="vm-confirm" hidden>
-            <p id="vmConfirmTexto"></p>
-            <div class="vm-botones">
-              <button class="cbtn" id="vmSi">Sí, hazlo</button>
-              <button class="cbtn" id="vmNo">No</button>
-            </div>
-          </div>
-          <div id="vmError" class="vm-error" hidden>
-            <p id="vmErrorTexto"></p>
-            <p id="vmErrorFix" class="vm-hint"></p>
-          </div>
-          <div class="vm-pie">
-            <span><kbd>Esc</kbd> para salir</span><span id="vmPista">habla cuando quieras, te escucho</span>
-          </div>
-          <!-- Parar el turno en curso: el panel tapa el chat, así que el botón de Detener del
-             compositor no se puede pulsar mientras el modo voz está abierto. Se enseña sólo
-             cuando hay algo que parar (lo decide el panel; ver setEstado). -->
-          <button class="cbtn vm-parar" id="vmParar" hidden>Parar</button>
-        </div>
       </div>
     </div>
-    <script src="frases.js"></script>
     <script src="icons.js"></script>
     <script src="marked.min.js"></script>
     <script src="chatkit.js"></script>
-    <script src="orb.js"></script>
-    <script src="voice-mode.js"></script>
     <script src="10-chat.js"></script>
-    <script src="20-voz.js"></script>
+    <script src="20-app.js"></script>
     <script src="30-ajustes.js"></script>
     <script src="ajustes-util.js"></script>
+    <script src="memoria-ui.js"></script>
     <script src="40-vistas.js"></script>
   </body>
 </html>

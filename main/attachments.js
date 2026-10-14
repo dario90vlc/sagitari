@@ -10,7 +10,11 @@
 
 const path = require('path');
 
-const MAX_ATTACH_CHARS = 120000; // ~30k tokens: margen sobrado, techo real
+const MAX_ATTACH_CHARS = 120000; // ~30k tokens por archivo: margen sobrado, techo real
+/* Techo del CONJUNTO de adjuntos de un mismo mensaje (~62k tokens). El renderer permite
+   8 archivos a la vez, así que sin esto la suma podía rondar el millón de caracteres y el
+   mensaje en curso reventaba la ventana del modelo (el recorte de historial no lo toca). */
+const MAX_ADJUNTOS_CHARS = 250000;
 const MAX_FILE_BYTES = 25 * 1024 * 1024;
 /* Un fichero sin extensión conocida y pequeño se intenta leer como texto */
 const PROBE_AS_TEXT_BYTES = 512 * 1024;
@@ -143,9 +147,34 @@ function blockFor(att) {
   return `--- ARCHIVO ADJUNTO: ${a.name} (${size}) ---\n${text.slice(0, MAX_ATTACH_CHARS)}${text.length > MAX_ATTACH_CHARS ? '\n… (truncado)' : ''}`;
 }
 
-/** Bloques de varios adjuntos de texto, en orden. */
+/** Bloques de varios adjuntos de texto, en orden. El tope por archivo
+    (`MAX_ATTACH_CHARS`) no basta: la interfaz permite 8 adjuntos a la vez y la suma
+    viajaba entera al mensaje en curso (que `contexto.recortarMensajes` NO puede aliviar:
+    es el mensaje actual, no historial viejo). Con 8 archivos grandes el proveedor
+    contestaba «context length exceeded» después de esperar. El techo del CONJUNTO se
+    anuncia con un bloque que dice qué no se envió, igual que el recorte por archivo. */
 function blocksFor(atts) {
-  return (atts || []).map(blockFor).join('\n\n');
+  const out = [];
+  let total = 0;
+  for (const att of atts || []) {
+    const nombre = (att && att.name) || 'archivo';
+    if (total >= MAX_ADJUNTOS_CHARS) {
+      out.push(
+        '--- ARCHIVO ADJUNTO: ' + nombre + ' (omitido: se alcanzó el tope de ' + MAX_ADJUNTOS_CHARS + ' caracteres del conjunto) ---',
+      );
+      continue;
+    }
+    const bloque = blockFor(att);
+    const hueco = MAX_ADJUNTOS_CHARS - total;
+    if (bloque.length <= hueco) {
+      out.push(bloque);
+      total += bloque.length;
+    } else {
+      out.push(bloque.slice(0, hueco) + '\n… (truncado: ' + (bloque.length - hueco) + ' caracteres más no se enviaron)');
+      total = MAX_ADJUNTOS_CHARS;
+    }
+  }
+  return out.join('\n\n');
 }
 
 /** ¿La ruta cae dentro de `dir`? Los datos de la app (claves, conversaciones) no
@@ -157,6 +186,7 @@ function insideDir(file, dir) {
 
 module.exports = {
   MAX_ATTACH_CHARS,
+  MAX_ADJUNTOS_CHARS,
   MAX_FILE_BYTES,
   PROBE_AS_TEXT_BYTES,
   TEXT_EXTS,

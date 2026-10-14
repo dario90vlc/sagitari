@@ -32,6 +32,9 @@ function registerMcpIpc(ipcMain, ctx) {
     if (previo) {
       server.env = mcpConfig.mergeSecrets(previo.env, server.env);
       server.headers = mcpConfig.mergeSecrets(previo.headers, server.headers);
+      // la URL con credenciales viaja enmascarada (mcp:list): si vuelve así, se guarda la
+      // de verdad. Si el usuario la escribió entera, manda la suya.
+      server.url = mcpConfig.mergeUrl(previo.url, server.url);
       // El formulario no reenvía estos campos: se conservan del servidor guardado para
       // que editar no reactive un servidor apagado ni pierda autoStart/timeout/cwd.
       if (payload.enabled === undefined) server.enabled = previo.enabled !== false;

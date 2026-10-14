@@ -10,6 +10,9 @@ release-body.md
 # Temporales de scripts/prepare-logo.ps1
 scripts/tmp_ico/
 
+# Espacio de trabajo temporal del arnés de interfaz (ui-check lo crea y lo borra)
+sagi-ui-ws-*/
+
 # Anuncio: video/audio (~9 MB) sin rastrear, no debe entrar en el historial
 anuncio/
 

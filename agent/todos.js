@@ -181,7 +181,7 @@ function bloquePrompt(todos) {
   );
 }
 
-/** Primer texto de tarea apto para voz/etiqueta (presente si lo hay, si no el imperativo). */
+/** Primer texto de tarea apto para etiqueta (presente si lo hay, si no el imperativo). */
 function etiquetaActiva(t) {
   if (!t) return '';
   return t.status === 'in_progress' && t.activeForm ? t.activeForm : t.content;

@@ -1859,7 +1859,7 @@ ipcMain.handle('mcp:import', (e, json) => {
 ```
    - `mcpExport()`: `{ mcpServers: { [id]: { command, args, env, url, headers } } }` con los valores en claro (el usuario los pidió para copiarlos). Se marca en la UI como "contiene tus secretos".
    - `mergeSecrets` y `parseMcpImport` viven en `main/mcp-config.js` (ya escritos en el Step 3).
-6. `before-quit` (donde ya se para el TaskManager y la voz): añadir
+6. `before-quit` (donde ya se para el TaskManager): añadir
 ```js
   if (mcp) { try { mcp.shutdown(); } catch {} }
 ```

@@ -6,9 +6,10 @@
    - ROUTER: clasifica una tarea en una categoría y elige el modelo adecuado
      de un mapping configurable (userSettings.models por categoría).
    - FALLBACK: dada la config (config.providers + config.fallbackChain),
-     produce la lista de cfgs a intentar en orden: primario → secundarios →
-     proveedores locales (Ollama/LM Studio). La tarea continúa si un proveedor
-     cae y hay local disponible.
+     produce la lista de cfgs a intentar en orden: primario → secundarios QUE EL
+     USUARIO DECLARE → proveedores locales (Ollama/LM Studio). La tarea continúa si
+     un proveedor cae y hay local disponible. Un guardado que el usuario no haya
+     puesto en su cadena no se usa salvo que active `fallbackAutomatico`.
    - HEALTH: registro persistente de latencia/errores/tokens/coste por modelo
      (runs.json) con resumen para el panel Model Health. */
 
@@ -90,10 +91,17 @@ function fallbackChain(config, category) {
           .toLowerCase()
           .includes(l),
     );
-  // 3) resto de proveedores cloud guardados
-  for (const p of providers) {
-    if (isLocal(p)) continue;
-    push(p, 'secondary');
+  // 3) resto de proveedores cloud guardados — SOLO si el usuario lo pide.
+  //    Antes se añadían TODOS los guardados y la petición entera (prompt, resultados de
+  //    herramientas, contenido de archivos) acababa en el primero que respondiera: el
+  //    usuario probaba un modelo en Ajustes y contestaba otro proveedor que ni había
+  //    elegido. El README promete lo contrario («el modelo elegido manda»), así que esta
+  //    capa es opt-in y explícita (Ajustes ▸ fallbackAutomatico), nunca silenciosa.
+  if (config && config.settings && config.settings.fallbackAutomatico === true) {
+    for (const p of providers) {
+      if (isLocal(p)) continue;
+      push(p, 'secondary');
+    }
   }
   // 4) locales al final (Ollama/LM Studio) — la red de salvamento
   for (const p of providers) {

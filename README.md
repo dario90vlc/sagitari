@@ -17,7 +17,7 @@
 
 [Download](#download) · [Features](#what-it-does) · [Security](#safety-first) · [Español](./README.es.md)
 
-**Natural language in. Real work out.** — SAGITARI uses your terminal, your files, and your browser to finish the job, while everything stays on your machine.
+**Natural language in. Real work out.** — SAGITARI uses your terminal, your files, and your browser to finish the job, while config, keys, conversations and memory stay in your data folder. Its **memory** is a card file of facts **you approve**, correct and can empty.
 
 </div>
 
@@ -35,11 +35,11 @@
     <td align="center"><sub><b>Fresh start</b> — a clean canvas, your accent</sub></td>
   </tr>
   <tr>
-    <td width="50%"><img src="docs/shot-voice.png" alt="SAGITARI voice mode"></td>
+    <td width="50%"><img src="docs/shot-memory.png" alt="SAGITARI memory view"></td>
     <td width="50%"><img src="docs/shot-settings.png" alt="SAGITARI appearance settings"></td>
   </tr>
   <tr>
-    <td align="center"><sub><b>Voice mode</b> — talk; it works and answers aloud</sub></td>
+    <td align="center"><sub><b>Memory</b> — what it knows, and what waits for your OK</sub></td>
     <td align="center"><sub><b>Appearance</b> — aura, glass, yours to tune</sub></td>
   </tr>
   <tr>
@@ -70,12 +70,16 @@ Terminal, files, apps, windows, and a real browser — one instruction, and the 
 <summary><b>Full breakdown</b></summary>
 
 - **Terminal and files** — inspect, create, edit, and organize work in your filesystem.
+- **A team, when the job splits** — the fourth mode (`Alt+M` reaches it) turns the agent into a **leader**: it breaks your order down and lifts up to **4 teammates** — the registry's specialists, built-in or ones you define on disk — who work **at the same time**, each with its own model and its own permission prompt. They hand each other things through a mailbox (a busy teammate gets the message on its next step; a finished one wakes up with it) and everyone writes to a shared board you can watch. The **Equipo** view shows every teammate with its state, the mailbox and the board; the rail tells you which teammate is waiting for a permission. A budget cap stops the team and says so rather than burning through your tokens.
+- **Several conversations at once** — a running turn no longer locks the app: open as many conversations as you want from the tab strip in the chat header, each with its own turns, its own tools and its own model exchange. A conversation that is still working is marked as such in its tab and in the History list, and switching back restores it exactly as you left it. Closing a tab does not delete the conversation.
 - **Desktop actions** — open applications and URLs, manage windows, clipboard, notifications, and multimedia.
 - **Browser v2** — drives Chrome or Edge like a person: an inventory with each control's **accessible name** (even icon-only buttons), inside **web components and iframes**, clicks re-located by fingerprint that warn when something covers them, real waits (`wait_for`), console and network errors (`logs`), dialogs, file uploads, keyboard shortcuts, lists and checkboxes, history, and downloads into a known folder.
 - **Parallel work** — orders in the same message run at once behind **per-resource locks**: there is only one browser, disk writes queue up, and Stop kills everything in flight.
 - **A live task list, like the best coding agents** — on a multi-step task the agent owns a checklist it updates as it goes: it marks each step in progress and completed, and you watch it advance in the chat. The list travels in its prompt on every step, so progress survives long turns and context trimming, and it is saved with the conversation so you can see where the work ended when you reopen it.
 - **Code with a safety net** — it knows how **your** project is verified (tests, build, lint) and syntax-checks every file as it writes it, so the error comes back right away instead of three steps later. `apply_patch` makes several edits across several files at once (all of them or none) and, before handing you anything as done, a **review agent** reads the turn's diff looking for what's wrong (broken contracts, missed edge cases, leftovers of the old name). Turn it off in Settings ▸ Delegation and verification.
 - **Project map** — on large projects it indexes files and symbols (`repo_map`, `find_symbol`) instead of reading them one by one, so it doesn't get lost in 100,000 lines or settle for four local edits.
+- **Read the web without a browser** — `web_fetch` pulls a page and reduces it to text (title, status, body), so looking something up doesn't cost a Chrome window. It only speaks `http(s)`, follows redirects with the check re-run at every hop, and refuses loopback, private, link-local and metadata addresses — the SSRF rule is enforced on the resolved address, not on the text of the URL.
+- **Git as a tool, not a guess** — `git_status`, `git_diff`, `git_log` and a guarded `git_branch`/`git_commit` give the agent structured repository state instead of a wall of terminal output. Git runs through an argument array with no shell, always on your workspace, and history-rewriting operations (reset, force-push, rebase, amend) are deliberately not exposed: those still go through `run_command` and its permission prompt.
 
 </details>
 
@@ -86,29 +90,33 @@ Reason deeply, plan before acting, or go direct — with the model of your choic
 <details>
 <summary><b>Full breakdown</b></summary>
 
-- **Bring your own model** — OpenCode Go, OpenRouter, OpenAI, Groq, Anthropic, Ollama, LM Studio, or any compatible endpoint.
-- **Think / Plan / Act** — reason deeply, prepare a plan before acting, or execute directly.
+- **Bring your own model** — OpenCode Go, OpenRouter, OpenAI, Anthropic, Groq, Google Gemini, DeepSeek, xAI (Grok), Mistral, Moonshot (Kimi), Cerebras, NVIDIA NIM, SambaNova, or any compatible endpoint — plus local runtimes: Ollama, LM Studio, llama.cpp, vLLM, Jan, KoboldCpp, text-generation-webui and LocalAI. Every preset carries the endpoint its vendor documents, and the provider you save can force its API protocol (OpenAI-compatible, Anthropic-compatible or the Responses API) so third-party gateways work too.
+- **Your own specialists** — the seven built-in subagents live in the product, but you can define your own by dropping an `AGENT.md` into `<data dir>/agents/<id>/` (name, description, allowed tools, model, step budget and its brief). A definition can never grant itself more than the built-in ceiling: its tool list is intersected with the real catalogue. The Agents view shows the registry the app actually uses, marked so you can see which agents came from disk, with a **Recargar** button that re-reads them without restarting.
+- **Think / Plan / Act** — reason deeply, prepare a plan before acting, or execute directly. **PLAN is genuinely read-only**: the tool set offered to the model is cut to inspection tools and any write is refused at execution time too, so the planning mode cannot touch your machine.
+- **Slash commands** — `/` opens a palette of commands above your skills: `/compact` has the model summarize the thread so a long session keeps going, `/cost` reports this conversation's tokens and spend, `/clear` and `/new` start over, `/model` switches the active model and `/help` lists them. What isn't a command is still just a message.
 - **Skills** — import specialized `SKILL.md` packs and load their instructions on demand instead of bloating every prompt.
 - **MCP servers** — Connect your own MCP servers (local commands or remote URLs) and the agent uses their tools like built-in ones. Everything they run asks for permission first, and you can promote a server you trust.
-- **Memory and habits** — keep useful context across conversations, locally.
+- **Memory and habits** — the agent keeps a card file of durable facts about you and the way you work, and it is yours to audit: what it learns from a turn lands in an approval tray first, so nothing becomes a fact until you say so. Every fact shows where it came from and when it was last used, is edited in place, and moves to a recoverable trash when you forget it — duplicates merge, a correction replaces the old fact, and what goes unused fades to low importance before it ever reaches the trash. Habits (tools, apps, commands, folders, sites, modes, permissions) are readable and forgettable one category at a time, and there is an **Export my memory** and a real forget-it-all. It lives in a file inside your data folder, and the facts and habits that match the conversation travel to the model you configured — like the rest of the message — as the view itself spells out.
 - **Fallbacks and recovery** — model fallback, background tasks, checkpoints, pause/resume, and recovery after interruptions. If a provider accepts the connection but stops sending data, the turn cuts itself off (configurable limit in Settings › Security) and the error is explained in the chat. The model chosen in Settings wins: the router no longer swaps it silently.
 
 </details>
 
 ### It shows the work.
 
-Every step, tool, and second on screen — and it can read the answer out loud.
+Every step, tool, and second on screen.
 
 <details>
 <summary><b>Full breakdown</b></summary>
 
 - Holographic interface built with vanilla HTML, CSS, and JavaScript.
-- Reactive frame glow while the agent thinks, works, listens, or speaks.
-- Six accent palettes plus live glow color and intensity controls.
+- **The light is the interface** — instead of a band around the window, the glow is the 1px edge of the surfaces that matter: the sidebar when it thinks, the composer when it works, the card that is actually running. State changes send one highlight along that edge and it settles; nothing spins and nothing pulses on its own. Colour and intensity are still yours.
+- **The turn's changes, per file** — before you accept a turn as done, the review panel shows exactly what changed: one card per file with its `+adds / −dels`, the hunks with line numbers, and a button to put back **that one file** without touching the rest. Files that can't be restored on their own say so instead of pretending.
+- **How much room is left** — the composer carries a live context meter (normal / tight / critical) fed by the same measurement the agent uses, so you can see a long session filling up before it starts trimming.
+- **Duplicate and rewind** — duplicate any conversation from the history to try another path without losing the original, and rewind a thread to an earlier message; the agent drops the summary and task list that described what you just removed.
+- Reactive light while the agent thinks or works — on the surface that is doing the work, not around the window.
+- **Settings that explain themselves** — six panels (Model, Appearance, Security, Agent, Data, About) with the basics first and the advanced controls folded into their own cards, each with a sentence saying what it does and what it does not. The permissions list covers every tool the agent has, not a sample.
 - Separate conversations, live agent telemetry, structured local run logs, and optional developer metrics.
-- Voice input through Windows speech recognition and text-to-speech output.
-- **Visible reasoning (optional)**: reasoning models (Claude, the o-series and GPT-5, DeepSeek R1…) show their thinking in a collapsible block above the answer; it streams live while they think, folds itself as soon as they start answering, and is never read out loud. Turn it on in Settings ▸ Agent.
-- **Voice mode**: press the mic and talk; the assistant hears you, does the work and answers out loud. Hands-free: it sends when you stop talking, it shows you the text while you speak and starts answering out loud as soon as it has the first sentence instead of waiting for the whole reply. If you speak while it talks, it shuts up and listens; and you can stop it by saying “para” or with the panel's **Parar** button. Everything stays on your machine, with a local neural voice (Piper) and high-accuracy local dictation (Whisper) installable from Settings. `Alt`+click on the mic keeps the classic dictation into the text box.
+- **Visible reasoning (optional)**: reasoning models (Claude, the o-series and GPT-5, DeepSeek R1…) show their thinking in a collapsible block above the answer; it streams live while they think and folds itself as soon as they start answering. Turn it on in Settings ▸ Agent.
 
 </details>
 
@@ -135,14 +143,14 @@ SAGITARI gives an agent real access to your computer, so safety is part of the p
 
 Useful shortcuts:
 
-| Shortcut       | Action                      |
-| -------------- | --------------------------- |
-| `Alt+1…9`      | Switch sections             |
-| `Ctrl+Alt+S`   | Show or hide the panel      |
-| `Alt+Shift+S`  | Bring SAGITARI to the front |
-| `Ctrl+Shift+G` | Trigger a glow pulse        |
-| `Alt+M`        | Cycle ACT → PLAN → THINK    |
-| `/` in chat    | Open the skills palette     |
+| Shortcut       | Action                               |
+| -------------- | ------------------------------------ |
+| `Alt+1…9`      | Switch sections                      |
+| `Ctrl+Alt+S`   | Show or hide the panel               |
+| `Alt+Shift+S`  | Bring SAGITARI to the front          |
+| `Ctrl+Shift+G` | Trigger a glow pulse                 |
+| `Alt+M`        | Cycle ACT → PLAN → THINK             |
+| `/` in chat    | Open the commands and skills palette |
 
 ## Download
 
@@ -152,8 +160,6 @@ Useful shortcuts:
 | [**Release notes**](https://github.com/dario90vlc/sagitari/releases)                          | Changes, security fixes, and SHA-256 hashes                    |
 
 > **Windows SmartScreen:** the binaries are currently unsigned, so Windows may show a warning on the first run. Choose _More info → Run anyway_ if you trust the download. Verify the SHA-256 hash published in the release notes.
-
-> **Voice engines:** the local neural voice (Piper) and the high-accuracy local dictation (Whisper) are **not** bundled in the installer —they are downloaded on demand from Settings, about 700 MB in total— so the download stays light and voice mode still works with the Windows engines until you install them.
 
 ## Privacy
 
@@ -167,7 +173,7 @@ Useful shortcuts:
 
 ```text
 sagitari/
-├── main/           Electron main process, windows, IPC, voice, providers
+├── main/           Electron main process, windows, IPC, providers
 ├── agent/          Agent loop, tools, guardrails, memory, skills, tasks, browser
 ├── renderer/       Vanilla HTML/CSS/JS interface
 ├── skills-starter/ Bundled starter skills
@@ -181,33 +187,37 @@ sagitari/
 
 ### Scripts
 
-| Script                  | Description                       |
-| ----------------------- | --------------------------------- |
-| `npm start`             | Start the app in production       |
-| `npm run dev`           | Start the app in development mode |
-| `npm run smoke`         | Run smoke test                    |
-| `npm test`              | Run existing tests                |
-| `npm run test:renderer` | Run unit tests (493 tests)        |
-| `npm run lint`          | Run ESLint                        |
-| `npm run lint:fix`      | Run ESLint with auto-fix          |
-| `npm run format`        | Format with Prettier              |
-| `npm run format:check`  | Check formatting with Prettier    |
-| `npm run uicheck`       | Check the live interface (CDP)    |
-| `npm run shots`         | Capture every view to `shots/`    |
-| `npm run contraste`     | Audit palette contrast (WCAG AA)  |
+| Script                  | Description                          |
+| ----------------------- | ------------------------------------ |
+| `npm start`             | Start the app in production          |
+| `npm run dev`           | Start the app in development mode    |
+| `npm run smoke`         | Run smoke test                       |
+| `npm test`              | Run the agent/main suite (445 tests) |
+| `npm run test:renderer` | Run the renderer suite (737 tests)   |
+| `npm run lint`          | Run ESLint                           |
+| `npm run lint:fix`      | Run ESLint with auto-fix             |
+| `npm run format`        | Format with Prettier                 |
+| `npm run format:check`  | Check formatting with Prettier       |
+| `npm run uicheck`       | Check the live interface (CDP)       |
+| `npm run shots`         | Capture every view to `shots/`       |
+| `npm run contraste`     | Audit palette contrast (WCAG AA)     |
 
 ### Tests
 
-493 unit tests across 38 files, covering the pure logic of the agent (guardrails,
-commands, memory, hooks, skills, models, subagents, context budget, diffs,
-diagnostics, search, repo map, project detection, habits, checkpoints, MCP
-transport/config, execution utilities, run-log redaction) and the main process
-(update versions/assets/signature, provider presets, attachments) plus the
-renderer (chatkit, protocols, tools, config, history):
+Two suites, both green before every release:
 
 ```bash
-npm run test:renderer
+npm test              # 445 tests: the agent core and the main process
+npm run test:renderer # 737 tests across 49 files: main-process modules and the renderer
 ```
+
+`npm test` (`test/run.js`) covers the agent loop end to end: guardrails,
+commands, memory, hooks, skills, models, subagents, context budget, diffs,
+diagnostics, search, repo map, project detection, habits, checkpoints, MCP
+transport/config, execution utilities, run-log redaction, the todo list, the
+close-verification gate — plus the main process (update versions/assets/signature,
+provider presets, attachments) and the renderer (chatkit, protocols, tools,
+config, history).
 
 `test/renderer/run.js` discovers every `*.test.js` in the folder and runs them in
 a single process — no child process is spawned, so it works under a restricted
@@ -219,17 +229,20 @@ Two checks cover what unit tests cannot see — the pixels and the contrast:
 
 ```bash
 npm run uicheck     # arranca la app y comprueba iconos, cableado, navegación y temas
-npm run shots       # captura las 10 vistas a shots/<vista>.png por CDP
-npm run contraste   # mide el contraste de cada color de texto contra cada superficie
+npm run shots       # captura las 13 vistas a shots/<vista>.png por CDP
+npm run contraste   # mide el contraste de cada color de texto contra cada superficie (también rótulos con opacidad o de pseudo-elemento)
 ```
 
 `shots` accepts a view list and a size, and `--demo` seeds a real conversation
 drawn with the renderer's own `bubble()` so `chat.png` shows the interface
-rather than the empty state:
+rather than the empty state. Besides the eleven sections it captures two UI states
+built with the renderer's own painters — `slash.png` (the `/` palette with its
+commands) and `diffs.png` (the turn's change review panel):
 
 ```bash
-npm run shots                                  # las 10 vistas, con demo
+npm run shots                                  # las 13 vistas, con demo
 node scripts/shot-cdp.js shots chat 1440 900   # solo el chat, sin demo
+node scripts/shot-cdp.js shots slash,diffs     # las dos capturas de estado
 ```
 
 `uicheck` drives the real window over the Chromium debugging protocol: it fails if a
@@ -247,8 +260,11 @@ with «SAGITARI ya está abierta» when nothing is open). `main/main.js` honours
 
 `contraste` reads the tokens from `renderer/styles.css`, composites each
 translucent surface over the base background, and reports every text/surface pair
-below 4.5:1 (WCAG 2.1 AA for body text). It reads the tokens, so a palette change
-is audited by re-running it.
+below 4.5:1 (WCAG 2.1 AA for body text). It also measures the composed texts the
+token sweep cannot see: labels painted with an `opacity` (the effective colour is
+the mix with the background) and labels drawn by a `::before`/`::after` with
+`content`, each one against its worst surface. It reads the tokens and the rules,
+so a palette or label change is audited by re-running it.
 
 The gallery at the top of this README is regenerated with `npm run shots` — the
 committed PNGs lag behind the CSS, so treat them as the design language rather

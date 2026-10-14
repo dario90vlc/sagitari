@@ -1,10 +1,10 @@
 /* SAGITARI renderer — 30-ajustes.js (antes app.js 2754-4113): ajustes, proveedores, seguridad, MCP, hábitos, datos, updater y acerca de
    Script clásico: comparte el scope global con los demás 1x-*.js.
    El orden de carga en index.html preserva el orden original. */
-/* global glowStrengthLabel, glassTintLabel, smsg */
-/* glowStrengthLabel y glassTintLabel están definidas en 40-vistas.js (scope compartido) */
-/* smsg está definida en ajustes-util.js (scope compartido) */
-/* exported fillSettings, pasosConMotor, refrescarWhisperUi, refrescarPiperUi, wizardMostrar, initAboutPanel */
+/* global glowStrengthLabel, glassTintLabel, smsg, hiloActual */
+/* glowStrengthLabel y glassTintLabel están definidas en 40-vistas.js y hiloActual en
+   10-chat.js (scope compartido); smsg está definida en ajustes-util.js */
+/* exported fillSettings, wizardMostrar, initAboutPanel */
 // ============ settings ============
 async function fillSettings() {
   CFG = await window.sagitari.getConfig();
@@ -24,8 +24,13 @@ async function fillSettings() {
       $('#modelSel').innerHTML = '<option value="">— detecta modelos primero —</option>';
       if ($('#apiFormat')) $('#apiFormat').value = p.format || 'auto'; // protocolo sugerido por el preset
       hintStoredKey(); // si esa misma URL ya tiene clave guardada, se dice en el campo
+      pintarPresetHint(p); // y qué es y para qué sirve este proveedor, que lo dice su `hint`
     };
     sel.dispatchEvent(new Event('change'));
+  } else {
+    // Si la lista ya estaba montada, el aviso del proveedor se repinta igual: dejarlo
+    // dependiendo de un solo `change` era lo que lo mantenía vacío para siempre.
+    pintarPresetHint(CFG.presets.find((x) => x.id === sel.value));
   }
   renderProviderList();
   if ($('#apiFormat')) $('#apiFormat').value = (CFG.active && CFG.active.format) || 'auto';
@@ -33,101 +38,6 @@ async function fillSettings() {
   filterSettings(''); // limpia cualquier búsqueda previa
   initDataPanel(); // hábitos + carpeta de datos
   $('#swGlow').classList.toggle('on', !!CFG.settings.glowEnabled);
-  $('#swTts').classList.toggle('on', !!CFG.settings.ttsEnabled);
-  $('#voiceLang').value = CFG.settings.voiceLang || 'es-ES';
-  // La lista de voces sale del motor real: si no hay ninguna, se dice, no se deja vacío.
-  // Las NATURALES ya vienen primero del motor (tts.ps1 las ordena arriba) y se marcan:
-  // son las voces modernas de Windows 11, que suenan a persona, frente a las de escritorio
-  // (Helena y compañía), que son las robóticas que se oían antes.
-  // Piper (voz local) va PRIMERO si está instalada: es la mejor que hay.
-  refrescarVocesTts();
-
-  function refrescarVocesTts() {
-    window.sagitari
-      .ttsList()
-      .then((r) => {
-        const sel = $('#ttsVoice');
-        if (!sel) return;
-        sel.innerHTML = '';
-        const voces = (r && r.voices) || [];
-        if (!voces.length) {
-          const o = document.createElement('option');
-          o.textContent = 'Sin voces instaladas';
-          o.value = '';
-          sel.appendChild(o);
-          return;
-        }
-        for (const v of voces) {
-          const o = document.createElement('option');
-          o.value = v.nombre;
-          o.textContent = v.nombre + ' (' + v.idioma + (v.natural ? ' · natural' : '') + ')';
-          if (CFG.settings.ttsVoice === v.nombre) o.selected = true;
-          sel.appendChild(o);
-        }
-        /* La voz LOCAL (Piper) manda cuando está instalada: es la única neuronal del equipo y
-       no depende del almacén de Windows (que en muchas máquinas sólo tiene voces de
-       escritorio, las robóticas). Sólo se respeta otra voz guardada si el usuario la
-       eligió a mano (`ttsVoiceFijo`): la que elige la propia app —la primera natural, la
-       que se autoasigna al instalar— no puede condenar a la voz buena a no sonar nunca. */
-        const local = voces.find((v) => /^piper/i.test(v.nombre));
-        if (local && !CFG.settings.ttsVoiceFijo && CFG.settings.ttsVoice !== local.nombre) {
-          const antesSonabaWindows = !!CFG.settings.ttsVoice;
-          sel.value = local.nombre;
-          CFG.settings.ttsVoice = local.nombre;
-          window.sagitari.setSettings({ ttsVoice: local.nombre });
-          if (antesSonabaWindows) showToast('Voz local activa: «' + local.nombre + '» suena mejor que la voz de Windows.');
-        }
-        /* Sin voz GUARDADA, se elige sola la primera NATURAL del idioma de voz: es la que
-       suena bien. Antes el desplegable se quedaba con la primera de la lista — una voz de
-       escritorio robótica — y el usuario tenía que saber que existían las naturales y
-       buscarlas a mano. */
-        if (!CFG.settings.ttsVoice) {
-          const lang = (CFG.settings.voiceLang || 'es-ES').split('-')[0];
-          const buena =
-            voces.find((v) => v.natural && (v.idioma || '').toLowerCase().startsWith(lang)) ||
-            voces.find((v) => (v.idioma || '').toLowerCase().startsWith(lang)) ||
-            voces.find((v) => v.natural);
-          if (buena) {
-            sel.value = buena.nombre;
-            window.sagitari.setSettings({ ttsVoice: buena.nombre });
-          }
-        } else {
-          /* La voz guardada puede haberse quedado en una de escritorio (era el default antes
-         de preferir naturales): si hay una natural del idioma, se migra sola UNA vez por
-         sesión. Una elección manual a otra voz de escritorio no se distingue, pero oír una
-         natural siempre es mejor que oír una robótica por un default viejo. */
-          const lang = (CFG.settings.voiceLang || 'es-ES').split('-')[0];
-          const actual = voces.find((v) => v.nombre === CFG.settings.ttsVoice);
-          const natural = voces.find((v) => v.natural && (v.idioma || '').toLowerCase().startsWith(lang));
-          if (actual && !actual.natural && natural && !window.__migracionVozNatural) {
-            window.__migracionVozNatural = true;
-            sel.value = natural.nombre;
-            CFG.settings.ttsVoice = natural.nombre;
-            window.sagitari.setSettings({ ttsVoice: natural.nombre });
-            showToast('Voz mejorada a «' + natural.nombre + '» (natural): suena mucho más humana que la anterior.');
-          }
-        }
-        /* Sin NINGUNA voz natural para el idioma, la calidad que queda es la robótica de
-       siempre: decir cómo se instalan las buenas (gratis, vienen con Windows 11) es la
-       única mejora que de verdad cambia lo que oye el usuario. Una sola vez por sesión. */
-        const lang2 = (CFG.settings.voiceLang || 'es-ES').split('-')[0];
-        const hayNatural = voces.some((v) => v.natural && (v.idioma || '').toLowerCase().startsWith(lang2));
-        if (!hayNatural && !window.__avisoVocesNaturales) {
-          window.__avisoVocesNaturales = true;
-          showToast(
-            'Para una voz más natural: Configuración de Windows > Accesibilidad > Narrador > «Voces naturales» (descarga gratuita), y vuelve a abrir SAGITARI.',
-          );
-        }
-      })
-      .catch(() => {});
-  }
-  /* El estado visual del interruptor de avisos se pinta aquí y no solo al cablearlo: los
-     ajustes llegan de disco después de que el script se ejecute, así que pintarlo al
-     cablear mostraba «apagado» aunque estuviera encendido. */
-  if ($('#swAvisos')) $('#swAvisos').classList.toggle('on', !!CFG.settings.ttsNotices);
-  /* Motor de escucha clásico: el estado visual se pinta aquí y no solo al cablear, por la
-     misma razón que el de avisos — los ajustes pueden llegar de disco después del script. */
-  if ($('#swSttClasico')) $('#swSttClasico').classList.toggle('on', !!CFG.settings.sttClasico);
   $('#setUserName').value = CFG.settings.userName || '';
   // apariencia: color de interfaz, color del glow e intensidad
   $('#uiColor').value = PALETTES[CFG.settings.uiColor] ? CFG.settings.uiColor : 'aurora';
@@ -144,7 +54,7 @@ async function fillSettings() {
   refreshGlowLabels();
   refreshColorDots();
   window.sagitari.workspaceGet().then((w) => {
-    $('#wsPath').value = w;
+    pintarEspacioTrabajo(w);
   });
   mode = CFG.settings.mode || 'act';
   updateModeUI();
@@ -155,7 +65,14 @@ $('#btnDetect').onclick = async () => {
   const url = $('#pUrl').value.trim();
   if (!url) return smsg('Escribe una Base URL.');
   smsg('Detectando modelos…');
-  const r = await window.sagitari.listModels(url, $('#pKey').value.trim());
+  /* El protocolo elegido viaja con la petición: sin él, una base Anthropic de terceros
+     (sin «/anthropic» en la ruta) se sondeaba con Bearer en vez de x-api-key y la
+     detección fallaba justo cuando el usuario acababa de decir cómo habla ese servidor. */
+  const pre = (CFG.presets || []).find((p) => p.id === $('#presetSel').value) || {};
+  const r = await window.sagitari.listModels(url, $('#pKey').value.trim(), {
+    format: apiFormatValue(),
+    providerId: pre.baseUrl && pre.baseUrl === url ? pre.id : undefined,
+  });
   if (!r.ok) return smsg('Error: ' + r.error);
   const sel = $('#modelSel');
   sel.innerHTML = '';
@@ -169,6 +86,54 @@ $('#btnDetect').onclick = async () => {
 };
 // 'auto' = que el agente deduzca el protocolo; si no, se fuerza el elegido
 const apiFormatValue = () => ($('#apiFormat') ? $('#apiFormat').value : 'auto') || 'auto'; // 'auto' = detectar
+
+/** El `hint` que cada proveedor predefinido trae escrito en main/providers.js es la única
+    explicación de para qué sirve cada uno (local y gratis, necesita clave, ultrarrápido…)
+    y hasta ahora no llegaba a ninguna parte: `#presetHint` era un div muerto y siempre
+    vacío, así que elegir un proveedor no decía nada sobre él. */
+function pintarPresetHint(p) {
+  const el = $('#presetHint');
+  if (el) el.textContent = (p && p.hint) || '';
+}
+
+/* El protocolo no es decorativo: decide las cabeceras (Bearer o x-api-key) y la ruta del
+   endpoint. Antes no tenía manejador, así que cambiarlo después de guardar no se guardaba
+   en ninguna parte: el proveedor conservaba el formato viejo y activarlo lo reenviaba, con
+   la llamada yendo por el camino equivocado sin que nada lo dijera. */
+if ($('#apiFormat'))
+  $('#apiFormat').onchange = async () => {
+    const format = apiFormatValue();
+    const texto = ($('#apiFormat').selectedOptions[0] || {}).textContent || format;
+    const url = $('#pUrl').value.trim();
+    const guardado = (CFG.providers || []).find((p) => p.baseUrl === url);
+    if (guardado) {
+      // Se guarda sobre el proveedor que ya tiene esa URL (la clave va enmascarada: main
+      // conserva la guardada). Así la fila «Usar» reenvía el protocolo correcto.
+      const r = await window.sagitari.saveProvider({ ...guardado, format });
+      if (r && r.ok === false) return smsg('Error: ' + (r.error || 'no se pudo guardar el protocolo'));
+      CFG = await window.sagitari.getConfig();
+      renderProviderList();
+    }
+    const activo = CFG.active && CFG.active.baseUrl === url && CFG.active.model;
+    if (activo) {
+      // Si es el proveedor activo, el cambio tiene que llegar al motor ya: activar el
+      // mismo modelo y la misma URL solo reescribe el protocolo.
+      const r = await window.sagitari.activateProvider({
+        providerId: CFG.active.providerId,
+        name: CFG.active.name,
+        baseUrl: url,
+        apiKey: $('#pKey').value.trim(),
+        model: CFG.active.model,
+        vision: CFG.active.vision,
+        format,
+      });
+      if (r && r.ok === false) return smsg('Error: ' + (r.error || 'no se pudo aplicar el protocolo'));
+      CFG = await window.sagitari.getConfig();
+      renderProviderList();
+      updateStatusLabels();
+    }
+    smsg(guardado || activo ? 'Protocolo aplicado: ' + texto : 'Protocolo elegido: ' + texto + '. Se guardará con el proveedor.');
+  };
 
 $('#btnSaveProv').onclick = async () => {
   const btn = $('#btnSaveProv');
@@ -233,6 +198,23 @@ function renderProviderList() {
     box.innerHTML = '<div class="subnote">Aún no hay proveedores guardados.</div>';
     return;
   }
+  /* Una clave guardada que este equipo no puede descifrar (config traída de otro
+     perfil o equipo) tiene que VERSE: el proveedor parece configurado, el campo
+     enseña sus puntos suspensivos y la llamada falla. El proceso principal ya no lo
+     trata como fallo interno; aquí se dice qué hacer, y sin bloquear nada. Va después
+     del caso vacío porque ese sí vacía la caja entera. */
+  const ilegibles = (CFG.providers || []).filter((p) => p && p.keyUnreadable);
+  if (ilegibles.length || (CFG.active && CFG.active.keyUnreadable)) {
+    const nombres = [...new Set([...ilegibles.map((p) => p.name), ...(CFG.active && CFG.active.keyUnreadable ? [CFG.active.name] : [])])];
+    const av = document.createElement('div');
+    av.className = 'subnote';
+    av.id = 'provKeyUnreadable';
+    av.innerHTML =
+      `<b>Hay una clave guardada que este equipo no puede descifrar</b> (pasa si el ` +
+      `config llegó de otro perfil o de otro equipo): ${esc(nombres.join(', '))}. ` +
+      `Vuelve a escribirla abajo y guárdala; hasta entonces ese proveedor no puede llamar al modelo.`;
+    box.appendChild(av);
+  }
   for (const p of CFG.providers) {
     const item = document.createElement('div');
     item.className = 'provitem';
@@ -283,6 +265,12 @@ function hintStoredKey() {
   if (!el) return;
   const url = $('#pUrl').value.trim();
   const guardado = (CFG.providers || []).find((p) => p.baseUrl === url && p.apiKey);
+  /* Una clave ilegible NO se puede «seguir usando»: decir «déjala vacía para seguir
+     usándola» mandaba al usuario a un proveedor que no puede llamar al modelo. */
+  if (guardado && guardado.keyUnreadable) {
+    el.placeholder = 'la clave guardada en «' + guardado.name + '» no se pudo descifrar: escríbela otra vez';
+    return;
+  }
   el.placeholder = guardado
     ? 'guardada en «' + guardado.name + '» — déjalo vacío para seguir usándola'
     : 'sk-… (vacío para Ollama o LM Studio)';
@@ -294,180 +282,30 @@ $('#swGlow').onclick = async (e) => {
   e.currentTarget.classList.toggle('on', on);
   await window.sagitari.setSettings({ glowEnabled: on });
 };
-// espacio de trabajo
+// espacio de trabajo: Ajustes ya NO tiene un segundo campo de ruta (duplicaba el
+// editable de la vista Espacio de trabajo); aquí se enseña la carpeta activa y se
+// ofrece cambiarla.
+function pintarEspacioTrabajo(p) {
+  const el = $('#wsPathLabel');
+  if (el) el.textContent = p || '—';
+  // El campo editable de la vista Espacio de trabajo es la otra cara del MISMO ajuste:
+  // si se cambia desde aquí y no se actualiza, las dos pantallas se contradicen.
+  const proj = $('#projPath');
+  if (proj && p) proj.value = p;
+}
 $('#wsPick').onclick = async () => {
   const r = await window.sagitari.workspacePick();
   if (r && r.ok) {
-    $('#wsPath').value = r.path;
+    pintarEspacioTrabajo(r.path);
     showToast('Espacio de trabajo: ' + r.path);
   }
 };
-$('#swTts').onclick = async (e) => {
-  const on = !e.currentTarget.classList.contains('on');
-  e.currentTarget.classList.toggle('on', on);
-  await window.sagitari.setSettings({ ttsEnabled: on });
-};
-$('#voiceLang').onchange = async (e) => {
-  try {
-    await window.sagitari.setSettings({ voiceLang: e.target.value });
-  } catch (err) {
-    showToast('No se pudo guardar el idioma de voz');
-  }
-};
-/* Elegir voz a mano marca la elección como FIJA: a partir de ahí manda la del usuario y la
-   app deja de preferir la voz local por su cuenta (ver `usarVozLocal` en el motor). */
-if ($('#ttsVoice'))
-  $('#ttsVoice').onchange = async (e) => {
-    CFG.settings.ttsVoiceFijo = true;
-    await window.sagitari.setSettings({ ttsVoice: e.target.value, ttsVoiceFijo: true });
-  };
 /* Relleno real del slider: --fill marca hasta dónde llega el valor y el CSS
    corta el canal ahí (sin esto el degradado fijo mintía sobre la posición). */
 function pintarFill(el) {
   if (!el) return;
   const pct = ((Number(el.value) - Number(el.min)) / (Number(el.max) - Number(el.min))) * 100;
   el.style.setProperty('--fill', Math.max(0, Math.min(100, pct)) + '%');
-}
-if ($('#ttsRate')) {
-  $('#ttsRate').oninput = async (e) => {
-    pintarFill(e.target);
-    await window.sagitari.setSettings({ ttsRate: Number(e.target.value) });
-  };
-  pintarFill($('#ttsRate'));
-}
-if ($('#swAvisos')) {
-  $('#swAvisos').classList.toggle('on', !!CFG.settings.ttsNotices);
-  $('#swAvisos').onclick = async (e) => {
-    const on = !e.currentTarget.classList.contains('on');
-    e.currentTarget.classList.toggle('on', on);
-    await window.sagitari.setSettings({ ttsNotices: on });
-  };
-}
-/* Dictado local (whisper): estado, instalación con progreso y etiqueta de Ajustes. */
-let __whisperProgreso = false;
-/* Motor de escucha DE GUARDIA (para la franja de pasos del panel): se refresca en los
-   momentos que pueden cambiarlo — arranque, apertura del modo, aviso de rescate — y se
-   lee de forma SÍNCRONA al pintar los pasos (los manejadores de eventos no son async). */
-let __estadoMotorEscucha = '';
-async function actualizarEstadoMotorEscucha() {
-  try {
-    const r = await window.sagitari.voiceInstallStatus();
-    if (!r || !r.ok) return;
-    if (r.disponible) __estadoMotorEscucha = 'dictado local (Whisper)';
-    else if (r.motor === 'sapi') __estadoMotorEscucha = 'Windows (clásico)';
-    else if (r.motor === 'winrt') __estadoMotorEscucha = 'Windows (moderno)';
-    else if (r.motor) __estadoMotorEscucha = 'Windows';
-    else __estadoMotorEscucha = '';
-  } catch {}
-}
-function pasosConMotor(lista) {
-  return __estadoMotorEscucha ? [{ label: 'Escucha: ' + __estadoMotorEscucha }, ...lista] : lista;
-}
-async function refrescarWhisperUi() {
-  const lbl = $('#lblWhisperEstado');
-  const btn = $('#btnInstalarWhisper');
-  if (!lbl || !btn) return;
-  try {
-    const r = await window.sagitari.voiceInstallStatus();
-    actualizarEstadoMotorEscucha();
-    const instalado = !!(r && r.ok && r.disponible);
-    btn.textContent = instalado ? 'Reinstalar' : 'Instalar motor';
-    if (r && r.ok && r.transcribiendo) lbl.textContent = 'transcribiendo…';
-    else if (r && r.ok && instalado) lbl.textContent = 'instalado (' + r.modeloNombre + ') — activo';
-  } catch {}
-}
-if ($('#btnInstalarWhisper')) {
-  $('#btnInstalarWhisper').onclick = async () => {
-    if (__whisperProgreso) return;
-    __whisperProgreso = true;
-    const lbl = $('#lblWhisperEstado'),
-      btn = $('#btnInstalarWhisper');
-    btn.disabled = true;
-    window.sagitari.onVoiceInstall((p) => {
-      if (!p) return;
-      if (p.tipo === 'binario') lbl.textContent = 'descargando motor… ' + Math.round((p.recibido / (p.total || 1)) * 100) + '%';
-      else if (p.tipo === 'modelo') lbl.textContent = 'descargando modelo… ' + Math.round((p.recibido / (p.total || 1)) * 100) + '%';
-      else if (p.tipo === 'extrayendo') lbl.textContent = 'extrayendo motor…';
-      else if (p.tipo === 'listo') {
-        lbl.textContent = 'instalado — activo';
-        btn.disabled = false;
-        btn.textContent = 'Reinstalar';
-        __whisperProgreso = false;
-        showToast('Dictado local instalado: SAGITARI ahora entiende mucho mejor lo que dices.');
-      } else if (p.tipo === 'error') {
-        lbl.textContent = 'error: ' + (p.error || 'descarga fallida');
-        btn.disabled = false;
-        __whisperProgreso = false;
-      }
-    });
-    try {
-      await window.sagitari.voiceInstall();
-    } catch (e) {
-      lbl.textContent = 'error: ' + (e.message || 'instalación');
-      __whisperProgreso = false;
-    }
-    btn.disabled = false;
-    __whisperProgreso = false;
-  };
-}
-/* Voz local (Piper): mismo patrón que el dictado local — progreso en vivo por evento,
-   botón que se desactiva mientras descarga, etiqueta que dice qué suena ahora. */
-let __piperProgreso = false;
-async function refrescarPiperUi() {
-  const lbl = $('#lblPiperEstado');
-  const btn = $('#btnInstalarPiper');
-  if (!lbl || !btn) return;
-  try {
-    const r = await window.sagitari.voiceInstallStatus();
-    const instalado = !!(r && r.ok && r.piperDisponible);
-    btn.textContent = instalado ? 'Reinstalar' : 'Instalar voz';
-    if (instalado) lbl.textContent = 'instalada (voz local Piper) — activa';
-  } catch {}
-}
-if ($('#btnInstalarPiper')) {
-  $('#btnInstalarPiper').onclick = async () => {
-    if (__piperProgreso) return;
-    __piperProgreso = true;
-    const lbl = $('#lblPiperEstado'),
-      btn = $('#btnInstalarPiper');
-    btn.disabled = true;
-    window.sagitari.onTtsInstall((p) => {
-      if (!p) return;
-      if (p.tipo === 'binario') lbl.textContent = 'descargando voz… ' + Math.round((p.recibido / (p.total || 1)) * 100) + '%';
-      else if (p.tipo === 'voz') lbl.textContent = 'descargando modelo de voz… ' + Math.round((p.recibido / (p.total || 1)) * 100) + '%';
-      else if (p.tipo === 'config') lbl.textContent = 'configurando voz…';
-      else if (p.tipo === 'extrayendo') lbl.textContent = 'extrayendo motor…';
-      else if (p.tipo === 'listo') {
-        lbl.textContent = 'instalada (voz local Piper) — activa';
-        btn.disabled = false;
-        btn.textContent = 'Reinstalar';
-        __piperProgreso = false;
-        showToast('Voz local instalada: SAGITARI ahora suena mucho más natural.');
-        refrescarVocesTts();
-      } else if (p.tipo === 'error') {
-        lbl.textContent = 'error: ' + (p.error || 'descarga fallida');
-        btn.disabled = false;
-        __piperProgreso = false;
-      }
-    });
-    try {
-      await window.sagitari.ttsInstall();
-    } catch (e) {
-      lbl.textContent = 'error: ' + (e.message || 'instalación');
-      __piperProgreso = false;
-    }
-    btn.disabled = false;
-    __piperProgreso = false;
-  };
-}
-/* Motor de escucha clásico: sólo cambia CÓMO se escucha (el reconocedor de Windows que
-   se usa). No toca la síntesis — esa es la de «Leer en voz alta» y su desplegable de voz. */
-if ($('#swSttClasico')) {
-  $('#swSttClasico').onclick = async (e) => {
-    const on = !e.currentTarget.classList.contains('on');
-    e.currentTarget.classList.toggle('on', on);
-    await window.sagitari.setSettings({ sttClasico: on });
-  };
 }
 // ---- apariencia: aplicar al vuelo y persistir ----
 function refreshGlowLabels() {
@@ -531,19 +369,85 @@ $('#setUserName').onchange = async (e) => {
 };
 
 // ---- seguridad: permisos por herramienta + guardarraíles (v1.1) ----
-const PERM_TOOLS = [
-  { n: 'run_command', d: 'Ejecutar comandos en la terminal' },
-  { n: 'write_file', d: 'Crear o sobrescribir archivos' },
-  { n: 'edit_file', d: 'Editar archivos existentes' },
-  { n: 'browser_control', d: 'Controlar el navegador' },
-  { n: 'browser_eval', d: 'Ejecutar JavaScript dentro de la página (acción eval)', label: 'Ejecutar JavaScript' },
-  { n: 'open_app', d: 'Abrir aplicaciones' },
-  { n: 'window_manage', d: 'Gestionar ventanas' },
-  { n: 'clipboard', d: 'Portapapeles' },
+/* QUÉ herramientas hay y qué nivel recomienda cada una lo dice el AGENTE
+   (agent/tools.js → meta:get.riskDefaults), que es la única fuente: aquí había una
+   lista copiada a mano con 8 filas de las 31 claves reales, así que todo lo que se
+   añadió después (apply_patch, open_url, web_fetch, los git…) no se podía permitir ni
+   bloquear desde Ajustes. Se pinta la tabla ENTERA, agrupada por familia para que se
+   lea, y una clave que no esté en ningún grupo no se esconde: cae en «Otras».
+   Lo único que se escribe a mano aquí es cómo se llama cada cosa en castellano
+   (`PERM_INFO`); si falta, se usa el nombre humanizado que da el catálogo (K.tool). */
+const PERM_GROUPS = [
+  {
+    id: 'archivos',
+    titulo: 'Archivos y proyecto',
+    keys: [
+      'read_file',
+      'write_file',
+      'edit_file',
+      'apply_patch',
+      'list_dir',
+      'search_files',
+      'search_code',
+      'find_symbol',
+      'repo_map',
+      'view_image',
+    ],
+  },
+  { id: 'terminal', titulo: 'Terminal', keys: ['run_command'] },
+  {
+    id: 'escritorio',
+    titulo: 'Escritorio y sistema',
+    keys: ['open_app', 'open_url', 'clipboard', 'notify', 'media_control', 'window_manage', 'screenshot', 'system_info'],
+  },
+  { id: 'navegador', titulo: 'Navegador', keys: ['browser_control', 'browser_eval'] },
+  { id: 'git', titulo: 'Git', keys: ['git_status', 'git_diff', 'git_log', 'git_branch', 'git_commit'] },
+  { id: 'web', titulo: 'Web', keys: ['web_fetch'] },
+  { id: 'agente', titulo: 'El propio agente', keys: ['remember', 'use_skill', 'todo_write', 'delegate'] },
 ];
+const PERM_INFO = {
+  read_file: 'Leer archivos de texto del proyecto',
+  write_file: 'Crear o sobrescribir archivos',
+  edit_file: 'Editar archivos existentes',
+  apply_patch: 'Aplicar un parche que toca varios archivos a la vez',
+  list_dir: 'Listar el contenido de una carpeta',
+  search_files: 'Buscar texto dentro de los archivos',
+  search_code: 'Buscar en el código del proyecto',
+  find_symbol: 'Buscar dónde se define una función o clase',
+  repo_map: 'Leer el índice del proyecto (nombres y rutas)',
+  view_image: 'Mirar una imagen que le señalas',
+  run_command: 'Ejecutar comandos en la terminal de Windows',
+  open_app: 'Abrir aplicaciones instaladas',
+  open_url: 'Abrir cualquier dirección en el navegador del sistema',
+  clipboard: 'Leer y escribir el portapapeles',
+  notify: 'Mostrar notificaciones de Windows',
+  media_control: 'Controlar la música y el volumen',
+  window_manage: 'Minimizar, enfocar y ordenar ventanas',
+  screenshot: 'Capturar la pantalla',
+  system_info: 'Consultar CPU, memoria, red y tiempo encendido',
+  browser_control: 'Manejar Chrome o Edge: clic, escribir, leer, capturar',
+  browser_eval: 'Ejecutar JavaScript dentro de la página (acción «eval»)',
+  git_status: 'Ver qué ha cambiado en el repositorio',
+  git_diff: 'Ver el detalle de los cambios',
+  git_log: 'Leer el historial de commits',
+  git_branch: 'Listar, crear y cambiar de rama',
+  git_commit: 'Crear un commit',
+  web_fetch: 'Descargar y leer una página pública',
+  remember: 'Guardar algo en su memoria',
+  use_skill: 'Aplicar una skill instalada',
+  todo_write: 'Llevar su lista de tareas del turno',
+  delegate: 'Repartir trabajo a subagentes',
+};
+const PERM_OTRAS = 'Otras herramientas';
 /* El nivel 'safe' se llamaba «Seguro», que se lee como «más protección» cuando en
    realidad significa «se ejecuta SIN preguntar». El nombre dice ahora su efecto. */
 const RISK_LABEL = { safe: 'permitir siempre', confirm: 'confirmar', restricted: 'bloqueado' };
+/* Claves reales de la tabla del agente, rellenadas al pintar Seguridad (ver
+   _renderSecurity): las usa «Restablecer permisos recomendados».
+   `PERM_LABEL`: nombres bonitos que no están en el catálogo del chat (browser_eval no
+   es una herramienta suelta, es la acción «eval» de browser_control). */
+let PERM_KEYS = [];
+const PERM_LABEL = { browser_eval: 'Ejecutar JavaScript' };
 
 /* Seguridad se pinta al arrancar (initSecurity) Y al entrar en su pestaña, así que dos
    pasadas pueden solaparse (al arrancar con «Seguridad» recordada como última pestaña, por
@@ -570,30 +474,50 @@ async function renderSecurity() {
 async function _renderSecurity() {
   const cfg = { permissions: {}, riskDefaults: {} };
   try {
-    const m = await window.sagitari.metaGet();
+    const m = await window.sagitari.metaGet(hiloActual());
     cfg.permissions = m.permissions || (CFG.security && CFG.security.permissions) || {};
     cfg.riskDefaults = m.riskDefaults || {};
   } catch {}
   const permBox = $('#permList');
   if (!permBox) return;
   permBox.innerHTML = '';
-  for (const t of PERM_TOOLS) {
-    const lvl = (cfg.permissions && cfg.permissions[t.n]) || 'default';
-    const rec = RISK_LABEL[cfg.riskDefaults[t.n]] || 'confirmar';
-    const row = document.createElement('div');
-    row.className = 'permrow';
-    row.innerHTML = `<span class="mt"><b>${esc(t.label || K.tool(t.n).label)}</b> <small class="md">${esc(t.n)}</small><br><small class="md">${esc(t.d)}</small><br><small class="pd">recomendado: ${rec}</small></span>
-      <select data-tool="${t.n}" aria-label="Permiso para ${esc(t.label || K.tool(t.n).label)} (${esc(t.n)})">
+  /* Las claves salen de la tabla del agente, NO de una lista de aquí. `browser_eval`
+     se añade porque es una SUB-permisión de browser_control (la herramienta es la
+     misma, la acción «eval» es la que se regula) y por eso no vive en esa tabla. */
+  const claves = Object.keys(cfg.riskDefaults);
+  if (!claves.includes('browser_eval')) claves.push('browser_eval');
+  PERM_KEYS = claves.slice(); // lo usa «Restablecer permisos recomendados»
+  const grupos = PERM_GROUPS.map((g) => ({ ...g, keys: g.keys.filter((k) => claves.includes(k)) }));
+  const yaPuestas = new Set(grupos.flatMap((g) => g.keys));
+  const sueltas = claves.filter((k) => !yaPuestas.has(k)); // una clave nueva NO se esconde
+  if (sueltas.length) grupos.push({ id: 'otras', titulo: PERM_OTRAS, keys: sueltas });
+  for (const g of grupos) {
+    if (!g.keys.length) continue;
+    const h = document.createElement('div');
+    h.className = 'subnote';
+    h.style.cssText = 'margin: 12px 0 4px; font-weight: 600; letter-spacing: 0.06em; text-transform: uppercase';
+    h.textContent = g.titulo;
+    permBox.appendChild(h);
+    for (const n of g.keys) {
+      const lvl = (cfg.permissions && cfg.permissions[n]) || 'default';
+      const rec = RISK_LABEL[cfg.riskDefaults[n]] || 'confirmar';
+      const nombre = PERM_LABEL[n] || K.tool(n).label; // nunca la clave interna
+      const desc = PERM_INFO[n] || g.titulo;
+      const row = document.createElement('div');
+      row.className = 'permrow';
+      row.innerHTML = `<span class="mt"><b>${esc(nombre)}</b><br><small class="md">${esc(desc)}</small><br><small class="pd">recomendado: ${rec}</small></span>
+      <select data-tool="${esc(n)}" aria-label="Permiso para ${esc(nombre)}">
         <option value="default"${lvl === 'default' ? ' selected' : ''}>Por defecto (${rec})</option>
         <option value="safe"${lvl === 'safe' ? ' selected' : ''}>Permitir siempre</option>
         <option value="confirm"${lvl === 'confirm' ? ' selected' : ''}>Preguntar antes</option>
         <option value="restricted"${lvl === 'restricted' ? ' selected' : ''}>Bloqueado</option>
       </select>`;
-    row.querySelector('select').onchange = async (e) => {
-      await window.sagitari.secSetToolPerm(t.n, e.target.value);
-      showToast(`${t.n}: ${e.target.selectedOptions[0].textContent.toLowerCase()}`);
-    };
-    permBox.appendChild(row);
+      row.querySelector('select').onchange = async (e) => {
+        await window.sagitari.secSetToolPerm(n, e.target.value);
+        showToast(`${nombre}: ${e.target.selectedOptions[0].textContent.toLowerCase()}`);
+      };
+      permBox.appendChild(row);
+    }
   }
   // ---- v3.1: servidores MCP. El comodín del servidor gobierna TODAS sus
   // herramientas de una vez (el override exacto de una herramienta sigue ganando).
@@ -603,6 +527,15 @@ async function _renderSecurity() {
   try {
     mcp = await window.sagitari.mcpList();
   } catch {}
+  /* Un servidor MCP es una fila que gobierna TODAS sus herramientas de una vez, así
+     que va en su propio grupo y no entre las nativas (donde se leería como una más). */
+  if ((mcp.servers || []).length) {
+    const hMcp = document.createElement('div');
+    hMcp.className = 'subnote';
+    hMcp.style.cssText = 'margin: 12px 0 4px; font-weight: 600; letter-spacing: 0.06em; text-transform: uppercase';
+    hMcp.textContent = 'Servidores MCP';
+    permBox.appendChild(hMcp);
+  }
   for (const s of mcp.servers || []) {
     const wildcard = s.permKey || 'mcp__' + s.id + '__*';
     const lvl = (cfg.permissions && cfg.permissions[wildcard]) || 'default';
@@ -627,7 +560,7 @@ async function _renderSecurity() {
 }
 async function initSecurity() {
   try {
-    const m = await window.sagitari.metaGet();
+    const m = await window.sagitari.metaGet(hiloActual());
     const g = m.guardrails || {};
     $('#grSteps').value = g.maxSteps ?? 60;
     $('#grToolCalls').value = g.maxToolCalls ?? 80;
@@ -637,6 +570,9 @@ async function initSecurity() {
     if ($('#grCost')) $('#grCost').value = g.maxCostUsd ?? 0;
     if ($('#grStall')) $('#grStall').value = g.stallThreshold ?? 6;
     if ($('#grDelegations')) $('#grDelegations').value = g.maxDelegations ?? 8;
+    /* v4.4: presupuesto del EQUIPO (modo EQUIPO). No es un guardarraíl del turno sino un
+       tope por encargo de equipo, y lo sirve `meta:get` junto con el tope de compañeros. */
+    if ($('#eqPresupuesto')) $('#eqPresupuesto').value = Number((m.equipo && m.equipo.presupuestoUsd) || 0);
     // v2.5: paralelismo del turno (por defecto 3; el navegador y el disco van con cola)
     if ($('#parTools')) $('#parTools').value = CFG.settings.parallelTools ?? 3;
     if ($('#grLlmTimeout')) $('#grLlmTimeout').value = Math.round((CFG.settings.llmTimeoutMs ?? 120000) / 1000);
@@ -660,6 +596,9 @@ async function initSecurity() {
     if ($('#swDiagnosticos')) $('#swDiagnosticos').classList.toggle('on', CFG.settings.diagnosticosEscritura !== false);
     if ($('#swCierre')) $('#swCierre').classList.toggle('on', CFG.settings.verificacionCierre !== false);
     if ($('#swArboles')) $('#swArboles').classList.toggle('on', CFG.settings.arbolesAislados !== false);
+    // Aceptar las escrituras sin preguntar: APAGADO por defecto (es el ajuste de más
+    // riesgo del panel, así que sólo se lee como encendido si es true de verdad)
+    if ($('#swAutoEdits')) $('#swAutoEdits').classList.toggle('on', CFG.settings.autoEdits === true);
     if ($('#verAttempts')) $('#verAttempts').value = CFG.settings.intentosArreglo ?? 2;
     // v2.5: tus hooks. Se guardan como texto tal cual (una línea = un comando).
     if ($('#hookEditar')) $('#hookEditar').value = CFG.settings.hookEditar || '';
@@ -695,6 +634,16 @@ if ($('#grCost')) $('#grCost').onchange = (e) => window.sagitari.secSetGuardrail
 if ($('#grStall')) $('#grStall').onchange = (e) => window.sagitari.secSetGuardrail({ stallThreshold: clampGuardrail(e.target, 0) });
 if ($('#grDelegations'))
   $('#grDelegations').onchange = (e) => window.sagitari.secSetGuardrail({ maxDelegations: clampGuardrail(e.target, 8) });
+/* v4.4: el presupuesto del equipo se guarda como ajuste (equipoPresupuestoUsd) y admite
+   decimales —es dinero, no un número de pasos—, así que no pasa por clampGuardrail. */
+if ($('#eqPresupuesto'))
+  $('#eqPresupuesto').onchange = async (e) => {
+    const v = Number(String(e.target.value).replace(',', '.'));
+    const usd = Number.isFinite(v) && v > 0 ? Math.round(v * 100) / 100 : 0; // 0 = sin tope propio
+    e.target.value = usd;
+    await window.sagitari.setSettings({ equipoPresupuestoUsd: usd });
+    showToast(usd ? 'Presupuesto del equipo: ' + usd.toFixed(2) + ' $ por encargo' : 'El equipo trabajará sin tope de gasto propio');
+  };
 if ($('#parTools'))
   $('#parTools').onchange = async (e) => {
     const v = clampGuardrail(e.target, 3); // 1 = en orden, como antes
@@ -775,6 +724,18 @@ if ($('#swArboles'))
     await window.sagitari.setSettings({ arbolesAislados: on });
     showToast(
       on ? 'Los subagentes que escriben trabajarán en un árbol de git aislado' : 'Los subagentes escribirán directamente sobre el proyecto',
+    );
+  };
+if ($('#swAutoEdits'))
+  $('#swAutoEdits').onclick = async (e) => {
+    const on = !e.currentTarget.classList.contains('on');
+    e.currentTarget.classList.toggle('on', on);
+    CFG.settings.autoEdits = on;
+    await window.sagitari.setSettings({ autoEdits: on });
+    showToast(
+      on
+        ? 'Los cambios en archivos se aceptarán sin preguntar (los comandos y lo que borra siguen pidiendo permiso)'
+        : 'Los cambios en archivos volverán a pedir tu permiso',
     );
   };
 if ($('#verAttempts'))
@@ -969,7 +930,7 @@ async function mcpFormShow(server) {
   if (server && server.id) {
     const clave = server.permKey || 'mcp__' + server.id + '__*';
     try {
-      const m = await window.sagitari.metaGet();
+      const m = await window.sagitari.metaGet(hiloActual());
       nivel = (m.permissions || {})[clave] || 'default';
     } catch {}
   }
@@ -1133,7 +1094,10 @@ $('#mcpPasteGo').onclick = async () => {
 
 /* ============ Ajustes: pestañas, búsqueda y utilidades ============ */
 
-const SET_TABS = ['model', 'prefs', 'security', 'agent', 'data', 'about'];
+/* Pestañas de Ajustes. El orden y los nombres tienen que coincidir con los pares
+   `#tab-*` / `#setpanel-*` de index.html (la búsqueda y el tablist ARIA se apoyan en
+   `data-set` ↔ `data-panel`). */
+const SET_TABS = ['model', 'apariencia', 'security', 'agent', 'data', 'about'];
 let setTabName = 'model';
 try {
   const t = localStorage.getItem('sagi.setTab');
@@ -1155,6 +1119,10 @@ function showSetTab(panel) {
       b.classList.toggle('on', on);
       b.setAttribute('role', 'tab');
       b.setAttribute('aria-selected', on ? 'true' : 'false');
+      /* Roving tabindex: solo la pestaña activa entra en el orden de tabulación —con las
+         siete dentro, Tab tenía que atravesarlas todas para llegar al contenido—; para
+         moverse entre pestañas están las flechas (ver el keydown de abajo). */
+      b.setAttribute('tabindex', on ? '0' : '-1');
     });
   }
   const wrap = $('#setWrap');
@@ -1163,6 +1131,10 @@ function showSetTab(panel) {
   // sesión (conectados, con su número de herramientas) y al pintarse una sola vez al
   // arrancar mostraban datos viejos.
   if (name === 'security') renderSecurity();
+  // El espacio de trabajo se puede cambiar desde su propia vista (y desde el asistente),
+  // así que al entrar en «Datos» se relee: si no, la carpeta que enseña Ajustes puede ser
+  // la de antes (y esa etiqueta es lo único que dice dónde aterrizan los archivos).
+  if (name === 'data') window.sagitari.workspaceGet().then(pintarEspacioTrabajo);
   // la pestaña «Acerca de» ya enseña el aviso: el punto del sidebar sobra
   // (solo si Ajustes está a la vista: fillSettings llama aquí al arrancar)
   if (name === 'about' && $('#view-settings').classList.contains('on')) setBadge('#nbUpdate', 0);
@@ -1180,6 +1152,26 @@ if ($('#setTabs'))
         showSetTab(b.dataset.set);
       };
     });
+
+/* Navegación por teclado del tablist (patrón ARIA). Con el roving tabindex de arriba,
+   las flechas son la única forma de llegar a las demás pestañas. Mueven el foco Y
+   activan —el mismo modelo que ya seguía el clic—, así que se reusa el clic en vez de
+   duplicar la activación (y así se limpia la búsqueda igual que con el ratón). */
+if ($('#setTabs'))
+  $('#setTabs').addEventListener('keydown', (e) => {
+    const tabs = [...$('#setTabs').querySelectorAll('.settab')];
+    const i = tabs.indexOf(document.activeElement);
+    if (i < 0) return;
+    let j = null;
+    if (e.key === 'ArrowRight') j = (i + 1) % tabs.length;
+    else if (e.key === 'ArrowLeft') j = (i - 1 + tabs.length) % tabs.length;
+    else if (e.key === 'Home') j = 0;
+    else if (e.key === 'End') j = tabs.length - 1;
+    if (j === null) return;
+    e.preventDefault();
+    tabs[j].focus();
+    tabs[j].click();
+  });
 
 /** Filtra los ajustes por texto. Con búsqueda activa se muestran todas las tarjetas
     cuyas filas (`.srow` y `.themerow`) coincidan. */
@@ -1254,19 +1246,25 @@ function advAplicar(id, on) {
 /* Aparece sólo cuando no hay modelo activo y el usuario no lo cerró antes (se
    recuerda en localStorage). Reutiliza los mismos IPC que el formulario de la
    pestaña Modelo (listModels / saveProvider / activateProvider), así que no
-   duplica lógica: al activar desde aquí, la pestaña queda sincronizada. */
-const WZ_PRESETS = [
-  { id: 'ollama', titulo: 'Ollama', desc: 'Local y gratis, sin clave. Necesita «ollama serve».' },
-  { id: 'lmstudio', titulo: 'LM Studio', desc: 'Local y gratis, sin clave. Servidor local activado.' },
-  { id: 'openrouter', titulo: 'OpenRouter', desc: 'Cientos de modelos con una sola API key.' },
-  { id: 'openai', titulo: 'OpenAI', desc: 'GPT-4o, GPT-4.1, GPT-5…' },
-  { id: 'anthropic', titulo: 'Anthropic (Claude)', desc: 'Claude nativo, API Messages.' },
-  { id: 'opencode-go', titulo: 'OpenCode Go', desc: 'Modelos curated (GLM, Kimi, DeepSeek, Qwen…).' },
-  { id: 'groq', titulo: 'Groq', desc: 'Ultrarrápido, Llama 3.x gratis con límites.' },
-];
+   duplica lógica: al activar desde aquí, la pestaña queda sincronizada.
+   Y elige el proveedor sobre EL MISMO catálogo (`CFG.presets`, que llega de
+   config:get): aquí había una lista copiada a mano con 7 de los 22 proveedores, así
+   que todo lo que se añadía a main/providers.js —Gemini, DeepSeek, xAI, Mistral,
+   Moonshot, Cerebras, Nvidia, los locales por HTTP…— era invisible para quien empieza
+   por el wizard. */
 let wzPaso = 1;
 let wzPreset = null;
+/* Protocolo elegido a mano en el paso 2 (solo se pregunta cuando el proveedor no trae su
+   Base URL). Hay que recordarlo: al llegar al paso 3 ese desplegable ya no está en el DOM
+   y sin esto la elección se perdería al probar y al guardar. */
+let wzFormatoElegido = null;
 let wzProvGuardado = null;
+/* Lo escrito en el paso 2 (Base URL y clave). Vive aquí y no sólo en el DOM porque el
+   paso 3 reemplaza el cuerpo del wizard: al cambiar de página, la dirección se perdía
+   —y con ella la detección de modelos y la activación en un perfil nuevo, justo el caso
+   para el que existe el asistente— y «Atrás» repintaba la del preset vaciando la clave. */
+let wzUrl = '';
+let wzKey = '';
 let wzBusy = false;
 function wizardDebeSalirse() {
   return !!(CFG && CFG.active && CFG.active.model);
@@ -1302,29 +1300,51 @@ function wizardPintar() {
   if (wzPaso === 1) {
     body.innerHTML =
       '<div class="wz-choose">' +
-      WZ_PRESETS.map(
-        (p) =>
-          `<button type="button" class="wz-opt${wzPreset === p.id ? ' on' : ''}" data-wz="${esc(p.id)}"><b>${esc(p.titulo)}</b><small>${esc(p.desc)}</small></button>`,
-      ).join('') +
+      (CFG.presets || [])
+        .map(
+          (p) =>
+            `<button type="button" class="wz-opt${wzPreset === p.id ? ' on' : ''}" data-wz="${esc(p.id)}"><b>${esc(p.name)}</b><small>${esc(p.hint || '')}</small></button>`,
+        )
+        .join('') +
       '</div>' +
-      `<div class="wz-note">¿Otro endpoint compatible con OpenAI? Usa la pestaña Modelo → preset «Personalizado». Puedes cambiar de proveedor cuando quieras.</div>`;
+      `<div class="wz-note">¿Un servidor propio? Elige «Personalizado (OpenAI-compatible)». Puedes cambiar de proveedor y de modelo cuando quieras desde la pestaña Modelo.</div>`;
     body.querySelectorAll('[data-wz]').forEach((b) => {
       b.onclick = () => {
         wzPreset = b.dataset.wz;
         wzProvGuardado = null;
+        wzFormatoElegido = null; // otro proveedor, otra decisión de protocolo
+        wzUrl = ''; // y otra base: la del preset nuevo, no la que se hubiera escrito
+        wzKey = '';
         wizardPintar();
       };
     });
   } else if (wzPaso === 2) {
     const p = (CFG.presets || []).find((x) => x.id === wzPreset) || {};
     const local = !p.needsKey;
+    /* Cuando el proveedor trae su Base URL, el catálogo ya sabe con qué protocolo habla y
+       el wizard no pregunta nada. Cuando la dirección la escribe el usuario (el preset
+       «Personalizado»), sí se pregunta: hay bases Anthropic de terceros que no lo dicen
+       en la ruta, y elegirlo aquí es la única forma de que funcionen a la primera. */
+    const propia = !!p.baseUrl;
     body.innerHTML = `
-      <div class="field"><label for="wzUrl">BASE URL</label><input type="text" id="wzUrl" value="${esc(p.baseUrl || '')}" placeholder="https://…/v1" /></div>
-      ${local ? '' : `<div class="field"><label for="wzKey">API KEY</label><input type="password" id="wzKey" placeholder="sk-… (vacío para Ollama o LM Studio)" /></div>`}
+      <div class="field"><label for="wzUrl">Base URL</label><input type="text" id="wzUrl" value="${esc(wzUrl || p.baseUrl || '')}" placeholder="https://…/v1" /></div>
+      ${local ? '' : `<div class="field"><label for="wzKey">API KEY</label><input type="password" id="wzKey" value="${esc(wzKey)}" placeholder="sk-… (vacío para Ollama o LM Studio)" /></div>`}
+      ${
+        propia
+          ? ''
+          : `<div class="field"><label for="wzFormat">Protocolo de la API</label><select id="wzFormat">
+               <option value="auto">Automático (deducirlo)</option>
+               <option value="openai">OpenAI — /chat/completions</option>
+               <option value="anthropic">Anthropic — /messages</option>
+               <option value="responses">OpenAI Responses — /responses</option>
+             </select></div>`
+      }
       <div class="subnote">${esc(p.hint || '')}${local ? ' No necesita clave: sólo tiene que estar en marcha.' : ''}</div>`;
+    // Al volver «Atrás» se recuerda lo que ya se había elegido.
+    if ($('#wzFormat') && wzFormatoElegido) $('#wzFormat').value = wzFormatoElegido;
   } else {
     body.innerHTML = `
-      <div class="field"><label for="wzModel">MODELO</label><select id="wzModel"><option value="">— detecta modelos primero —</option></select></div>
+      <div class="field"><label for="wzModel">Modelo</label><select id="wzModel"><option value="">— detecta modelos primero —</option></select></div>
       <div class="subnote">Elige el modelo con el que trabajará Sagitari. Puedes cambiarlo en cualquier momento desde la pestaña Modelo.</div>`;
   }
   const foot = document.createElement('div');
@@ -1357,6 +1377,12 @@ function wizardPintar() {
           $('#wzMsg').textContent = 'Escribe la Base URL del proveedor.';
           return;
         }
+        // El protocolo elegido a mano se guarda para los pasos siguientes (el
+        // desplegable desaparece al pasar de página), y con él la dirección y la clave:
+        // el paso 3 ya no tiene esos campos, así que aquí es donde se quedan.
+        if ($('#wzFormat')) wzFormatoElegido = $('#wzFormat').value || 'auto';
+        wzUrl = url;
+        wzKey = ($('#wzKey') && $('#wzKey').value) || '';
         const ya = (CFG.providers || []).find((pr) => pr.baseUrl === url);
         if (ya) wzProvGuardado = ya; // reutiliza el proveedor ya guardado con esa URL
       }
@@ -1372,10 +1398,19 @@ function wzMsg(t) {
 }
 async function wizardDetectar() {
   wzMsg('Detectando modelos…');
-  const url = ($('#wzUrl') || {}).value || (wzProvGuardado && wzProvGuardado.baseUrl) || '';
-  const key = ($('#wzKey') && $('#wzKey').value.trim()) || '';
+  /* La base y la clave se leen del estado del wizard, no del DOM: en este paso (#3) sus
+     campos ya no existen. Si no hay ninguna escrita se prueba con la del proveedor que
+     ya estuviera guardado con esa URL. */
+  const url = wzUrl || (wzProvGuardado && wzProvGuardado.baseUrl) || '';
+  const key = String(wzKey || '').trim();
+  const pre = (CFG.presets || []).find((x) => x.id === wzPreset) || {};
   try {
-    const r = await window.sagitari.listModels(url, key);
+    // El protocolo viaja con la petición: sin él, una base Anthropic de terceros se
+    // sondearía con Bearer y la detección fallaría justo después de haber dicho cómo habla.
+    const r = await window.sagitari.listModels(url, key, {
+      format: wzFormato(),
+      providerId: pre.baseUrl && pre.baseUrl === url ? pre.id : undefined,
+    });
     if (!r.ok) {
       wzMsg('Error: ' + r.error);
       return;
@@ -1393,29 +1428,51 @@ async function wizardDetectar() {
     wzMsg('Error: ' + ((e && e.message) || e));
   }
 }
+/** Protocolo con el que el wizard prueba y guarda. Manda, por este orden: lo que el
+    usuario haya elegido en el paso 2 (solo se pregunta cuando el proveedor no trae su
+    Base URL y el protocolo no se puede deducir del catálogo), el del proveedor ya
+    guardado con esa URL —pudo cambiarse en la pestaña Modelo— y el que declara el
+    propio preset. Antes se guardaba siempre `'auto'`, así que el formato del proveedor
+    elegido se perdía: un preset Anthropic guardado por el wizard acababa yendo por la
+    ruta de OpenAI. */
+function wzFormato() {
+  const sel = $('#wzFormat');
+  if (sel) return sel.value || 'auto';
+  if (wzFormatoElegido) return wzFormatoElegido;
+  const p = (CFG.presets || []).find((x) => x.id === wzPreset) || {};
+  return (wzProvGuardado && wzProvGuardado.format) || p.format || 'auto';
+}
 async function wizardActivar() {
   if (wzBusy) return;
-  const url = ($('#wzUrl') || {}).value || (wzProvGuardado && wzProvGuardado.baseUrl) || '';
-  const key = ($('#wzKey') && $('#wzKey').value.trim()) || '';
+  // Igual que en la detección: lo escrito en el paso 2 vive en el estado del wizard.
+  const url = wzUrl || (wzProvGuardado && wzProvGuardado.baseUrl) || '';
+  const key = String(wzKey || '').trim();
   const model = $('#wzModel') && $('#wzModel').value;
   if (!url || !model) return wzMsg('Detecta modelos y elige uno.');
+  const p = (CFG.presets || []).find((x) => x.id === wzPreset) || {};
+  const format = wzFormato();
   wzBusy = true;
   try {
     if (!wzProvGuardado) {
-      const p = (CFG.presets || []).find((x) => x.id === wzPreset) || {};
       const guardar = await window.sagitari.saveProvider({
         id: 'prov_' + Date.now().toString(36),
         name: p.name || 'Proveedor',
         baseUrl: url,
         apiKey: key,
-        format: 'auto',
+        format,
         models: [...$('#wzModel').options].map((o) => o.value).filter(Boolean),
       });
       if (guardar && guardar.ok === false) {
         wzMsg('Error: ' + (guardar.error || 'no se pudo guardar'));
         return;
       }
-      wzProvGuardado = (CFG.providers || []).find((pr) => pr.baseUrl === url) || { id: null, name: p.name || 'Proveedor', format: 'auto' };
+      wzProvGuardado = (CFG.providers || []).find((pr) => pr.baseUrl === url) || { id: null, name: p.name || 'Proveedor', format };
+    } else if (wzFormatoElegido) {
+      /* Se reutiliza un proveedor ya guardado con esa URL, pero el usuario ha elegido
+         protocolo en este paso: se guarda también en él para que la fila «Usar» de la
+         pestaña Modelo no siga reenviando el formato viejo. */
+      await window.sagitari.saveProvider({ ...wzProvGuardado, format });
+      wzProvGuardado = (CFG.providers || []).find((pr) => pr.baseUrl === url) || { ...wzProvGuardado, format };
     }
     const vision = K && K.looksVision ? K.looksVision(model) : false;
     const r = await window.sagitari.activateProvider(
@@ -1427,9 +1484,9 @@ async function wizardActivar() {
             apiKey: key,
             model,
             vision,
-            format: wzProvGuardado.format || 'auto',
+            format: wzProvGuardado.format || format,
           }
-        : { name: (wzProvGuardado && wzProvGuardado.name) || 'Proveedor', baseUrl: url, apiKey: key, model, vision, format: 'auto' },
+        : { name: (wzProvGuardado && wzProvGuardado.name) || 'Proveedor', baseUrl: url, apiKey: key, model, vision, format },
     );
     if (r && r.ok === false) {
       wzMsg('Error: ' + (r.error || 'no se pudo activar'));
@@ -1454,10 +1511,15 @@ async function wizardActivar() {
 if ($('#apiKeyReveal'))
   $('#apiKeyReveal').onclick = () => {
     const k = $('#pKey');
+    const b = $('#apiKeyReveal');
     const show = k.type === 'password';
     k.type = show ? 'text' : 'password';
-    $('#apiKeyReveal').classList.toggle('on', show);
-    $('#apiKeyReveal').title = show ? 'Ocultar la clave' : 'Mostrar la clave';
+    b.classList.toggle('on', show);
+    b.title = show ? 'Ocultar la clave' : 'Mostrar la clave';
+    // el estado se dice, no solo se dibuja: sin esto el botón siempre anunciaba
+    // «no pulsado» mientras la clave estaba a la vista
+    b.setAttribute('aria-pressed', show ? 'true' : 'false');
+    b.setAttribute('aria-label', show ? 'Ocultar la clave' : 'Mostrar la clave');
   };
 
 // restablecer límites a los valores recomendados QUE DEFINE EL AGENTE (main los
@@ -1466,7 +1528,7 @@ if ($('#apiKeyReveal'))
 if ($('#secResetGuardrails'))
   $('#secResetGuardrails').onclick = async () => {
     try {
-      const m = await window.sagitari.metaGet();
+      const m = await window.sagitari.metaGet(hiloActual());
       const d = m && m.guardrailDefaults;
       if (!d) throw new Error('el agente no informó de sus valores recomendados');
       const r = await window.sagitari.secSetGuardrail(d);
@@ -1479,12 +1541,18 @@ if ($('#secResetGuardrails'))
   };
 if ($('#secResetPerms'))
   $('#secResetPerms').onclick = async () => {
-    for (const t of PERM_TOOLS) await window.sagitari.secSetToolPerm(t.n, 'default');
+    // Si meta:get no llegó a pintar la tabla, se usa la lista de grupos: es la misma
+    // tabla del agente escrita aquí solo como respaldo, nunca como fuente.
+    const claves = PERM_KEYS.length ? PERM_KEYS : [...PERM_GROUPS.flatMap((g) => g.keys), 'browser_eval'];
+    for (const t of claves) await window.sagitari.secSetToolPerm(t, 'default');
     await renderSecurity();
     showToast('Permisos restablecidos a los recomendados');
   };
 
 // datos: hábitos aprendidos + carpeta de datos
+/* Mismo listado, mismo orden y mismas categorías que la sección «Cómo trabajas conmigo»
+   de la vista Memoria: se reutilizan `MEM_GRUPOS` y `memFilas` (renderer/memoria-ui.js)
+   para que la etiqueta humana y la clave que viaja al proceso principal no se separen. */
 async function renderHabitsPreview() {
   const box = $('#habitsPreview');
   if (!box) return;
@@ -1496,25 +1564,41 @@ async function renderHabitsPreview() {
     box.innerHTML = '';
     return;
   }
-  const pills = [];
-  const add = (label, arr) => {
-    if (arr && arr.length)
-      pills.push(`<span class="hpill">${esc(label)}: ${arr.map((x) => esc(x.name) + ' ×' + x.count).join(', ')}</span>`);
-  };
-  add('apps', s.apps);
-  add('comandos', s.commands);
-  add('carpetas', s.folders);
-  add('webs', s.sites);
-  add('herramientas', s.tools);
-  const modes = Object.entries(s.modes || {}).sort((a, b) => b[1] - a[1]);
-  if (modes.length && modes[0][1] >= 2) pills.push(`<span class="hpill">modo: ${esc(modes[0][0])}</span>`);
-  box.innerHTML = pills.length
-    ? pills.join('')
+  const bloques = [];
+  for (const g of MEM_GRUPOS) {
+    const filas = memFilas(g.cat, s[g.cat]).filter((f) => f.name && f.count > 0);
+    if (!filas.length) continue;
+    const total = filas.reduce((n, f) => n + f.count, 0);
+    bloques.push(
+      `<div class="hgrupo" data-cat="${esc(g.cat)}"><span class="hgr-t">${ic(g.icono)} ${esc(g.titulo)}</span>` +
+        `<span class="hgr-n">${total} ${total === 1 ? 'uso' : 'usos'}</span>` +
+        filas.map((f) => `<span class="hpill">${esc(f.name)} ×${f.count}</span>`).join('') +
+        `<button class="btn ghost sq" data-olvidar="${esc(g.olvidar)}" title="Olvidar ${esc(g.titulo.toLowerCase())}" aria-label="Olvidar ${esc(g.titulo.toLowerCase())}">${ic('trash')}</button></div>`,
+    );
+  }
+  box.innerHTML = bloques.length
+    ? bloques.join('')
     : '<span class="hdim">Todavía no hay hábitos: se aprenden con el uso normal de la app.</span>';
+  box.querySelectorAll('[data-olvidar]').forEach((b) => {
+    b.onclick = async () => {
+      const categoria = b.dataset.olvidar;
+      if (!(await askConfirm(b, '¿Olvidar lo observado en ' + memTituloCategoria(categoria) + '?', 'Dejará de usarse para conocerte.')))
+        return;
+      b.disabled = true;
+      const r = await window.sagitari.habitsForget(categoria);
+      if (r && r.ok === false) {
+        b.disabled = false;
+        showToast('No se pudo olvidar: ' + (r.error || 'error desconocido'));
+        return;
+      }
+      await renderHabitsPreview();
+      showToast('Hábitos olvidados: ' + memTituloCategoria(categoria));
+    };
+  });
 }
 async function initDataPanel() {
   try {
-    const m = await window.sagitari.metaGet();
+    const m = await window.sagitari.metaGet(hiloActual());
     const p = $('#dataDirPath');
     if (p && m.dataDir) p.textContent = m.dataDir;
   } catch {}
@@ -1901,8 +1985,19 @@ if (window.sagitari.onUpdate)
     }
   });
 
+/* Observador de cada interruptor pulido, para poder desconectarlo: un `.sw` repintado
+   (la lista de Skills se rehace entera) deja su nodo suelto, y el observador lo
+   mantendría vivo —junto con todo lo que cuelga de él— hasta cerrar la app. */
+const swObservados = new Map();
+
 /** Interruptores: teclado + estado ARIA, sin tocar sus handlers ya definidos. */
 function polishSwitches() {
+  for (const [sw, obs] of swObservados) {
+    if (!sw.isConnected) {
+      obs.disconnect();
+      swObservados.delete(sw);
+    }
+  }
   $$('.sw').forEach((sw) => {
     if (sw.dataset.polished) return;
     sw.dataset.polished = '1';
@@ -1915,10 +2010,9 @@ function polishSwitches() {
         sw.click();
       }
     });
-    new MutationObserver(() => sw.setAttribute('aria-checked', sw.classList.contains('on') ? 'true' : 'false')).observe(sw, {
-      attributes: true,
-      attributeFilter: ['class'],
-    });
+    const obs = new MutationObserver(() => sw.setAttribute('aria-checked', sw.classList.contains('on') ? 'true' : 'false'));
+    obs.observe(sw, { attributes: true, attributeFilter: ['class'] });
+    swObservados.set(sw, obs);
   });
 }
 polishSwitches();

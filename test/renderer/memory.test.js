@@ -62,6 +62,11 @@ test('tokeniza un texto null', () => {
   assertEqual(tokens.length, 0);
 });
 
+test('tokeniza igual que siempre (la suite de scoring depende de esto)', () => {
+  const t = memory.tokenize('El usuario prefiere informes en PDF');
+  assertOk(t.includes('usuario') && t.includes('informes') && t.includes('pdf'));
+});
+
 console.log('memory.js — scoreAgainst');
 
 test('scoreAgainst devuelve un objeto con score y overlap', () => {

@@ -101,6 +101,115 @@ function mergeSecrets(prev = {}, next = {}) {
   return out;
 }
 
+/* ---- credenciales DENTRO de la URL ------------------------------------------------
+   Un servidor MCP remoto se autentica muchas veces por la propia URL
+   (`https://usuario:token@host/mcp` o `https://host/sse?key=SECRETO`). Esa parte es un
+   secreto igual que los valores de `env`/`headers`: no puede quedar en claro en
+   config.json ni viajar sin enmascarar a la vista. Estas tres funciones son el único
+   sitio que decide qué es credencial y cómo se tapa. La cirugía es sobre el TEXTO (no
+   se reconstruye con `new URL`, que percent-codificaría los puntos suspensivos). */
+const MASCARA_URL = '••••';
+const PARAM_CREDENCIAL_RX =
+  /^(key|api_?key|token|access_?token|auth|authorization|password|passwd|pwd|secret|client_?secret|sig|signature|bearer)$/i;
+
+const sinHash = (s) => {
+  const i = String(s).indexOf('#');
+  return i < 0 ? String(s) : String(s).slice(0, i);
+};
+const esNombreCredencial = (nombre) => {
+  const n = String(nombre || '');
+  if (PARAM_CREDENCIAL_RX.test(n)) return true;
+  try {
+    return PARAM_CREDENCIAL_RX.test(decodeURIComponent(n));
+  } catch {
+    return false;
+  }
+};
+
+/** ¿La URL lleva credenciales? (userinfo `usuario:clave@` o un parámetro con nombre de secreto). */
+function urlLlevaCredenciales(url) {
+  const s = String(url || '');
+  if (/^[a-z][a-z0-9+.-]*:\/\/[^/?#]*@/i.test(s)) return true;
+  const q = sinHash(s);
+  const i = q.indexOf('?');
+  if (i < 0) return false;
+  return q
+    .slice(i + 1)
+    .split('&')
+    .some((par) => esNombreCredencial(par.split('=')[0]));
+}
+
+/** La misma URL con las credenciales tapadas: la vista la enseña y el usuario puede editarla. */
+function enmascararUrl(url) {
+  const s = String(url == null ? '' : url);
+  if (!urlLlevaCredenciales(s)) return s;
+  const iHash = s.indexOf('#');
+  const cola = iHash < 0 ? '' : s.slice(iHash);
+  let out = iHash < 0 ? s : s.slice(0, iHash);
+  // userinfo: lo que hay entre «esquema://» y la «@» anterior al host
+  const m = out.match(/^([a-z][a-z0-9+.-]*:\/\/)([^/?#]*@)(.*)$/i);
+  if (m) {
+    // `usuario:clave` → se tapa solo la clave (el usuario no es el secreto y ayuda a
+    // reconocer el servidor); `token` a secas → se tapa entero, porque ES el token.
+    const cred = m[2].slice(0, -1);
+    const i = cred.indexOf(':');
+    out = m[1] + (i < 0 ? MASCARA_URL : cred.slice(0, i) + ':' + MASCARA_URL) + '@' + m[3];
+  }
+  // parámetros con nombre de credencial
+  out = out.replace(/([?&])([^=&#?]+)=([^&#]*)/g, (todo, sep, nombre) =>
+    esNombreCredencial(nombre) ? sep + nombre + '=' + MASCARA_URL : todo,
+  );
+  return out + cola;
+}
+
+/** Parámetros `nombre=valor` de la query de una URL (sin el fragmento). */
+function paramsDe(s) {
+  const q = sinHash(s);
+  const i = q.indexOf('?');
+  if (i < 0) return [];
+  return q
+    .slice(i + 1)
+    .split('&')
+    .map((par) => {
+      const j = par.indexOf('=');
+      return j < 0 ? [par, ''] : [par.slice(0, j), par.slice(j + 1)];
+    });
+}
+
+/** Conserva las credenciales guardadas cuando el formulario reenvía la URL enmascarada
+    (el usuario pidió verla, no que su token se sustituyera por la máscara). */
+function mergeUrl(guardada, nueva) {
+  const n = String(nueva == null ? '' : nueva);
+  if (!n || !n.includes(MASCARA_URL)) return n;
+  const g = String(guardada == null ? '' : guardada);
+  const mg = n.match(/^([a-z][a-z0-9+.-]*:\/\/)([^/?#]*@)(.*)$/i);
+  const gg = g.match(/^([a-z][a-z0-9+.-]*:\/\/)([^/?#]*@)(.*)$/i);
+  let out = n;
+  if (mg && gg) {
+    const nuevo = mg[2].slice(0, -1);
+    const guardado = gg[2].slice(0, -1);
+    const i = nuevo.indexOf(':');
+    if (i < 0) {
+      out = mg[1] + guardado + '@' + mg[3]; // «token@» → el userinfo entero
+    } else {
+      // `usuario:••••@`: se restaura la clave y se respeta el usuario que haya escrito
+      const clave = nuevo.slice(i + 1);
+      const j = guardado.indexOf(':');
+      const claveReal = j < 0 ? guardado : guardado.slice(j + 1);
+      out = mg[1] + nuevo.slice(0, i) + ':' + (clave === MASCARA_URL ? claveReal : clave) + '@' + mg[3];
+    }
+  }
+  const guardados = new Map(paramsDe(g));
+  const iHash = out.indexOf('#');
+  const cola = iHash < 0 ? '' : out.slice(iHash);
+  const sinCola = (iHash < 0 ? out : out.slice(0, iHash)).replace(/([?&])([^=&#?]+)=([^&#]*)/g, (todo, sep, nombre, valor) => {
+    if (!esNombreCredencial(nombre) || valor !== MASCARA_URL) return todo;
+    const real = guardados.get(nombre);
+    return real === undefined ? todo : sep + nombre + '=' + real;
+  });
+  return sinCola + cola;
+}
+
 /**
  * Convierte el JSON de `mcpServers` de otro cliente en servidores validados.
  * `command` → stdio, `url` → http. Las entradas que no pasan la validación se
@@ -137,4 +246,4 @@ function parseMcpImport(text) {
   return { ok: true, servers };
 }
 
-module.exports = { validateServer, sanitizeList, rawId, mergeSecrets, parseMcpImport };
+module.exports = { validateServer, sanitizeList, rawId, mergeSecrets, urlLlevaCredenciales, enmascararUrl, mergeUrl, parseMcpImport };

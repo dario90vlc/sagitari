@@ -1,5 +1,5 @@
 'use strict';
-/* Suite SAGITARI — agente, voz, orquestación, v2.x, v3.0 y fases (antes run.js 3453-7406).
+/* Suite SAGITARI — agente, orquestación, v2.x, v3.0 y fases (antes run.js 3453-7406).
    Registra tests en la cola de ./comun; run.js carga los bloques en orden. */
 const {
   fs,
@@ -303,1702 +303,6 @@ test('chat: el fallo se explica y la píldora ofrece los modelos de tu API', () 
   eq(c.known, false);
   // y ya no existe la etiqueta de estado que dictaba «Conectado»/«Con errores»
   eq(K.statusPill, undefined, 'la píldora de estado se retiró del kit');
-});
-
-/* ---------- voz: contrato de motores y eventos ---------- */
-
-/* El protocolo del motor de dictado. Se cortaba el prefijo a mano (`slice(6)` para un
-   prefijo de 7) y el «fallo» no se veía como un error sino como un «:» de más dentro de
-   lo dictado: por eso se prueba el corte, y no que la función exista. */
-test('voz/protocolo: cada prefijo se corta por su largo y la confianza no se cuela', () => {
-  const { partirLinea, PREFIJOS } = require('../main/voice/protocolo');
-  eq(
-    PREFIJOS.every((p) => p.endsWith('::')),
-    true,
-    'todos los prefijos terminan en ::',
-  );
-  const fin = partirLinea('FINAL::Recuérdame llamar a Álvaro\u001f0.82');
-  eq(fin.prefijo, 'FINAL::', 'se reconoce el final');
-  eq(fin.cuerpo, 'Recuérdame llamar a Álvaro', 'sin el prefijo delante ni la confianza detrás');
-  eq(partirLinea('READY::es-ES').cuerpo, 'es-ES', 'el idioma llega limpio');
-  eq(partirLinea('MODE::sapi').cuerpo, 'sapi', 'el motor llega tal cual (y por eso se puede avisar del clásico)');
-  eq(partirLinea('PART::recuérdame').cuerpo, 'recuérdame', 'la hipótesis en curso también');
-  eq(partirLinea('NOTE::WinRT no disponible').prefijo, 'NOTE::', 'la explicación del motor es del protocolo');
-  /* Una traza suelta de PowerShell no puede convertirse en una frase dictada. */
-  eq(partirLinea('At line:1 char:1'), null, 'lo que no es del protocolo no dice nada');
-  eq(partirLinea(''), null, 'ni una línea vacía');
-  eq(partirLinea('FINAL::   hola   \u001f0.3').cuerpo, 'hola', 'se recortan los espacios de sobra');
-});
-
-test('voz/protocolo: el troceado no parte los números decimales ni pierde dígitos', () => {
-  const { trocear } = require('../main/voice/protocolo');
-  /* «versión 3.5» es UNA frase: el punto es decimal, no final (antes se leía «versión
-     tres» y «cinco» por separado). */
-  const d = trocear('La versión 3.5 está lista.');
-  eq(d.length, 1, 'el decimal se queda dentro: ' + JSON.stringify(d));
-  eq(d[0], 'La versión 3.5 está lista.');
-  /* Un final de frase tras un número SÍ corta, y el dígito no se pierde: «tarea 3».
-     (Una primera formulación de esta regla se comía el dígito antes del punto.) */
-  const n = trocear('Termina la tarea 3. Mañana seguimos.');
-  eq(n[0], 'Termina la tarea 3.', 'el número antes del punto final no se come: ' + JSON.stringify(n));
-  eq(n.length, 2, 'y el punto cierra igual la frase');
-  /* Y el troceado de siempre sigue igual: líneas, puntos, sin fusionar frases cortas. */
-  const lista = trocear('Lista uno\nLista dos sin punto');
-  eq(lista.length, 2, 'los saltos de línea parten la frase: ' + JSON.stringify(lista));
-  eq(lista[0], 'Lista uno');
-  const simple = trocear('Hecho. He creado el recordatorio y lo he anotado.');
-  eq(simple.length, 2, 'dos frases normales siguen siendo dos');
-  eq(simple[0], 'Hecho.');
-  eq(trocear('').length, 0, 'texto vacío: ninguna frase');
-});
-
-test('voz/tts: el protocolo de voces llega con su marca natural', async () => {
-  const { createTtsWindows } = require('../main/voice/tts-windows');
-  const dir = tmpDir('sagi-tts-nat-');
-  const spawnFn = () => {
-    const l = {};
-    const proc = {
-      stdout: {
-        on: (k, f) => {
-          l['o' + k] = f;
-        },
-      },
-      stderr: {
-        on: (k, f) => {
-          l['e' + k] = f;
-        },
-      },
-      on: (k, f) => {
-        l[k] = f;
-      },
-      kill() {},
-      stdin: { end() {} },
-    };
-    setTimeout(() => {
-      l['odata'](Buffer.from('VOICE::Microsoft Elena Natural|es-ES|natural\nVOICE::Microsoft Helena Desktop|es-ES|\n'));
-      l['exit'](0);
-    }, 5);
-    return proc;
-  };
-  const tts = createTtsWindows({ spawnFn, dataDir: dir });
-  const l = await tts.listarVoces();
-  eq(l.length, 2, 'dos voces');
-  eq(l[0].natural, true, 'la natural viene marcada');
-  eq(l[0].nombre, 'Microsoft Elena Natural');
-  eq(l[1].natural, false, 'la de escritorio no');
-  eq(l[1].idioma, 'es-ES');
-});
-
-test('voz/tts: un fallo de síntesis con la marca natural cae en el resultado, no en una excepción', async () => {
-  const { createTtsWindows } = require('../main/voice/tts-windows');
-  const spawnFn = () => {
-    const l = {};
-    const proc = {
-      stdout: {
-        on: (k, f) => {
-          l['o' + k] = f;
-        },
-      },
-      stderr: {
-        on: (k, f) => {
-          l['e' + k] = f;
-        },
-      },
-      on: (k, f) => {
-        l[k] = f;
-      },
-      kill() {},
-      stdin: { end() {} },
-    };
-    setTimeout(() => {
-      l['odata'](Buffer.from('ERROR::No hay voces instaladas\n'));
-      l['exit'](1);
-    }, 5);
-    return proc;
-  };
-  const tts = createTtsWindows({ spawnFn, dataDir: tmpDir('sagi-tts-nat2-') });
-  const r = await tts.sintetizar('hola');
-  ok(typeof r.error === 'string' && r.error);
-  eq(r.natural, false, 'sin voz no hay marca natural');
-});
-
-test('voz/contrato: un evento bien formado pasa y uno roto se explica', () => {
-  const { assertEvent, TIPOS, ESTADOS } = require('../main/voice/contract');
-  assertEvent({ type: 'state', state: 'escuchando' });
-  assertEvent({ type: 'final', text: 'hola', confidence: 0.8 });
-  assertEvent({ type: 'partial', text: 'ho' });
-  assertEvent({ type: 'level', value: 0.5 });
-  eq(TIPOS.length, 6, 'seis tipos de evento');
-  eq(ESTADOS.length, 6, 'seis estados');
-  let fallo = null;
-  try {
-    assertEvent({ type: 'state', state: 'dormido' });
-  } catch (e) {
-    fallo = e.message;
-  }
-  ok(fallo && /estado/i.test(fallo), 'un estado inventado se rechaza con un mensaje legible: ' + fallo);
-  fallo = null;
-  try {
-    assertEvent({ type: 'inventado' });
-  } catch (e) {
-    fallo = e.message;
-  }
-  ok(fallo && /tipo/i.test(fallo), 'un tipo inventado se rechaza: ' + fallo);
-  fallo = null;
-  try {
-    assertEvent({ type: 'level', value: NaN });
-  } catch (e) {
-    fallo = e.message;
-  }
-  ok(fallo && /nivel/i.test(fallo), 'un nivel NaN se rechaza: ' + fallo);
-});
-
-test('voz/contrato: un motor necesita nombre, capacidades y los tres métodos', () => {
-  const { assertEngine, CAPACIDADES_BASE } = require('../main/voice/contract');
-  const bueno = { nombre: 'mentira', capacidades: { ...CAPACIDADES_BASE, partials: true }, start() {}, push() {}, stop() {} };
-  assertEngine(bueno);
-  const sinStop = { nombre: 'mentira', capacidades: { ...CAPACIDADES_BASE }, start() {}, push() {} };
-  let fallo = null;
-  try {
-    assertEngine(sinStop);
-  } catch (e) {
-    fallo = e.message;
-  }
-  ok(fallo && /stop/.test(fallo), 'se dice exactamente qué falta: ' + fallo);
-});
-
-/* ---------- voz: filtro de frases basura ---------- */
-
-test('voz/basura: rechaza frases vacías, golpes y ruido del motor de dictado', () => {
-  const { esBasura } = require('../main/voice/junk');
-  ok(esBasura('', 900).basura, 'texto vacío');
-  ok(esBasura('   ', 900).basura, 'sólo espacios');
-  ok(esBasura('.', 900).basura, 'un punto');
-  ok(esBasura('eh', 120).basura, 'un golpe de 120 ms con dos letras');
-  ok(!esBasura('Recuérdame mañana llamar a Álvaro', 1200).basura, 'una frase de verdad pasa');
-  ok(!esBasura('sí', 400).basura, 'un «sí» corto pero con voz real pasa: es una respuesta');
-  /* Sin duración (el motor de Windows no la manda) no se puede concluir «sin voz»:
-     estas dos pruebas son las que habrían cazado el fallo que encontró la revisión. */
-  ok(!esBasura('sí').basura, 'sin saber la duración, un «sí» no es basura');
-  ok(!esBasura('no').basura, 'ni un «no»');
-  ok(!esBasura('ok').basura, 'ni un «ok»');
-  ok(!esBasura('2026').basura, 'números son válidos');
-  ok(!esBasura('3.5').basura, 'decimales son válidos');
-  ok(!esBasura('pdf').basura, 'acrónimo técnico PDF pasa');
-  ok(!esBasura('css').basura, 'acrónimo técnico CSS pasa');
-  ok(!esBasura('sql').basura, 'acrónimo técnico SQL pasa');
-  ok(!esBasura('gpt').basura, 'acrónimo técnico GPT pasa');
-  ok(!esBasura('npm test').basura, 'comando de desarrollo pasa');
-});
-
-test('voz/basura: las alucinaciones conocidas no llegan al agente', () => {
-  const { esBasura, BASURA } = require('../main/voice/junk');
-  ok(BASURA.length >= 6, 'hay lista negra');
-  for (const frase of [
-    'Gracias por ver el vídeo',
-    '¡Suscríbete al canal!',
-    'Subtítulos realizados por la comunidad',
-    'Música',
-    'Aplausos',
-  ]) {
-    const r = esBasura(frase, 3000);
-    ok(r.basura, 'la lista negra caza: ' + frase);
-    ok(/lista negra/.test(r.motivo), 'y dice por qué: ' + r.motivo);
-  }
-});
-
-test('voz/basura: una palabra repetida en bucle no es una orden', () => {
-  const { esBasura } = require('../main/voice/junk');
-  ok(esBasura('no no no no no', 2000).basura, 'repetición');
-  ok(!esBasura('no, gracias', 800).basura, 'una negativa normal pasa');
-  /* La lista negra no puede comerse una orden real que empiece como una alucinación. */
-  ok(!esBasura('música a todo volumen', 1500).basura, 'una orden que empieza por una palabra de la lista pasa');
-  ok(!esBasura('aplausos del público al final', 1800).basura, 'y otra igual');
-});
-
-test('voz/stt-windows: arranca el motor moderno (sin caparlo) y traduce el protocolo', async () => {
-  const { createSttWindows } = require('../main/voice/stt-windows');
-  const eventos = [];
-  let argsUsados = null;
-  const spawnFn = (cmd, args) => {
-    argsUsados = args;
-    const listeners = {};
-    const proc = {
-      stdout: {
-        on: (k, f) => {
-          listeners['out:' + k] = f;
-        },
-      },
-      stderr: {
-        on: (k, f) => {
-          listeners['err:' + k] = f;
-        },
-      },
-      on: (k, f) => {
-        listeners[k] = f;
-      },
-      kill: () => {
-        if (listeners.exit) listeners.exit(0);
-      },
-      stdin: { end: () => {} },
-    };
-    setTimeout(() => {
-      listeners['out:data'](
-        Buffer.from(
-          'MODE::winrt\nREADY::es-ES\nNOTE::WinRT no disponible, usando motor clasico\nPART::recuerdame\nFINAL::Recuérdame mañana\u001f0.82\n',
-        ),
-      );
-    }, 5);
-    return proc;
-  };
-  const engine = createSttWindows({ emit: (e) => eventos.push(e), spawnFn, scriptPath: 'voice.ps1', lang: 'es-ES' });
-  await engine.start();
-  await new Promise((r) => setTimeout(r, 40));
-  ok(!argsUsados.includes('-NoWinrt'), 'no se capa el motor moderno: ' + JSON.stringify(argsUsados));
-  ok(argsUsados.includes('es-ES'), 'se pasa el idioma');
-  eq(eventos.filter((e) => e.type === 'partial').length, 1, 'un parcial');
-  const fin = eventos.find((e) => e.type === 'final');
-  eq(fin.text, 'Recuérdame mañana', 'el texto del final va limpio');
-  eq(fin.confidence, 0.82, 'la confianza llega como número');
-  eq(engine.info().motor, 'winrt', 'se sabe qué motor está detrás');
-  /* El `NOTE::` es la explicación de por qué se cae al motor clásico: si no se traduce,
-     en el modo voz nadie sabe que oye peor por eso (se perdía en silencio). */
-  ok(
-    eventos.some((e) => e.type === 'notice' && /WinRT no disponible/.test(e.text)),
-    'el NOTE:: del motor llega como aviso: ' + JSON.stringify(eventos.filter((e) => e.type === 'notice')),
-  );
-
-  const errores = [];
-  const engine2 = createSttWindows({
-    emit: (e) => errores.push(e),
-    spawnFn: (c, a) => {
-      const l = {};
-      return {
-        stdout: {
-          on: (k, f) => {
-            l['o' + k] = f;
-          },
-        },
-        stderr: {
-          on: (k, f) => {
-            l['e' + k] = f;
-          },
-        },
-        on: (k, f) => {
-          l[k] = f;
-        },
-        kill() {},
-        stdin: { end() {} },
-      };
-    },
-    scriptPath: 'voice.ps1',
-  });
-  await engine2.start();
-  eq(errores.filter((e) => e.type === 'error').length, 0, 'sin salida no hay error inventado');
-});
-
-test('voz/stt-windows: un ERROR:: del motor se convierte en error con arreglo', async () => {
-  const { createSttWindows } = require('../main/voice/stt-windows');
-  const eventos = [];
-  const spawnFn = () => {
-    const l = {};
-    const proc = {
-      stdout: {
-        on: (k, f) => {
-          l['o' + k] = f;
-        },
-      },
-      stderr: {
-        on: (k, f) => {
-          l['e' + k] = f;
-        },
-      },
-      on: (k, f) => {
-        l[k] = f;
-      },
-      kill() {},
-      stdin: { end() {} },
-    };
-    setTimeout(() => l['odata'](Buffer.from('ERROR::No hay micrófono\n')), 5);
-    return proc;
-  };
-  const engine = createSttWindows({ emit: (e) => eventos.push(e), spawnFn, scriptPath: 'voice.ps1' });
-  await engine.start();
-  await new Promise((r) => setTimeout(r, 30));
-  const err = eventos.find((e) => e.type === 'error');
-  ok(err && /micrófono/i.test(err.text), 'el error se propaga tal cual: ' + JSON.stringify(err));
-  ok(err.fix && err.fix.includes('ms-settings:sound'), 'y trae un arreglo concreto: ' + err.fix);
-});
-
-test('voz/stt-windows: si el motor muere insistentemente, se rinde y avisa al consumidor', async () => {
-  const { createSttWindows } = require('../main/voice/stt-windows');
-  const eventos = [];
-  let nacidos = 0;
-  const spawnFn = () => {
-    nacidos++;
-    const l = {};
-    const proc = {
-      stdout: {
-        on: (k, f) => {
-          l['o' + k] = f;
-        },
-      },
-      stderr: {
-        on: (k, f) => {
-          l['e' + k] = f;
-        },
-      },
-      on: (k, f) => {
-        l[k] = f;
-      },
-      kill() {},
-      stdin: { end() {} },
-    };
-    setTimeout(() => {
-      l['odata'](Buffer.from('MODE::sapi\nREADY::es-ES\n'));
-      l['exit'](1);
-    }, 5);
-    return proc;
-  };
-  const engine = createSttWindows({ emit: (e) => eventos.push(e), spawnFn, scriptPath: 'voice.ps1' });
-  await engine.start();
-  /* Dos rearranques a 1,2 s y el tercero cae igual: ahí sí toca rendirse y avisar.
-     (Una muerte PUNTUAL ya no es error: se rearranca — ver el test de abajo.) */
-  await new Promise((r) => setTimeout(r, 3000));
-  eq(nacidos, 3, 'arranque inicial + dos reintentos: ' + nacidos);
-  ok(
-    eventos.some((e) => e.type === 'error' && /cerr[oó] solo/i.test(e.text)),
-    'la caída insistente se convierte en error: ' + JSON.stringify(eventos.filter((e) => e.type === 'error')),
-  );
-
-  const eventos2 = [];
-  const spawnFn2 = () => {
-    const l = {};
-    const proc = {
-      stdout: {
-        on: (k, f) => {
-          l['o' + k] = f;
-        },
-      },
-      stderr: {
-        on: (k, f) => {
-          l['e' + k] = f;
-        },
-      },
-      on: (k, f) => {
-        l[k] = f;
-      },
-      kill() {
-        setTimeout(() => l['exit'](0), 5);
-      },
-      stdin: { end() {} },
-    };
-    return proc;
-  };
-  const engine2 = createSttWindows({ emit: (e) => eventos2.push(e), spawnFn: spawnFn2, scriptPath: 'voice.ps1' });
-  await engine2.start();
-  await engine2.stop();
-  await new Promise((r) => setTimeout(r, 30));
-  eq(eventos2.filter((e) => e.type === 'error').length, 0, 'un cierre pedido no es un error');
-});
-
-test('voz/ruta-script: fuera del asar la ruta se devuelve tal cual', () => {
-  const { rutaScriptReal } = require('../main/voice/ruta-script');
-  const dev = path.join(__dirname, '..', 'main', 'tts.ps1');
-  eq(rutaScriptReal(dev), dev, 'en desarrollo no hay copias ni cachés de por medio');
-});
-
-/* El fallo que arregla esto se veía SOLO en la app instalada: `powershell.exe -File` no
-   puede leer dentro de `app.asar` («El argumento … no existe») y el usuario se quedaba
-   sin voz y sin dictado. Se reproduce aquí la forma exacta de esa ruta. */
-test('voz/ruta-script: dentro del asar usa el guion desempaquetado', () => {
-  const { rutaScriptReal } = require('../main/voice/ruta-script');
-  const raiz = tmpDir('sagi-asar-');
-  const enAsar = path.join(raiz, 'app.asar', 'main', 'tts.ps1');
-  const gemelo = path.join(raiz, 'app.asar.unpacked', 'main', 'tts.ps1');
-  fs.mkdirSync(path.dirname(enAsar), { recursive: true });
-  fs.mkdirSync(path.dirname(gemelo), { recursive: true });
-  fs.writeFileSync(enAsar, 'Write-Output "asar"', 'utf8');
-  fs.writeFileSync(gemelo, 'Write-Output "desempaquetado"', 'utf8');
-  eq(rutaScriptReal(enAsar), gemelo, 'se entrega a PowerShell la ruta real, no la del asar');
-  // Una ruta que YA está desempaquetada no puede reescribirse dos veces.
-  eq(rutaScriptReal(gemelo), gemelo, 'el gemelo no se reescribe a sí mismo');
-});
-
-test('voz/ruta-script: sin gemelo deja una copia real y la refresca al cambiar', () => {
-  const { rutaScriptReal } = require('../main/voice/ruta-script');
-  const raiz = tmpDir('sagi-asar2-');
-  const dirCache = path.join(raiz, 'cache');
-  const enAsar = path.join(raiz, 'app.asar', 'main', 'voice.ps1');
-  fs.mkdirSync(path.dirname(enAsar), { recursive: true });
-  fs.writeFileSync(enAsar, 'guion uno', 'utf8');
-  const real = rutaScriptReal(enAsar, { dirCache });
-  ok(!real.includes('app.asar' + path.sep), 'la ruta devuelta no está dentro del asar: ' + real);
-  eq(fs.readFileSync(real, 'utf8'), 'guion uno', 'y su contenido es el del guion empacado');
-  // Una actualización de la app no puede dejar el guion viejo en caché.
-  fs.writeFileSync(enAsar, 'guion dos', 'utf8');
-  eq(fs.readFileSync(rutaScriptReal(enAsar, { dirCache }), 'utf8'), 'guion dos', 'la copia se refresca con el guion nuevo');
-});
-
-/* Los DOS motores tienen que pasar por el resolver por defecto: si uno se queda con
-   `path.join(__dirname, …)`, el fallo vuelve en la app instalada sin que ningún test
-   funcional lo note (los tests inyectan scriptPath). Se comprueba sobre el código, como
-   el resto de comprobaciones de contrato de este fichero. */
-test('voz: los dos motores de Windows resuelven la ruta del guion fuera del asar', () => {
-  for (const f of ['stt-windows.js', 'tts-windows.js']) {
-    const src = fs.readFileSync(path.join(__dirname, '..', 'main', 'voice', f), 'utf8');
-    ok(/scriptPath = rutaScriptReal\(/.test(src), f + ' resuelve el guion con rutaScriptReal');
-  }
-  /* Y el empaquetado tiene que sacar los guiones del asar: sin esto, el resolver cae al
-     camino de copia —funciona, pero es trabajo en caliente que no hace falta. */
-  const pkg = JSON.parse(fs.readFileSync(path.join(__dirname, '..', 'package.json'), 'utf8'));
-  ok(
-    (pkg.build.asarUnpack || []).some((p) => /main\/\*\*\/\*\.ps1/.test(p)),
-    'los .ps1 van desempaquetados (asarUnpack)',
-  );
-});
-
-test('voz/tts-windows: sintetiza una frase, borra el temporal y dice qué voz usó', async () => {
-  const fs = require('fs');
-  const path = require('path');
-  const { createTtsWindows } = require('../main/voice/tts-windows');
-  const dir = tmpDir('sagi-tts-');
-  const llamadas = [];
-  let stdinCerrado = false;
-  const spawnFn = (cmd, args) => {
-    llamadas.push(args);
-    const l = {};
-    const proc = {
-      stdout: {
-        on: (k, f) => {
-          l['o' + k] = f;
-        },
-      },
-      stderr: {
-        on: (k, f) => {
-          l['e' + k] = f;
-        },
-      },
-      on: (k, f) => {
-        l[k] = f;
-      },
-      kill() {},
-      stdin: {
-        end: () => {
-          stdinCerrado = true;
-        },
-      },
-    };
-    const outFile = args[args.indexOf('-OutFile') + 1];
-    fs.writeFileSync(outFile, Buffer.from('RIFF....WAVEfmt '));
-    setTimeout(() => {
-      l['odata'](Buffer.from('VOICEUSED::Microsoft Helena\nOK::' + outFile + '|412\n'));
-      l['exit'](0);
-    }, 5);
-    return proc;
-  };
-  const tts = createTtsWindows({ spawnFn, dataDir: dir });
-  /* Los temporales van a la carpeta del motor (`<dataDir>/tts`), así que el recuento mira
-     ahí: si mirase a %TEMP% la comprobación no podría fallar nunca y no valdría de nada. */
-  const carpetaTts = path.join(dir, 'tts');
-  const cuentaWavs = () => (fs.existsSync(carpetaTts) ? fs.readdirSync(carpetaTts).filter((f) => /^sagi-tts-.*\.wav$/.test(f)).length : 0);
-  const antes = cuentaWavs();
-  const r = await tts.sintetizar('Hola, esto es una prueba.', { voice: 'Microsoft Helena', lang: 'es-ES' });
-  ok(r.wav.length > 8, 'devuelve bytes de WAV');
-  eq(r.voz, 'Microsoft Helena', 'dice qué voz usó');
-  eq(r.ms, 412, 'y cuánto tardó la síntesis');
-  /* Comprobación REAL de que no deja basura: se cuentan los WAV temporales antes y
-     después. (La primera versión de este test miraba un directorio que nunca se creaba,
-     así que no podía fallar; lo cazó el reconocimiento previo del plan.) */
-  eq(cuentaWavs(), antes, 'no deja WAV temporales tras sintetizar');
-  ok(
-    llamadas[0].some((a) => String(a).endsWith('tts.ps1')),
-    'llama a tts.ps1',
-  );
-  ok(llamadas[0].includes('es-ES'), 'y le pasa el idioma');
-  /* La voz elegida tiene que llegar al guion: si se queda en el camino, el usuario
-     escoge «Helena» en los ajustes y oye siempre la misma voz sin saber por qué. */
-  eq(llamadas[0][llamadas[0].indexOf('-Voice') + 1], 'Microsoft Helena', 'y la voz pedida');
-  /* Con la entrada de PowerShell abierta, powershell.exe no termina al acabar el guion
-     y la promesa de sintetizar() no resuelve jamás (pasó: el mock lo tapaba, la voz real
-     se quedaba colgada). Por eso se comprueba que se cierra. */
-  ok(stdinCerrado, 'cierra la entrada de PowerShell (si no, no termina nunca)');
-  /* dispose() tiene que barrer de verdad: si una síntesis se queda a medias, el .txt con
-     la frase del usuario y el .wav se quedan en la carpeta hasta que alguien los borre. */
-  fs.writeFileSync(path.join(carpetaTts, 'sagi-tts-resto-de-una-sintesis.wav'), 'x');
-  tts.dispose();
-  ok(!fs.existsSync(carpetaTts), 'dispose() borra lo que deje una síntesis interrumpida');
-});
-
-test('voz/tts-windows: sin voz disponible devuelve un error legible, no una excepción', async () => {
-  const { createTtsWindows } = require('../main/voice/tts-windows');
-  const spawnFn = () => {
-    const l = {};
-    const proc = {
-      stdout: {
-        on: (k, f) => {
-          l['o' + k] = f;
-        },
-      },
-      stderr: {
-        on: (k, f) => {
-          l['e' + k] = f;
-        },
-      },
-      on: (k, f) => {
-        l[k] = f;
-      },
-      kill() {},
-      stdin: { end() {} },
-    };
-    setTimeout(() => {
-      l['odata'](Buffer.from('ERROR::No hay voces instaladas\n'));
-      l['exit'](1);
-    }, 5);
-    return proc;
-  };
-  const tts = createTtsWindows({ spawnFn, dataDir: tmpDir('sagi-tts-') });
-  let r = null;
-  try {
-    r = await tts.sintetizar('hola');
-  } catch (e) {
-    r = { texto: e.message };
-  }
-  ok(r && typeof r.error === 'string' && r.error, 'no revienta el proceso y explica el fallo');
-  ok(!r.wav, 'y no devuelve audio inventado');
-});
-
-test('voz/tts-local: sin instalar devuelve error legible y estado no disponible', async () => {
-  const { createTtsLocal } = require('../main/voice/tts-local');
-  const tts = createTtsLocal({ dataDir: tmpDir('sagi-piper-vacio-') });
-  ok(!tts.estado().disponible, 'sin binario ni voz: no disponible');
-  eq((await tts.listarVoces()).length, 0, 'sin voces que listar');
-  const r = await tts.sintetizar('hola');
-  ok(!r.wav && r.error, 'error legible, no excepción ni audio inventado');
-});
-
-test('voz/tts-local: sintetiza por stdin, mapea rate a length_scale y limpia', async () => {
-  const fs = require('fs');
-  const path = require('path');
-  const { createTtsLocal } = require('../main/voice/tts-local');
-  const dir = tmpDir('sagi-piper-');
-  const raiz = path.join(dir, 'voice-engine', 'tts');
-  fs.mkdirSync(raiz, { recursive: true });
-  fs.writeFileSync(path.join(raiz, 'piper.exe'), 'x');
-  fs.writeFileSync(path.join(raiz, 'voz-sharvard.onnx'), 'x');
-  fs.writeFileSync(path.join(raiz, 'voz-sharvard.onnx.json'), '{}');
-  let vistos = null;
-  let entrada = '';
-  const spawnFn = (cmd, args) => {
-    vistos = { cmd, args };
-    const l = {};
-    const proc = {
-      stdin: {
-        write: (d) => {
-          entrada += d.toString('utf8');
-        },
-        end: () => {},
-      },
-      stderr: { on: () => {} },
-      on: (k, f) => {
-        l[k] = f;
-      },
-      kill() {},
-    };
-    setTimeout(() => {
-      const iF = args.indexOf('-f');
-      fs.writeFileSync(args[iF + 1], Buffer.from('RIFF....WAVEfmt '));
-      l['exit'](0);
-    }, 5);
-    return proc;
-  };
-  const tts = createTtsLocal({ spawnFn, dataDir: dir });
-  ok(tts.estado().disponible, 'binario + voz + config: disponible');
-  const r = await tts.sintetizar('Hola, prueba.', { rate: 20 });
-  ok(r.wav && r.wav.length > 8, 'devuelve bytes de WAV');
-  eq(r.voz, 'Piper sharvard (es-ES)', 'dice qué voz usó');
-  ok(r.natural, 'marcada como natural (neuronal, no SAPI)');
-  ok(entrada.includes('Hola, prueba.'), 'la frase entra por stdin');
-  const iL = vistos.args.indexOf('--length_scale');
-  eq(vistos.args[iL + 1], '0.8', 'rate +20 → length 0.8 (más rápido)');
-  const sobran = fs.readdirSync(raiz).filter((f) => /^sagi-piper-.*\.(txt|wav)$/.test(f));
-  eq(sobran.length, 0, 'no deja temporales: ' + JSON.stringify(sobran));
-});
-test('voz/manager: un final limpio pasa, la basura se avisa y no se envía', async () => {
-  const { createVoiceManager } = require('../main/voice/manager');
-  const eventos = [];
-  const stt = {
-    nombre: 'stt-mentira',
-    capacidades: { partials: true, confidence: true, level: false },
-    start: async () => {},
-    push: () => {},
-    stop: async () => {},
-  };
-  const tts = {
-    nombre: 'tts-mentira',
-    capacidades: { partials: false, confidence: false, level: false },
-    sintetizar: async () => ({ wav: Buffer.from('RIFF'), voz: 'x', ms: 1 }),
-    listarVoces: async () => [],
-  };
-  const m = createVoiceManager({ emit: (e) => eventos.push(e), stt, tts, onPhrase: () => {} });
-  await m.open();
-  m.ingest({ type: 'final', text: 'Recuérdame llamar a Álvaro', confidence: 0.9 });
-  m.ingest({ type: 'final', text: 'Gracias por ver el vídeo', confidence: 0.4 });
-  const fines = eventos.filter((e) => e.type === 'final');
-  eq(fines.length, 1, 'sólo pasa la frase de verdad');
-  eq(fines[0].text, 'Recuérdame llamar a Álvaro', 'y es la buena');
-  ok(
-    eventos.some((e) => e.type === 'notice' && /basura|no te he entendido/i.test(e.text)),
-    'la basura se avisa',
-  );
-  eq(m.estado(), 'oyendo', 'con una frase cerrada el estado pasa a oyendo');
-});
-
-test('voz/tts-local: elige la voz pedida y cae a la instalada', async () => {
-  const path = require('path');
-  const { createTtsLocal, elegirVoz } = require('../main/voice/tts-local');
-  const dir = tmpDir('sagi-piper-voces-');
-  const raiz = path.join(dir, 'voice-engine', 'tts');
-  fs.mkdirSync(raiz, { recursive: true });
-  fs.writeFileSync(path.join(raiz, 'piper.exe'), 'x');
-  fs.writeFileSync(path.join(raiz, 'voz-sharvard.onnx'), 'x');
-  fs.writeFileSync(path.join(raiz, 'voz-sharvard.onnx.json'), '{}');
-  eq(elegirVoz(raiz, '').archivo, 'voz-sharvard.onnx', 'sin pedir, la instalada');
-  eq(elegirVoz(raiz, 'Piper sharvard (es-ES)').archivo, 'voz-sharvard.onnx', 'la pedida manda');
-  eq(elegirVoz(raiz, 'sharvard').archivo, 'voz-sharvard.onnx', 'vale el id corto');
-  eq(elegirVoz(raiz, 'otra-voz').archivo, 'voz-sharvard.onnx', 'la desconocida cae a la instalada, no al silencio');
-  const tts = createTtsLocal({ dataDir: dir });
-  eq((await tts.listarVoces()).map((v) => v.nombre).join(','), 'Piper sharvard (es-ES)', 'se lista lo descargado');
-});
-
-test('voz/tts-local: la puntuación final mueve ritmo y variación', async () => {
-  const path = require('path');
-  const { createTtsLocal } = require('../main/voice/tts-local');
-  const dir = tmpDir('sagi-piper-pros-');
-  const raiz = path.join(dir, 'voice-engine', 'tts');
-  fs.mkdirSync(raiz, { recursive: true });
-  fs.writeFileSync(path.join(raiz, 'piper.exe'), 'x');
-  fs.writeFileSync(path.join(raiz, 'voz-sharvard.onnx'), 'x');
-  fs.writeFileSync(path.join(raiz, 'voz-sharvard.onnx.json'), '{}');
-  const vistos = [];
-  const spawnFn = (cmd, args) => {
-    vistos.push({ cmd, args });
-    const l = {};
-    const proc = {
-      stdin: { write: () => {}, end: () => {} },
-      stderr: { on: () => {} },
-      on: (k, f) => {
-        l[k] = f;
-      },
-      kill() {},
-    };
-    setTimeout(() => {
-      fs.writeFileSync(args[args.indexOf('-f') + 1], Buffer.from('RIFF....WAVEfmt '));
-      l['exit'](0);
-    }, 5);
-    return proc;
-  };
-  const tts = createTtsLocal({ spawnFn, dataDir: dir });
-  const val = (args, flag) => args[args.indexOf(flag) + 1];
-  await tts.sintetizar('Todo listo.');
-  await tts.sintetizar('¿Vienes mañana?');
-  await tts.sintetizar('¡Increíble!');
-  eq(val(vistos[0].args, '--noise_scale'), '0.667', 'la afirmación queda en natural');
-  ok(
-    Number(val(vistos[1].args, '--length_scale')) < Number(val(vistos[0].args, '--length_scale')),
-    'la pregunta respira más rápida: ' + val(vistos[1].args, '--length_scale'),
-  );
-  ok(Number(val(vistos[1].args, '--noise_scale')) > 0.667, 'y con más variación');
-  ok(
-    Number(val(vistos[2].args, '--length_scale')) < Number(val(vistos[1].args, '--length_scale')),
-    'la exclamación empuja más: ' + val(vistos[2].args, '--length_scale'),
-  );
-});
-
-test('voz/manager: trocea la respuesta en frases y las sintetiza en orden', async () => {
-  const { createVoiceManager } = require('../main/voice/manager');
-  const eventos = [];
-  const frases = [];
-  const tts = {
-    nombre: 'tts-mentira',
-    capacidades: { partials: false, confidence: false, level: false },
-    sintetizar: async (t) => {
-      frases.push(t);
-      return { wav: Buffer.from('RIFF'), voz: 'x', ms: 1 };
-    },
-    listarVoces: async () => [],
-  };
-  const stt = {
-    nombre: 'stt',
-    capacidades: { partials: true, confidence: true, level: false },
-    start: async () => {},
-    push: () => {},
-    stop: async () => {},
-  };
-  const m = createVoiceManager({
-    emit: (e) => eventos.push(e),
-    stt,
-    tts,
-    onPhrase: (p) => {
-      setTimeout(() => m.spoken(p.id), 5);
-    },
-  });
-  await m.open();
-  m.say('Hecho. He creado el recordatorio y lo he anotado.');
-  await new Promise((r) => setTimeout(r, 80));
-  eq(frases.length, 2, 'dos frases: ' + JSON.stringify(frases));
-  eq(frases[0], 'Hecho.', 'la primera es la primera');
-  /* Los saltos de línea son frontera de frase: una lista se lee frase a frase. La línea SIN
-     punto final es la que distingue de verdad —con el troceado viejo, que colapsaba los
-     espacios antes de partir, las dos líneas salían pegadas en una sola frase—, y se compara
-     pieza a pieza porque `eq` es estricto (`a !== b`): dos arrays distintos nunca son el mismo
-     objeto, así que `eq(trocear(...), [...])` fallaría siempre, con las dos listas iguales en
-     el mensaje de error. */
-  const { trocear } = require('../main/voice/manager');
-  const lista = trocear('Lista uno\nLista dos sin punto');
-  eq(lista.length, 2, 'los saltos de línea parten la frase: ' + JSON.stringify(lista));
-  eq(lista[0], 'Lista uno', 'la primera línea se queda sola');
-  eq(lista[1], 'Lista dos sin punto', 'y la segunda, sin punto final, es su propia frase');
-  ok(
-    eventos.some((e) => e.type === 'state' && e.state === 'hablando'),
-    'el estado pasa a hablando',
-  );
-  ok(
-    eventos.some((e) => e.type === 'state' && e.state === 'escuchando'),
-    'y vuelve a escuchando al terminar',
-  );
-});
-
-test('voz/manager: sintetiza la frase siguiente mientras suena la actual', async () => {
-  const { createVoiceManager } = require('../main/voice/manager');
-  const orden = [];
-  const inicios = [];
-  let sintesis = 0;
-  const t0 = Date.now();
-  const ahora = () => Date.now() - t0;
-  // sonar (50 ms) tarda más que sintetizar (30 ms): la gracia del adelanto es que
-  // la síntesis n+1 corre DURANTE la reproducción n, no después
-  const tts = {
-    nombre: 'tts',
-    capacidades: { partials: false, confidence: false, level: false },
-    sintetizar: async (t) => {
-      sintesis++;
-      inicios.push([t, ahora()]);
-      await new Promise((r) => setTimeout(r, 30));
-      orden.push(t);
-      return { wav: Buffer.from('RIFF'), voz: 'x', ms: 30 };
-    },
-    listarVoces: async () => [],
-  };
-  const stt = {
-    nombre: 'stt',
-    capacidades: { partials: true, confidence: false, level: false },
-    start: async () => {},
-    push: () => {},
-    stop: async () => {},
-  };
-  const habladas = [];
-  const m = createVoiceManager({
-    emit: () => {},
-    stt,
-    tts,
-    onPhrase: (p) => {
-      habladas.push([p.id, ahora()]);
-      setTimeout(() => m.spoken(p.id), 50);
-    },
-  });
-  await m.open();
-  m.say('Uno. Dos. Tres.');
-  await new Promise((r) => {
-    const t = setInterval(() => {
-      if (habladas.length >= 3) {
-        clearInterval(t);
-        r();
-      }
-    }, 5);
-    setTimeout(() => {
-      clearInterval(t);
-      r();
-    }, 2000);
-  });
-  eq(orden.join('|'), 'Uno.|Dos.|Tres.', 'el orden no cambia: ' + orden.join('|'));
-  eq(sintesis, 3, 'tres frases, tres síntesis (el adelanto no duplica)');
-  eq(habladas.map((h) => h[0]).join(','), '1,2,3', 'y suenan en orden');
-  const ini2 = inicios.find((i) => i[0] === 'Dos.')[1];
-  const fin1 = habladas.find((h) => h[0] === 1)[1] + 50;
-  ok(ini2 < fin1, 'la síntesis de la 2ª empezó (' + ini2 + ' ms) antes de terminar la 1ª (' + fin1 + ' ms)');
-});
-
-test('voz/manager: un parcial mientras el asistente habla es eco, no una orden', async () => {
-  const { createVoiceManager } = require('../main/voice/manager');
-  const eventos = [];
-  const tts = {
-    nombre: 'tts',
-    capacidades: { partials: false, confidence: false, level: false },
-    sintetizar: async () => ({ wav: Buffer.from('RIFF'), voz: 'x', ms: 1 }),
-    listarVoces: async () => [],
-  };
-  const stt = {
-    nombre: 'stt',
-    capacidades: { partials: true, confidence: true, level: false },
-    start: async () => {},
-    push: () => {},
-    stop: async () => {},
-  };
-  const m = createVoiceManager({ emit: (e) => eventos.push(e), stt, tts, onPhrase: () => {} });
-  await m.open();
-  m.say('He abierto la carpeta de descargas.');
-  await new Promise((r) => setTimeout(r, 20));
-  eq(m.estado(), 'hablando', 'el asistente habla');
-  m.ingest({ type: 'partial', text: 'he abierto la carpeta' });
-  eq(eventos.filter((e) => e.type === 'partial').length, 0, 'su propia voz no se pinta como si el usuario hablara');
-  eq(m.estado(), 'hablando', 'y el estado sigue siendo «hablando»');
-  /* Callado, el parcial sí pasa: es la vista previa del dictado local. */
-  m.stopSpeaking();
-  m.ingest({ type: 'partial', text: 'recuérdame' });
-  eq(eventos.filter((e) => e.type === 'partial').length, 1, 'con el asistente callado, el parcial entra');
-  eq(m.estado(), 'oyendo', 'y el orbe pasa a «oyendo»');
-});
-
-test('voz/manager: el asistente no toma su propia voz por una orden del usuario', async () => {
-  const { createVoiceManager } = require('../main/voice/manager');
-  const eventos = [];
-  let ultima = 0;
-  const tts = {
-    nombre: 'tts',
-    capacidades: { partials: false, confidence: false, level: false },
-    sintetizar: async () => ({ wav: Buffer.from('RIFF'), voz: 'x', ms: 1 }),
-    listarVoces: async () => [],
-  };
-  const stt = {
-    nombre: 'stt',
-    capacidades: { partials: true, confidence: true, level: false },
-    start: async () => {},
-    push: () => {},
-    stop: async () => {},
-  };
-  const m = createVoiceManager({
-    emit: (e) => eventos.push(e),
-    stt,
-    tts,
-    onPhrase: (p) => {
-      ultima = p.id;
-    },
-  });
-  const dichos = () => eventos.filter((e) => e.type === 'final').length;
-  await m.open();
-  m.ingest({ type: 'final', text: 'recuérdame llamar a Álvaro' });
-  eq(dichos(), 1, 'con el asistente callado una frase pasa');
-
-  /* Lo que el motor oye mientras el asistente habla: sus propios altavoces. */
-  m.say('He abierto la carpeta de descargas.');
-  await new Promise((r) => setTimeout(r, 20));
-  eq(m.estado(), 'hablando', 'el asistente está hablando');
-  m.ingest({ type: 'final', text: 'He abierto la carpeta de descargas' });
-  eq(dichos(), 1, 'lo que oye de sí mismo mientras habla no llega al agente');
-  eq(m.estado(), 'hablando', 'y no le cambia el estado al asistente');
-  /* La frase termina de sonar, pero el motor no cierra la suya hasta 1,6 s después: lo que
-     llegue en esa cola sigue siendo eco. */
-  m.spoken(ultima);
-  await new Promise((r) => setTimeout(r, 20));
-  m.ingest({ type: 'final', text: 'He abierto la carpeta de descargas' });
-  eq(dichos(), 1, 'la cola de eco tampoco deja pasar el eco');
-  await new Promise((r) => setTimeout(r, 2000)); // la cola se agota
-  m.ingest({ type: 'final', text: 'ahora abre el navegador' });
-  eq(dichos(), 2, 'pasada la cola, lo que diga el usuario vuelve a entrar');
-});
-
-test('voz/manager: tras interrumpir, el siguiente id reiniciado no queda huérfano', async () => {
-  /* Este test documenta el contrato del renderer: al interrumpir, el renderer manda
-     tts:reset y el proceso principal recrea el manager (seq vuelve a 0). Sin eso, la
-     frase siguiente a una interrupción llevaba un id viejo y se descartaba al terminar
-     (la respuesta se quedaba muda tras una frase). */
-  const { createVoiceManager } = require('../main/voice/manager');
-  const dichos = [];
-  const tts = {
-    nombre: 'tts',
-    capacidades: { partials: false, confidence: false, level: false },
-    sintetizar: async (t) => ({ wav: Buffer.from('RIFF'), voz: 'x', ms: 1 }),
-    listarVoces: async () => [],
-  };
-  const stt = {
-    nombre: 'stt',
-    capacidades: { partials: true, confidence: true, level: false },
-    start: async () => {},
-    push: () => {},
-    stop: async () => {},
-  };
-  const m = createVoiceManager({ emit: () => {}, stt, tts, onPhrase: (p) => dichos.push(p.id) });
-  await m.open();
-  m.say('Frase uno. Frase dos.');
-  await new Promise((r) => setTimeout(r, 20));
-  ok(dichos.length >= 1, 'hay frases con id');
-  // el reset del proceso principal (tts:reset) es exactamente esto: un manager nuevo
-  const m2 = createVoiceManager({ emit: () => {}, stt, tts, onPhrase: (p) => dichos.push('nuevo:' + p.id) });
-  await m2.open();
-  m2.say('Frase nueva.');
-  await new Promise((r) => setTimeout(r, 20));
-  eq(
-    dichos.find((x) => x === 'nuevo:1'),
-    'nuevo:1',
-    'el manager nuevo arranca en id 1',
-  );
-});
-
-test('voz/manager: interrumpir corta la cola y no sintetiza lo que queda', async () => {
-  const { createVoiceManager } = require('../main/voice/manager');
-  const frases = [];
-  const tts = {
-    nombre: 'tts',
-    capacidades: { partials: false, confidence: false, level: false },
-    sintetizar: async (t) => {
-      frases.push(t);
-      return { wav: Buffer.from('RIFF'), voz: 'x', ms: 1 };
-    },
-    listarVoces: async () => [],
-  };
-  const stt = {
-    nombre: 'stt',
-    capacidades: { partials: true, confidence: true, level: false },
-    start: async () => {},
-    push: () => {},
-    stop: async () => {},
-  };
-  const m = createVoiceManager({ emit: () => {}, stt, tts, onPhrase: () => {} }); // nunca llega 'spoken'
-  await m.open();
-  m.say('Primera frase. Segunda frase. Tercera frase.');
-  await new Promise((r) => setTimeout(r, 40));
-  m.stopSpeaking();
-  const alCortar = frases.length;
-  // Con el adelanto (una frase sintetizada mientras suena la anterior) puede haber
-  // DOS en marcha: la que sonaba y la adelantada. Lo que no puede haber es una tercera.
-  ok(alCortar <= 2, 'como mucho la en marcha + una adelantada: ' + JSON.stringify(frases));
-  await new Promise((r) => setTimeout(r, 40));
-  eq(frases.length, alCortar, 'tras cortar no se sintetiza nada más');
-  eq(m.estado(), 'escuchando', 'y vuelve a escuchar');
-});
-
-/* ---------- voz: reparaciones del modo voz (detección y calidad) ---------- */
-
-/* «Cierra el navegador» es una ORDEN para el agente: el prefijo suelto de antes la
-   cazaba y apagaba el modo voz en vez de enviarla. La decisión vive en el regex de
-   voice-mode.js, así que se prueba el fichero fuente (la lógica del panel no está
-   exportada y el resto de la suite ya comprueba así el cableado del renderer). */
-test('voz/salida: sólo se cierra el modo con frases que hablan del modo voz', () => {
-  const fs = require('fs');
-  const src = fs.readFileSync(path.join(__dirname, '..', 'renderer', 'voice-mode.js'), 'utf8');
-  const regexDe = (linea) => {
-    const ini = linea.indexOf('/^(');
-    const fin = linea.indexOf('/i.test');
-    ok(ini >= 0 && fin > ini, 'el regex de salida está completo en la línea');
-    return new RegExp(linea.slice(ini + 1, fin), 'i'); // sin el «/» inicial ni la bandera
-  };
-  /* Las DOS líneas se buscan por su contenido, no por su posición: la primera línea del
-     fichero que empiece por `/^(` ya no es la del modo voz — hay otras órdenes por voz
-     («para», «detente»…) que también son un regex y que, tomadas por la del cierre, hacían
-     fallar esta comprobación por un motivo que no tiene nada que ver con lo que vigila. */
-  const lineas = src.split(/\r?\n/).filter((l) => l.includes('/^(') && l.includes('/i.test'));
-  const lineaModo = lineas.find((l) => l.includes('voz|dictado'));
-  /* Ojo con la clave de búsqueda: el regex del modo TAMBIÉN contiene «hasta luego|salir»
-     (dentro de su propia alternancia), así que hay que buscar por lo que sólo tiene la
-     línea de las despedidas — el `\b` que cierra su grupo. */
-  const lineaAdios = lineas.find((l) => l.includes('salir)\\b'));
-  if (!lineaModo || !lineaAdios) {
-    ok(false, 'no se encuentran los dos regex de salida en voice-mode.js');
-    return;
-  }
-  const reModo = regexDe(lineaModo);
-  const reAdios = regexDe(lineaAdios);
-  ok(reModo.test('cierra el modo voz'), '«cierra el modo voz» cierra');
-  ok(reModo.test('apaga el modo voz'), '«apaga el modo voz» cierra');
-  ok(reModo.test('cierra la voz'), '«cierra la voz» cierra');
-  ok(reModo.test('para el dictado'), '«para el dictado» cierra');
-  ok(reAdios.test('adiós'), '«adiós» cierra');
-  ok(reAdios.test('hasta luego'), '«hasta luego» cierra');
-  ok(!reModo.test('cierra el navegador'), '«cierra el navegador» NO cierra: es una orden');
-  ok(!reModo.test('cierra la ventana'), '«cierra la ventana» NO cierra: es una orden');
-  ok(!reModo.test('para el proyecto de ley'), '«para el proyecto de ley» NO cierra');
-  ok(!reAdios.test('cierra el navegador'), 'y las despedidas tampoco lo cazan');
-});
-
-test('voz/stt-windows: si el motor muere solo se rearranca y no se rinde a la primera', async () => {
-  const { createSttWindows } = require('../main/voice/stt-windows');
-  const eventos = [];
-  let nacidos = 0;
-  const spawnFn = () => {
-    nacidos++;
-    const l = {};
-    const proc = {
-      stdout: {
-        on: (k, f) => {
-          l['o' + k] = f;
-        },
-      },
-      stderr: {
-        on: (k, f) => {
-          l['e' + k] = f;
-        },
-      },
-      on: (k, f) => {
-        l[k] = f;
-      },
-      kill() {},
-      stdin: { end() {} },
-    };
-    setTimeout(() => {
-      l['odata'](Buffer.from('MODE::winrt\nREADY::es-ES\n'));
-      l['exit'](1);
-    }, 5);
-    return proc;
-  };
-  const engine = createSttWindows({ emit: (e) => eventos.push(e), spawnFn, scriptPath: 'voice.ps1' });
-  await engine.start();
-  // 2 rearranques programados a 1,2 s: se espera lo justo y se comprueba que nació otro
-  await new Promise((r) => setTimeout(r, 1600));
-  ok(nacidos >= 2, 'el motor se rearranca tras morir: nacidos=' + nacidos);
-  ok(
-    eventos.some((e) => e.type === 'notice' && /reiniciado/.test(e.text)),
-    'se avisa que sigue escuchando',
-  );
-  ok(!eventos.some((e) => e.type === 'error' && /cerr[oó] solo/.test(e.text)), 'no se rinde a la primera caída');
-  await engine.stop();
-});
-
-test('voz/tts-windows: el resultado de sintetizar lleva la marca natural REAL (VOICEOK)', async () => {
-  const { createTtsWindows } = require('../main/voice/tts-windows');
-  const fs = require('fs');
-  const dir = tmpDir('sagi-tts-ok-');
-  const spawnFn = (cmd, args) => {
-    const l = {};
-    const proc = {
-      stdout: {
-        on: (k, f) => {
-          l['o' + k] = f;
-        },
-      },
-      stderr: {
-        on: (k, f) => {
-          l['e' + k] = f;
-        },
-      },
-      on: (k, f) => {
-        l[k] = f;
-      },
-      kill() {},
-      stdin: { end() {} },
-    };
-    const outFile = args[args.indexOf('-OutFile') + 1];
-    fs.writeFileSync(outFile, Buffer.from('RIFF....WAVEfmt '));
-    setTimeout(() => {
-      l['odata'](Buffer.from('VOICEOK::Microsoft Elena Natural|natural\nOK::' + outFile + '|100\n'));
-      l['exit'](0);
-    }, 5);
-    return proc;
-  };
-  const tts = createTtsWindows({ spawnFn, dataDir: dir });
-  const r = await tts.sintetizar('hola');
-  ok(r.wav && r.wav.length > 8, 'devuelve audio');
-  eq(r.voz, 'Microsoft Elena Natural');
-  eq(r.natural, true, 'la marca natural llega hasta el renderer');
-});
-
-test('voz/tts-windows: una voz natural que falla no se cambia en silencio por una robótica', async () => {
-  const { createTtsWindows } = require('../main/voice/tts-windows');
-  const spawnFn = () => {
-    const l = {};
-    const proc = {
-      stdout: {
-        on: (k, f) => {
-          l['o' + k] = f;
-        },
-      },
-      stderr: {
-        on: (k, f) => {
-          l['e' + k] = f;
-        },
-      },
-      on: (k, f) => {
-        l[k] = f;
-      },
-      kill() {},
-      stdin: { end() {} },
-    };
-    setTimeout(() => {
-      l['odata'](Buffer.from('ERROR::SSML no válido\n'));
-      l['exit'](1);
-    }, 5);
-    return proc;
-  };
-  const tts = createTtsWindows({ spawnFn, dataDir: tmpDir('sagi-tts-nat3-') });
-  const r = await tts.sintetizar('hola', { voice: 'Microsoft Elena Natural' });
-  ok(!r.wav && r.error, 'no hay audio y hay error');
-  ok(/natural/i.test(r.error), 'el error dice que la voz natural falló: ' + r.error);
-});
-
-/* ---------- rescate del motor sordo (motor moderno que no recibe audio) ---------- */
-
-test('voz/manager: rescatarMotor delega en el motor de escucha (motorAlternativo)', async () => {
-  const { createVoiceManager } = require('../main/voice/manager');
-  const llamadas = [];
-  const stt = {
-    nombre: 'stt',
-    capacidades: { partials: true, confidence: true, level: false },
-    start: async () => {},
-    push: () => {},
-    stop: async () => {},
-    motorAlternativo: async () => {
-      llamadas.push('rescate');
-    },
-  };
-  const tts = {
-    nombre: 'tts',
-    capacidades: { partials: false, confidence: false, level: false },
-    sintetizar: async () => ({ wav: Buffer.from('RIFF'), voz: 'x', ms: 1 }),
-    listarVoces: async () => [],
-  };
-  const m = createVoiceManager({ emit: () => {}, stt, tts, onPhrase: () => {} });
-  await m.rescatarMotor();
-  eq(llamadas.length, 1, 'el rescate del manager llega al motor de escucha');
-  /* Un motor que no sabe rescatar (una fase futura, una mentira de prueba) no rompe nada. */
-  const sttMudo = {
-    nombre: 'stt',
-    capacidades: { partials: true, confidence: true, level: false },
-    start: async () => {},
-    push: () => {},
-    stop: async () => {},
-  };
-  const m2 = createVoiceManager({ emit: () => {}, stt: sttMudo, tts, onPhrase: () => {} });
-  await m2.rescatarMotor(); // no debe lanzar
-  ok(true, 'y un motor sin motorAlternativo no rompe el rescate');
-});
-
-test('voz/rescate: el vigía del renderer pide el cambio al clásico cuando hay voz y cero texto', () => {
-  const fs = require('fs');
-  const src = fs.readFileSync(path.join(__dirname, '..', 'renderer', 'voice-mode.js'), 'utf8');
-  /* La señal del vigía: voz real del micro sostenida SIN ningún texto del motor en toda
-     la sesión. Los parciales y los finales (y la basura, que prueba audio) marcan texto. */
-  ok(/PRIMERA_FRASE_MS\s*=\s*\d{4,}/.test(src), 'hay margen de gracia tras abrir (nadie habla al instante)');
-  ok(/MODO_CALMA_MS\s*=\s*\d{3,}/.test(src), 'la voz debe ser sostenida: una palmada no es un motor sordo');
-  ok((src.match(/textoVisto = true;/g) || []).length >= 3, 'los tres caminos de texto (parcial, final y basura) marcan textoVisto');
-  ok(/voiceRescue\(\)/.test(src), 'el vigía llama al puente voiceRescue');
-  ok(/rescateHecho = true;/.test(src) && !/rescateHecho = false;\s*\/\/\s*otra vez/.test(src), 'el rescate se pide UNA vez por sesión');
-  ok(/clearInterval\(vigia\)/.test(src), 'la vigilancia muere al cerrar el modo');
-  /* El cuerpo de la función, acotado de verdad: el primer trozo tras split('vigilancia')
-     es el comentario de una variable («intervalo de vigilancia»), no la función. */
-  const cuerpoVigia = src.slice(src.indexOf('function vigilancia'), src.indexOf('async function abrir'));
-  ok(/estado === 'hablando'/.test(cuerpoVigia), 'mientras el asistente habla el vigía no juzga (eso es barge-in)');
-});
-
-test('voz/whisper: corta frases por silencio y las manda transcribir al CLI', async () => {
-  const { createWhisper } = require('../main/voice/whisper');
-  const fs = require('fs');
-  const path = require('path');
-  const eventos = [];
-  const argsVistos = [];
-  const spawnFn = (cmd, args) => {
-    argsVistos.push({ cmd, args });
-    const l = {};
-    const proc = {
-      stdout: {
-        on: (k, f) => {
-          l['o' + k] = f;
-        },
-      },
-      stderr: {
-        on: (k, f) => {
-          l['e' + k] = f;
-        },
-      },
-      on: (k, f) => {
-        l[k] = f;
-      },
-      kill() {},
-      stdin: { end() {} },
-    };
-    setTimeout(() => {
-      l['odata'](Buffer.from('Hola, ¿qué hora es?\n'));
-      l['exit'](0);
-    }, 5);
-    return proc;
-  };
-  const dir = tmpDir('sagi-wh-');
-  fs.mkdirSync(path.join(dir, 'bin'), { recursive: true });
-  fs.mkdirSync(path.join(dir, 'models'), { recursive: true });
-  fs.writeFileSync(path.join(dir, 'bin', 'whisper-cli.exe'), '');
-  fs.writeFileSync(path.join(dir, 'models', 'ggml-base.bin'), '');
-  const engine = createWhisper({ emit: (e) => eventos.push(e), lang: 'es-ES', spawnFn, dirRaiz: dir, tmpDir: dir });
-  await engine.start();
-  ok(engine.estado().disponible, 'binario y modelo resueltos: ' + JSON.stringify(engine.estado()));
-  /* Voz de 0,4 s (tono) + silencio de 0,8 s: la frase se abre con el tono y cierra con
-     la cola de silencio (~0,6 s). */
-  const sr = 16000;
-  const voz = Buffer.alloc(sr * 0.4 * 2);
-  for (let i = 0; i < sr * 0.4; i++) voz.writeInt16LE(Math.round(Math.sin((2 * Math.PI * 220 * i) / sr) * 12000), i * 2);
-  engine.push(voz);
-  await new Promise((r) => setTimeout(r, 60));
-  eq(eventos.filter((e) => e.type === 'final').length, 0, 'la frase sigue abierta: nada final aún');
-  engine.push(Buffer.alloc(sr * 0.8 * 2));
-  await new Promise((r) => setTimeout(r, 60));
-  const fin = eventos.find((e) => e.type === 'final');
-  ok(fin, 'la frase cerró con el silencio y llegó transcrita: ' + JSON.stringify(eventos));
-  eq(fin && fin.text, 'Hola, ¿qué hora es?', 'texto que devolvió el CLI');
-  const a = argsVistos[0].args;
-  ok(a.includes('-l') && a[a.indexOf('-l') + 1] === 'es', 'idioma derivado de es-ES: ' + JSON.stringify(a));
-  ok(a.includes('-nt'), 'sin marcas de tiempo (-nt)');
-  ok(!a.includes('--prompt'), 'sin --prompt: en frases cortas el modelo acaba repitiendo su propia cola');
-  const iF = a.indexOf('-f');
-  ok(iF >= 0 && a[iF + 1].endsWith('.wav'), 'transcribe un WAV temporal');
-  ok(!fs.existsSync(a[iF + 1]), 'el WAV temporal se limpia tras transcribir');
-  await engine.stop();
-});
-
-test('voz/whisper: tumba alucinaciones sin voces y limpia el texto', async () => {
-  const { createWhisper } = require('../main/voice/whisper');
-  const fs = require('fs');
-  const path = require('path');
-  const eventos = [];
-  let salida = '♪ ♪ ♪';
-  const spawnFn = () => {
-    const l = {};
-    const proc = {
-      stdout: {
-        on: (k, f) => {
-          l['o' + k] = f;
-        },
-      },
-      stderr: {
-        on: (k, f) => {
-          l['e' + k] = f;
-        },
-      },
-      on: (k, f) => {
-        l[k] = f;
-      },
-      kill() {},
-      stdin: { end() {} },
-    };
-    setTimeout(() => l['odata'](Buffer.from(salida + '\n')), 5);
-    return proc;
-  };
-  const dir = tmpDir('sagi-wh-');
-  fs.mkdirSync(path.join(dir, 'bin'), { recursive: true });
-  fs.mkdirSync(path.join(dir, 'models'), { recursive: true });
-  fs.writeFileSync(path.join(dir, 'bin', 'whisper-cli.exe'), '');
-  fs.writeFileSync(path.join(dir, 'models', 'ggml-base.bin'), '');
-  const engine = createWhisper({ emit: (e) => eventos.push(e), lang: 'es-ES', spawnFn, dirRaiz: dir, tmpDir: dir });
-  await engine.start();
-  const sr = 16000;
-  engine.push(
-    Buffer.alloc(sr * 0.5 * 2).map((v, i) =>
-      i % 2 === 0
-        ? Math.round(Math.sin((2 * Math.PI * 220 * (i / 2)) / sr) * 12000) & 0xff
-        : Math.round(Math.sin((2 * Math.PI * 220 * (i / 2)) / sr) * 12000) >> 8,
-    ),
-  );
-  engine.push(Buffer.alloc(sr * 0.8 * 2));
-  await new Promise((r) => setTimeout(r, 60));
-  eq(eventos.filter((e) => e.type === 'final').length, 0, 'una alucinación sin voces no llega al usuario');
-  salida = '   Hola,   ¿qué   hora   es?   ';
-  engine.push(Buffer.alloc(sr * 0.4 * 2)); // nuevo silencio no abre nada: sin voz no hay frase
-  await new Promise((r) => setTimeout(r, 30));
-  eq(eventos.filter((e) => e.type === 'final').length, 0, 'silencio solo no produce frases');
-  await engine.stop();
-});
-
-test('voz/whisper: el tap PCM renderer→voice:pcm→push está cableado', () => {
-  const fs = require('fs');
-  const app = readRenderer();
-  const main = MAIN_ALL; // Fase 4: main.js + routers main/ipc-*.js
-  const preload = fs.readFileSync('main/preload.js', 'utf8');
-  const vm = fs.readFileSync('renderer/voice-mode.js', 'utf8');
-  ok(/voicePcm:\s*\(pcm\)/.test(preload), 'el preload puentea voicePcm');
-  ok(/ipcMain\.on\('voice:pcm'/.test(main), 'main recibe el PCM por voice:pcm');
-  ok(/createWhisper/.test(main) && /push\(pcm\)/.test(main), 'main construye el motor whisper y le pasa el PCM');
-  ok(/abrirTapPcm/.test(app) && /cerrarTapPcm/.test(app), 'el renderer abre y cierra el tap con la sesión');
-  ok(/audioWorklet/.test(app), 'el tap va por AudioWorklet (sin ruido del hilo principal)');
-  ok(/__alCerrarModoVoz/.test(vm), 'el cierre del panel (Esc/adiós/botón) suelta el tap');
-  ok(/voiceInstallStatus/.test(preload) && /voice:installStatus/.test(main), 'el estado del dictado local llega a Ajustes');
-});
-
-test('voz/tap: las cuatro causas del «orbe se mueve y no transcribe» están cerradas', () => {
-  const fs = require('fs');
-  const app = readRenderer();
-  const html = fs.readFileSync('renderer/index.html', 'utf8');
-  const main = MAIN_ALL; // Fase 4: main.js + routers main/ipc-*.js
-  const wj = fs.readFileSync('main/voice/whisper.js', 'utf8');
-  /* 1) La CSP debe permitir blobs como script: el código del AudioWorklet viaja en uno
-        y sin esto Chromium lo BLOQUEA en silencio — el tap nacía muerto. */
-  ok(/script-src[^"]*\bblob:/.test(html), 'la CSP deja cargar el AudioWorklet (script-src con blob:)');
-  /* 2) El contexto del tap NUNCA fuerza sampleRate: Chromium en Windows entrega
-        silencio con algunos micros si se le pide 16 kHz; se captura a la tasa nativa
-        y se remuestrea. */
-  ok(!/new AudioCtx\(\{\s*sampleRate/.test(app), 'el tap no fuerza sampleRate (silencio garantizado en algunos micros)');
-  ok(/enviarPcmAlMotor/.test(app) && /srDestino = 16000/.test(app), 'el remuestreo a 16 kHz vive en el renderer');
-  /* 3) El fallo del tap ya no se traga: se suelta lo adquirido y se AVISA. Y el nodo
-        cuelga del destino vía un gain mudo (un grafo sin destino puede no procesarse). */
-  ok(/\[tap-pcm\] fallo al abrir/.test(app), 'el fallo del tap se registra y se muestra');
-  ok(
-    /createGain\(\)/.test(app) && /gain\.value = 0/.test(app) && /connect\(ctx\.destination\)/.test(app),
-    'el nodo del tap cuelga del destino con un gain mudo',
-  );
-  /* 4) Con voz y sin nada transcribiendo, el vigía reabre el tap (whisper) o pide el
-        rescate (motores de Windows); el proceso principal también puede ordenarlo. */
-  ok(
-    /__reabrirTap/.test(app) && /reabrir-tap/.test(app) && /reabrirTapVoz/.test(app),
-    'la reapertura del tap está cableada (vigía y orden del principal)',
-  );
-  ok(/__tapEstado/.test(app), 'el vigía puede saber si el tap está vivo');
-  ok(/reabrir-tap/.test(main), 'el proceso principal emite la orden de reabrir el tap');
-  ok(/pcmMs/.test(main), 'hay telemetría de audio recibido por voice:pcm');
-  /* Y el VAD no debe dejar fuera a los micros de poca ganancia: puerta tenue sostenida. */
-  ok(/FACTOR_TI_BIO/.test(wj) && /DISPARO_TI_BIO/.test(wj), 'el VAD abre frases con habla tenue sostenida (micros de poca ganancia)');
-});
-
-test('voz/whisper: la puerta tenue del VAD abre frases que el umbral fuerte no ve', async () => {
-  const { createWhisper } = require('../main/voice/whisper');
-  const fs = require('fs');
-  const path = require('path');
-  const eventos = [];
-  const spawnFn = (cmd, args) => {
-    const l = {};
-    const proc = {
-      stdout: {
-        on: (k, f) => {
-          l['o' + k] = f;
-        },
-      },
-      stderr: {
-        on: (k, f) => {
-          l['e' + k] = f;
-        },
-      },
-      on: (k, f) => {
-        l[k] = f;
-      },
-      kill() {},
-      stdin: { end() {} },
-    };
-    setTimeout(() => {
-      l['odata'](Buffer.from('voz tenue\n'));
-      l['exit'](0);
-    }, 5);
-    return proc;
-  };
-  const dir = tmpDir('sagi-wh-tb-');
-  fs.mkdirSync(path.join(dir, 'bin'), { recursive: true });
-  fs.mkdirSync(path.join(dir, 'models'), { recursive: true });
-  fs.writeFileSync(path.join(dir, 'bin', 'whisper-cli.exe'), '');
-  fs.writeFileSync(path.join(dir, 'models', 'ggml-base.bin'), '');
-  const engine = createWhisper({ emit: (e) => eventos.push(e), lang: 'es-ES', spawnFn, dirRaiz: dir, tmpDir: dir });
-  await engine.start();
-  /* Habla TENUE: 2× el suelo (por debajo del umbral fuerte de 3×), 0,5 s seguidos.
-     La puerta fuerte no la abre; la tenue (1,6×, 12 marcos ≈ 360 ms) debe hacerlo. */
-  const sr = 16000;
-  const calibra = Buffer.alloc(sr * 1.0 * 2); // 1 s de suelo bajo para calibrar
-  engine.push(calibra);
-  const tenue = Buffer.alloc(sr * 0.5 * 2);
-  for (let i = 0; i < sr * 0.5; i++) tenue.writeInt16LE(Math.round(Math.sin((2 * Math.PI * 220 * i) / sr) * 500), i * 2);
-  engine.push(tenue);
-  engine.push(Buffer.alloc(sr * 0.8 * 2)); // silencio que cierra la frase
-  await new Promise((r) => setTimeout(r, 60));
-  const fin = eventos.find((e) => e.type === 'final');
-  ok(fin && fin.text === 'voz tenue', 'la frase tenue se abrió, cerró y se transcribió: ' + JSON.stringify(eventos));
-  await engine.stop();
-});
-
-test('voz/rescate: MotorAlterno:: del guion no respawnedea el proceso y fija el clásico para el próximo arranque', async () => {
-  const { createSttWindows } = require('../main/voice/stt-windows');
-  const eventos = [];
-  let nacidos = 0;
-  const argsVistos = [];
-  const spawnFn = (c, a) => {
-    nacidos++;
-    argsVistos.push(a);
-    const l = {};
-    const proc = {
-      stdout: {
-        on: (k, f) => {
-          l['o' + k] = f;
-        },
-      },
-      stderr: {
-        on: (k, f) => {
-          l['e' + k] = f;
-        },
-      },
-      on: (k, f) => {
-        l[k] = f;
-      },
-      kill() {},
-      stdin: { end() {} },
-    };
-    setTimeout(() => {
-      l['odata'](Buffer.from('MODE::winrt\nREADY::es-ES\nMotorAlterno::el microfono predeterminado no entrega audio\n'));
-    }, 5);
-    return proc;
-  };
-  const engine = createSttWindows({ emit: (e) => eventos.push(e), spawnFn, scriptPath: 'voice.ps1' });
-  await engine.start();
-  await new Promise((r) => setTimeout(r, 40));
-  eq(nacidos, 1, 'el guion se rescata solo: no se lo mata desde fuera: ' + nacidos);
-  ok(
-    eventos.some((e) => e.type === 'notice' && /cl[aá]sico/.test(e.text)),
-    'se avisa del cambio: ' + JSON.stringify(eventos.filter((e) => e.type === 'notice')),
-  );
-  // El próximo arranque (caída, reapertura) va ya directo al clásico:
-  await engine.start();
-  eq(nacidos, 2, 'un start() rearma la escucha');
-  ok(argsVistos[1].includes('-NoWinrt'), 'el rearranque tras el auto-rescate va al clásico: ' + JSON.stringify(argsVistos[1]));
-});
-
-test('voz/rescate: la cadena completa renderer→manager→-NoWinrt está cableada', () => {
-  const fs = require('fs');
-  const preload = fs.readFileSync(path.join(__dirname, '..', 'main', 'preload.js'), 'utf8');
-  const mainSrc = MAIN_ALL; // Fase 4: main.js + routers main/ipc-*.js
-  const stt = fs.readFileSync(path.join(__dirname, '..', 'main', 'voice', 'stt-windows.js'), 'utf8');
-  ok(/voiceRescue:.*'voice:rescue'/.test(preload), 'el puente expone voiceRescue sobre el canal voice:rescue');
-  ok(/'voice:rescue'/.test(mainSrc) && /rescatarMotor/.test(mainSrc), 'el proceso principal atiende voice:rescue y llama al manager');
-  ok(/motorAlternativo/.test(mainSrc), 'el wrapper stt del proceso principal expone el rescate');
-  ok(/motorAlternativo/.test(stt) && /-NoWinrt/.test(stt), 'el motor de escucha rearma el guion con el clásico');
-});
-
-/* ---------- voz: calidad de la voz local, precisión del dictado y fluidez ---------- */
-
-/* El troceado de la lectura en voz alta vive en renderer/frases.js justo para poder
-   probarlo aquí (es la pieza delicada: partir de más o de menos se oye). */
-test('voz/frases: parte la respuesta sin romper decimales y sin leer código', () => {
-  const { corteDeFrase, limpiarParaVoz, diceAlgo } = require('../renderer/frases');
-  const trozos = (texto, fin) => {
-    const out = [];
-    let leido = 0;
-    for (;;) {
-      const c = corteDeFrase(texto.slice(leido), fin);
-      if (c <= 0) break;
-      out.push(texto.slice(leido, leido + c));
-      leido += c;
-    }
-    return out;
-  };
-  eq(trozos('Hecho.', false).length, 1, 'una frase cerrada se lee entera');
-  /* El decimal NO es un final de frase: si el corte fuera por el punto, la voz diría
-     «versión tres» y «cinco» — es el fallo que ya se cazó en el troceado del proceso
-     principal, y aquí vale la pena tenerlo escrito otra vez. */
-  eq(trozos('Está en la versión 3.5 del manual.', false).length, 1, 'el punto de un decimal no parte la frase');
-  eq(trozos('Quedan 10.000 resultados para revisar.', false).length, 1, 'ni el de un separador de miles');
-  eq(trozos('Estoy mirando el', false).length, 0, 'a medias no se dice nada todavía');
-  eq(trozos('Estoy mirando el', true).length, 1, 'y al terminar la respuesta la cola sin punto sí se lee');
-  const lista = trozos('Uno\nDos sin punto\n', false);
-  eq(lista.length, 2, 'los saltos de línea son frontera de frase: ' + JSON.stringify(lista));
-  const conCodigo = trozos('Mira:\n```js\nconst a = 1;\n```\nListo.', true).map(limpiarParaVoz).join('|');
-  ok(!/const/.test(conCodigo), 'el código no se lee en voz alta: ' + JSON.stringify(conCodigo));
-  ok(/Listo/.test(conCodigo), 'y el texto de alrededor sí se lee: ' + JSON.stringify(conCodigo));
-  eq(limpiarParaVoz('**Hola** `x` # Título'), 'Hola x Título', 'el markdown se limpia antes de hablar');
-  ok(!diceAlgo(limpiarParaVoz('|---|---|')), 'una línea de tabla no gasta una síntesis');
-  ok(diceAlgo('Hola'), 'y una palabra sí se lee');
-});
-
-test('voz/local: la voz de Piper manda salvo que el usuario elija otra a mano', () => {
-  const { usarVozLocal, VOZ_NOMBRE } = require('../main/voice/tts-local');
-  ok(usarVozLocal({ disponible: true, voice: '' }), 'sin voz guardada suena la local');
-  ok(usarVozLocal({ disponible: true, voice: VOZ_NOMBRE }), 'con la local guardada, la local');
-  ok(usarVozLocal({ disponible: true, voice: 'Microsoft Helena' }), 'una voz de Windows puesta por la APP no condena a la local');
-  ok(!usarVozLocal({ disponible: true, voice: 'Microsoft Helena', fijo: true }), 'si la eligió el usuario a mano, manda la suya');
-  ok(usarVozLocal({ disponible: true, voice: VOZ_NOMBRE, fijo: true }), 'y si eligió la local, sigue siendo la local');
-  ok(!usarVozLocal({ disponible: false, voice: '' }), 'sin instalar no hay nada que preferir');
-  const main = MAIN_ALL; // Fase 4: main.js + routers main/ipc-*.js
-  const app = readRenderer();
-  ok(/usarVozLocal\(/.test(main), 'el proceso principal decide con esta función');
-  ok(/'ttsVoiceFijo' in clean/.test(MAIN_ALL), 'el ajuste «elegida a mano» se valida como booleano');
-  ok(/ttsVoiceFijo: true/.test(app), 'elegir voz en Ajustes la marca como elección del usuario');
-  ok(/\^piper/i.test(app), 'Ajustes reconoce la voz local para preferirla');
-});
-
-test('voz/whisper: el motor elige el modelo de más precisión que haya instalado', () => {
-  const { createWhisper } = require('../main/voice/whisper');
-  const dir = tmpDir('sagi-wh-modelo-');
-  fs.mkdirSync(path.join(dir, 'bin'), { recursive: true });
-  fs.mkdirSync(path.join(dir, 'models'), { recursive: true });
-  fs.writeFileSync(path.join(dir, 'bin', 'whisper-cli.exe'), '');
-  fs.writeFileSync(path.join(dir, 'models', 'ggml-base.bin'), '');
-  eq(createWhisper({ emit: () => {}, dirRaiz: dir }).estado().modeloNombre, 'ggml-base', 'con sólo el base instalado usa el base');
-  fs.writeFileSync(path.join(dir, 'models', 'ggml-small-q5_1.bin'), '');
-  eq(
-    createWhisper({ emit: () => {}, dirRaiz: dir }).estado().modeloNombre,
-    'ggml-small-q5_1',
-    'y en cuanto está el small prefiere al base',
-  );
-  fs.writeFileSync(path.join(dir, 'models', 'ggml-large-v3-turbo-q5_0.bin'), '');
-  eq(createWhisper({ emit: () => {}, dirRaiz: dir }).estado().modeloNombre, 'ggml-large-v3-turbo-q5_0', 'y el turbo manda sobre todos');
-  const main = MAIN_ALL; // Fase 4: main.js + routers main/ipc-*.js
-  ok(/ggml-large-v3-turbo-q5_0\.bin/.test(main), 'el instalador baja ese mismo modelo (el que el motor va a usar)');
-  ok(/MIN_MODELO/.test(main) && /llegó incompleto/.test(main), 'y no da por bueno un modelo truncado');
-});
-
-test('voz/whisper: la cola de silencio se alarga cuando se lleva hablando un rato', async () => {
-  const { createWhisper } = require('../main/voice/whisper');
-  const finales = [];
-  const spawnFn = (cmd, args) => {
-    const l = {};
-    const proc = {
-      stdout: {
-        on: (k, f) => {
-          l['o' + k] = f;
-        },
-      },
-      stderr: { on: () => {} },
-      on: (k, f) => {
-        l[k] = f;
-      },
-      kill() {},
-    };
-    setTimeout(() => {
-      l['odata'](Buffer.from('texto de mentira\n'));
-      l['exit'](0);
-    }, 5);
-    return proc;
-  };
-  const dir = tmpDir('sagi-wh-cola-');
-  const tmp = path.join(dir, 'tmp');
-  fs.mkdirSync(path.join(dir, 'bin'), { recursive: true });
-  fs.mkdirSync(path.join(dir, 'models'), { recursive: true });
-  fs.mkdirSync(tmp, { recursive: true });
-  fs.writeFileSync(path.join(dir, 'bin', 'whisper-cli.exe'), '');
-  fs.writeFileSync(path.join(dir, 'models', 'ggml-base.bin'), '');
-  const engine = createWhisper({
-    emit: (e) => {
-      if (e.type === 'final') finales.push(e.text);
-    },
-    lang: 'es-ES',
-    spawnFn,
-    dirRaiz: dir,
-    tmpDir: tmp,
-  });
-  await engine.start();
-  const sr = 16000;
-  const marcoVoz = () => {
-    const m = Buffer.alloc(480 * 2);
-    for (let i = 0; i < 480; i++) m.writeInt16LE(Math.round(Math.sin((2 * Math.PI * 220 * i) / sr) * 12000), i * 2);
-    return m;
-  };
-  const marcoSil = () => Buffer.alloc(480 * 2);
-  const empuja = (n, voz) => {
-    for (let i = 0; i < n; i++) engine.push(voz ? marcoVoz() : marcoSil());
-  };
-  const espera = (ms) => new Promise((r) => setTimeout(r, ms));
-  // ráfaga corta (1 s) + 700 ms de silencio: cierra con la cola corta
-  empuja(33, true);
-  empuja(23, false);
-  await espera(80);
-  eq(finales.length, 1, 'lo corto cierra rápido');
-  // habla larga (5 s) + 700 ms de silencio: SIGUE abierta (cola alargada a ~900 ms)
-  empuja(167, true);
-  empuja(23, false);
-  await espera(80);
-  eq(finales.length, 1, 'la pausa de pensar no parte la frase larga');
-  // +500 ms más de silencio (total ~1,2 s): ahora sí cierra
-  empuja(17, false);
-  await espera(80);
-  eq(finales.length, 2, 'y con silencio de verdad cierra');
-});
-
-test('voz/whisper: la vista previa enseña el texto mientras se habla y no pisa al final', async () => {
-  const { createWhisper } = require('../main/voice/whisper');
-  const eventos = [];
-  const lanzados = [];
-  const spawnFn = (cmd, args) => {
-    lanzados.push(args);
-    const l = {};
-    const proc = {
-      stdout: {
-        on: (k, f) => {
-          l['o' + k] = f;
-        },
-      },
-      stderr: {
-        on: (k, f) => {
-          l['e' + k] = f;
-        },
-      },
-      on: (k, f) => {
-        l[k] = f;
-      },
-      kill() {},
-      stdin: { end() {} },
-    };
-    const wav = args[args.indexOf('-f') + 1];
-    const previa = path.basename(wav).startsWith('p-');
-    setTimeout(() => {
-      l['odata'](Buffer.from(previa ? 'recuérdame llamar\n' : 'Recuérdame llamar a Álvaro.\n'));
-      l['exit'](0);
-    }, 5);
-    return proc;
-  };
-  const dir = tmpDir('sagi-wh-prev-');
-  const tmp = path.join(dir, 'tmp');
-  fs.mkdirSync(path.join(dir, 'bin'), { recursive: true });
-  fs.mkdirSync(path.join(dir, 'models'), { recursive: true });
-  fs.mkdirSync(tmp, { recursive: true });
-  fs.writeFileSync(path.join(dir, 'bin', 'whisper-cli.exe'), '');
-  fs.writeFileSync(path.join(dir, 'models', 'ggml-base.bin'), '');
-  const engine = createWhisper({ emit: (e) => eventos.push(e), lang: 'es-ES', spawnFn, dirRaiz: dir, tmpDir: tmp });
-  await engine.start();
-  /* 2 s de voz seguidos: por encima del mínimo de la previa (~1,2 s) y sin silencio, así
-     que la frase sigue abierta mientras la previa ya se ha lanzado. */
-  const sr = 16000;
-  const voz = new Int16Array(sr * 2);
-  for (let i = 0; i < voz.length; i++) voz[i] = Math.round(Math.sin((2 * Math.PI * 220 * i) / sr) * 12000);
-  engine.push(Buffer.from(voz.buffer));
-  await new Promise((r) => setTimeout(r, 80));
-  const parcial = eventos.find((e) => e.type === 'partial');
-  ok(parcial && /recuérdame/.test(parcial.text), 'mientras habla, el panel ya enseña texto: ' + JSON.stringify(eventos));
-  eq(eventos.filter((e) => e.type === 'final').length, 0, 'y la frase sigue abierta: nada definitivo todavía');
-  engine.push(Buffer.alloc(sr * 0.8 * 2));
-  await new Promise((r) => setTimeout(r, 80));
-  const fin = eventos.find((e) => e.type === 'final');
-  ok(fin && fin.text === 'Recuérdame llamar a Álvaro.', 'al callar, el texto definitivo sustituye al parcial: ' + JSON.stringify(eventos));
-  const parciales = eventos.filter((e) => e.type === 'partial').length;
-  await new Promise((r) => setTimeout(r, 60));
-  eq(
-    eventos.filter((e) => e.type === 'partial').length,
-    parciales,
-    'ningún parcial llega DESPUÉS del final (el panel no revive texto viejo)',
-  );
-  ok(lanzados.length >= 2, 'se lanzaron la previa y la definitiva (procesos distintos)');
-  eq(fs.readdirSync(tmp).length, 0, 'ni la previa ni el final dejan WAV temporales');
-  await engine.stop();
-});
-
-test('voz/fluidez: la respuesta se lee por frases MIENTRAS se escribe', () => {
-  const app = readRenderer();
-  const main = MAIN_ALL; // Fase 4: main.js + routers main/ipc-*.js
-  const html = fs.readFileSync(path.join(__dirname, '..', 'renderer', 'index.html'), 'utf8');
-  ok(/SagiFrases/.test(app) && /frases\.js/.test(html), 'el troceado probado es el que usa la página');
-  ok(
-    /hablarEnFlujo\(\(b\._frozenText \|\| ''\) \+ \(b\._openText \|\| ''\), false\)/.test(app),
-    'cada trozo del stream entra en la voz en cuanto tiene frase (con los tramos ya congelados incluidos)',
-  );
-  ok(/hablarEnFlujo\(leidoHastaAqui, true\)/.test(app), 'al cerrar el turno solo va la cola, no se repite lo ya leído');
-  ok(/encolar: lecturaSuena/.test(app), 'la primera frase corta la lectura anterior y las siguientes se encolan');
-  ok(/if \(!\(opts && opts\.encolar\)\) voz\.stopSpeaking\(\)/.test(main), 'el proceso principal encola sin cortar lo que suena');
-  const vm = fs.readFileSync(path.join(__dirname, '..', 'renderer', 'voice-mode.js'), 'utf8');
-  ok(/setInterrumpido/.test(app), 'la app sabe cuándo el usuario ha interrumpido');
-  ok(/AL_INTERRUMPIR\(\)/.test(vm), 'y el panel se lo dice al interrumpir (barge-in)');
-  ok(
-    /reiniciarLecturaVoz\(\)/.test(app) && /limpiarPasosVoz\(\);\r?\n {2}reiniciarLecturaVoz\(\)/.test(app),
-    'cada turno empieza a leer de cero',
-  );
-});
-
-test('voz/parar: el panel puede detener el turno en curso (botón y voz)', () => {
-  const html = fs.readFileSync(path.join(__dirname, '..', 'renderer', 'index.html'), 'utf8');
-  const vm = fs.readFileSync(path.join(__dirname, '..', 'renderer', 'voice-mode.js'), 'utf8');
-  const app = readRenderer();
-  ok(/id="vmParar"/.test(html), 'el panel tiene su botón de parar (el chat queda detrás)');
-  ok(/cablearParar/.test(vm) && /PARAR\(\)/.test(vm), 'el botón llama a parar');
-  ok(/setParar/.test(vm) && /setOcupado/.test(vm), 'el panel sabe si hay trabajo y cómo pararlo');
-  ok(/window\.sagitari\.stopChat\(\)/.test(app) && /setParar\(/.test(app), 'parar de verdad es el MISMO stopChat del chat');
-  ok(/\^\(para\|p\[aá\]rate/.test(vm), 'decir «para» con el agente trabajando también lo detiene');
-  ok(/parar\.hidden = !\(s === 'pensando' \|\| s === 'hablando'\)/.test(vm), 'el botón solo se enseña cuando hay algo que parar');
 });
 
 /* ---------- v2.1: orquestación, skills por agente y cierre verificado ---------- */
@@ -2317,7 +621,7 @@ test('chatkit: la etiqueta del subagente cubre TODO el registro de agentes', () 
   eq(ChatKit.subagent(''), null, 'sin clave no hay etiqueta');
 });
 
-test('renderer: el texto de un subagente no entra en la burbuja ni en la voz', () => {
+test('renderer: el texto de un subagente no entra en la burbuja', () => {
   const app = readRenderer();
   const desde = app.indexOf("case 'delta': {");
   ok(desde >= 0, 'el caso delta existe');
@@ -2325,7 +629,6 @@ test('renderer: el texto de un subagente no entra en la burbuja ni en la voz', (
   const guarda = cuerpo.indexOf('if (ev.subagent) break;');
   ok(guarda >= 0, 'el delta con `subagent` se descarta');
   ok(guarda < cuerpo.indexOf('ensureAssistantBubble'), 'se descarta ANTES de tocar la burbuja del asistente');
-  ok(guarda < cuerpo.indexOf('hablarEnFlujo'), 'y antes de leerlo en voz alta (el RESULT del subagente no se pronuncia)');
   // las tareas en segundo plano ya tenían su propio camino, pero el cierre de la
   // delegación también tiene que contarse ahí
   ok(/if \(ev\.bg\) \{[\s\S]*?case 'delegate_done'/.test(app), 'una tarea en segundo plano informa del cierre de su delegación');
@@ -2465,6 +768,9 @@ test('agent: el subagente también salta de modelo si el proveedor falla', async
       { id: 'p1', name: 'uno', baseUrl: 'https://api.uno.com/v1', apiKey: 'k1', model: 'modelo-malo', models: ['modelo-malo'] },
       { id: 'p2', name: 'dos', baseUrl: 'https://api.dos.com/v1', apiKey: 'k2', models: ['modelo-bueno'] },
     ],
+    // el usuario eligió p2 como reserva: sin esto NO se salta a un proveedor que no
+    // escogió (la capa automática es opt-in; ver models.js)
+    fallbackChain: ['p2'],
     settings: { mode: 'act', workspace: process.cwd() },
   };
   const events = [];
@@ -2687,7 +993,7 @@ test('agent: el razonamiento se emite solo si el usuario lo activa, y nunca el d
     eventos.some((e) => e.type === 'assistant_done' && e.text === 'Listo.'),
     'la respuesta sigue siendo la respuesta',
   );
-  ok(!eventos.some((e) => e.type === 'delta' && /vueltas/.test(e.text)), 'el razonamiento NO entra por el canal del texto (ni a la voz)');
+  ok(!eventos.some((e) => e.type === 'delta' && /vueltas/.test(e.text)), 'el razonamiento NO entra por el canal del texto');
 
   const apagado = [];
   const agent2 = new AgentCls({ fetchFn: async () => sseResponse(chunks), emit: (e) => apagado.push(e), screenshotFn: async () => ({}) });
@@ -2726,6 +1032,9 @@ test('agent: un reintento en otro modelo no mezcla el razonamiento', async () =>
   });
   const settings = SETTINGS_BASE({ showThinking: true, modelRouting: true });
   settings.providers.push({ id: 'p2', name: 'dos', baseUrl: 'https://api.dos.com/v1', apiKey: 'k2', models: ['gpt-4o'] });
+  // reserva ELEGIDA por el usuario: la capa automática ya no mete proveedores que
+  // no escogió (mandaría la petición a un tercero sin decirlo)
+  settings.fallbackChain = ['p2'];
   await agent.chat('piensa', settings);
   const tipos = events.filter((e) => String(e.type).startsWith('thinking')).map((e) => e.type);
   ok(tipos.includes('thinking_delta'), 'el primer intento alcanzó a razonar: ' + tipos.join(','));
@@ -3050,10 +1359,7 @@ test('renderer: el tablero del equipo pinta las delegaciones en vivo', () => {
   ok(/FAILED/.test(cierra) && /PARTIAL/.test(cierra), 'distingue el fallo y el parcial');
   const limpieza = fnDe('closePendingCards');
   ok(/pendingTurn\.team/.test(limpieza), 'un turno interrumpido no deja el tablero «en marcha» para siempre');
-  ok(
-    /etiquetaEquipo/.test(app) && /pasoVoz\(\{ name: 'delegate'/.test(app),
-    'y la franja del modo voz cuenta la delegación con su subtarea',
-  );
+  ok(/etiquetaEquipo/.test(app), 'la etiqueta del equipo nombra al agente y su subtarea');
   ok(/\.tgroup\.team/.test(css), 'el tablero tiene su estilo');
 });
 
@@ -3061,7 +1367,7 @@ test('renderer: la narración se intercala con las herramientas y sobrevive al c
   const app = readRenderer();
   ok(/function freezeStream\(\)/.test(app), 'existe la congelación de tramos de narración');
   ok(
-    /case 'tool':\s*\r?\n\s*freezeStream\(\);[^\r\n]*\r?\n\s*toolCard\(ev\);/.test(app),
+    /case 'tool':\s*\{?\s*freezeStream\(\);[\s\S]{0,80}?toolCard\(ev\);/.test(app),
     'cada herramienta congela antes la narración: queda encima de su tarjeta',
   );
   ok(/className = 'stream-done'/.test(app), 'el tramo congelado es estático (sin caret de "sigue escribiendo")');
@@ -3070,10 +1376,17 @@ test('renderer: la narración se intercala con las herramientas y sobrevive al c
     'al cerrar no se borra la narración para pintar solo el último párrafo',
   );
   ok(/pendingTurn\.mode === 'plan' && pendingTurn\.plan/.test(app), 'en modo PLAN con tarjeta no se congela (el plan ya vive ahí)');
-  ok(/con la ventana oculta Chromium no dispara/.test(app), 'y el tramo abierto se asegura en pantalla al cerrar (sin fiarse del frame)');
+  /* El tramo abierto se acumula en cada evento pero se PINTA por frames: al cerrar hay que
+     reescribirlo ENTERO, sin fiarse del último frame. Antes sólo se rellenaba si estaba
+     vacío, así que una respuesta «pintada a medias» (ventana sin foco) quedaba cortada en
+     pantalla mientras el mensaje guardado estaba entero. */
+  ok(
+    /if \(holder\._openText\) \{\s*stream\.className = 'stream-done';[\s\S]{0,900}?stream\.innerHTML = fmt\(holder\._openText\);/.test(app),
+    'y el tramo abierto se reescribe entero al cerrar, sin fiarse del frame',
+  );
 });
 
-test('renderer: el razonamiento va en su bloque, fuera de la respuesta y de la voz', () => {
+test('renderer: el razonamiento va en su bloque, fuera de la respuesta', () => {
   const app = readRenderer();
   const css = fs.readFileSync(path.join(__dirname, '..', 'renderer', 'styles.css'), 'utf8');
   const desde = (a, b) => {
@@ -3084,7 +1397,7 @@ test('renderer: el razonamiento va en su bloque, fuera de la respuesta y de la v
   };
   const caso = desde("case 'thinking_delta':", "case 'thinking_done':");
   ok(/ensureThinkBlock\(\)/.test(caso), 'el delta de razonamiento pinta SU bloque');
-  ok(!/_stream/.test(caso) && !/hablarEnFlujo/.test(caso), 'y no toca el texto del turno ni la lectura por frases');
+  ok(!/_stream/.test(caso), 'y no toca el texto del turno');
   ok(/if \(ev\.subagent\) break;/.test(caso), 'el de un subagente se descarta (es trabajo interno)');
   ok(/scheduleThinkRender/.test(caso), 'se repinta por frames, no en cada token');
   /* El CIERRE se pinta de forma SÍNCRONA: con la ventana minimizada u oculta Chromium no
@@ -3110,7 +1423,7 @@ test('renderer: el razonamiento va en su bloque, fuera de la respuesta y de la v
   ok(/cerrarRazonamiento\(\);/.test(cierreTurno), 'y al cerrar el turno quedan plegados razonamiento y herramientas');
 
   eq(
-    (app.match(/thinkblock'\)\.forEach\(x => x\.remove\(\)\)/g) || []).length,
+    (app.match(/thinkblock'\)\.forEach\(\(?x\)?\s*=>\s*x\.remove\(\)\)/g) || []).length,
     2,
     'copiar mensaje y copiar conversación dejan fuera el razonamiento',
   );
@@ -3135,7 +1448,7 @@ test('renderer: el separador de día sale al cambiar de día, no en cada turno',
   ok(/'Ayer'/.test(etiqueta) && /toLocaleDateString\('es-ES'/.test(etiqueta), 'con la fecha en castellano para los días antiguos');
   ok(/stampDia = null;/.test(app), 'una conversación nueva vuelve a estampar el día');
   ok(/dayStamp\(m\.ts\)/.test(app), 'al restaurar se estampa el día de los mensajes, no el de hoy');
-  ok(/dayStamp\(\); {3}\/\/ si el hilo cruza la medianoche/.test(app), 'y también con la pregunta, si cruza la medianoche');
+  ok(/dayStamp\(\);\s*\/\/[^\n]*cruza la medianoche/.test(app), 'y también con la pregunta, si cruza la medianoche');
 });
 
 test('renderer: el grupo de herramientas dice cuántas van y si algo falló', () => {
@@ -3143,7 +1456,7 @@ test('renderer: el grupo de herramientas dice cuántas van y si algo falló', ()
   const css = fs.readFileSync(path.join(__dirname, '..', 'renderer', 'styles.css'), 'utf8');
   const refresh = app.match(/function refreshToolGroup[\s\S]*?\n\}/)[0];
   ok(
-    /en curso/.test(refresh) && /cards\.filter\(c => c\.classList\.contains\('run'\)\)/.test(refresh),
+    /en curso/.test(refresh) && /cards\s*\.filter\(\(?c\)?\s*=>\s*c\.classList\.contains\('run'\)\)/.test(refresh),
     'la cabecera cuenta las tarjetas en curso',
   );
   ok(/tg-fails|fails\.textContent/.test(refresh) && /has-fails/.test(refresh), 'y enseña los fallos aunque el grupo esté plegado');
@@ -3161,17 +1474,17 @@ test('renderer: el grupo de herramientas dice cuántas van y si algo falló', ()
 
 test('conversación: el turno guarda su rastro (herramientas y razonamiento), no solo el texto', () => {
   const main = MAIN_ALL; // Fase 4: main.js + routers main/ipc-*.js
-  ok(/function trazaApunta/.test(main) && /trazaApunta\(e\)/.test(main), 'el rastro se acumula con los eventos del turno');
+  ok(/function trazaApunta/.test(main) && /trazaApunta\(convId, e\)/.test(main), 'el rastro se acumula con los eventos del turno');
   ok(/turnTrace\.tools\.push/.test(main) && /turnTrace\.think =/.test(main), 'guarda herramientas y razonamiento');
   ok(
-    /const completo = \(e\.transcript && e\.transcript\.length > e\.text\.length\) \? e\.transcript : e\.text;/.test(main),
+    /const completo =\s*\(?e\.transcript && e\.transcript\.length > e\.text\.length\)?\s*\?\s*e\.transcript : e\.text;/.test(main),
     'y se guarda la narración COMPLETA del turno, no solo el párrafo final',
   );
   ok(
     /content: completo, ts: Date\.now\(\), \.\.\.\(conTraza \? \{ trace: conTraza \} : \{\}\)/.test(main),
     'y viaja CON el mensaje del asistente al guardarlo',
   );
-  ok(/trazaNueva\(\);/.test(main), 'cada turno estrena rastro (el anterior ya está guardado)');
+  ok(/trazaNueva\(c\.id\);/.test(main), 'cada turno estrena rastro (el anterior ya está guardado)');
   ok(/function tool_result/.test(main) === false && /e\.type === 'tool_result'/.test(main), 'cierra cada herramienta con su resultado');
   ok(/e\.type === 'delegate_done'/.test(main) && /e\.type === 'thinking_done'/.test(main), 'y guarda las delegaciones y el razonamiento');
   // sin topes, conversations.json (que se lee ENTERO al arrancar) crecería sin freno
@@ -3182,7 +1495,7 @@ test('conversación: el turno guarda su rastro (herramientas y razonamiento), no
 test('conversación: al reabrir la app se repinta el turno con sus tarjetas', () => {
   const app = readRenderer();
   ok(/function restaurarTraza/.test(app), 'existe el repintado del turno guardado');
-  ok(/if \(tieneTraza\) restaurarTraza\(b, m\.trace, html\);/.test(app), 'y el chat lo usa al restaurar la conversación');
+  ok(/if \(tieneTraza\)\s*restaurarTraza\(b, m\.trace, html\);/.test(app), 'y el chat lo usa al restaurar la conversación');
   const fn = app.match(/function restaurarTraza[\s\S]*?\n\}/)[0];
   ok(
     /buildToolGroup\(\)/.test(fn) && /buildToolCard\(/.test(fn) && /pintarResultadoTarjeta\(/.test(fn) && /buildThinkBlock\(\)/.test(fn),
@@ -3586,9 +1899,20 @@ test('verificación de cierre: las pruebas del proyecto mandan, y su fallo vuelv
   const rojo = proyectoCon('process.stdout.write("FAIL: 2 pruebas fallaron\\n"); process.exit(1);');
   const verde = proyectoCon('process.stdout.write("ok 3 pruebas\\n");');
 
+  /* La puerta de seguridad del cierre (`_chequeoCierre`) solo deja ejecutar un comando
+     que YA fuera el comando de pruebas del proyecto al empezar el turno; el snapshot lo
+     toma `_run`. Aquí se reproduce, porque lo que este bloque comprueba es el ciclo
+     falla→arregla→vuelve a comprobar, no la puerta. */
+  const diagnosticos = require('../agent/diagnosticos');
+  const conComandoPrevio = (agente, ws) => {
+    const plan = diagnosticos.planCierre(proyecto.perfil(ws));
+    agente._comandoCierrePrevio = (plan && plan.comando) || null;
+    return agente;
+  };
+
   /* 1) Falla: el turno NO cierra y el modelo recibe la salida real con la orden de arreglarlo */
   const eventos = [];
-  const a1 = new Agent({ emit: (e) => eventos.push(e) });
+  const a1 = conComandoPrevio(new Agent({ emit: (e) => eventos.push(e) }), rojo);
   a1._writes = 1;
   const messages = [];
   const sigue = await a1._chequeoCierre({ settings: { settings: { workspace: rojo } }, messages, res: { text: 'ya está hecho' } });
@@ -3627,7 +1951,7 @@ test('verificación de cierre: las pruebas del proyecto mandan, y su fallo vuelv
   );
 
   /* 3) Tope de intentos: cuando se agotan, cierra igual (con el fallo a la vista) */
-  const a2 = new Agent({ emit: () => {} });
+  const a2 = conComandoPrevio(new Agent({ emit: () => {} }), rojo);
   a2._writes = 1;
   a2._intentosArreglo = 2;
   eq(
@@ -3637,17 +1961,20 @@ test('verificación de cierre: las pruebas del proyecto mandan, y su fallo vuelv
   );
 
   /* 4) En verde: cierra y queda marcado como verificado de verdad */
-  const a3 = new Agent({ emit: () => {} });
+  const a3 = conComandoPrevio(new Agent({ emit: () => {} }), verde);
   a3._writes = 1;
   eq(await a3._chequeoCierre({ settings: { settings: { workspace: verde } }, messages: [], res: {} }), false, 'en verde cierra');
   eq(a3._verified, true, 'y con evidencia real, así la puerta de verificación no le pregunta otra vez');
 
   /* 5) Apagado en Ajustes: no ejecuta nada */
-  const a4 = new Agent({
-    emit: () => {
-      throw new Error('no debería emitir nada');
-    },
-  });
+  const a4 = conComandoPrevio(
+    new Agent({
+      emit: () => {
+        throw new Error('no debería emitir nada');
+      },
+    }),
+    rojo,
+  );
   a4._writes = 1;
   eq(
     await a4._chequeoCierre({ settings: { settings: { workspace: rojo, verificacionCierre: false } }, messages: [], res: {} }),
@@ -3656,20 +1983,24 @@ test('verificación de cierre: las pruebas del proyecto mandan, y su fallo vuelv
   );
 
   /* 6) Un proyecto sin pruebas ni compilación no tiene nada que ejecutar */
-  const a5 = new Agent({
-    emit: () => {
-      throw new Error('no debería emitir nada');
-    },
-  });
+  const vacio = tmpDir('sagi-cierre-vacio-');
+  const a5 = conComandoPrevio(
+    new Agent({
+      emit: () => {
+        throw new Error('no debería emitir nada');
+      },
+    }),
+    vacio,
+  );
   a5._writes = 1;
   eq(
-    await a5._chequeoCierre({ settings: { settings: { workspace: tmpDir('sagi-cierre-vacio-') } }, messages: [], res: {} }),
+    await a5._chequeoCierre({ settings: { settings: { workspace: vacio } }, messages: [], res: {} }),
     false,
     'sin tests ni build declarados, no se inventa un comando',
   );
 
   /* 7) Si el modelo ya lanzó ESA orden después de su última escritura, no se repite */
-  const a6 = new Agent({ emit: () => {} });
+  const a6 = conComandoPrevio(new Agent({ emit: () => {} }), rojo);
   a6._writes = 1;
   a6._lastWriteSeq = 3;
   a6._lastCmdSeq = 4;
@@ -3683,7 +2014,7 @@ test('verificación de cierre: las pruebas del proyecto mandan, y su fallo vuelv
   );
   eq(ev6.length, 0, 'ni se lanza nada');
   // …pero si el comando que corrió era otra cosa, sí se ejecuta el del proyecto
-  const a7 = new Agent({ emit: () => {} });
+  const a7 = conComandoPrevio(new Agent({ emit: () => {} }), rojo);
   a7._writes = 1;
   a7._lastWriteSeq = 3;
   a7._lastCmdSeq = 4;
@@ -3698,7 +2029,7 @@ test('verificación de cierre: las pruebas del proyecto mandan, y su fallo vuelv
      nadie llame no comprueba nada (es el fallo que este bloque viene a cerrar). */
   const agentSrc = fs.readFileSync(path.join(__dirname, '..', 'agent', 'agent.js'), 'utf8');
   ok(
-    /if \(p\.account && await this\._chequeoCierre\(/.test(agentSrc),
+    /if \(p\.account && \(?await this\._chequeoCierre\(/.test(agentSrc),
     'el bucle de cierre del agente llama a la comprobación del proyecto',
   );
   const cierreIdx = agentSrc.indexOf('await this._chequeoCierre(');
@@ -3751,7 +2082,10 @@ test('deshacer: el turno vuelve a como estaba y no toca lo que no tocó', () => 
   /* Y está CABLEADO de punta a punta: sin esto, el módulo sería un adorno. */
   const read = (p) => fs.readFileSync(path.join(__dirname, '..', p), 'utf8');
   ok(/ipcMain\.handle\('cambios:deshacer'/.test(read('main/ipc-cambios.js')), 'el proceso principal expone deshacer');
-  ok(/undoChanges: \(\) => ipcRenderer\.invoke\('cambios:deshacer'\)/.test(read('main/preload.js')), 'y llega al renderer por el puente');
+  ok(
+    /undoChanges: \(convId\) => ipcRenderer\.invoke\('cambios:deshacer', convId\)/.test(read('main/preload.js')),
+    'y llega al renderer por el puente',
+  );
   ok(
     /case 'can_undo'/.test(readRenderer()) && /id="undoBar"/.test(read('renderer/index.html')),
     'la interfaz ofrece deshacer cuando el turno toca archivos',
@@ -4472,7 +2806,10 @@ test('agent: el cambio se revisa antes de cerrar, una vez por turno y solo si es
   eq(soloTexto._needsReview({ settings: { workspace: dir } }), false, 'ni con escrituras si no hay diff registrado');
   const conCambio = new AgentCls({ emit: () => {}, screenshotFn: async () => ({}) });
   fs.writeFileSync(path.join(dir, 'otro.js'), '\n');
-  cambios.recordar(dir, path.join(dir, 'otro.js'), '');
+  /* Con la revisión por conversación, el diff se registra y se busca con el MISMO dueño
+     (en producción, `executeTool` lo saca de `ctx.ownerCambios`). Registrar sin dueño y
+     buscar con él sería comprobar otro caso distinto del que pasa el agente. */
+  cambios.recordar(dir, path.join(dir, 'otro.js'), '', conCambio.ownerCambios());
   conCambio._writes = 1;
   eq(conCambio._needsReview({ settings: { workspace: dir } }), true, 'con escritura y diff, sí');
   conCambio._reviewed = true;
@@ -4730,11 +3067,10 @@ test('agent: Detener mata TODAS las herramientas en vuelo, no solo la última', 
   const agent = new AgentCls({ emit: () => {}, screenshotFn: async () => ({}) });
   agent.runningTools.set('a', { stop: () => matadas.push('a') });
   agent.runningTools.set('b', { stop: () => matadas.push('b') });
-  agent.runningTool = { stop: () => matadas.push('directa') }; // compatibilidad con lo de antes
   agent.subagents.add({ stop: () => matadas.push('sub1') });
   agent.subagents.add({ stop: () => matadas.push('sub2') });
   agent.stop();
-  for (const x of ['a', 'b', 'directa', 'sub1', 'sub2']) ok(matadas.includes(x), x + ' debía morir al Detener: ' + matadas.join(','));
+  for (const x of ['a', 'b', 'sub1', 'sub2']) ok(matadas.includes(x), x + ' debía morir al Detener: ' + matadas.join(','));
   eq(agent.runningTools.size, 0, 'y la lista queda limpia');
 });
 
@@ -5076,10 +3412,22 @@ test('runlog: los secretos no llegan al disco', () => {
   ok(!r.command.includes('abcdef123456'), 'el Bearer no queda en el log: ' + r.command);
   const r2 = redactToolArgs('run_command', { command: 'node a.js sk-abc123xyz456789' });
   ok(!r2.command.includes('sk-abc123xyz456789'), 'la API key no queda en el log');
-  // el portapapeles y lo tecleado se recortan (pueden ser contraseñas)
+  // el portapapeles y lo tecleado en un campo sensible se ENMASCARAN (pueden ser
+  // contraseñas): un recorte deja el secreto dentro, la máscara no
   const largo = 'x'.repeat(500);
-  ok(redactToolArgs('clipboard', { action: 'write', text: largo }).text.endsWith('…[truncado]'), 'portapapeles largo se recorta');
-  ok(redactToolArgs('browser_control', { action: 'type', text: largo }).text.endsWith('…[truncado]'), 'type largo se recorta');
+  const clip = redactToolArgs('clipboard', { action: 'write', text: largo }).text;
+  eq(clip, '[REDACTED 500 chars]', 'lo escrito en el portapapeles no queda en el log, ni recortado');
+  const enCampoSensible = redactToolArgs('browser_control', {
+    action: 'type',
+    selector: '#password',
+    text: 'hunter2',
+  }).text;
+  eq(enCampoSensible, '[REDACTED 7 chars]', 'lo tecleado en un campo sensible tampoco');
+  // teclear en un campo normal se recorta, pero se puede leer para depurar
+  ok(
+    redactToolArgs('browser_control', { action: 'type', selector: '#ciudad', text: largo }).text.endsWith('…[truncado]'),
+    'type largo en un campo normal se recorta',
+  );
   // el contenido de ficheros no inunda el log
   ok(redactToolArgs('write_file', { path: 'a.txt', content: largo }).content.endsWith('…[truncado]'), 'content se recorta');
   // lo corto e inocente pasa intacto
@@ -5249,6 +3597,25 @@ test('árboles: el subagente ve el proyecto tal y como lo tiene el usuario', asy
   eq(arbolesMod.vivos().length, 0, 'no debe quedar ningún árbol en pie');
 });
 
+test('árboles: si el espacio de trabajo desaparece, el registro no se queda en el repo', async () => {
+  if (!GIT_OK) return;
+  const raiz = repoDePrueba();
+  /* El espacio de trabajo es una SUBCARPETA del repositorio y desaparece ANTES del
+     desmontaje. Es lo que pasa de verdad (la carpeta del usuario se mueve o se borra, un
+     disco se desconecta, el perfil de pruebas se limpia): el comando de git no puede correr
+     desde un directorio que ya no está, y antes el registro del árbol se quedaba dentro del
+     repositorio del usuario para siempre —`git worktree list` acumulaba fantasmas. */
+  const ws = path.join(raiz, 'proyecto');
+  fs.mkdirSync(ws);
+  fs.writeFileSync(path.join(ws, 'b.js'), 'module.exports = 1;\n');
+  const arbol = await arbolesMod.crear(ws);
+  ok(arbol, 'debería poder aislarse aunque el espacio de trabajo sea una subcarpeta');
+  fs.rmSync(ws, { recursive: true, force: true });
+  await arbolesMod.descartar(arbol);
+  eq(arbolesMod.vivos().length, 0, 'no debe quedar ningún árbol en pie');
+  eq(/arbol-/.test(gitEn(raiz, 'worktree', 'list')), false, 'no puede quedar un registro fantasma en el repositorio');
+});
+
 test('árboles: la fusión aplica solo lo que cambió el agente', async () => {
   if (!GIT_OK) return;
   const ws = repoDePrueba();
@@ -5372,12 +3739,6 @@ test('auditoría: main enmascara secretos hacia el renderer', () => {
   );
 });
 
-test('auditoría: la instalación de voz/TTS no interpola rutas en shell', () => {
-  ok(/function expandirZip\(zip, destino/.test(MAIN_ALL), 'debe existir el extractor sin shell'); // Fase 4: vive en ipc-voz.js
-  ok(!/execSync\('powershell\.exe -NoProfile -Command "Expand-Archive/.test(MAIN_ALL), 'no debe quedar execSync interpolado');
-  ok(/tamaño anómalo/.test(MAIN_ALL), 'los zips con tamaño anómalo se rechazan');
-});
-
 test('auditoría: hooks destructivos no se ejecutan', async () => {
   const { ejecutarHook } = require('../agent/executors');
   const r = await ejecutarHook('format C:', { ws: tmpDir('sagitari-hook-') });
@@ -5408,14 +3769,26 @@ test('auditoría: MCP nuevo pide confianza y updateAll pide confirmación', () =
 });
 
 test('auditoría: workspace:pick valida como workspace:set', () => {
-  // El diálogo devolvía cualquier carpeta sin comprobar: ahora comparte las guardas.
-  // Fase 4: el handler vive en main/ipc-convs.js (MAIN_ALL = main/*.js).
+  /* El diálogo devolvía cualquier carpeta sin comprobar: ahora comparte las guardas.
+     La validación vive en UN solo sitio (main/workspace-ruta.js) y la usan las tres
+     vías que pueden fijar el espacio de trabajo: workspace:set, workspace:pick y
+     shell:openPath. Antes estaba copiada verbatim en las tres (y en shell:openPath
+     no estaba en absoluto). */
+  const ruta = fs.readFileSync(path.join(__dirname, '..', 'main', 'workspace-ruta.js'), 'utf8');
+  ok(/carpetas del sistema/.test(ruta), 'la validación rechaza carpetas del sistema');
+  ok(/datos de la app/.test(ruta), 'y el directorio de datos de la app');
+  ok(/raíz de una unidad/.test(ruta), 'y la raíz de una unidad');
   const iPick = MAIN_ALL.indexOf("ipcMain.handle('workspace:pick'");
   ok(iPick > -1, 'debe existir el handler');
   const bloque = MAIN_ALL.slice(iPick, iPick + 1800);
-  ok(/carpetas del sistema/.test(bloque), 'pick debe rechazar carpetas del sistema');
-  ok(/datos de la app/.test(bloque), 'pick debe rechazar el CONFIG_DIR');
-  ok(/raíz de una unidad/.test(bloque), 'pick debe rechazar la raíz');
+  ok(/validarWorkspaceRuta\(/.test(bloque), 'pick tiene que usar ESA validación, no una copia');
+  // una sola copia de cada rechazo en todo el proceso principal
+  eq(
+    (MAIN_ALL.match(/carpetas del sistema no pueden ser el espacio de trabajo/g) || []).length,
+    1,
+    'los rechazos viven en un único sitio: repetirlos los deja divergir',
+  );
+  eq((MAIN_ALL.match(/raíz de una unidad no puede ser el espacio de trabajo/g) || []).length, 1, 'y la de la raíz');
 });
 
 /* ---------- Fase 3: updater sin firma (TOFU + guion verificado) ---------- */
@@ -5466,4 +3839,263 @@ test('fase3: writeHelperPs devuelve huella y programarInstalacion la comprueba',
   }
   ok(fallo && /cambió en disco/.test(fallo.message), 'debe abortar si el guion cambió: ' + (fallo && fallo.message));
   eq(lanzada, false, 'la tarea manipulada no debe dispararse');
+});
+
+/* --------------------------------------------------------------------------- *
+ *  Auditoría 5.0.0 — núcleo del agente (agent/agent.js, agent/executors.js)
+ *
+ *  Cada bloque reproduce el fallo del informe ANTES de arreglarlo.
+ * --------------------------------------------------------------------------- */
+
+test('cierre: si el modelo reescribió el manifiesto en el turno, la comprobación no se lanza', async () => {
+  const { Agent } = require('../agent/agent');
+  const cambios = require('../agent/cambios');
+  const proyecto = require('../agent/proyecto');
+  const diagnosticos = require('../agent/diagnosticos');
+  cambios.limpiar();
+  const ws = tmpDir('sagi-cierre-manifiesto-');
+  const marca = path.join(ws, 'corrio.txt');
+  fs.writeFileSync(path.join(ws, 'package.json'), JSON.stringify({ name: 'x', scripts: { test: 'node t.js' } }));
+  fs.writeFileSync(path.join(ws, 't.js'), 'require("fs").writeFileSync("corrio.txt","si");process.stdout.write("ok\\n");');
+  proyecto._resetForTests();
+  const plan = diagnosticos.planCierre(proyecto.perfil(ws));
+  eq(plan.comando, 'npm test', 'el comando del proyecto es npm test');
+
+  /* El fallo: el modelo reescribe el CUERPO de scripts.test (o añade un pretest) en el
+     mismo turno; el TEXTO del comando no cambia, así que comparar cadenas no lo ve y la
+     app lanzaba `npm test` —el script del modelo— sin tarjeta de ejecución. */
+  const eventos = [];
+  const a = new Agent({ emit: (e) => eventos.push(e) });
+  a._writes = 1;
+  a._comandoCierrePrevio = plan.comando; // ya era la comprobación del proyecto al empezar el turno
+  cambios.recordar(ws, path.join(ws, 'package.json'), undefined, a.ownerCambios()); // lo escribió el modelo
+  eq(
+    await a._chequeoCierre({ settings: { settings: { workspace: ws } }, messages: [], res: {} }),
+    false,
+    'la puerta cierra: no hay nada que devolver al modelo',
+  );
+  ok(!fs.existsSync(marca), 'el script que escribió el modelo NO se ejecutó');
+  const bloqueado = eventos.find((e) => e.type === 'tool_result' && e.ok === false);
+  ok(
+    bloqueado && /lo ha escrito este turno/.test(String(bloqueado.result)),
+    'y se explica que el manifiesto lo escribió este turno: ' + (bloqueado && String(bloqueado.result).slice(0, 140)),
+  );
+  ok(!eventos.some((e) => e.type === 'status' && /ejecutando/.test(e.text || '')), 'no se anunció ninguna ejecución');
+
+  // Control: si el manifiesto NO se tocó, la comprobación se lanza como siempre
+  cambios.limpiar();
+  const b = new Agent({ emit: () => {} });
+  b._writes = 1;
+  b._comandoCierrePrevio = plan.comando;
+  eq(await b._chequeoCierre({ settings: { settings: { workspace: ws } }, messages: [], res: {} }), false, 'en verde cierra');
+  ok(fs.existsSync(marca), 'control: sin tocar el manifiesto, el comando sí se ejecuta');
+  eq(b._verified, true, 'y cuenta como verificado de verdad');
+  cambios.limpiar();
+});
+
+test('chat: un error del modelo no deja el checkpoint en «running»', async () => {
+  const { Agent } = require('../agent/agent');
+  const checkpoints = require('../agent/checkpoints');
+  const eventos = [];
+  const a = new Agent({ emit: (e) => eventos.push(e) });
+  const run = checkpoints.newRun({ goal: 'crea un informe de gastos', mode: 'act' });
+  checkpoints.save(run);
+  a.currentRun = run;
+  a._run = async () => {
+    throw new Error('HTTP 500 del proveedor');
+  };
+  await a.chat('crea un informe de gastos', { settings: { mode: 'act', workspace: tmpDir('sagi-chat-error-') } });
+
+  const guardado = checkpoints.read(run.runId);
+  eq(guardado.status, 'interrupted', 'el run no se queda «running» (Tareas lo pintaría «en ejecución» con nada corriendo)');
+  eq(a.currentRun, null, 'y el chat no lo reutiliza como tarea abierta con el goal del mensaje anterior');
+  ok(
+    eventos.some((e) => e.type === 'error'),
+    'el error se sigue contando al usuario',
+  );
+  const inter = eventos.find((e) => e.type === 'task_interrupted');
+  ok(inter && inter.runId === run.runId && inter.goal === run.goal, 'y la interfaz ve la tarea interrumpida (recuperable)');
+  eq(a.busy, false, 'el agente queda libre para el siguiente mensaje');
+});
+
+test('equipo: Detener interrumpe un team_wait en vuelo en vez de esperar el tope', async () => {
+  const { Agent } = require('../agent/agent');
+  const a = new Agent({ emit: () => {} });
+  const settings = { settings: { mode: 'equipo', workspace: tmpDir('sagi-eq-wait-') } };
+  a._correrMiembro = () => new Promise(() => {}); // un compañero que nunca termina
+  const ac = new AbortController();
+  const eqE = a._equipoActual(settings, ac.signal);
+  const r = eqE.levantar({ key: 'research', name: 'Research Agent', emoji: '🔍' }, { tarea: 'investiga sin parar' });
+  ok(r.ok, 'el compañero se levanta: ' + (r.error || ''));
+
+  const espera = a._herramientaEquipo('team_wait', { ids: [r.id], timeoutMs: 300000 }, { settings, signal: ac.signal });
+  await new Promise((res) => setTimeout(res, 30)); // el líder está esperando de verdad
+  ac.abort(); // Detener
+  const out = await Promise.race([espera, new Promise((res) => setTimeout(() => res('__SIGUE_ESPERANDO__'), 1500))]);
+  ok(out !== '__SIGUE_ESPERANDO__', 'Detener suelta la espera (sin el arreglo seguía hasta el tope, aquí 300 s)');
+  ok(!/^Error/.test(String(out)), 'no se convierte en error: el usuario paró, no el compañero');
+  ok(/interrumpida/i.test(String(out)), 'y se dice que la espera se cortó al Detener: ' + String(out).slice(0, 140));
+  ok(/- m1 .*Research Agent: trabajando/.test(String(out)), 'sin perder el estado de los compañeros: ' + String(out).slice(0, 140));
+});
+
+test('equipo: el gasto de un compañero se cuenta UNA vez por vuelta', async () => {
+  const { Agent } = require('../agent/agent');
+  const a = new Agent({ emit: () => {} });
+  const sub = new Agent({ emit: () => {} });
+  /* Cada vuelta cuesta 100 tokens y 0,01 $; `_runWithSystem` pone a cero los contadores
+     del turno (beginRun) pero NO el uso acumulado del compañero (que es de por vida). */
+  sub._runWithSystem = async () => {
+    sub.guardrails.beginRun();
+    sub.guardrails.tokensUsed += 100;
+    sub.guardrails.tokensIn += 100;
+    sub.guardrails.costUsd += 0.01;
+    sub._uso.tokens += 100;
+    sub._uso.costUsd += 0.01;
+  };
+  const miembro = { id: 'm1', spec: subagents.SUBAGENTS.review, agent: sub, tarea: 'revisa', expect: '', cortado: false, arbol: null };
+  const settings = { settings: { workspace: tmpDir('sagi-eq-uso-') } };
+  const signal = noSignal();
+  await a._correrMiembro(miembro, 'primera vuelta', { settings, signal });
+  await a._correrMiembro(miembro, 'segunda vuelta', { settings, signal });
+
+  eq(a._uso.tokens, 200, 'el uso de la conversación suma lo gastado (100+100), no el acumulado de la vuelta 1 dos veces (300)');
+  ok(Math.abs(a._uso.costUsd - 0.02) < 1e-9, 'y el coste igual: 0,02 $ (no 0,03 $) → ' + a._uso.costUsd);
+  eq(a.guardrails.tokensUsed, 200, 'el tope del turno ve las dos vueltas, no solo la última');
+  ok(Math.abs(a.guardrails.costUsd - 0.02) < 1e-9, 'y su coste también → ' + a.guardrails.costUsd);
+});
+
+test('agent: Detener no marca el modelo como «con errores» en Model Health', async () => {
+  const { Agent } = require('../agent/agent');
+  const models = require('../agent/models');
+  const runlog = require('../agent/runlog');
+  const MODELO = 'audit-abort-model';
+  const a = new Agent({ emit: () => {} });
+  const cadena = [{ model: MODELO, role: 'primary', providerId: 'p', baseUrl: 'https://api.openai.com/v1', apiKey: 'k' }];
+
+  // 1) abortado a MITAD del stream: readSSE devuelve aborted (no lanza)
+  a._streamOnce = async () => ({ aborted: true, usage: { prompt_tokens: 10, completion_tokens: 5 } });
+  const r = await a._streamWithFallback(cadena, [], new AbortController().signal);
+  eq(r.aborted, true, 'el turno se da por abortado');
+  const h1 = models.summary().find((m) => m.model === MODELO);
+  eq(h1 && h1.calls ? h1.calls : 0, 0, 'parar a mano no registra una llamada fallida');
+  eq(h1 && h1.errors ? h1.errors : 0, 0, 'ni suma un error en la salud del modelo');
+
+  // 2) el abort llega antes de las cabeceras: el fetch lanza (AbortError)
+  a._streamOnce = async () => {
+    throw new Error('The operation was aborted.');
+  };
+  const ac2 = new AbortController();
+  ac2.abort();
+  const fallbacksAntes = runlog.readRecent(300).filter((e) => e.event === 'model_fallback' && e.model === MODELO).length;
+  let lanzo = null;
+  try {
+    await a._streamWithFallback(cadena, [], ac2.signal);
+  } catch (e) {
+    lanzo = e;
+  }
+  ok(lanzo, 'el aborto sigue propagándose (la cadena no se pone a probar otros modelos)');
+  const h2 = models.summary().find((m) => m.model === MODELO);
+  eq(h2 && h2.errors ? h2.errors : 0, 0, 'un aborto no es un error del proveedor');
+  eq(h2 && h2.fallbacks ? h2.fallbacks : 0, 0, 'ni cuenta un «relevo» que no existió');
+  const fallbacksDespues = runlog.readRecent(300).filter((e) => e.event === 'model_fallback' && e.model === MODELO).length;
+  eq(fallbacksDespues, fallbacksAntes, 'y el runlog no apunta un cambio de modelo que no hubo');
+});
+
+test('delegación: si el subagente muere por excepción, su fila se cierra (delegate_done)', async () => {
+  const { Agent } = require('../agent/agent');
+  const eventos = [];
+  const a = new Agent({ emit: (e) => eventos.push(e) });
+  const original = Agent.prototype._runWithSystem;
+  Agent.prototype._runWithSystem = async () => {
+    throw new Error('sin proveedor/modelo activo');
+  };
+  try {
+    const out = await a._delegate(
+      subagents.SUBAGENTS.research,
+      { task: 'investiga X' },
+      {
+        settings: { settings: { workspace: tmpDir('sagi-del-falla-'), modelRouting: false } },
+      },
+    );
+    ok(/delegación fallida/.test(out), 'el líder se entera del fallo: ' + out.slice(0, 80));
+    const cierres = eventos.filter((e) => e.type === 'delegate_done');
+    eq(cierres.length, 1, 'la fila del subagente se cierra aunque su vuelta muera (si no, queda «en marcha» para siempre)');
+    eq(cierres[0].subagent, 'research', 'con el agente que abrió la fila');
+    eq(cierres[0].status, 'FAILED', 'y su estado real');
+    ok(/sin proveedor/.test(String(cierres[0].result || '')), 'con el motivo del fallo');
+    ok(
+      a._delegations.some((d) => d.agent === 'research' && d.status === 'FAILED'),
+      'y el tablero del run lo registra (el líder no repite la misma delegación fallida sin verla)',
+    );
+  } finally {
+    Agent.prototype._runWithSystem = original;
+  }
+});
+
+test('equipo: un corte por presupuesto deja traza de por qué ese trabajo no está en el proyecto', async () => {
+  if (!GIT_OK) return; // sin git no hay árbol que descartar
+  const { Agent } = require('../agent/agent');
+  const runlog = require('../agent/runlog');
+  const ws = repoDePrueba();
+  const a = new Agent({ emit: () => {} });
+  const sub = new Agent({ emit: () => {} });
+  sub._runWithSystem = async () => {}; // su vuelta muere sin dejar cambios
+  const miembro = {
+    id: 'm1',
+    spec: subagents.SUBAGENTS.coding,
+    agent: sub,
+    tarea: 'escribe algo',
+    expect: '',
+    cortado: true, // el equipo se paró por presupuesto
+    arbol: null,
+  };
+  const eventos = [];
+  const original = runlog.log;
+  runlog.log = (e) => eventos.push(e); // determinista: no depende del volcado del fichero
+  try {
+    await a._correrMiembro(miembro, 'escribe algo', { settings: { settings: { workspace: ws } }, signal: noSignal() });
+  } finally {
+    runlog.log = original;
+  }
+  const traza = eventos.find((e) => e.event === 'arbol_fusionar');
+  ok(traza, 'el descarte por presupuesto deja traza: sin ella no se puede auditar por qué no hay cambios');
+  eq(traza.ok, false, 'diciendo que NO se fusionó');
+  eq(traza.motivo, 'cortado', 'y por qué (el equipo se paró por presupuesto, no el usuario)');
+  eq(arbolesMod.vivos().length, 0, 'y el árbol no se queda en pie');
+});
+
+test('remember: sin «guardar sin preguntar» propone en la bandeja y no escribe el hecho', async () => {
+  const memory = require('../agent/memory');
+  const { MEM_DIR } = require('./comun');
+  const dir = tmpDir('sagi-remember-');
+  memory.__test._resetForTests(path.join(dir, 'memory.json'));
+  memory.__test._resetTray(path.join(dir, 'memory-tray.json'));
+  try {
+    const ws = tmpDir('sagi-remember-ws-');
+    const apagado = { workspace: ws, settings: { settings: { memoryAutoSave: false } } };
+    const r1 = await executeTool('remember', { text: 'Me llamo Darío' }, apagado);
+    ok(/aproba|Recién aprendido|pendiente/i.test(String(r1)), 'se le dice al modelo que queda pendiente de aprobación: ' + r1);
+    eq(memory.list().length, 0, 'apagado, el recuerdo NO entra en los hechos (el ajuste existe justo para eso)');
+    eq(memory.trayList().length, 1, 'y sí queda la propuesta en «Recién aprendido»');
+    // el modelo no debe repetirla: la misma propuesta no se duplica y se le dice
+    const r2 = await executeTool('remember', { text: 'Me llamo Darío' }, apagado);
+    eq(memory.trayList().length, 1, 'la misma propuesta no se encola dos veces');
+    ok(/ya/i.test(String(r2)), 'y se le dice al modelo que no la repita: ' + r2);
+
+    // encendido: guarda directo, como siempre
+    const r3 = await executeTool(
+      'remember',
+      { text: 'Prefiero el trato directo' },
+      {
+        workspace: ws,
+        settings: { settings: { memoryAutoSave: true } },
+      },
+    );
+    ok(/guardado/i.test(String(r3)), 'encendido, se guarda: ' + r3);
+    eq(memory.list().length, 1, 'con el ajuste encendido el hecho sí está en la memoria');
+    eq(memory.trayList().length, 1, 'y la bandeja no se toca');
+  } finally {
+    memory.__test._resetForTests(path.join(MEM_DIR, 'memory.json'));
+    memory.__test._resetTray(path.join(MEM_DIR, 'memory-tray.json'));
+  }
 });

@@ -46,6 +46,16 @@ const POR_HERRAMIENTA = {
   screenshot: ['escritorio'],
   clipboard: ['escritorio'],
   delegate: [],
+  /* v4.4 — MODO EQUIPO: las cinco herramientas del equipo son orquestación PURA (crean un
+     compañero, le dejan un mensaje, apuntan en el tablero o esperan su estado). No tocan
+     el navegador, el disco, la terminal ni el escritorio, así que no pueden encolarse por
+     un recurso: un `team_wait` de hasta 30 s ocupaba una de las cuatro plazas de 'general'
+     mientras los compañeros —que sí las necesitan para web_fetch o git— la esperaban. */
+  team_spawn: [],
+  team_send: [],
+  team_wait: [],
+  team_board: [],
+  team_done: [],
   read_file: [],
   view_image: [],
   list_dir: [],

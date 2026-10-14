@@ -8,6 +8,7 @@ const {
   test,
   eq,
   ok,
+  wait,
   sseResponse,
   fakeFetch,
   evData,
@@ -30,8 +31,8 @@ function iconExists(name) {
   return ICON_NAMES.has(name);
 }
 
-test('chat: los tres modos tienen identidad propia y real', () => {
-  eq(ChatKit.MODE_ORDER.join(','), 'act,plan,think');
+test('chat: los cuatro modos tienen identidad propia y real', () => {
+  eq(ChatKit.MODE_ORDER.join(','), 'act,plan,think,equipo');
   for (const k of ChatKit.MODE_ORDER) {
     const m = ChatKit.MODES[k];
     ok(m.label && m.name && m.tagline, k + ' debe explicarse en la UI');
@@ -42,13 +43,14 @@ test('chat: los tres modos tienen identidad propia y real', () => {
     ok(ChatKit.MODE_ORDER.indexOf(m.key) >= 0, k + ' debe pertenecer al ciclo');
   }
   const colors = new Set(ChatKit.MODE_ORDER.map((k) => ChatKit.MODES[k].color));
-  eq(colors.size, 3, 'los tres modos no pueden compartir color');
+  eq(colors.size, 4, 'los cuatro modos no pueden compartir color');
 });
 
-test('chat: nextMode cicla ACT → PLAN → THINK → ACT', () => {
+test('chat: nextMode cicla ACT → PLAN → THINK → EQUIPO → ACT', () => {
   eq(ChatKit.nextMode('act'), 'plan');
   eq(ChatKit.nextMode('plan'), 'think');
-  eq(ChatKit.nextMode('think'), 'act');
+  eq(ChatKit.nextMode('think'), 'equipo');
+  eq(ChatKit.nextMode('equipo'), 'act');
   eq(ChatKit.nextMode('inexistente'), 'plan', 'un modo inválido se trata como ACT');
   eq(ChatKit.mode('PLAN').key, 'plan', 'acepta el nombre en mayúsculas');
 });
@@ -163,7 +165,7 @@ test('renderer: los scripts conviven en el mismo ámbito (sin redeclaraciones)',
   // sin nada, con el HTML estático aún en pantalla. Se compila el conjunto
   // como un solo script (sin ejecutarlo) para detectarlo antes de arrancar.
   const vm = require('vm');
-  const files = ['icons.js', 'chatkit.js', 'orb.js', ...RENDERER_JS];
+  const files = ['icons.js', 'chatkit.js', ...RENDERER_JS];
   const code = files.map((f) => fs.readFileSync(path.join(__dirname, '..', 'renderer', f), 'utf8')).join('\n;\n');
   new vm.Script(code, { filename: 'renderer-bundle-check.js' });
 });
@@ -206,16 +208,22 @@ test('chat: la vista tiene estado en vivo, estado vacío y salto al final', () =
     ok(html.includes('id="' + id + '"'), 'falta el contenedor ' + id);
   }
   ok(/<section class="view on" id="view-chat" data-mode="act"/.test(html), 'el chat necesita data-mode y debe ser la vista inicial');
-  // chatkit.js debe cargarse ANTES del renderer partido: define el catálogo que usa
-  const kit = html.indexOf('chatkit.js');
-  const app2 = html.indexOf('10-chat.js');
-  ok(kit > 0 && app2 > kit, 'chatkit.js debe cargarse antes que el renderer');
+  /* chatkit.js tiene que cargarse ANTES del renderer partido: define el catálogo que
+     usa. Se mira el ORDEN DE LAS ETIQUETAS `<script>`, no la primera aparición del
+     nombre en el fichero: un comentario que mencione el fichero (los hay, y ayudan)
+     hacía fallar esta comprobación sin que nada estuviera mal. */
+  const scripts = [...html.matchAll(/<script\s+src="([^"]+)"/g)].map((m) => m[1]);
+  const kit = scripts.indexOf('chatkit.js');
+  const app2 = scripts.indexOf('10-chat.js');
+  ok(kit >= 0 && app2 > kit, 'chatkit.js debe cargarse antes que el renderer');
 });
 
 test('chat: el CSS da color propio a cada modo y estiliza las tarjetas', () => {
   const css = fs.readFileSync(path.join(__dirname, '..', 'renderer', 'styles.css'), 'utf8');
+  /* El selector va sin comillas fijas: Prettier normaliza a comilla simple y la
+     comprobación es del contrato (cada modo tiene su tema), no del formato. */
   for (const k of ChatKit.MODE_ORDER) {
-    ok(css.includes(`#view-chat[data-mode="${k}"]`), 'el modo ' + k + ' necesita su tema en el chat');
+    ok(new RegExp('#view-chat\\[data-mode=["\']' + k + '["\']').test(css), 'el modo ' + k + ' necesita su tema en el chat');
   }
   for (const cls of ['tcard', 'tgroup', 'plancard', 'codeblock', 'msg-actions', 'msg-mode', 'chat-empty', 'jumpdown', 'stream']) {
     ok(css.includes('.' + cls), 'falta el estilo .' + cls);
@@ -496,7 +504,7 @@ test('sidebar: grupos, contadores, pie y atajos coherentes con las vistas', () =
   const groups = [...html.matchAll(/class="navgroup"\s+data-label="([^"]+)"/g)].map((m) => m[1]);
   ok(groups.length >= 4, 'grupos del sidebar: ' + groups.join(' / '));
   const views = [...html.matchAll(/class="navitem[^"]*"\s+data-view="([^"]+)"/g)].map((m) => m[1]);
-  eq(views.length, 10, 'ítems de navegación (sin Inicio: la app abre en Chat)');
+  eq(views.length, 11, 'ítems de navegación (sin Inicio: la app abre en Chat)');
   eq(new Set(views).size, views.length, 'sin vistas duplicadas en el sidebar');
   // MCP y Herramientas son hermanas: la sección va en «Conocimiento», justo antes que Tools
   const conocimiento = html.slice(html.indexOf('data-label="Conocimiento"'), html.indexOf('data-label="Sistema"'));
@@ -534,7 +542,9 @@ test('sidebar: grupos, contadores, pie y atajos coherentes con las vistas', () =
   // estrechaba aunque los iconos sí se centraban.
   const css = fs.readFileSync(path.join(__dirname, '..', 'renderer', 'styles.css'), 'utf8');
   ok(
-    /\.app\.compact:not\(\[data-view="chat"\]\):not\(\[data-view="agents"\]\)\s*\{\s*grid-template-columns:\s*78px 1fr/.test(css),
+    /\.app\.compact:not\(\[data-view=["']chat["']\]\):not\(\[data-view=["']agents["']\]\)\s*\{\s*grid-template-columns:\s*78px 1fr/.test(
+      css,
+    ),
     'el compacto debe mandar sobre el recorte del rail en las vistas sin rail',
   );
 });
@@ -591,8 +601,9 @@ test('arranque: la segunda instancia no muere en silencio y reutiliza la ventana
     'debe atender second-instance mostrando la ventana existente',
   );
   ok(/ya está abierta/.test(MAIN_SRC), 'debe avisar por consola de que ya había una instancia abierta');
-  // showWindow tiene que poder recrear la ventana si se cerró con la X
-  ok(/function showWindow\(\)[\s\S]{0,200}?createChatWindow\(\)/.test(MAIN_SRC), 'showWindow debe recrear la ventana si ya no existe');
+  // showWindow vive en main/ventana.js (la fábrica de la ventana), no en main.js
+  const ventana = fs.readFileSync(path.join(__dirname, '..', 'main', 'ventana.js'), 'utf8');
+  ok(/function showWindow\(\)[\s\S]{0,200}?createChatWindow\(\)/.test(ventana), 'showWindow debe recrear la ventana si ya no existe');
 });
 
 test('arranque: un fallo del proceso principal no cierra la app', () => {
@@ -618,50 +629,75 @@ test('ui-check espera a que la instancia de prueba muera antes de salir', () => 
 test('apariencia: el CSS tematiza por triplets RGB y el glow escala con intensidad', () => {
   const css = fs.readFileSync(path.join(__dirname, '..', 'renderer', 'styles.css'), 'utf8');
   for (const v of ['--acc-rgb', '--acc2-rgb', '--acc3-rgb', '--glow-rgb', '--glow-str']) ok(css.includes(v + ':'), 'debe declarar ' + v);
-  /* El aura tiene tres tonos (--glow-a/b/c-rgb) y todos escalan con la intensidad del
-     ajuste. Se comprueba ese contrato y no una regla concreta: antes esto afirmaba el
-     anillo del marco, que ya no lleva luz propia (la luz es del aura, y sólo cuando el
-     agente hace algo). */
-  ok(/rgba\(var\(--glow-[abc]-rgb\), calc\([^)]*var\(--glow-str\)/.test(css), 'las capas del aura deben multiplicar por --glow-str');
+  /* El espectro tiene tres tonos (--glow-a/b/c-rgb) y todos escalan con la intensidad del
+     ajuste. Se comprueba ese contrato y no una regla concreta: el recorrido del filo y el
+     pulso son quienes lo consumen, y si dejara de multiplicarse, la preferencia del
+     usuario no se notaría en la luz. */
+  ok(
+    /rgba\(var\(--glow-[abc]-rgb\), calc\([^)]*var\(--glow-str[^)]*\)/.test(css),
+    'las capas del espectro deben multiplicar por --glow-str',
+  );
   ok(/--ambient/.test(css), 'la atmósfera del fondo también debe seguir al estado');
   ok(
     (css.match(/rgba\(var\(--acc/g) || []).length >= 40,
     'los tintes decorativos deben usar los triplets (' + (css.match(/rgba\(var\(--acc/g) || []).length + ')',
   );
-  // los modos conservan su color aunque cambie el acento
-  ok(/#view-chat\[data-mode="plan"\]\s*\{[^}]*167,139,250/.test(css), 'PLAN mantiene su violeta');
-  ok(/#view-chat\[data-mode="think"\]\s*\{[^}]*125,180,255/.test(css), 'THINK mantiene su azul');
-  ok(/#view-chat, #view-chat\[data-mode="act"\]/.test(css), 'ACT mantiene su verde');
-  /* Glow: el contrato es un trabajo por capas —cada estado pone SU nivel de luz
-     (energía + opacidad del filo), el aura vive con su propio movimiento (giro
-     del color + respiración del alcance) y el pulso da el acuse— y un camino de
-     movimiento reducido. Se comprueba eso y no un selector concreto, que es
-     detalle de implementación. */
-  for (const estado of ['think', 'work', 'listen', 'speak']) {
-    ok(new RegExp('\\.shell\\.glow-' + estado + '\\s*\\{[^}]*--energy').test(css), 'el estado ' + estado + ' debe tener su energía');
+  // los modos conservan su color aunque cambie el acento (el formateo del triplet
+  // no cuenta: la comprobación es del valor, no de los espacios de Prettier)
+  ok(/#view-chat\[data-mode=["']plan["']\]\s*\{[^}]*167,\s*139,\s*250/.test(css), 'PLAN mantiene su violeta');
+  ok(/#view-chat\[data-mode=["']think["']\]\s*\{[^}]*125,\s*180,\s*255/.test(css), 'THINK mantiene su azul');
+  ok(/#view-chat,\s*#view-chat\[data-mode=["']act["']\]/.test(css), 'ACT mantiene su verde');
+  /* Glow «borde vivo»: la luz es el FILO de las superficies que trabajan, no una banda
+     alrededor de la ventana. Cada estado escribe SUS niveles y cada superficie lee el
+     suyo; el dibujo es común y multiplica por `--glow-str`, así que la preferencia del
+     usuario se nota en el filo y no sólo en el slider. Se comprueba el contrato, no un
+     selector concreto. */
+  for (const estado of ['think', 'work', 'pulse']) {
     ok(
-      new RegExp('\\.shell\\.glow-' + estado + '\\s+\\.glow\\s*\\{[^}]*opacity:').test(css),
-      'el estado ' + estado + ' debe tener su nivel de luz',
+      new RegExp('\\.shell\\.glow-' + estado + '\\s*\\{[^}]*--live-window').test(css),
+      'el estado ' + estado + ' debe declarar sus niveles de luz',
     );
   }
-  for (const k of ['frame-bloom', 'giro', 'reachLife']) ok(css.includes('@keyframes ' + k), 'falta el keyframe ' + k);
-  /* Aura iridiscente: tres capas con tonos vecinos del elegido. No hay recorrido: el glow no
-     viaja, respira. */
-  for (const token of ['--glow-a-rgb', '--glow-b-rgb', '--glow-c-rgb']) ok(css.includes(token + ':'), 'falta ' + token);
-  ok(!/offset-path/.test(css), 'el glow no debe recorrer el marco');
+  for (const nivel of ['--live-window', '--live-side', '--live-com', '--live-rail'])
+    ok(css.includes(nivel + ':'), 'falta el nivel ' + nivel + ' (una superficie sin el suyo no se enciende)');
   ok(
-    /@media \(prefers-reduced-motion: reduce\)[\s\S]{0,700}?animation: none !important/.test(css),
-    'el movimiento reducido debe parar el latido y el viaje',
+    /opacity:\s*calc\(var\(--rim[^)]*\)\s*\*\s*var\(--glow-str/.test(css),
+    'el filo es el glow: su nivel tiene que multiplicarse por la intensidad del ajuste',
   );
-  ok(/input\[type="range"\]\.glowslider/.test(css), 'debe existir el estilo del slider de intensidad');
+  ok(
+    /\.filo,[\s\S]{0,80}?\.shell \.rcard\s*\{[^}]*overflow:\s*hidden/.test(css),
+    'la superficie del recorrido tiene que recortarlo (si no, la barra asoma fuera al aparecer)',
+  );
+  /* El aura vieja NO puede volver: era una banda de 70px con tres halos girando, y cada
+     frame volvía a rasterizar el degradado del filo. Medido en la 4.2: el movimiento
+     permanente era el único coste constante de la página. */
+  ok(!/glowFlow|halo-[abc]/.test(css), 'el aura de halos girando no vuelve');
+  ok(!/@keyframes (giro|reachLife|frame-bloom)/.test(css), 'ni sus keyframes');
+  ok(!/@property --(giro|reach)\b/.test(css), 'ni las propiedades registradas que la movían');
+  ok(!/offset-path/.test(css), 'el glow no recorre el marco');
+  ok(
+    /@media \(prefers-reduced-motion: reduce\)[\s\S]{0,900}?\.filo::after[\s\S]{0,200}?animation:\s*none/.test(css),
+    'el movimiento reducido debe quitar el recorrido del filo',
+  );
+  /* Sin foco no hay luz: la ventana de fondo no se ilumina. El pulso sí (su atajo es
+     global: existe justo para cuando NO estás mirando). */
+  ok(
+    /body\.nofocus \.shell\s*\{[^}]*--live-window:\s*0/.test(css) &&
+      /body\.nofocus \.shell\.glow-pulse\s*\{[^}]*--live-window:\s*1/.test(css),
+    'sin foco el filo se apaga, salvo el pulso',
+  );
+  ok(/input\[type=["']range["']\]\.glowslider/.test(css), 'debe existir el estilo del slider de intensidad');
 });
 
-test('apariencia: el alias glow de la muestra de color no hereda el lienzo del halo', () => {
+test('apariencia: la muestra del color de glow es una muestra, no una capa de la ventana', () => {
   const css = fs.readFileSync(path.join(__dirname, '..', 'renderer', 'styles.css'), 'utf8');
   const muestra = css.match(/\.colordot\.glow\s*\{([^}]*)\}/);
   ok(muestra, 'debe existir una regla específica para la muestra del glow');
-  ok(/position:\s*relative/.test(muestra[1]) && /opacity:\s*1/.test(muestra[1]), 'la muestra debe ser visible y ocupar su propio espacio');
-  ok(/inset:\s*auto/.test(muestra[1]), 'la muestra no debe cubrir la ventana');
+  ok(/rgb\(var\(--glow-rgb\)\)/.test(muestra[1]), 'la muestra enseña el color de glow elegido');
+  /* Un `inset` en la muestra la estiraba hasta cubrir la ventana con el color del glow
+     (pasó): la muestra ocupa lo que ocupa su punto de color, nada más. */
+  ok(!/position:\s*(fixed|absolute)/.test(muestra[1]), 'la muestra no puede salirse de su sitio');
+  ok(!/inset:\s*0/.test(muestra[1]), 'ni cubrir la ventana');
 });
 
 test('apariencia: Ajustes expone color de UI, color de glow e intensidad', () => {
@@ -682,60 +718,45 @@ test('apariencia: Ajustes expone color de UI, color de glow e intensidad', () =>
   ok(/const PALETTES = \{[\s\S]{0,1400}\};/.test(app), 'debe existir la tabla PALETTES');
   ok(/function applyTheme\(\)/.test(app), 'debe existir applyTheme');
   ok(/\$\('#glowStrength'\)\.oninput/.test(app) && /\$\('#uiColor'\)\.onchange/.test(app), 'los controles deben estar cableados');
-  // tema Aurora: interfaz sobria + espectro en el borde
+  // tema Aurora: interfaz sobria + espectro en el filo de las superficies
   ok(/aurora:\s*\{ label: 'Aurora'/.test(app), 'PALETTES debe traer aurora');
   ok(/AURORA_GLOW/.test(app), 'el espectro del glow aurora debe estar definido');
   ok(html.includes('value="aurora"'), 'los selects deben ofrecer aurora');
-  ok(
-    /glow-aurora/.test(app) &&
-      /\.shell\.glow-aurora \.glow::before\s*\{/.test(fs.readFileSync(path.join(__dirname, '..', 'renderer', 'styles.css'), 'utf8')),
-    'aurora debe encender el espectro del borde',
-  );
-  // receta del experimento de jacobamobin (sin shaders):6 colores fijos + filo nítido + copias desenfocadas, todos a la
-  // vez como halos que ondulan (el filo lleva el espectro fijo; la luz del
-  // aura rueda por debajo con giro, sin recorrer el marco)
-  const css = fs.readFileSync(path.join(__dirname, '..', 'renderer', 'styles.css'), 'utf8');
-  for (const hex of ['f5b9ea', 'ffba71', 'ff6778', 'c686ff', '8d9fff', 'bc82f3'])
-    ok(css.toLowerCase().includes(hex), 'el espectro aurora debe llevar el color ' + hex);
-  ok(/@keyframes giro/.test(css) && /@keyframes reachLife/.test(css), 'la rotación y la respiración del aura deben existir');
-  // equilibrio Siri: todos presentes a la vez, el anillo interior reparte los
-  // 3 tonos sin que uno tiña todo el marco y el filo nítido lleva el espectro
-  // fijo (los 6 hexes de arriba); por debajo, la luz del aura rueda con giro
-  ok(
-    /\.shell\.glow-aurora \.glowRing\s*\{/.test(css) && /\.shell\.glow-aurora \.glow::before\s*\{[^}]*f5b9ea/.test(css),
-    'el anillo y el filo aurora reparten el espectro',
-  );
-  // RGB continuo y suave: los 3 tonos los fija AURORA_GLOW (azul, rosa,
-  // naranja — a la vez, como Siri) y applyTheme los vuelca en
-  // --glow-a/b/c-rgb, así que los halos genéricos del aura los pintan y el
-  // blur los mezcla
+  /* El espectro vive en los tokens `--glow-a/b/c-rgb`, que escriben `applyTheme` y que
+     consume el RECORRIDO del filo (y el pulso). Ya no hay capa `.glow` que los pinte:
+     si el espectro dejara de escribirse, el recorrido se quedaría de un solo tono. */
   ok(
     /AURORA_GLOW = \{ a: \[141, 159, 255\], b: \[255, 103, 120\], c: \[255, 186, 113\] \}/.test(app),
     'AURORA_GLOW reparte azul, rosa y naranja',
   );
   ok(/auroraGlow \? AURORA_GLOW\.a/.test(app), 'applyTheme vuelca el espectro aurora en el glow');
+  const cssAurora = fs.readFileSync(path.join(__dirname, '..', 'renderer', 'styles.css'), 'utf8');
+  ok(
+    /\.shell\.glow-pulse[\s\S]{0,400}?--glow-a-rgb/.test(cssAurora),
+    'el recorrido del pulso tiene que llevar el espectro (los tres tonos a la vez)',
+  );
+  ok(!/\.shell\.glow-aurora/.test(cssAurora), 'la capa del aura aurora ya no existe: el filo es la luz');
   // tricolor real: los 3 tonos nacen a ±42º del elegido (no vecinos), para que
   // se distingan a la vez en vez de fundirse en un solo color
   ok(/_rgb\(gh \+ 42/.test(app) && /_rgb\(gh - 42/.test(app), 'los 3 tonos del glow deben nacer separados ±42º');
-  ok(/saturate\(1\.8\)/.test(css), 'el flow debe ir bien saturado');
   // reequilibrio: acentos calmados y glow suave por defecto (que acaricie, no que invada)
   ok(/Number\(s\.glowStrength\) \|\| 0\.7/.test(app), 'el glow por defecto debe ser suave (0.7)');
+  /* Y aplicar dos veces el MISMO estado no puede rehacer nada: el proceso principal emite
+     `work` en CADA herramienta del turno, así que sin esta guarda el recorrido volvía a
+     empezar y el filo se hundía un momento en cada paso (el parpadeo al aparecer). */
+  ok(/if \(pedido === actual && pedido !== 'pulse'\) return;/.test(app), 'el mismo estado repetido no debe reiniciar el recorrido');
   // la rueda sobre el menú abierto (o sus sliders vecinos) no lo cierra: solo
   // se cierra si se desplaza algo FUERA de él (el menú es fixed y quedaría descolgado)
   ok(/cselAbierto\.menu\.contains\(e\.target\)/.test(app), 'el scroll dentro del menú no debe cerrarlo');
-  // el glow se enciende al hablar y se apaga al terminar la voz
-  ok(/window\.sagitari\.glow\('speak'\)/.test(app), 'speak() debe encender el glow');
-  ok(/onTtsDone/.test(app), 'el fin de la voz debe apagar el glow');
   ok(/onThemeChanged/.test(app), 'los cambios de tema deben aplicarse al vuelo');
 });
 
-test('apariencia: main guarda preferencias y emite tts:done + theme:changed', () => {
+test('apariencia: main guarda preferencias y emite theme:changed', () => {
   ok(/uiColor: 'aurora'/.test(MAIN_SRC) && /glowStrength: 1/.test(MAIN_SRC), 'defaults de apariencia en settings');
   ok(/glowColor: 'match'/.test(MAIN_SRC), 'el glow sigue al tema por defecto');
-  ok(/tts:done/.test(MAIN_ALL), 'el fin del TTS debe notificarse al renderer'); // Fase 4: vive en ipc-voz.js
   ok(/theme:changed/.test(MAIN_ALL), 'los cambios de apariencia deben broadcastearse');
   const preload = fs.readFileSync(path.join(__dirname, '..', 'main', 'preload.js'), 'utf8');
-  ok(/onTtsDone/.test(preload) && /onThemeChanged/.test(preload), 'preload debe exponer onTtsDone y onThemeChanged');
+  ok(/onThemeChanged/.test(preload), 'preload debe exponer onThemeChanged');
 });
 
 test('apariencia: el tinte de vidrio repinta sin encender el glow', () => {
@@ -801,7 +822,11 @@ test('adjuntos: main delega en el módulo de adjuntos y conserva los metadatos',
 test('adjuntos: el agente acepta varias imágenes y retry las conserva', () => {
   const agent = fs.readFileSync(path.join(__dirname, '..', 'agent', 'agent.js'), 'utf8');
   ok(/const imgUrls = \[imageDataUrl, \.\.\.extraImgs\]/.test(agent), 'debe combinar la imagen principal con los adjuntos');
-  ok(/const images = parts \? parts\.filter\(c => c\.type === 'image_url'\)\.map/.test(agent), 'retry debe recuperar TODAS las imágenes');
+  // el encadenado se lee igual con o sin los saltos de línea que mete Prettier
+  ok(
+    /const images = parts[\s\S]{0,40}?\.filter\([\s\S]{0,40}?\.type === 'image_url'[\s\S]{0,40}?\.map/.test(agent),
+    'retry debe recuperar TODAS las imágenes',
+  );
   ok(/attachments: images\.slice\(1\)/.test(agent), 'retry debe reenviar el resto de imágenes');
 });
 
@@ -815,7 +840,10 @@ test('adjuntos: UI completa — botón, drag&drop, pegar, chips y miniaturas', (
   ok(/addEventListener\('paste'/.test(app), 'debe aceptar imágenes pegadas');
   ok(/function paintAttachments/.test(app), 'las burbujas deben pintar los adjuntos');
   ok(/MAX_ATTACHMENTS = 8/.test(app), 'límite de adjuntos por mensaje');
-  ok(/pendingAttachments\.slice\(\)/.test(app) && /sendChat\(text, null, atts\)/.test(app), 'envío debe incluir los adjuntos');
+  ok(
+    /pendingAttachments\.slice\(\)/.test(app) && /sendChat\(hiloActual\(\), text, null, atts/.test(app),
+    'envío debe incluir los adjuntos',
+  );
   const icons = fs.readFileSync(path.join(__dirname, '..', 'renderer', 'icons.js'), 'utf8');
   ok(/ {2}clip: /.test(icons) && / {2}x: /.test(icons), 'faltan los iconos clip y x');
   // integración preload↔renderer (mismo guardián que el resto)
@@ -979,4 +1007,94 @@ test('icono incluido: BMP en los tamaños pequeños (o Windows cae al icono gen�
 test('png-ops se puede importar sin ejecutar el pipeline', () => {
   // el pipeline lee y escribe ficheros: al importarlo solo debe exponer el toolkit
   ok(typeof pngOps.decodePNG === 'function' && typeof pngOps.encodePNG === 'function', 'debe exponer el toolkit');
+});
+
+/* ---------- memoria: aprender de la conversación al cerrar el turno ---------- */
+
+/* El gancho de aprendizaje vive en el router de chat y no en el agente porque es el
+   ÚNICO sitio que ve a la vez la frase del usuario, el hilo del que salió y los ajustes
+   vivos. Estas pruebas montan el router con dobles (ipcMain, ventana y almacén) para
+   comprobar lo que de verdad importa: CUÁNDO se llama, con QUÉ y que nada de esto pueda
+   tumbar un turno que ya terminó bien. */
+function montarRouterChat({ settings, proponerDeTurno, onError }) {
+  const { registerChatIpc } = require('../main/ipc-chat');
+  const handlers = {};
+  const fakeIpc = {
+    handle: (name, fn) => {
+      handlers[name] = fn;
+    },
+  };
+  const cfgObj = { settings: { ...settings } };
+  /* El hilo ya tiene un mensaje y su título: con el hilo vacío el router estrena el
+     título con la primera frase (comportamiento correcto) y la prueba de la procedencia
+     mediría otra cosa. */
+  const conv = { id: 'c1', title: 'Vuelos a Tánger', messages: [{ role: 'user', content: 'hola' }], updatedAt: 0 };
+  registerChatIpc(fakeIpc, {
+    config: () => cfgObj,
+    runtimes: { agentFor: () => ({ chat: async () => {}, isBusy: () => false }) },
+    convsApi: { convById: () => conv, currentConv: () => conv, ensureConv: () => conv, saveConvs: () => {} },
+    getSkills: () => ({ getSkill: async () => null }),
+    getGlow: () => () => {},
+    getWin: () => null,
+    configDir: () => tmpDir('sagi-chatdir-'),
+    onError: onError || (() => {}),
+    dialog: {},
+    fsp: {},
+    fs,
+    path,
+    attach: { blocksFor: () => '' },
+    memory: () => ({ proponerDeTurno }),
+  });
+  return { handlers, cfgObj };
+}
+
+test('memoria: al cerrar el turno se le pasa la frase del usuario al almacén', async () => {
+  const llamadas = [];
+  const { handlers, cfgObj } = montarRouterChat({
+    settings: { memoryLearn: true, memoryAutoSave: false },
+    proponerDeTurno: (texto, opts) => {
+      llamadas.push({ texto, opts });
+      return [];
+    },
+  });
+  await handlers['chat:send'](null, { convId: 'c1', text: 'Me llamo Darío', attachments: [] });
+  await wait(5);
+  eq(llamadas.length, 1, 'un cierre de turno → una extracción');
+  eq(llamadas[0].texto, 'Me llamo Darío', 'se extrae lo que dijo el usuario, no el prompt montado');
+  eq(llamadas[0].opts.convId, 'c1', 'la propuesta sabe de qué conversación salió');
+  eq(llamadas[0].opts.convTitulo, 'Vuelos a Tánger', 'y de qué hilo, para poder auditarla');
+  eq(llamadas[0].opts.autoGuardar, false, 'por defecto se propone y espera aprobación');
+
+  cfgObj.settings.memoryAutoSave = true;
+  await handlers['chat:send'](null, { convId: 'c1', text: 'Prefiero el trato directo', attachments: [] });
+  await wait(5);
+  eq(llamadas.length, 2, 'el segundo turno también aprende');
+  eq(llamadas[1].opts.autoGuardar, true, 'con «guardar sin preguntar» el almacén acepta solo');
+});
+
+test('memoria: con el interruptor apagado no se propone nada', async () => {
+  const llamadas = [];
+  const { handlers } = montarRouterChat({
+    settings: { memoryLearn: false },
+    proponerDeTurno: (...a) => llamadas.push(a),
+  });
+  await handlers['chat:send'](null, { convId: 'c1', text: 'Me llamo Darío', attachments: [] });
+  await wait(5);
+  eq(llamadas.length, 0, 'apagado no es «menos»: es nada');
+});
+
+test('memoria: un fallo del almacén no tumba el turno de chat', async () => {
+  const errores = [];
+  const { handlers } = montarRouterChat({
+    settings: { memoryLearn: true },
+    proponerDeTurno: () => {
+      throw new Error('almacén roto');
+    },
+    onError: (k, err) => errores.push([k, err && err.message]),
+  });
+  const r = await handlers['chat:send'](null, { convId: 'c1', text: 'Me llamo Darío', attachments: [] });
+  await wait(5);
+  eq(r.ok, true, 'el turno sigue siendo un éxito');
+  eq(errores.length, 1, 'el fallo se registra donde se ven todos los demás');
+  eq(errores[0][0], 'memory:proponer', 'con su etiqueta propia, para poder buscarlo');
 });

@@ -22,6 +22,11 @@
 
 const SECRETO_MASK = '••••';
 
+/* v4.4: tope duro del presupuesto de un encargo de equipo (USD). El ajuste admite
+   0..este valor; se exporta para que la vista Equipo y meta:get compartan el número
+   en vez de copiarlo. */
+const EQUIPO_PRESUPUESTO_MAX_USD = 50;
+
 function enmascararApiKey(p) {
   if (!p || typeof p !== 'object') return p;
   if (!p.apiKey) return p;
@@ -111,7 +116,7 @@ function registerConfigIpc(ipcMain, ctx) {
     return persistConfig();
   });
 
-  ipcMain.handle('provider:models', async (e, { baseUrl, apiKey }) => {
+  ipcMain.handle('provider:models', async (e, { baseUrl, apiKey, format, providerId, model } = {}) => {
     const config = cfg();
     // Igual que en activar: el campo de clave se vacía al cambiar de preset, así que
     // si no llega clave se usa la del proveedor guardado con esa URL. Detectar
@@ -119,8 +124,17 @@ function registerConfigIpc(ipcMain, ctx) {
     // '••••' = la UI reenvía la máscara de config:get: también es «usar la guardada».
     const recibida = String(apiKey || '').trim();
     const key = !recibida || recibida === SECRETO_MASK ? claveGuardadaPara(config, { baseUrl }) : recibida;
+    /* El protocolo con el que se sondea no se puede deducir siempre de la URL: hay
+       bases Anthropic de terceros cuyo path no lo dice (y se detectarían con Bearer).
+       La interfaz manda `format`/`providerId`/`model` hasta aquí para que «Detectar
+       modelos» use las MISMAS cabeceras que usará luego la petición real. `listModels`
+       recibe `undefined` como fetchFn a propósito: así vale su fetch por defecto y no
+       se toca el orden posicional (test/40-agente.js lo llama con el 3.º = spy). */
     try {
-      return { ok: true, models: await listModels(baseUrl, key) };
+      return {
+        ok: true,
+        models: await listModels(baseUrl, key, undefined, { format, providerId, model }),
+      };
     } catch (err) {
       return { ok: false, error: err.message };
     }
@@ -147,22 +161,59 @@ function registerConfigIpc(ipcMain, ctx) {
     return persistConfig();
   });
 
+  /* Claves que settings:set puede escribir. Antes se fusionaba el patch ENTERO sobre
+   config.settings sin mirar qué claves traía: el renderer (o cualquier bug suyo) podía
+   colar `workspace` —que el agente usa para crear/ejecutar— saltándose la validación de
+   los canales dedicados (`workspace:set`/`workspace:pick`), o pisar cualquier otra cosa.
+   La lista son SOLO los ajustes editables desde Ajustes y sus canales (enumerados de
+   renderer/30-ajustes.js, renderer/40-vistas.js y los defaults de main.js); `workspace`
+   y cualquier clave con secretos quedan FUERA a propósito. */
+  const CLAVES_AJUSTES_PERMITIDAS = new Set([
+    // apariencia
+    'theme',
+    'uiColor',
+    'glowColor',
+    'glowStrength',
+    'glassTint',
+    'glowEnabled',
+    // agente
+    'userName',
+    'mode',
+    'maxConcurrentTasks',
+    /* v4.4: tope de gasto por encargo de equipo (0 = sin tope propio). Se expone en
+       meta:get para que la interfaz lo enseñe sin copiar el número. */
+    'equipoPresupuestoUsd',
+    'autoResumeTasks',
+    'llmTimeoutMs',
+    'showThinking',
+    'reviewGate',
+    'verifyGate',
+    'parallelTools',
+    'diagnosticosEscritura',
+    'verificacionCierre',
+    'intentosArreglo',
+    'promptCache',
+    'arbolesAislados',
+    /* Aceptar automáticamente las ESCRITURAS de archivo (nunca comandos ni
+       ejecución): el usuario lo enciende a mano en Ajustes ▸ Seguridad. */
+    'autoEdits',
+    /* Fase 1 de memoria: `memoryLearn` es la puerta (con `false` no se propone nada) y
+       `memoryAutoSave` decide si lo propuesto se guarda sin preguntar. La vista los llama
+       «Que aprenda de nuestras conversaciones» y «guardar sin preguntar». */
+    'memoryLearn',
+    'memoryAutoSave',
+    'agentRouting',
+    'memSensitivity',
+    'hookEditar',
+    'hookCerrar',
+    'devMode',
+  ]);
+
   ipcMain.handle('settings:set', (e, patch) => {
     const config = cfg();
     const clean = { ...(patch || {}) };
-    // El idioma del dictado llega a voice.ps1 como argumento y allí se usa como
-    // comodín (`-like ($Lang + '*')`), así que un `*`/`?` seleccionaría el
-    // reconocedor equivocado. Solo se acepta la forma xx-XX; lo demás se ignora.
-    if ('voiceLang' in clean && !/^[a-z]{2}-[A-Z]{2}$/.test(String(clean.voiceLang || ''))) delete clean.voiceLang;
-    /* Interruptor del motor de escucha clásico: booleano estricto (un «true» en texto de
-       un formulario sería veraz y el ajuste no se podría apagar nunca). */
-    if ('sttClasico' in clean && typeof clean.sttClasico !== 'boolean') delete clean.sttClasico;
-    /* Motor de dictado: 'whisper' lo fija a mano (aunque falte instalarlo, para que al
-       terminar la instalación ya esté en marcha); cualquier otro valor borra la fijación. */
-    if ('motor' in clean && clean.motor !== 'whisper') delete clean.motor;
-    /* ¿La voz de la lectura la eligió el usuario a mano? Booleano estricto, por lo mismo
-       que `sttClasico`: un «true» en texto no debe poder fijar el ajuste. */
-    if ('ttsVoiceFijo' in clean && typeof clean.ttsVoiceFijo !== 'boolean') delete clean.ttsVoiceFijo;
+    // Allowlist ANTES de validar: lo que no sea un ajuste conocido se descarta aquí.
+    for (const k of Object.keys(clean)) if (!CLAVES_AJUSTES_PERMITIDAS.has(k)) delete clean[k];
     /* Razonamiento visible (v2.3): booleano estricto. Un «true»/«false» en texto significaría
        verdadero siempre, y el ajuste no se podría apagar. */
     if ('showThinking' in clean && typeof clean.showThinking !== 'boolean') delete clean.showThinking;
@@ -186,10 +237,29 @@ function registerConfigIpc(ipcMain, ctx) {
        se puede apagar para que escriban directamente sobre el proyecto (más rápido, pero
        dos especialistas a la vez vuelven a pisarse). */
     if ('arbolesAislados' in clean && typeof clean.arbolesAislados !== 'boolean') delete clean.arbolesAislados;
+    /* Aceptar automáticamente las escrituras de archivo: booleano estricto, como los
+       demás interruptores de seguridad. Un «false» en texto no puede dejarlo encendido,
+       y un «true» en texto no puede encenderlo sin querer: es un ajuste de riesgo. */
+    if ('autoEdits' in clean && typeof clean.autoEdits !== 'boolean') delete clean.autoEdits;
+    /* Fase 1 de memoria: booleanos estrictos, como los demás interruptores. Aquí importa más
+       que en otros sitios: con un «true»/«false» en texto, `memoryLearn` quedaría encendido
+       siempre —o `memoryAutoSave` guardando sin preguntar— sin poder apagarlo. */
+    if ('memoryLearn' in clean && typeof clean.memoryLearn !== 'boolean') delete clean.memoryLearn;
+    if ('memoryAutoSave' in clean && typeof clean.memoryAutoSave !== 'boolean') delete clean.memoryAutoSave;
     if ('intentosArreglo' in clean) {
       const n = Math.round(Number(clean.intentosArreglo));
       if (!Number.isFinite(n) || n < 0 || n > 5) delete clean.intentosArreglo;
       else clean.intentosArreglo = n;
+    }
+    /* v4.4 — presupuesto del encargo de equipo, en USD. 0 = sin tope propio (lo hereda
+       de los guardarraíles). Un valor fuera de 0..50 casi siempre es un número pegado
+       de otra casilla (tokens, milisegundos) o una errata: se rechaza en vez de aceptar
+       un tope que cortaría el equipo a la primera llamada. NO se redondea: son dólares,
+       y 0.25 es un tope válido. */
+    if ('equipoPresupuestoUsd' in clean) {
+      const n = Number(clean.equipoPresupuestoUsd);
+      if (!Number.isFinite(n) || n < 0 || n > EQUIPO_PRESUPUESTO_MAX_USD) delete clean.equipoPresupuestoUsd;
+      else clean.equipoPresupuestoUsd = n;
     }
     /* v2.5 — tus hooks (Ajustes ▸ Agente). Una sola línea cada uno y sin saltos de línea:
        un hook es UN comando; si alguien pega un guion de varias líneas, se queda la primera
@@ -201,6 +271,14 @@ function registerConfigIpc(ipcMain, ctx) {
       clean[k] = v;
     }
     config.settings = { ...config.settings, ...clean };
+    /* `autoEdits` es una preferencia del usuario (vive en `settings`, que es lo que lee la
+       interfaz) pero el motor de permisos solo ve la POLÍTICA. Se refleja en las dos y se
+       empuja al agente vivo: sin este puente el interruptor se guardaba y no hacía nada
+       hasta reiniciar la app. */
+    if ('autoEdits' in clean) {
+      config.security = { ...(config.security || {}), autoEdits: clean.autoEdits === true };
+      if (typeof ctx.setAgentPolicy === 'function') ctx.setAgentPolicy(config.security);
+    }
     const saved = persistConfig();
     if ('glowEnabled' in clean && !clean.glowEnabled) glow('off');
     // si cambió la apariencia, el renderer repinta el tema; si el glow está
@@ -231,6 +309,7 @@ function registerConfigIpc(ipcMain, ctx) {
 module.exports = {
   registerConfigIpc,
   SECRETO_MASK,
+  EQUIPO_PRESUPUESTO_MAX_USD,
   enmascararApiKey,
   desenmascararApiKey,
   enmascararMapaSecretos,

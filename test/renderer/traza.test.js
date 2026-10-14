@@ -80,7 +80,7 @@ test('trazaApunta y trazaCerrar son funciones', () => {
 
 test('apuntar una herramienta no revienta', () => {
   traza.trazaNueva();
-  traza.trazaApunta({ name: 'run_command', args: { command: 'echo hola' }, ok: true, ms: 12 });
+  traza.trazaApunta(null, { name: 'run_command', args: { command: 'echo hola' }, ok: true, ms: 12 });
   assertOk(true, 'no debe lanzar');
 });
 

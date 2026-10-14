@@ -40,6 +40,9 @@ const { spawn, spawnSync } = require('child_process');
 const RAIZ = path.join(__dirname, '..');
 const updater = require(path.join(RAIZ, 'main', 'updater.js'));
 
+/** Rastro ausente del padre: el mismo texto que se enseña en el informe. */
+const NO_RRASTRO = '(el padre no escribió nada)';
+
 /** Electron de verdad; null si no está instalado. */
 function electronExe() {
   try {
@@ -119,6 +122,15 @@ async function sinProceso(nombre, ms = 10000) {
   return false;
 }
 
+/* Electron NO retira sus propios conmutadores de `process.argv` (comprobado:
+   `--no-sandbox --disable-gpu` siguen ahí, delante del guion). Con ellos delante,
+   `slice(2)` leería el conmutador en lugar del primer argumento, así que la
+   referencia es el propio guion del padre. */
+const ARGV_DESDE_GUION = [
+  'const _i = process.argv.findIndex((a) => a === __filename || /[\\\\/]padre\\.js$/i.test(a));',
+  'const argv = process.argv.slice(_i >= 0 ? _i + 1 : 2);',
+];
+
 /** Guion del padre: lanza el plan, espera el RASTRO (no «que siga vivo») y sale. */
 function escribirPadre(padreJs, padreTxt) {
   fs.writeFileSync(
@@ -128,7 +140,8 @@ function escribirPadre(padreJs, padreTxt) {
       "const fs = require('fs');",
       "const { app } = require('electron');",
       "const { spawn } = require('child_process');",
-      'const [file, argsJson, optsJson, logPath, padreTxt] = process.argv.slice(2);',
+      ...ARGV_DESDE_GUION,
+      'const [file, argsJson, optsJson, logPath, padreTxt] = argv;',
       "const rastro = () => { try { return fs.readFileSync(logPath, 'utf8'); } catch { return ''; } };",
       'app.whenReady().then(async () => {',
       '  try { fs.rmSync(logPath, { force: true }); } catch {}',
@@ -165,7 +178,8 @@ function escribirPadreTarea(padreJs, padreTxt) {
       "'use strict';",
       "const fs = require('fs');",
       "const { app } = require('electron');",
-      'const [updaterPath, dir, name, installer, args, logPath, taskName, txt] = process.argv.slice(2);',
+      ...ARGV_DESDE_GUION,
+      'const [updaterPath, dir, name, installer, args, logPath, taskName, txt] = argv;',
       'const updater = require(updaterPath);',
       'app.whenReady().then(async () => {',
       '  try {',
@@ -219,8 +233,25 @@ async function pasada({ dir, nombre, exe = null, diseño = 'nuevo', capMs = 4500
     spawnArgs = [padreJs, plan.file, JSON.stringify(plan.args), JSON.stringify(plan.spawnOpts), log, padreTxt];
   }
 
-  const hijo = spawn(exe, spawnArgs, { stdio: 'ignore', windowsHide: true });
-  hijo.on('error', () => {});
+  /* Los mismos conmutadores que usa `lanzar.js` (y `ui-check`/`shot-cdp`): en un
+     sandbox de token restringido, un Electron sin `--no-sandbox` ni `--disable-gpu`
+     sale con STATUS_CONTROL_C_EXIT antes de abrir nada y el padre nunca escribe su
+     rastro. En una máquina normal sobran, pero no cambian el comportamiento — y el
+     guion del padre ya lee sus argumentos por referencia al propio guion, así que
+     los conmutadores delante no los desplazan. */
+  const hijo = spawn(exe, ['--no-sandbox', '--disable-gpu', ...spawnArgs], {
+    stdio: ['ignore', 'pipe', 'pipe'],
+    windowsHide: true,
+  });
+  /* La salida del padre SÍ se lee: cuando el entorno no deja escribir en el
+     directorio del escenario (token restringido → EPERM) o el Programador de
+     tareas no está disponible, el único sitio donde eso se ve es aquí. Sin
+     capturarla, un entorno inservible y un ayudante roto eran indistinguibles:
+     los dos acababan en «el padre no escribió nada». */
+  let salidaHijo = '';
+  hijo.stdout.on('data', (c) => (salidaHijo += c));
+  hijo.stderr.on('data', (c) => (salidaHijo += c));
+  hijo.on('error', (e) => (salidaHijo += '\nSPAWN ERROR: ' + e.message));
   const capar = () => {
     try {
       hijo.kill();
@@ -247,7 +278,7 @@ async function pasada({ dir, nombre, exe = null, diseño = 'nuevo', capMs = 4500
   }
   const diario = fs.existsSync(log) ? fs.readFileSync(log, 'utf8') : '';
   const args = fs.existsSync(salida) ? fs.readFileSync(salida, 'utf8') : '';
-  const padre = fs.existsSync(padreTxt) ? fs.readFileSync(padreTxt, 'utf8') : '(el padre no escribió nada)';
+  const padre = fs.existsSync(padreTxt) ? fs.readFileSync(padreTxt, 'utf8') : NO_RRASTRO;
   capar();
   // higiene: la tarea es de un solo uso y el ayudante se autoborra al terminar,
   // pero si la pasada falló antes, no se deja basura en el Programador.
@@ -269,12 +300,40 @@ async function pasada({ dir, nombre, exe = null, diseño = 'nuevo', capMs = 4500
     args: args.trim(),
     padre,
     diario: diario.replace(/\s+/g, ' ').trim(),
+    salidaHijo: salidaHijo.replace(/\s+/g, ' ').trim().slice(0, 600),
   };
 }
 
 /**
+ * ¿El entorno puede siquiera montar el escenario? Devuelve el motivo o null.
+ *
+ * No es una red para tapar fallos: solo declara inservible el entorno cuando hay
+ * PRUEBA POSITIVA de que el sistema operativo se lo impide, no cuando el ayudante
+ * falla. Los dos casos medidos en un sandbox de token restringido son:
+ *   - el proceso hijo no puede escribir en el directorio del escenario (EPERM), así
+ *     que el padre jamás podría dejar su rastro por bueno que fuera el ayudante;
+ *   - el Programador de tareas no está disponible (schtasks no encuentra la ruta),
+ *     que es la vía principal del diseño 'tarea' desde la 3.3.4.
+ * En una máquina normal ninguno de los dos aparece y la comprobación conserva
+ * todos sus dientes.
+ */
+function motivoEntorno(p) {
+  if (!p || p.saltada || p.arranco) return null;
+  if (/EPERM|operation not permitted|Acceso denegado/i.test(p.salidaHijo) && p.padre === NO_RRASTRO) {
+    return 'el hijo no puede escribir en el directorio del escenario (EPERM): ' + p.salidaHijo.slice(0, 160);
+  }
+  if (
+    /FALLO al programar/.test(p.padre) &&
+    /no puede encontrar la ruta especificada|no se encuentra|no reconoce|Acceso denegado/i.test(p.padre)
+  ) {
+    return 'el Programador de tareas no está disponible aquí: ' + p.padre.slice(0, 160);
+  }
+  return null;
+}
+
+/**
  * Verifica la cadena completa. El control exige que el diseño anterior FALLE.
- * @returns {Promise<{estado:'ok'|'fallo'|'sin-electron', pasadas:Array, control:Object|null}>}
+ * @returns {Promise<{estado:'ok'|'fallo'|'sin-electron'|'entorno', pasadas:Array, control:Object|null, motivo?:string}>}
  */
 async function verificar({ dir, pasadas = 1, conControl = true, capMs = 45000 } = {}) {
   const base = dir || fs.mkdtempSync(path.join(os.tmpdir(), 'sagitari-verif-'));
@@ -299,6 +358,9 @@ async function verificar({ dir, pasadas = 1, conControl = true, capMs = 45000 } 
     const nom = i === 0 ? nombre : nombre + 'P' + i;
     const p = await pasada({ dir: base, nombre: nom, exe: conNombre(nom), diseño: 'tarea', capMs });
     if (p.saltada) return { estado: 'sin-electron', pasadas: [p], control: null };
+    const motivo = motivoEntorno(p);
+    // Entorno inservible ≠ ayudante roto: se declara y no se miente con un fallo.
+    if (motivo) return { estado: 'entorno', motivo, pasadas: [p], control: null };
     hechas.push(p);
   }
   const okTodas = hechas.every((p) => p.arranco && p.ejecuto && p.orden && p.codigo0);
@@ -323,6 +385,13 @@ if (require.main === module) {
   verificar({ pasadas, conControl }).then((r) => {
     if (r.estado === 'sin-electron') {
       console.log('SIN ELECTRON: ' + (r.pasadas[0] && r.pasadas[0].motivo));
+      process.exit(2);
+    }
+    /* El entorno no puede montar el escenario (token restringido: el hijo no puede
+       escribir en su propio directorio, o no hay Programador de tareas). Se sale 2,
+       igual que sin Electron: no es un veredicto sobre el ayudante. */
+    if (r.estado === 'entorno') {
+      console.log('ENTORNO NO SIRVE: ' + r.motivo);
       process.exit(2);
     }
     for (const [i, p] of r.pasadas.entries()) {

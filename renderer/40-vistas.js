@@ -1,26 +1,48 @@
-/* SAGITARI renderer — 40-vistas.js (antes app.js 4115-5258): conversaciones, modos, memoria, tareas, TTS, menús, tema y arranque init()
+/* SAGITARI renderer — 40-vistas.js (antes app.js 4115-5258): conversaciones, modos, memoria, tareas, menús, tema y arranque init()
    Script clásico: comparte el scope global con los demás 1x-*.js.
    El orden de carga en index.html preserva el orden original. */
 /* Funciones que se usan desde otros scripts del renderer (index.html carga varios
    <script> que comparten scope). El comentario `exported` le dice a ESLint que
    estas definiciones se usan fuera de este archivo: sin él las marcaría como
    no usadas. */
-/* exported silenciarLecturaVoz, hablarEnFlujo, gh, glowStrengthLabel, glassTintLabel, renderTools, reiniciarLecturaVoz,
+/* exported glowStrengthLabel, glassTintLabel, renderTools,
    showEmpty, lastTurnLabel, setChatStatus, ensureThinkBlock, scheduleThinkRender, completeToolCard,
-   delegationCard, restaurarTraza, equipoChip, equipoCierra, mostrarDeshacer, toolChip, todosCard */
-/* global fillSettings, wizardMostrar, refrescarWhisperUi, refrescarPiperUi */
-/* Las de arriba están definidas en 30-ajustes.js (scope compartido) */
+   delegationCard, restaurarTraza, equipoChip, equipoCierra, mostrarDeshacer, toolChip, todosCard, pintarDiff, renderAgents,
+   equipoEvento, renderEquipo, cargarLimiteEquipo, equipoDe, equipoFicha, equipoPermiso, nombreEquipo,
+   estadoEquipo, badgeEquipoPermisos, pintarBadgeEquipo, resumenEquipo, equipoCierraPorTurno */
+/* global fillSettings, wizardMostrar, polishSwitches, pintarRailEquipo, refrescarEquipoChat */
+/* Las de arriba están definidas en 30-ajustes.js (scope compartido) salvo `pintarRailEquipo`,
+   que vive en 20-app.js (el rail es suyo) y `refrescarEquipoChat`, que vive en 10-chat.js
+   (la tarjeta del turno es suya): las llama el repintado del equipo de aquí. */
+/* currentConvId está declarado en 10-chat.js; aquí sólo se ASIGNA al cambiar de
+   hilo (por eso writable), para que el rebobinado y /compact sepan dónde están */
+/* global currentConvId:writable */
+/* Las pestañas de conversaciones abiertas viven en 10-chat.js: aquí sólo se piden sus
+   puertas (activar una pestaña, repintar la cabecera del hilo, marcar su turno, saber
+   cuál está abierta y repintar el strip). */
+/* global abrirRuntime, pintarHiloActivo, hiloActual, rtActual, reflejarTurno, pintarPestanas */
 // ============ conversation history ============
 let convTitle = 'Nueva conversación';
-function setChatTitle(t) {
+/* Último `conv:list` leído (el Historial lo refresca): de aquí sale el nombre de una
+   conversación que se abre por su id, para poder ponerlo en su pestaña. */
+let listaConvs = [];
+function tituloDeConv(id) {
+  const c = listaConvs.find((x) => x.id === id);
+  return c ? c.title : '';
+}
+function setChatTitle(t, guardar) {
   convTitle = t || 'Nueva conversación';
+  rtActual().titulo = convTitle; // la pestaña enseña el mismo nombre que la cabecera
+  pintarPestanas();
   const h = $('#chatTitle');
   h.textContent = convTitle;
   const root = $('#chatRootTitle'); // el h1 (oculto) de la vista mantiene la raíz del documento
   if (root) root.textContent = convTitle;
   h.title = convTitle; // se trunca con ellipsis: la pista completa va en el title
-  // sincroniza el título con la conversación real en el historial
-  if (t) {
+  /* sincroniza el título con la conversación real en el historial. `guardar === false`
+     es para repintar la cabecera al cambiar de pestaña: el nombre ya está guardado y
+     volver a mandarlo sólo añadiría una ida y vuelta por clic. */
+  if (t && guardar !== false) {
     // fire-and-forget: si el IPC rechaza, el fallo se avisa aquí en vez de
     // acabar como promesa sin manejar (burbuja roja en el chat)
     try {
@@ -48,11 +70,17 @@ async function renderHistory() {
     box.innerHTML = `<div class="subnote">No se pudieron cargar las conversaciones: ${esc((err && err.message) || err)}</div>`;
     return;
   }
-  // v4.2: buscador del historial — filtra por título y contenido de la conversación
+  /* La lista se recuerda (títulos y cuáles trabajan): con su id se puede abrir una
+     conversación desde cualquier sitio —una pestaña, una copia recién hecha— y saber su
+     nombre sin volver a preguntar. */
+  listaConvs = list;
+  /* v4.2: buscador del historial — por título Y por lo que se dijo dentro. El texto
+     buscable viene ya preparado y acotado desde el proceso principal (`busca`), así que
+     filtrar es instantáneo al teclear y no hay una ida y vuelta por pulsación. */
   const q = ($('#histSearch') && $('#histSearch').value.trim().toLowerCase()) || '';
   if (q)
     list = list.filter((c) =>
-      String(c.title || '')
+      String(c.busca || c.title || '')
         .toLowerCase()
         .includes(q),
     );
@@ -78,17 +106,31 @@ async function renderHistory() {
     const d = new Date(c.updatedAt);
     const when = d.toLocaleDateString('es') + ' · ' + d.toLocaleTimeString('es', { hour: '2-digit', minute: '2-digit' });
     it.innerHTML = `<div class="hic">${ic('chat')}</div>
-      <div class="hmain"><b>${esc(c.title)}</b><small>${c.count} mensajes · ${when}</small></div>
+      <div class="hmain"><b>${esc(c.title)}</b><small>${c.busy ? '<span class="hbusy">trabajando</span> ' : ''}${c.count} mensajes · ${when}</small></div>
+      <button class="btn ghost sq hfork" data-fork="${esc(c.id)}" title="Duplicar" aria-label="Duplicar la conversación «${esc(c.title)}»">${ic('copy')}</button>
       <button class="btn ghost sq danger hdel" title="Eliminar">${ic('trash')}</button>`;
     it.addEventListener('click', (ev) => {
-      if (ev.target.closest('.hdel')) return;
-      openConversation(c.id);
+      if (ev.target.closest('.hdel') || ev.target.closest('[data-fork]')) return;
+      openConversation(c.id, c.title);
     });
     it.addEventListener('keydown', (ev) => {
       if (ev.target !== it || (ev.key !== 'Enter' && ev.key !== ' ')) return;
       ev.preventDefault();
       it.click();
     });
+    it.querySelector('[data-fork]').onclick = async (ev) => {
+      ev.stopPropagation();
+      const r = await window.sagitari.convFork(c.id);
+      if (!r || !r.ok) {
+        showToast('No se pudo duplicar la conversación');
+        return;
+      }
+      /* main ya ha cambiado de hilo: la copia es la conversación en curso. Se refresca
+         el historial PRIMERO (así la copia ya está en la lista con su nombre) y se abre
+         en su propia pestaña, con su hilo copiado a la vista. */
+      await renderHistory();
+      await openConversation(r.id, tituloDeConv(r.id));
+    };
     it.querySelector('.hdel').onclick = async (ev) => {
       ev.stopPropagation();
       if (!(await askConfirm(it, '¿Eliminar la conversación «' + c.title + '»?', 'Se borrará el hilo completo y sus mensajes.'))) return;
@@ -99,29 +141,56 @@ async function renderHistory() {
   }
 }
 
-async function openConversation(id) {
-  // cambiar de hilo con una ejecución en curso desviaría la respuesta (y su
-  // guardado) a la conversación equivocada
-  if (busy) {
-    showToast('Detén o espera la ejecución en curso para cambiar de conversación');
-    return;
-  }
+/* El hilo en curso (`currentConvId`) lo declara 10-chat.js; aquí sólo se sigue el
+   que main acaba de abrir, crear o bifurcar. Va en una función para que el
+   fichero lo LEA (no sólo lo escriba) y para no repetir el guard cuatro veces.
+   Además deja a la vista la pestaña de ese hilo (`abrirRuntime`): desde que varias
+   conversaciones pueden estar abiertas a la vez, cambiar de hilo es cambiar de pestaña,
+   y el hilo abierto SIEMPRE tiene una. */
+function recordarHilo(id, titulo) {
+  const nuevo = id || null;
+  if (currentConvId !== nuevo) currentConvId = nuevo;
+  const rt = abrirRuntime(nuevo);
+  if (titulo && !rt.titulo) rt.titulo = titulo;
+  return nuevo;
+}
+
+/** Abre (o trae al frente) la conversación `id` en SU pestaña. Cambiar de conversación
+    está SIEMPRE permitido: cada una tiene su nodo de mensajes y su turno, así que una
+    puede seguir trabajando mientras se usa otra (antes había que esperar a que
+    terminara, y por eso esta función se negaba). `titulo` es el nombre conocido
+    (Historial o lista) para su pestaña. */
+async function openConversation(id, titulo) {
   const r = await window.sagitari.convOpen(id);
-  if (!r.ok) {
+  if (!r || !r.ok) {
     showToast('No se pudo abrir la conversación');
     return;
   }
-  resetChatView(r.messages);
-  setChatTitle((r.messages.find((m) => m.role === 'user') || {}).content || 'Nueva conversación');
+  // el hilo en curso pasa a ser éste (main ya lo hizo en `conv:open`): pestaña + runtime
+  const rt = recordarHilo(id);
+  if (titulo && !rt.titulo) rt.titulo = titulo;
+  /* El estado de turno lo manda el proceso principal (`conv:open` viaja con `busy`): una
+     conversación que siguió trabajando sin mirarla vuelve marcada como ocupada. */
+  rt.busy = !!r.busy;
+  reflejarTurno(rt);
+  if (!r.busy) resetChatView(r.messages);
+  /* Con su turno en vuelo NO se repinta: su nodo ya tiene lo pintado hasta ahora (la
+     respuesta en curso incluida) y rehacerlo desde el historial guardado lo borraría. */
+  const mensajes = r.messages || [];
+  setChatTitle((mensajes.find((m) => m.role === 'user') || {}).content || titulo || rt.titulo || 'Nueva conversación');
+  pintarHiloActivo(); // título, estado, contexto y deshacer: los de ESTA conversación
   goto('chat');
   feed('Conversación restaurada', 'blu');
 }
 
 /** Vuelve el chat a cero y, si hay historial, lo pinta con su modo por turno. */
 function resetChatView(messages) {
-  // última barrera: ningún camino puede vaciar el hilo mientras el agente trabaja
+  /* Última barrera: repintar el hilo A LA VISTA mientras su turno trabaja tiraría lo que
+     hay pintado del turno (la burbuja pendiente, su stream). Cambiar de conversación ya
+     no pasa por aquí —cada pestaña tiene su nodo y su estado—, así que esto sólo salta en
+     los repintados internos (rebobinar, /compact). */
   if (busy) {
-    showToast('Detén o espera la ejecución en curso para cambiar de conversación');
+    showToast('Espera a que termine el turno de esta conversación para repintarla');
     return false;
   }
   cancelStreamRender();
@@ -161,7 +230,7 @@ function resetChatView(messages) {
     else b.innerHTML = fmt(html || '');
     if (m.attachments && m.attachments.length) paintAttachments(b, m.attachments);
     if (m.role === 'assistant') {
-      msgActions(b.closest('.msg-body') || b, m.content, { speak: true });
+      msgActions(b.closest('.msg-body') || b, m.content, {});
       lastAssistantEl = b;
     }
   }
@@ -171,15 +240,15 @@ function resetChatView(messages) {
 }
 
 async function newConversation() {
-  // no se crea un hilo nuevo con una ejecución en curso: la respuesta acabaría
-  // en el hilo nuevo y el original quedaría sin ella
-  if (busy) {
-    showToast('Detén o espera la ejecución en curso para empezar una conversación nueva');
-    return;
-  }
-  await window.sagitari.convNew();
+  /* Se puede empezar una conversación nueva aunque la anterior siga trabajando: la
+     anterior conserva su pestaña, su nodo y su turno (su respuesta se queda en su hilo). */
+  const r = await window.sagitari.convNew();
+  // main devuelve el id del hilo recién creado y ya cambió el suyo: seguirlo
+  // (null sólo si el IPC no trajo id, que degrada sin romper)
+  recordarHilo(r && r.ok && r.id);
   resetChatView([]);
   setChatTitle('Nueva conversación');
+  pintarHiloActivo();
   goto('chat');
   $('#chatInput').focus();
 }
@@ -276,69 +345,10 @@ window.addEventListener('keydown', (e) => {
 });
 
 // ============ memory view ============
-async function renderMemory() {
-  const box = $('#memList');
-  if (!box) return;
-  let list = [],
-    err = null;
-  try {
-    list = (await window.sagitari.memoryList()) || [];
-  } catch (e) {
-    err = e;
-  }
-  box.innerHTML = '';
-  // sin datos y «IPC caído» no pueden verse igual
-  if (err) {
-    box.innerHTML = `<div class="subnote">No se pudo leer la memoria: ${esc((err && err.message) || err)}</div>`;
-    return;
-  }
-  if (!list.length) {
-    box.innerHTML = vListEmpty(
-      'memory',
-      'La memoria está vacía',
-      'Añade un recuerdo arriba ("siempre guardo los informes en...") o pídele a Sagitari que recuerde algo: lo usará cuando encaje con lo que pidas.',
-    );
-    return;
-  }
-  for (const m of list) {
-    const it = document.createElement('div');
-    it.className = 'memitem';
-    const imp = Math.round((m.importance ?? 0.5) * 100);
-    it.innerHTML = `<span class="mt">${esc(m.text)}<br><small class="md">importancia ${imp}% · confianza ${Math.round((m.confidence ?? 0.8) * 100)}% · usos ${m.uses || 0} · ${new Date(m.date).toLocaleDateString('es')}</small></span>
-      <input type="range" min="0" max="100" value="${imp}" data-imp class="glowslider compact" title="Importancia" aria-label="Importancia" />
-      <button class="btn ghost sq danger" data-del title="Eliminar">${ic('trash')}</button>`;
-    const rangoImp = it.querySelector('[data-imp]');
-    pintarFill(rangoImp);
-    rangoImp.oninput = (e) => pintarFill(e.target); // el relleno sigue el arrastre
-    rangoImp.onchange = async (e) => {
-      pintarFill(e.target);
-      await window.sagitari.memoryUpdate(m.id, { importance: Number(e.target.value) / 100 });
-      showToast('Importancia actualizada');
-    };
-    it.querySelector('[data-del]').onclick = async () => {
-      if (!(await askConfirm(it, '¿Olvidar este recuerdo?', String(m.text || '').slice(0, 200)))) return;
-      await window.sagitari.memoryRemove(m.id);
-      renderMemory();
-    };
-    box.appendChild(it);
-  }
-}
-$('#memAdd').onclick = async () => {
-  const btn = $('#memAdd');
-  if (btn.disabled) return; // evita el doble envío mientras dura el IPC
-  const t = $('#memInput').value.trim();
-  if (!t) return;
-  btn.disabled = true;
-  try {
-    await window.sagitari.memoryAdd(t);
-    $('#memInput').value = '';
-    await renderMemory();
-  } catch (e) {
-    showToast('No se pudo añadir: ' + ((e && e.message) || e));
-  } finally {
-    btn.disabled = false;
-  }
-};
+/* La vista Memoria vive en renderer/memoria-ui.js (ficha, bandeja, hábitos, buscador,
+   papelera y pie). Aquí ya no queda nada suyo: el router de vistas llama a
+   `renderMemoria()` por su nombre. La vieja lista plana con deslizador de importancia se
+   retiró con ella. */
 
 // ============ v1.2: relevancia de memoria (Ajustes) ============
 async function fillMemorySens() {
@@ -419,6 +429,11 @@ async function renderSkills() {
     };
     box.appendChild(it);
   }
+  /* Los interruptores que acaban de pintarse son nodos NUEVOS: la vista se repinta sola
+     al activar una skill, al actualizarla y al importar, y sin esta llamada se quedaban
+     sin role=switch, sin tabindex y sin Enter/Espacio (sólo los pulía el goto() de la
+     entrada a la vista, que aquí ya ha pasado). Se pule SIEMPRE que se pinta. */
+  polishSwitches();
 }
 $('#skillImportBtn').onclick = async () => {
   const btn = $('#skillImportBtn');
@@ -477,6 +492,533 @@ $('#skillCreateBtn').onclick = async () => {
   }
 };
 
+// ============ agents view (v4.3) ============
+/* La vista enseña el registro REAL de subagentes (agentsCustom), no un
+   escaparate: antes eran 6 tarjetas fijas que ni cuadraban en número con los
+   agentes que existen. Este mapa es sólo presentación (icono y color); un
+   agente que no esté aquí cae en el genérico y nunca se queda sin cara. */
+const AGENT_LOOK = {
+  research: { icon: 'search', cls: 'a-b' },
+  browser: { icon: 'compass', cls: 'a-c' },
+  coding: { icon: 'code', cls: 'a-p' },
+  file: { icon: 'folder', cls: 'a-y' },
+  vision: { icon: 'eye', cls: 'a-b2' },
+  verification: { icon: 'check', cls: 'a-p' },
+  review: { icon: 'list', cls: 'a-y2' },
+};
+const AGENT_LOOK_FALLBACK = { icon: 'agents', cls: 'a-p2' };
+
+/** «Integrado» o «cargado de disco» a partir del `origen` que da el registro.
+    Un valor que no reconocemos se enseña tal cual y, si no viene, no se pinta
+    nada: mejor sin insignia que con una inventada. */
+function origenAgente(origen) {
+  const s = String(origen || '').trim();
+  if (!s) return { label: '', cls: '' };
+  if (/disco|disk|custom|usuario|user|extern|fichero|cargad/i.test(s)) return { label: 'Cargado de disco', cls: 'custom' };
+  if (/integ|built|sistema|nativ|default|predefinid/i.test(s)) return { label: 'Integrado', cls: '' };
+  return { label: s, cls: '' };
+}
+
+/** Herramientas de un agente, vengan como array o como texto separado por comas. */
+function toolsAgente(tools) {
+  if (Array.isArray(tools)) return tools.map((t) => String(t)).filter(Boolean);
+  const s = String(tools || '').trim();
+  return s ? s.split(/[,\s]+/).filter(Boolean) : [];
+}
+
+/** Una tarjeta de agente. Todo el texto lo produce el registro: va escapado. */
+function agentCard(a) {
+  const id = String((a && a.id) || '');
+  const look = AGENT_LOOK[id] || AGENT_LOOK_FALLBACK;
+  const nombre = String((a && a.nombre) || id || 'Agente');
+  const desc = String((a && a.descripcion) || '');
+  const ori = origenAgente(a && a.origen);
+  const tools = toolsAgente(a && a.tools);
+  const meta = [];
+  if (a && a.modelo) meta.push('modelo ' + String(a.modelo));
+  if (a && a.maxSteps) meta.push(String(a.maxSteps) + ' pasos');
+  return `<div class="acard" id="agentCard-${esc(id)}">
+    <div class="aic ${look.cls}">${ic(look.icon)}</div>
+    <div class="amain">
+      <div class="ahead"><b>${esc(nombre)}</b>${ori.label ? `<span class="abadge${ori.cls ? ' ' + ori.cls : ''}">${esc(ori.label)}</span>` : ''}</div>
+      ${desc ? `<small>${esc(desc)}</small>` : ''}
+      ${tools.length ? `<span class="amd">Herramientas: ${esc(tools.join(', '))}</span>` : ''}
+      ${meta.length ? `<span class="amd">${esc(meta.join(' · '))}</span>` : ''}
+    </div>
+    <span class="adot"></span>
+  </div>`;
+}
+
+/** Pinta la vista Agentes desde el registro real, con carga y error explícitos. */
+async function renderAgents() {
+  const box = $('#agentsList');
+  if (!box) return;
+  box.setAttribute('aria-busy', 'true');
+  const cuenta = $('#agentsCount');
+  let r = null;
+  try {
+    r = await window.sagitari.agentsCustom();
+  } catch (e) {
+    r = { ok: false, error: (e && e.message) || String(e) };
+  }
+  const agentes = r && r.ok && Array.isArray(r.agentes) ? r.agentes : [];
+  if (!r || !r.ok) {
+    box.innerHTML = `<div class="subnote">No se pudieron cargar los agentes: ${esc((r && r.error) || 'error desconocido')}</div>`;
+    if (cuenta) cuenta.textContent = '';
+    box.setAttribute('aria-busy', 'false');
+    return;
+  }
+  if (!agentes.length) {
+    box.innerHTML = vListEmpty('agents', 'Sin agentes', 'El registro de agentes está vacío: no hay ninguno que listar.');
+  } else {
+    box.innerHTML = agentes.map(agentCard).join('');
+  }
+  if (cuenta) cuenta.textContent = agentes.length + (agentes.length === 1 ? ' agente' : ' agentes');
+  box.setAttribute('aria-busy', 'false');
+}
+
+$('#agentsReload').onclick = async () => {
+  const btn = $('#agentsReload');
+  if (btn.disabled) return;
+  btn.disabled = true;
+  try {
+    await window.sagitari.agentsCustomRecargar();
+  } catch (e) {
+    showToast('No se pudieron recargar los agentes: ' + ((e && e.message) || e));
+  } finally {
+    btn.disabled = false;
+  }
+  renderAgents();
+};
+
+/* La lista se pinta al ENTRAR en la vista, sea por clic o por Alt+4: se observa
+   la clase `.on` de la sección en vez de engancharse a cada atajo (goto no
+   refresca esta vista, a diferencia de Tareas o Skills). */
+(function vigilarVistaAgentes() {
+  const v = document.getElementById('view-agents');
+  if (!v) return;
+  new MutationObserver(() => {
+    if (v.classList.contains('on')) renderAgents();
+  }).observe(v, { attributes: true, attributeFilter: ['class'] });
+  if (v.classList.contains('on')) renderAgents();
+})();
+
+// ============ equipo view (v4.4, modo EQUIPO) ============
+/* El equipo trabaja en el proceso principal, así que aquí sólo se ve lo que cuentan sus
+   eventos. NO hay canal de lectura: el estado se ACUMULA por conversación —cada team_*
+   viaja con su convId— y por eso cambiar de pestaña no mezcla equipos y una conversación
+   sin equipo dice la verdad al enseñar el vacío (un equipo no sobrevive al reinicio de la
+   app en esta versión: el vacío ES el estado real, no una carga que se quedó colgada).
+   Todo lo que se pinta sale de esos eventos; nada inventado.
+
+   Vocabulario de estado: el del motor (trabajando · esperando · terminado · fallo) y,
+   en el tablero, el de la lista de tareas (pending · in_progress · completed), que es de
+   donde viene la forma de sus ítems. Lo que no esté en la tabla se enseña tal cual. */
+const EQUIPO_BUZON_MAX = 200; // el buzón es un feed vivo, no un archivo: se queda lo último
+
+const EQUIPO_ESTADOS = {
+  trabajando: { label: 'trabajando', cls: 'eq-trabajando' },
+  // «esperando» es del motor: un permiso pendiente O una pregunta al usuario (el motivo
+  // llega aparte, en `atencion`). Por eso la etiqueta no dice «permiso»: quien lo dice es
+  // la insignia de permisos pendientes, que sí cuenta los que piden autorización.
+  esperando: { label: 'esperando', cls: 'eq-esperando' },
+  terminado: { label: 'terminado', cls: 'eq-terminado' },
+  fallo: { label: 'falló', cls: 'eq-fallo' },
+  interrumpido: { label: 'interrumpido', cls: 'eq-interrumpido' },
+  pending: { label: 'pendiente', cls: '' },
+  in_progress: { label: 'en curso', cls: 'eq-trabajando' },
+  completed: { label: 'hecho', cls: 'eq-terminado' },
+  failed: { label: 'falló', cls: 'eq-fallo' },
+};
+
+/** Cómo se llama y se pinta un estado. Un valor que no conocemos se dice sin inventarlo. */
+function estadoEquipo(v) {
+  const k = String(v || '').toLowerCase();
+  return EQUIPO_ESTADOS[k] || { label: k || 'sin estado', cls: '' };
+}
+
+const equipos = new Map(); // convId -> estado acumulado del equipo de ESA conversación
+let equipoLimiteMiembros = 0; // tope de compañeros que da el motor (meta:get); 0 = sin dato
+
+/** Clave de conversación de un evento (o de la conversación abierta). */
+function claveEquipo(convId) {
+  return String(convId || hiloActual() || '');
+}
+
+/** Estado del equipo de una conversación (con o sin creación). */
+function equipoDe(convId, crear) {
+  const clave = claveEquipo(convId);
+  let e = equipos.get(clave) || null;
+  if (!e && crear) {
+    e = {
+      convId: clave,
+      inicio: Date.now(),
+      fin: 0,
+      estado: 'vivo', // 'vivo' | 'fin'
+      ok: null,
+      miembros: new Map(),
+      orden: [],
+      mensajes: [],
+      tablero: [],
+      resumen: '',
+      gasto: null,
+    };
+    equipos.set(clave, e);
+  }
+  return e;
+}
+
+/** Un compañero, venga del team_start (aún sin encargo) o del team_member (ya con él). */
+function equipoMiembro(e, ev) {
+  const id = String((ev && ev.id) || '');
+  if (!id) return null;
+  let m = e.miembros.get(id);
+  if (!m) {
+    m = { id, spec: '', name: '', estado: 'trabajando', tarea: '', expect: '', atencion: '', resumen: '', evidencia: '', permisos: 0 };
+    e.miembros.set(id, m);
+    e.orden.push(id);
+  }
+  if (ev.spec) m.spec = String(ev.spec);
+  /* El nombre lo pone el registro (main). Si un evento llegara sin él, el id sigue
+     valiendo: mejor «m2» que una fila sin nombre. */
+  if (ev.name) m.name = String(ev.name);
+  if (!m.name) m.name = m.spec || id;
+  return m;
+}
+
+/** Nombre de un extremo del buzón: id de compañero, «lider» o «todos». */
+function nombreEquipo(e, id) {
+  const k = String(id || '');
+  if (k === 'lider' || k === 'líder') return 'Líder';
+  if (k === 'todos') return 'Todos';
+  const m = e && e.miembros.get(k);
+  return (m && (m.name || m.id)) || k || '—';
+}
+
+/** Insignia de permisos pendientes: el mismo lenguaje que el resto (.abadge + .dot).
+    La usan el rail y la vista, así que la cuenta se ve igual en los dos sitios. */
+function badgeEquipoPermisos(m) {
+  const n = Number(m && m.permisos) || 0;
+  if (!n) return '';
+  const txt = n === 1 ? '1 permiso pendiente' : n + ' permisos pendientes';
+  return `<span class="abadge eqperm" title="${esc(txt)} de ${esc((m && m.name) || 'este compañero')}"><span class="dot a-y"></span>${esc(n === 1 ? '1 permiso' : n + ' permisos')}</span>`;
+}
+
+/** Entra un evento del equipo. Los team_* llegan ANTES de la tarjeta del chat: aquí se
+    acumula (para cualquier conversación) y después se pinta lo que toque. */
+function equipoEvento(ev) {
+  const tipo = String((ev && ev.type) || '');
+  const e = equipoDe(ev.convId, true);
+  switch (tipo) {
+    case 'team_start':
+      /* Un encargo nuevo en la MISMA conversación empieza de cero: los eventos que llegan
+         describen al equipo que arranca ahora, no al que ya cerró (miembros, buzón y
+         tablero del anterior no pintan nada aquí y hacerlos convivir mentiría). */
+      e.inicio = Number(ev.ts) || Date.now();
+      e.fin = 0;
+      e.estado = 'vivo';
+      e.ok = null;
+      e.resumen = '';
+      e.gasto = null;
+      e.miembros = new Map();
+      e.orden = [];
+      e.mensajes = [];
+      e.tablero = [];
+      e.card = null; // la tarjeta del equipo anterior: la nueva se apunta al pintarla
+      for (const mi of Array.isArray(ev.miembros) ? ev.miembros : []) equipoMiembro(e, mi);
+      break;
+    case 'team_member': {
+      const m = equipoMiembro(e, ev);
+      if (m) {
+        if (ev.estado) m.estado = String(ev.estado);
+        if (ev.tarea) m.tarea = String(ev.tarea);
+        if (ev.expect) m.expect = String(ev.expect);
+        /* `atencion` es POR QUÉ está esperando (un permiso, una pregunta): el estado sólo
+           dice «esperando», y sin el motivo el usuario tendría que adivinar qué se le pide. */
+        m.atencion = ev.atencion ? String(ev.atencion) : '';
+      }
+      break;
+    }
+    case 'team_message':
+      e.mensajes.push({
+        de: String(ev.de || ''),
+        para: String(ev.para || ''),
+        texto: String(ev.texto || ''),
+        ts: Number(ev.ts) || Date.now(),
+      });
+      if (e.mensajes.length > EQUIPO_BUZON_MAX) e.mensajes.splice(0, e.mensajes.length - EQUIPO_BUZON_MAX);
+      break;
+    case 'team_board':
+      // el tablero se reemplaza entero: es el estado que apunta el líder, no un diario
+      e.tablero = (Array.isArray(ev.items) ? ev.items : []).map((i) => ({
+        quien: (i && i.quien) || '',
+        que: (i && i.que) || '',
+        estado: (i && i.estado) || '',
+        nota: (i && i.nota) || '',
+      }));
+      break;
+    case 'team_done': {
+      const m = equipoMiembro(e, ev);
+      if (m) {
+        m.estado = ev.ok === false ? 'fallo' : 'terminado';
+        if (ev.resumen) m.resumen = String(ev.resumen);
+        if (ev.evidencia) m.evidencia = String(ev.evidencia);
+      }
+      break;
+    }
+    case 'team_end': {
+      e.estado = 'fin';
+      e.fin = Number(ev.ts) || Date.now();
+      e.ok = ev.ok !== false;
+      e.resumen = ev.resumen ? String(ev.resumen) : '';
+      e.gasto = ev.gasto && typeof ev.gasto === 'object' ? ev.gasto : null;
+      /* El motor manda el estado REAL de cada compañero al cerrar: a quien sigue esperando al
+         usuario se le deja esperando (su permiso pendiente se puede contestar y su vuelta
+         continúa), y sólo se les quita lo que ya no está pendiente a los demás. Decir
+         «interrumpido» de quien está esperando una respuesta del usuario sería mentir, y
+         además borraría la insignia del permiso que el usuario todavía tiene que contestar. */
+      for (const mi of Array.isArray(ev.miembros) ? ev.miembros : []) equipoMiembro(e, mi);
+      for (const m of e.miembros.values()) {
+        if (m.estado !== 'trabajando' && m.estado !== 'esperando') m.permisos = 0;
+      }
+      break;
+    }
+    default:
+      return; // un team_* que no conocemos no toca el estado
+  }
+  pintarEquipoDe(e.convId);
+}
+
+/** Repinta las superficies del equipo tras un cambio de estado: la vista y el rail son de
+    la conversación ABIERTA (el mismo criterio que el chat), y el contador del menú es de
+    toda la app —un equipo en marcha en otra conversación también se ve ahí—. */
+function pintarEquipoDe(convId) {
+  if (claveEquipo(convId) === claveEquipo(null)) {
+    renderEquipo();
+    pintarRailEquipo(); // definida en 20-app.js: el rail es suyo
+    refrescarEquipoChat(); // y la tarjeta del turno (10-chat.js): la insignia vive en su fila
+  }
+  pintarBadgeEquipo();
+}
+
+/** Contador del menú: compañeros vivos en CUALQUIER conversación. */
+function pintarBadgeEquipo() {
+  let n = 0;
+  for (const e of equipos.values()) {
+    if (e.estado !== 'vivo') continue;
+    for (const m of e.miembros.values()) if (m.estado === 'trabajando' || m.estado === 'esperando') n++;
+  }
+  setBadge('#nbEquipo', n);
+}
+
+/** Ficha de un compañero, para atribuir un permiso o una herramienta a SU miembro.
+    Devuelve null si ese id no es de este equipo: entonces no se inventa un nombre. */
+function equipoFicha(convId, id) {
+  const e = equipoDe(convId, false);
+  const m = e && e.miembros.get(String(id || ''));
+  return m ? { id: m.id, name: m.name || m.id, spec: m.spec } : null;
+}
+
+/** Suma o resta un permiso pendiente al compañero que lo pide. La barra de confirmación y
+    la insignia salen de AQUÍ: un compañero puede estar esperando un permiso mientras otro
+    trabaja, y la cuenta tiene que ser la misma en los dos sitios. Devuelve false cuando ese
+    id no es de un equipo conocido (el líder, o un permiso sin equipo detrás). */
+function equipoPermiso(convId, member, delta) {
+  const e = equipoDe(convId, false);
+  const m = e && e.miembros.get(String(member || ''));
+  if (!m) return false;
+  m.permisos = Math.max(0, (Number(m.permisos) || 0) + (delta > 0 ? 1 : -1));
+  pintarEquipoDe(e.convId);
+  return true;
+}
+
+/** ¿Hay un equipo vivo en OTRA conversación? Es lo único que se puede saber sin mentir
+    cuando la que está abierta no tiene equipo: cada convId tiene su estado. */
+function equipoEnOtroHilo() {
+  const abierto = claveEquipo(null);
+  for (const e of equipos.values()) if (e.convId !== abierto && e.estado === 'vivo') return e;
+  return null;
+}
+
+/** El TURNO de esa conversación se ha cerrado (o ha muerto: un corte por guardarraíl, un
+    fallo, el botón Detener): un equipo que siga «vivo» ya no lo está. El motor sólo manda
+    `team_end` cuando el turno llega al final, así que sin esto el rail y el contador del
+    menú seguirían contando compañeros que se apagaron con el turno. */
+function equipoCierraPorTurno(convId) {
+  const e = equipoDe(convId, false);
+  if (!e || e.estado !== 'vivo') return;
+  e.estado = 'fin';
+  e.fin = Date.now();
+  e.ok = false; // no llegó al final: el cierre se cuenta como interrumpido
+  for (const m of e.miembros.values()) {
+    if (m.estado === 'trabajando' || m.estado === 'esperando') m.estado = 'interrumpido';
+    m.permisos = 0;
+  }
+  pintarEquipoDe(e.convId);
+}
+
+/** El tope de compañeros lo fija el motor (meta:get): la vista no lo inventa. */
+async function cargarLimiteEquipo() {
+  try {
+    const m = await window.sagitari.metaGet(hiloActual());
+    const n = Number(m && m.equipo && m.equipo.limiteMiembros);
+    if (Number.isFinite(n) && n > 0) equipoLimiteMiembros = n;
+  } catch {
+    // sin dato se dice sin número; no hay nada que avisar aquí
+  }
+  return equipoLimiteMiembros;
+}
+
+function notaEquipo() {
+  const tope = equipoLimiteMiembros ? ` Caben como máximo ${equipoLimiteMiembros} compañeros a la vez, además del líder.` : '';
+  return (
+    'En modo EQUIPO el agente pasa a líder: reparte tu encargo entre compañeros vivos, ellos se escriben por un buzón y apuntan lo que hacen en un tablero compartido.' +
+    tope +
+    ' Aquí se ve el encargo de cada uno, el buzón y el tablero de ESTA conversación.'
+  );
+}
+
+/** Una tarjeta de miembro: la misma piel que las de la vista Agentes (.acard). */
+function equipoCard(m) {
+  const look = K.subagent(m.spec) || { icon: 'agents', cls: 'a-p2' };
+  const est = estadoEquipo(m.estado);
+  return `<div class="acard ${est.cls}" id="equipoMiembro-${esc(m.id)}">
+    <div class="aic ${look.cls}">${ic(look.icon)}</div>
+    <div class="amain">
+      <div class="ahead"><b>${esc(m.name || m.id)}</b><span class="abadge ${est.cls}">${esc(est.label)}</span>${badgeEquipoPermisos(m)}</div>
+      <small>${esc(m.tarea || 'Sin encargo todavía')}</small>
+      ${m.spec ? `<span class="amd">especialista: ${esc(m.spec)}${m.expect ? ' · criterio: ' + esc(K.clip(m.expect, 120)) : ''}</span>` : ''}
+      ${m.atencion ? `<span class="amd">te necesita: ${esc(K.clip(m.atencion, 200))}</span>` : ''}
+      ${m.resumen ? `<span class="amd">${esc(K.clip(m.resumen, 240))}</span>` : ''}
+    </div>
+    <span class="adot"></span>
+  </div>`;
+}
+
+function equipoFilaBuzon(e, msg) {
+  const hora = new Date(msg.ts).toLocaleTimeString('es', { hour: '2-digit', minute: '2-digit' });
+  return `<div class="eqfila">
+    <span class="eqde">${esc(nombreEquipo(e, msg.de))}</span><span class="eqfl">→</span
+    ><span class="eqpara">${esc(nombreEquipo(e, msg.para))}</span
+    ><span class="eqtexto">${esc(msg.texto)}</span><span class="eqts">${hora}</span>
+  </div>`;
+}
+
+function equipoFilaTablero(e, i, n) {
+  const est = i.estado ? estadoEquipo(i.estado) : null;
+  return `<div class="eqitem">
+    <span class="eqquien">${esc(nombreEquipo(e, i.quien))}</span>
+    <span class="eqque">${esc(i.que)}${est ? ` <span class="abadge ${est.cls}">${esc(est.label)}</span>` : ''}${
+      i.nota ? `<span class="eqnota">${esc(i.nota)}</span>` : ''
+    }</span>
+  </div>`;
+}
+
+/** El resumen del cierre, con su recaída HONESTA: el motor puede cerrar un encargo sin
+    resumen (el corte por presupuesto viaja por el buzón, no aquí). Entonces no se dice
+    «terminó»: se cuenta cuántos compañeros no llegaron a cerrar su parte. Lo usan la vista
+    y la tarjeta del chat, que tienen que contar lo mismo. */
+function resumenEquipo(e) {
+  if (!e) return '';
+  if (e.resumen) return e.resumen;
+  const fallidos = [...e.miembros.values()].filter((m) => m.estado === 'fallo' || m.estado === 'interrumpido');
+  if (fallidos.length) {
+    // el título del bloque ya dice que se detuvo: aquí sólo se explica quién no llegó
+    return (
+      (fallidos.length === 1 ? 'Un compañero no terminó' : fallidos.length + ' compañeros no terminaron') +
+      ' su parte: el detalle está en el buzón y en el tablero.'
+    );
+  }
+  return e.ok === false ? 'No llegó un resumen del cierre.' : 'El equipo terminó sin resumen.';
+}
+
+/** El cierre del encargo: resumen agregado y gasto del equipo. Con `ok:false` el bloque
+    se pinta en rojo: es el estado de error del equipo (p. ej. el corte por presupuesto). */
+function equipoCierre(e) {
+  const mal = e.ok === false;
+  const g = e.gasto || {};
+  const gasto = [];
+  if (Number.isFinite(Number(g.tokens)) && Number(g.tokens) > 0) gasto.push(K.thousands(g.tokens) + ' tokens');
+  if (Number.isFinite(Number(g.costUsd)) && Number(g.costUsd) > 0) gasto.push('$' + Number(g.costUsd).toFixed(4));
+  return `<div class="eqresumen${mal ? ' err' : ''}">
+    <b>${mal ? 'El equipo se detuvo' : 'Encargo cerrado'}</b>
+    ${esc(resumenEquipo(e))}
+    ${gasto.length ? `\nGasto del equipo: ${esc(gasto.join(' · '))}` : ''}
+  </div>`;
+}
+
+/** Pinta la vista Equipo. Sin equipo en esta conversación hay tres casos HONESTOS: el
+    líder aún repartiendo (carga), un equipo vivo en otra conversación (se ofrece ir), o
+    sencillamente ninguno (vacío). */
+function renderEquipo() {
+  const box = $('#equipoMiembros');
+  if (!box) return;
+  const e = equipoDe(null, false);
+  const estadoEl = $('#equipoEstado');
+  const nota = $('#equipoNota');
+  const buzon = $('#equipoBuzon');
+  const tablero = $('#equipoTablero');
+  const cierre = $('#equipoCierre');
+  if (nota) nota.textContent = notaEquipo();
+
+  if (!e) {
+    const esperandoLider = busy && currentRunMode === 'equipo';
+    box.setAttribute('aria-busy', esperandoLider ? 'true' : 'false');
+    if (estadoEl) estadoEl.textContent = '';
+    if (buzon) buzon.innerHTML = '<div class="subnote">Ningún mensaje todavía.</div>';
+    if (tablero) tablero.innerHTML = '<div class="subnote">Nada apuntado todavía.</div>';
+    if (cierre) cierre.innerHTML = '';
+    if (esperandoLider) {
+      // estado de CARGA: el turno va en modo EQUIPO y aún no ha llegado ningún team_*
+      box.innerHTML = '<div class="subnote">El líder está repartiendo el encargo entre los compañeros…</div>';
+      return;
+    }
+    const otro = equipoEnOtroHilo();
+    box.innerHTML = vListEmpty(
+      'agents',
+      'Sin equipo en esta conversación',
+      otro
+        ? 'El equipo de esta conversación todavía no ha empezado. Hay uno en marcha en otra conversación: puedes ir a ella para seguirlo.'
+        : 'Escribe una orden en modo EQUIPO (el cuarto modo del compositor, Alt+M para llegar) y el agente pasará a líder: repartirá el trabajo entre compañeros, se verá lo que se escriben y lo que apuntan en el tablero. Aquí no hay nada aún porque esta conversación no ha levantado ningún equipo.',
+      otro ? '<button class="btn ghost" data-eqir>Ir a esa conversación</button>' : '',
+    );
+    if (otro) {
+      const b = box.querySelector('[data-eqir]');
+      if (b) b.onclick = () => openConversation(otro.convId, tituloDeConv(otro.convId));
+    }
+    return;
+  }
+
+  box.setAttribute('aria-busy', 'false');
+  const miembros = e.orden.map((id) => e.miembros.get(id)).filter(Boolean);
+  const enMarcha = miembros.filter((m) => m.estado === 'trabajando').length;
+  const esperan = miembros.filter((m) => m.estado === 'esperando').length;
+  const permisos = miembros.reduce((s, m) => s + (Number(m.permisos) || 0), 0);
+  if (estadoEl) {
+    const partes = [miembros.length === 1 ? '1 compañero' : miembros.length + ' compañeros'];
+    if (e.estado === 'vivo') {
+      partes.push(enMarcha ? enMarcha + ' en marcha' : 'ninguno trabajando');
+      if (esperan) partes.push(esperan + ' esperando permiso');
+    } else partes.push(e.ok === false ? 'se detuvo' : 'terminado');
+    if (permisos) partes.push(permisos === 1 ? '1 permiso pendiente' : permisos + ' permisos pendientes');
+    estadoEl.textContent = partes.join(' · ');
+  }
+  box.innerHTML = miembros.length
+    ? miembros.map(equipoCard).join('')
+    : '<div class="subnote">El equipo no ha levantado ningún compañero.</div>';
+  if (buzon)
+    buzon.innerHTML = e.mensajes.length
+      ? e.mensajes.map((m) => equipoFilaBuzon(e, m)).join('')
+      : '<div class="subnote">Ningún mensaje todavía: el buzón se llena cuando el líder o los compañeros se escriben.</div>';
+  if (tablero)
+    tablero.innerHTML = e.tablero.length
+      ? e.tablero.map((i, n) => equipoFilaTablero(e, i, n)).join('')
+      : '<div class="subnote">Nada apuntado todavía: el tablero es donde el equipo deja el progreso.</div>';
+  if (cierre) cierre.innerHTML = e.estado === 'fin' ? equipoCierre(e) : '';
+  // el buzón vive de lo último: el feed se lee por el final, como el del rail
+  if (buzon) buzon.scrollTop = buzon.scrollHeight;
+}
+
 // ============ tools view ============
 const TOOL_INFO = [
   ['run_command', 'terminal', 'Terminal de Windows: comandos, scripts, git…'],
@@ -506,9 +1048,11 @@ async function renderTools() {
   if (!g) return;
   let rec = {};
   try {
-    const m = await window.sagitari.metaGet();
+    const m = await window.sagitari.metaGet(hiloActual());
     rec = (m && m.riskDefaults) || {};
   } catch {}
+  // se vacía ANTES de construir la cabecera: si se limpia después, la borra
+  g.innerHTML = '';
   // v4.2: cabecera de contexto: qué es esta vista y cómo llegar a los permisos
   const head = document.createElement('div');
   head.style.cssText = 'grid-column:1/-1;margin-bottom:6px';
@@ -516,7 +1060,6 @@ async function renderTools() {
     '<div class="subnote" style="margin:0">Lo que Sagitari puede hacer por ti, agrupado por su nivel de permiso. Cambia el nivel de cada una en <b>Ajustes → Seguridad</b>.</div>';
   g.appendChild(head);
   const grupoDe = (n) => (rec[n] === 'restricted' || rec[n] === 'safe' ? rec[n] : 'confirmar');
-  g.innerHTML = '';
   for (const gr of TOOL_GROUPS) {
     const items = TOOL_INFO.filter(([n]) => grupoDe(n) === gr.key);
     if (!items.length) continue;
@@ -607,15 +1150,13 @@ async function renderTasks() {
     const d = new Date(t.updatedAt);
     const when = d.toLocaleDateString('es') + ' · ' + d.toLocaleTimeString('es', { hour: '2-digit', minute: '2-digit' });
     const err = t.lastError
-      ? `<small class="md" style="color:var(--danger)">✗ ${esc(t.lastError.step || '')}${t.lastError.tool ? ' · ' + esc(t.lastError.tool) : ''}: ${esc(String(t.lastError.message).slice(0, 120))}</small><br>`
+      ? `<small class="md" style="color:var(--danger)">✗ ${esc(t.lastError.step || '')}${t.lastError.tool ? ' · ' + esc(t.lastError.tool) : ''}: ${esc(K.clip(t.lastError.message, 120))}</small><br>`
       : '';
     const live = t.live
       ? `<small class="md">${t.live.toolCalls || 0} herramientas · ${(t.live.tokensIn || 0) + (t.live.tokensOut || 0)} tok${t.live.costUsd ? ' · $' + t.live.costUsd.toFixed(4) : ''}${t.live.toolsFired && t.live.toolsFired.length ? ' · última: ' + esc(t.live.toolsFired[t.live.toolsFired.length - 1].name) : ''}</small><br>`
       : '';
     const sched =
       t.status === 'scheduled' && t.scheduledAt ? `<small class="md">→ ${new Date(t.scheduledAt).toLocaleString('es')}</small><br>` : '';
-    // fila operable con teclado; el borrado no se ofrece mientras la tarea corre
-    it.setAttribute('tabindex', '0');
     // sin role=button: la fila lleva botones propios (pausar, reanudar, borrar…)
     it.setAttribute('aria-label', 'Tarea: ' + (t.goal || 'sin objetivo') + ' — ' + st.label);
     it.title = t.goal || '(sin objetivo)';
@@ -623,20 +1164,26 @@ async function renderTasks() {
       <div class="hmain"><b>${esc(t.goal || '(sin objetivo)')}</b>
         <small><span class="dot ${st.cls}"></span> ${st.label} · paso ${esc(t.step || '—')} · ${t.steps || 0} pasos · ${when}</small><br>
         ${sched}${live}${err}
-        ${t.result ? `<small class="md">${esc(String(t.result).slice(0, 140))}</small>` : ''}
+        ${t.result ? `<small class="md">${esc(K.clip(t.result, 140))}</small>` : ''}
       </div>
       ${t.status === 'running' ? `<button class="btn ghost sq" data-pause title="Pausar">${ic('pause')}</button>` : ''}
       ${t.status === 'paused' || t.status === 'interrupted' || t.status === 'failed' || t.status === 'pending' ? `<button class="btn primary sq" data-resume title="Reanudar">${ic('zap')}</button>` : ''}
       ${t.status === 'scheduled' ? `<button class="btn primary sq" data-runnow title="Ejecutar ahora">${ic('zap')}</button>` : ''}
       ${!['completed', 'failed', 'cancelled'].includes(t.status) ? `<button class="btn ghost sq danger" data-cancel title="Cancelar">${ic('close')}</button>` : ''}
       ${t.status === 'running' ? '' : `<button class="btn ghost sq danger" data-del title="Eliminar">${ic('trash')}</button>`}`;
-    it.addEventListener('keydown', (ev) => {
-      if (ev.target !== it || (ev.key !== 'Enter' && ev.key !== ' ')) return;
-      ev.preventDefault();
-      // Enter/Space actúa como el clic en la fila: dispara su botón principal
-      const main = it.querySelector('button:not([data-del])');
-      if (main) main.click();
-    });
+    // fila operable con teclado SOLO si tiene una acción principal: completed y
+    // cancelled únicamente traen el borrado, y una fila enfocable que no responde
+    // a Enter es una trampa para quien navega con el teclado.
+    const accionPrincipal = it.querySelector('button:not([data-del])');
+    if (accionPrincipal) {
+      it.setAttribute('tabindex', '0');
+      it.addEventListener('keydown', (ev) => {
+        if (ev.target !== it || (ev.key !== 'Enter' && ev.key !== ' ')) return;
+        ev.preventDefault();
+        // Enter/Space actúa como el clic en la fila: dispara su botón principal
+        accionPrincipal.click();
+      });
+    }
     const rb = it.querySelector('[data-resume]');
     if (rb)
       rb.onclick = async (ev) => {
@@ -687,7 +1234,7 @@ async function renderTasks() {
     if (cb)
       cb.onclick = async (ev) => {
         ev.stopPropagation();
-        if (!(await askConfirm(it, '¿Cancelar esta tarea?', String(t.goal || '').slice(0, 160)))) return;
+        if (!(await askConfirm(it, '¿Cancelar esta tarea?', K.clip(t.goal, 160)))) return;
         cb.disabled = true;
         await window.sagitari.taskCancel(t.runId);
         renderTasks();
@@ -696,7 +1243,7 @@ async function renderTasks() {
     if (db)
       db.onclick = async (ev) => {
         ev.stopPropagation();
-        if (!(await askConfirm(it, '¿Eliminar esta tarea del historial?', String(t.goal || '').slice(0, 160)))) return;
+        if (!(await askConfirm(it, '¿Eliminar esta tarea del historial?', K.clip(t.goal, 160)))) return;
         await window.sagitari.taskRemove(t.runId);
         renderTasks();
       };
@@ -766,7 +1313,7 @@ $('#taskSchedule').onclick = async () => {
   }, 4000);
 };
 $('#chatPause').onclick = async () => {
-  const r = await window.sagitari.pauseChat();
+  const r = await window.sagitari.pauseChat(hiloActual());
   if (r && r.ok === false) showToast(r.error || 'No se pudo pausar la tarea');
 };
 
@@ -779,7 +1326,6 @@ $('#projOpen').onclick = async () => {
     const r = await window.sagitari.openPath($('#projPath').value);
     if (r && r.ok) {
       $('#projMsg').textContent = 'Espacio de trabajo activo: ' + (r.workspace || r.path);
-      $('#wsPath').value = r.workspace || r.path;
       feed('Espacio de trabajo: ' + (r.workspace || r.path), 'ok');
     } else {
       $('#projMsg').textContent = (r && r.error) || 'No se pudo abrir la ruta.';
@@ -799,7 +1345,6 @@ $('#projPick').onclick = async () => {
     const s = await window.sagitari.workspaceSet(r.path);
     if (s && s.ok) {
       $('#projPath').value = s.path;
-      $('#wsPath').value = s.path;
       $('#projMsg').textContent = 'Espacio de trabajo activo: ' + s.path;
       feed('Espacio de trabajo: ' + s.path, 'ok');
     } else $('#projMsg').textContent = (s && s.error) || 'No se pudo fijar la carpeta.';
@@ -810,84 +1355,27 @@ $('#projPick').onclick = async () => {
 };
 
 // ============ misc ============
-function speak(text, { forzar = false, encolar = false } = {}) {
-  if ((!forzar && !CFG.settings.ttsEnabled) || !text) return;
-  const clean = text
-    .replace(/```[\s\S]*?```/g, ' (código) ')
-    .replace(/[*_`#>«»]/g, '')
-    .replace(/\s+/g, ' ')
-    .trim();
-  if (clean) {
-    window.sagitari.glow('speak'); // el marco late mientras habla
-    /* El `forzar` viaja al proceso principal: es él quien conoce el ajuste del TTS y el
-       silencio de los arranques de prueba, y quien decide si esta lectura sale.
-       `encolar` es lo que permite leer la respuesta por frases SIN cortar la que está
-       sonando: con la cola, la lectura avanza sola mientras el modelo sigue escribiendo. */
-    window.sagitari.speak(clean, { forzar, encolar });
-  }
-}
 
-/* ---- La respuesta se lee MIENTRAS se escribe --------------------------------------
-   Antes la voz salía entera al terminar el turno (`assistant_done`): en un turno con
-   herramientas eso eran decenas de segundos de silencio y luego un monólogo — nada que ver
-   con los modos de voz de los asistentes, donde el asistente empieza a hablar en cuanto
-   tiene la primera frase. Aquí cada trozo del stream se manda frase a frase.
-
-   El estado de la lectura es POR TURNO: `lecturaLeida` son los caracteres del stream ya
-   mandados a la voz, `lecturaSuena` distingue la primera frase (que sí corta la lectura
-   anterior, de otro turno) de las siguientes (que se encolan), y `lecturaMuda` apaga el
-   resto del turno cuando el usuario interrumpe. */
-let lecturaLeida = 0;
-let lecturaSuena = false;
-let lecturaMuda = false;
-function reiniciarLecturaVoz() {
-  lecturaLeida = 0;
-  lecturaSuena = false;
-  lecturaMuda = false;
-}
-function silenciarLecturaVoz() {
-  lecturaMuda = true;
-}
-
-/* El troceado (fin de frase sin partir decimales, saltos de línea, código fuera) vive en
-   renderer/frases.js: es la pieza delicada de esta lectura y así se puede probar desde
-   Node, sin navegador. */
-const FRASES = window.SagiFrases || { corteDeFrase: () => 0, limpiarParaVoz: (t) => String(t || ''), diceAlgo: () => false };
-
-/* Manda a la voz lo que ya esté completo. `fin` = la respuesta terminó: entonces también
-   va la cola sin punto (una frase suelta al final se lee, no se pierde). */
-function hablarEnFlujo(texto, fin) {
-  if (lecturaMuda) return;
-  const bruto = String(texto || '');
-  if (!bruto) return;
-  /* El stream puede ACORTARSE: en modo Plan el texto del plan se pinta como tarjeta y sale
-     del stream. Ahí no se relee nada (se saltan los caracteres que ya no existen) — el
-     error contrario, repetir en voz alta lo mismo, se oiría como un tartamudeo. */
-  if (bruto.length < lecturaLeida) lecturaLeida = bruto.length;
-  const abierto = !!(window.VoiceMode && window.VoiceMode.abierto());
-  for (;;) {
-    if (lecturaMuda) return;
-    const corte = FRASES.corteDeFrase(bruto.slice(lecturaLeida), fin);
-    if (corte <= 0) return;
-    const trozo = bruto.slice(lecturaLeida, lecturaLeida + corte);
-    lecturaLeida += corte;
-    const limpio = FRASES.limpiarParaVoz(trozo);
-    if (!FRASES.diceAlgo(limpio)) continue; // una línea de signos no gasta una síntesis
-    speak(limpio, { forzar: abierto, encolar: lecturaSuena });
-    lecturaSuena = true;
-  }
-}
-// cuando la voz termina (el proceso TTS sale), el glow vuelve a su calma
-window.sagitari.onTtsDone && window.sagitari.onTtsDone(() => glowOffSoon());
 function showToast(text) {
-  document.querySelectorAll('.toast').forEach((t) => t.remove());
+  // los avisos se apilan: uno nuevo NO debe borrar el anterior antes de que se lea.
+  // Se conservan 3 como máximo y el más viejo cae primero (ya tiene su temporizador).
+  // El contenedor los coloca en columna: sin él los tres se pintaban en el MISMO punto
+  // y el nuevo tapaba al viejo, que se iba sin que nadie lo hubiera leído.
+  let pila = $('#toastStack');
+  if (!pila) {
+    pila = document.createElement('div');
+    pila.id = 'toastStack';
+    document.body.appendChild(pila);
+  }
+  const previos = pila.querySelectorAll('.toast');
+  if (previos.length >= 3) previos[0].remove();
   const t = document.createElement('div');
   t.className = 'toast';
   // aviso no bloqueante: el lector de pantalla lo anuncia sin robar el foco
   t.setAttribute('role', 'status');
   t.setAttribute('aria-live', 'polite');
   t.innerHTML = `<span class="dot pur"></span>${esc(text)}`;
-  document.body.appendChild(t);
+  pila.appendChild(t);
   setTimeout(() => t.remove(), 3200);
 }
 /** Texto del pie: qué modelo está en uso y de qué proveedor. Sin estados: la
@@ -988,14 +1476,17 @@ function cselAbrir(sel) {
   // contenedor (antes .main lo recortaba). Se mide con la lista ya pintada, se ancla
   // al botón, se voltea hacia arriba si abajo no cabe y se mantiene dentro de la vista.
   const r = caja.getBoundingClientRect();
-  const alto = Math.min(300, menu.scrollHeight || 300);
   menu.style.width = Math.round(r.width) + 'px';
+  // el menú nace [hidden] (display:none) y sin caja scrollHeight mide siempre 0:
+  // se le da caja un instante para medirlo de verdad. Todo ocurre en el mismo tick,
+  // así que no llega a pintarse en una posición provisional.
+  menu.hidden = false;
+  const alto = Math.min(300, menu.scrollHeight || 300);
   const cabeAbajo = window.innerHeight - r.bottom - 8 >= Math.min(alto, 200);
   const arriba = !cabeAbajo && r.top > alto;
   const top = arriba ? r.top - alto - 6 : r.bottom + 6;
   menu.style.left = Math.round(Math.max(8, Math.min(r.left - 2, window.innerWidth - r.width - 6))) + 'px';
   menu.style.top = Math.round(Math.max(8, Math.min(top, window.innerHeight - 12))) + 'px';
-  menu.hidden = false;
   const ya = menu.querySelector('.sm-item.on');
   if (ya) ya.scrollIntoView({ block: 'nearest' });
   caja.querySelector('.csel-btn').setAttribute('aria-expanded', 'true');
@@ -1296,21 +1787,32 @@ if (modelMenu)
     showToast('Modelo: ' + model);
   };
 
-// ============ frame glow: estados del agente en el marco de la app ============
+// ============ borde vivo: estados del agente en el filo de las superficies ============
 const shellEl = document.getElementById('shell');
 let frameGlowTimer = null;
-/* El COLOR lo pone el usuario (Ajustes → Apariencia) vía --glow-rgb; cada estado
-   se distingue por su RITMO, no por su tono: pensar respira lento, trabajar
-   late rápido, escuchar respira suave y hablar pulsa al ritmo de la voz. */
+/* El COLOR lo pone el usuario (Ajustes → Apariencia) vía --glow-rgb, y cada estado se
+   distingue por DÓNDE está encendida la luz, no por su tono: pensar enciende el panel
+   lateral y trabajar el compositor y la tarjeta que corre. Desde aquí sólo se pone la clase;
+   el mapa estado→superficie vive en styles.css (BORDE VIVO), en un solo sitio. */
 window.sagitari.onGlow(({ mode }) => {
-  ['think', 'work', 'listen', 'speak', 'pulse'].forEach((m) => shellEl.classList.remove('glow-' + m));
+  const ESTADOS = ['think', 'work', 'pulse'];
+  const pedido = mode === 'off' ? '' : ESTADOS.includes(mode) ? mode : 'think';
+  const actual = ESTADOS.find((m) => shellEl.classList.contains('glow-' + m)) || '';
+  /* Mismo estado = NO se toca nada. Quitar y volver a poner la misma clase deja la lista
+     igual, pero REINICIA el recorrido y hunde un momento el nivel del filo: con los
+     eventos de estado que llegan durante un turno (uno por herramienta), la luz se
+     re-encendía y el reflejo volvía a empezar en cada paso — el parpadeo que se veía «al
+     aparecer». `pulse` sí se rehace a propósito: es un acuse de un solo pase. */
+  if (pedido === actual && pedido !== 'pulse') return;
+  ESTADOS.forEach((m) => shellEl.classList.remove('glow-' + m));
   clearTimeout(frameGlowTimer);
-  if (mode === 'off') return; // sin clases = resplandor calmado por defecto
-  // `pulse` ya no reutiliza el estado de trabajo: es un pase de luz (una vuelta), que es
-  // lo que significa «acuso recibo» y no «estoy trabajando».
-  const anim = { think: 'think', work: 'work', listen: 'listen', speak: 'speak', pulse: 'pulse' }[mode] || 'think';
-  shellEl.classList.add('glow-' + anim);
-  if (mode === 'pulse') frameGlowTimer = setTimeout(() => shellEl.classList.remove('glow-pulse'), 1400);
+  if (!pedido) return; // sin clases = calma: sólo queda el filo de reposo
+  /* Forzar el recálculo: si ya estaba pulsando, quitar y poner la misma clase en el mismo
+     turno deja la lista igual y el navegador no reinicia el recorrido — el segundo
+     Ctrl+Shift+G no se vería. */
+  if (pedido === 'pulse') void shellEl.offsetWidth;
+  shellEl.classList.add('glow-' + pedido);
+  if (pedido === 'pulse') frameGlowTimer = setTimeout(() => shellEl.classList.remove('glow-pulse'), 1400);
 });
 
 /* ============ tema: acento de la UI + color e intensidad del glow ============
@@ -1402,7 +1904,7 @@ function rampaDeSuperficies(acento) {
   // SOLO la paleta de referencia se fija con sus literales, para que el tema por
   // defecto quede idéntico. Aplicarlo siempre devolvía la rampa violeta a todas las
   // paletas: el color de la interfaz cambiaba en los acentos y no en los fondos.
-  if (clave === '156,138,253') {
+  if (clave === PALETTES.violet.acc.join(',')) {
     out['--bg0-rgb'] = '6, 4, 15';
     out['--bg1-rgb'] = '16, 10, 38';
     out['--bg2-rgb'] = '22, 14, 48';
@@ -1414,11 +1916,6 @@ function rampaDeSuperficies(acento) {
     out['--face2-rgb'] = '38, 26, 76';
   }
   return (_rampas[clave] = out);
-}
-/** Un tono vecino del elegido, en grados de diferencia. */
-function gh(pal, giro) {
-  const [h, s, l] = _hsl(pal.acc2);
-  return _rgb(h + giro, Math.min(1, s * 1.02), Math.min(0.78, l * 1.0)).join(', ');
 }
 function applyTheme() {
   const s = CFG.settings || {};
@@ -1446,8 +1943,8 @@ function applyTheme() {
   r.setProperty('--glass', String(Math.min(1.3, Math.max(0.4, Number(s.glassTint) || 1))));
   // los fondos también son del tema: si no, el color cambia solo en los acentos
   for (const [token, valor] of Object.entries(rampaDeSuperficies(pal.acc))) r.setProperty(token, valor);
-  // el espectro fluye por el borde solo con aurora
-  document.getElementById('shell').classList.toggle('glow-aurora', auroraGlow);
+  /* Los tres tonos ya no giran por el marco: se conservan porque los leen el filo vivo
+     (--live-rgb sale de --glow-rgb) y la veta del pulso, que los lleva enteros. */
   // refresca las muestras de color de Ajustes si están pintadas
   document.querySelectorAll('.colordot').forEach((d) => {
     d.style.background = '';
@@ -1462,16 +1959,74 @@ function glassTintLabel(v) {
 // cambios hechos desde Ajustes se aplican al vuelo (y desde main, p.ej. relanzar glow)
 window.sagitari.onThemeChanged && window.sagitari.onThemeChanged(() => applyTheme());
 
+// ============ revisión del cambio (F2) ============
+/* Pinta un payload de cambiosDiff() dentro del contenedor dado. Es SÓLO pintura:
+   no engancha listeners (el revisor delega el clic en [data-revert]). Las rutas
+   y las líneas del diff las produce el modelo sobre tus archivos, así que TODO
+   lo que se interpola va escapado con esc(). */
+/** Números de partida de un hunk: "@@ -12,3 +12,5 @@" → {viejo, nuevo}. */
+function diffContadores(cabecera) {
+  const m = /-(\d+)(?:,\d+)?\s+\+(\d+)(?:,\d+)?/.exec(String(cabecera || ''));
+  return m ? { viejo: Number(m[1]), nuevo: Number(m[2]) } : { viejo: 1, nuevo: 1 };
+}
+
+/** Un hunk: su cabecera y sus líneas, cada una con su número y su color. */
+function diffHunk(h) {
+  const cabecera = String((h && h.cabecera) || '');
+  const lineas = h && Array.isArray(h.lineas) ? h.lineas : [];
+  const n = diffContadores(cabecera);
+  const filas = lineas.map((l) => {
+    const tipo = l && l.tipo === 'del' ? 'del' : l && l.tipo === 'add' ? 'add' : 'ctx';
+    let num;
+    if (tipo === 'add') num = n.nuevo++;
+    else if (tipo === 'del') num = n.viejo++;
+    else {
+      num = n.nuevo;
+      n.viejo++;
+      n.nuevo++;
+    }
+    const signo = tipo === 'add' ? '+' : tipo === 'del' ? '−' : ' ';
+    const texto = esc(l && l.texto !== null && l.texto !== undefined ? String(l.texto) : '');
+    return `<div class="df-line ${tipo}"><span class="df-num" aria-hidden="true">${num}</span><span class="df-sign" aria-hidden="true">${signo}</span><span class="df-text">${texto || '&nbsp;'}</span></div>`;
+  });
+  return `<div class="df-hunk">${cabecera ? `<div class="df-hunkhead">${esc(cabecera)}</div>` : ''}${filas.join('')}</div>`;
+}
+
+/** Pinta `archivos` (de cambiosDiff) dentro de `contenedor` (id o elemento). */
+function pintarDiff(archivos, contenedor) {
+  const box = typeof contenedor === 'string' ? document.getElementById(contenedor) : contenedor;
+  if (!box) return;
+  const lista = Array.isArray(archivos) ? archivos : [];
+  if (!lista.length) {
+    box.innerHTML = '<div class="subnote">No hay cambios que revisar en este turno.</div>';
+    return;
+  }
+  box.innerHTML = lista
+    .map((a) => {
+      const f = a && typeof a === 'object' ? a : {};
+      const ruta = String(f.path || '');
+      const rel = String(f.rel || f.path || '');
+      const hunks = Array.isArray(f.hunks) ? f.hunks : [];
+      const noRev = !!f.noReversible;
+      const adds = Number(f.adds) || 0;
+      const dels = Number(f.dels) || 0;
+      return `<div class="dffile">
+        <div class="df-head">
+          <span class="df-path" title="${esc(rel)}">${esc(rel)}</span>
+          <span class="df-counts"><span class="df-add">+${adds}</span><span class="df-del">−${dels}</span></span>
+          ${noRev ? '<span class="df-norev">No se puede revertir solo este archivo</span>' : ''}
+          <button class="btn ghost sq" data-revert="${esc(ruta)}" title="Revertir este archivo" aria-label="Revertir los cambios de ${esc(rel)}"${noRev ? ' disabled' : ''}>${ic('history')}</button>
+        </div>
+        <div class="df-hunks">${hunks.map(diffHunk).join('')}</div>
+      </div>`;
+    })
+    .join('');
+}
+
 // ============ init ============
 (async function init() {
   await fillSettings();
   wizardMostrar(); // v4.2: guía de primer uso si no hay modelo activo
-  try {
-    refrescarWhisperUi();
-  } catch {}
-  try {
-    refrescarPiperUi();
-  } catch {}
   fillMemorySens();
   await initSecurity();
   // los desplegables nativos (selects) pasan a ser controles con el estilo de la app
@@ -1498,15 +2053,18 @@ window.sagitari.onThemeChanged && window.sagitari.onThemeChanged(() => applyThem
     // de esta misma burbuja, heredando el modo del arranque
     const b = bubble('ai');
     b.innerHTML = fmt(
-      '**Sagitari online.** Antes de hablar conmigo, ve a **Ajustes** y activa un proveedor y modelo (OpenCode Go, OpenRouter, Ollama…).',
+      '**Sagitari online.** Antes de escribirme, ve a **Ajustes** y activa un proveedor y modelo (OpenCode Go, OpenRouter, Ollama…).',
     );
   }
   // recupera la conversación activa si la app se cerró a medias
   try {
     const list = await window.sagitari.convList();
+    listaConvs = list; // de aquí sale el nombre de su pestaña
     if (list.length) {
       const r = await window.sagitari.convOpen(list[0].id);
+      if (r.ok) recordarHilo(list[0].id, list[0].title); // el hilo restaurado es el que manda
       if (r.ok && r.messages.length) resetChatView(r.messages);
+      if (r.ok) pintarHiloActivo(); // el título y el turno de ESA conversación, en su cabecera
     }
   } catch {}
 })();

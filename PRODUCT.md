@@ -15,7 +15,7 @@ Audiencia **amplia y deliberada**: desde personas que empiezan en el mundo de la
 hasta gente experta. Todas en Windows, con su propio equipo como superficie de
 trabajo.
 
-- El principiante instala un `.exe`, pega su API key y escribe o dicta: no sabe —ni
+- El principiante instala un `.exe`, pega su API key y escribe: no sabe —ni
   quiere saber— qué es una terminal. El README está escrito para él.
 - El experto quiere un agente con manos en su máquina: auditable, con modelo propio,
   sin suscripciones ni cajas negras.
@@ -27,7 +27,7 @@ avanzada debe seguir disponible para el experto sin estorbar en el camino simple
 ## Product Purpose
 
 SAGITARI es un asistente agéntico de IA que vive en el escritorio de Windows y
-**ejecuta de verdad**: pide algo escribiendo o dictando, y el agente planifica, usa
+**ejecuta de verdad**: pide algo escribiendo, y el agente planifica, usa
 la terminal, lee y escribe archivos, abre aplicaciones, gestiona ventanas y maneja
 Chrome/Edge, con cada paso a la vista en la interfaz.
 
@@ -72,8 +72,6 @@ Lo sostienen tres cosas que el producto ya hace:
   `%APPDATA%\SagitariAI\` (claves cifradas con DPAPI). Sin cuentas y sin telemetría.
 - **Navegador**: el agente controla Chrome/Edge por el protocolo DevTools con un
   perfil persistente propio, así que los inicios de sesión del usuario se conservan.
-- **Voz**: dictado con los reconocedores de voz de Windows y lectura en voz alta
-  (TTS). Para máxima precisión se pide activar el reconocimiento en línea del sistema.
 - **Espacio de trabajo**: carpeta por defecto (`Escritorio\Sagitari`) donde el agente
   crea y modifica archivos y ejecuta comandos si no se le da una ruta absoluta.
 - **Ritual de release**: un tag `v*` dispara CI (tests + comprobación sobre la
@@ -84,18 +82,42 @@ Lo sostienen tres cosas que el producto ya hace:
 
 **Capacidades confirmadas**
 
-- Chat con modos Think / Plan / Act, adjuntos (imágenes como partes de visión y 30+
-  formatos de texto leídos solos) e historial de conversaciones separadas.
+- Chat con modos Think / Plan / Act / **Equipo** (**PLAN es solo lectura de verdad**: catálogo
+  recortado y rechazo al ejecutar), adjuntos (imágenes como partes de visión y 30+
+  formatos de texto leídos solos), órdenes de barra (`/compact`, `/cost`, `/clear`,
+  `/new`, `/model`, `/help`) e historial con **varias conversaciones abiertas a la
+  vez** (cada una con su agente, su turno y su rastro; cerrar la pestaña no borra la
+  conversación), con bifurcación y rebobinado del hilo.
+- Proveedores: 22 presets con el endpoint documentado por su fabricante (OpenCode Go,
+  OpenRouter, OpenAI, Anthropic, Groq, Gemini, DeepSeek, xAI, Mistral, Moonshot,
+  Cerebras, NVIDIA, SambaNova y los locales Ollama, LM Studio, llama.cpp, vLLM, Jan,
+  KoboldCpp, text-generation-webui, LocalAI) más endpoint propio, con el protocolo
+  (OpenAI / Anthropic / Responses) forzable por proveedor.
+- **EQUIPO**: un cuarto modo del compositor (junto a ACT/PLAN/THINK) en el que el
+  agente pasa a **líder**: trocea la orden, levanta hasta **4 compañeros** vivos —los
+  especialistas del registro, de serie o de disco— que trabajan **en paralelo** con su
+  propio modelo y su propio permiso, se **hablan por un buzón** asíncrono (entrega real,
+  también a un compañero en marcha), apuntan en un **tablero compartido** y se agregan al
+  final. Con tope de 4 a la vez y un presupuesto editable (`equipoPresupuestoUsd`) que, al
+  agotarse, para al equipo y lo dice. Vista propia con miembros, buzón y tablero.
 - Autonomía: tareas en segundo plano con pausa/reanudación/cancelación, subagentes
-  especialistas, checkpoints y fallback de modelos si un proveedor falla.
+  especialistas (los de serie y los que el usuario define con `AGENT.md` en disco),
+  checkpoints y fallback de modelos si un proveedor falla —**solo a los proveedores
+  que el usuario haya elegido como reserva**, nunca a un guardado cualquiera.
 - Conocimiento: motor de skills (formato `SKILL.md`) con carga bajo demanda, importación
   desde GitHub y marketplace curado; memoria persistente y hábitos observados.
 - Control: terminal, archivos, apps, portapapeles, notificaciones, multimedia y
-  ventanas; automatización de navegador; capturas que el modelo ve.
+  ventanas; automatización de navegador; **git estructurado** (`git_status`, `git_diff`,
+  `git_log`, `git_branch`, `git_commit`, sin operaciones que reescriban historia) y
+  **`web_fetch`** para leer una página sin abrir el navegador; capturas que el modelo ve.
+- Revisión: el panel del turno enseña el cambio archivo a archivo (contadores, hunks y
+  vuelta atrás de un solo archivo) y el compositor lleva un medidor de contexto en vivo.
 - Seguridad: permisos por herramienta, guardarraíles de pasos/tiempo/tokens/coste,
-  detección de bucles, logs JSONL locales y modo desarrollador opcional.
-- Interfaz: 9 secciones, seis paletas de acento, intensidad de glow configurable,
-  atajos (`Alt+1…9`, `Ctrl+Alt+S`, `Alt+Shift+S`, `Ctrl+Shift+G`, `Alt+M`, `/`).
+  detección de bucles, **modo de aceptar ediciones de archivo sin preguntar** (nunca
+  comandos ni ejecución), logs JSONL locales y modo desarrollador opcional.
+- Interfaz: 11 secciones, seis paletas de acento, intensidad de glow configurable,
+  atajos (`Alt+1…9`, `Ctrl+Alt+S`, `Alt+Shift+S`, `Ctrl+Shift+G`, `Alt+M` —que ahora cicla
+  los cuatro modos—, `/`).
 
 **Restricciones técnicas**
 
@@ -115,7 +137,7 @@ justificación (ver _Brand Commitments_).
 
 - **Nombre y activos**: SAGITARI, con marca y logotipo propios (`renderer/assets/`,
   `docs/header.png`). El icono se mantiene coherente en la barra de tareas de Windows.
-- **Voz**: español primero, con paridad bilingüe en README y notas de versión —un
+- **Idioma**: español primero, con paridad bilingüe en README y notas de versión —un
   compromiso de larga duración, no una traducción suelta.
 - **Identidad visual fijada**: interfaz holográfica hecha a mano, con glow reactivo
   que ilumina el marco según lo que hace el agente (color e intensidad configurables).

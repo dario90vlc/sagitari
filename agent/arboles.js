@@ -37,6 +37,7 @@ const fs = require('fs');
 const fsp = require('fs/promises');
 const path = require('path');
 const { spawn } = require('child_process');
+const datadir = require('./datadir');
 
 const VIVEN = new Map(); // id -> { ws, dir, base }  (los que siguen en pie)
 
@@ -114,6 +115,11 @@ async function sinSeguimiento(ws) {
 async function crear(ws, opts = {}) {
   if (!(await disponible(ws))) return null;
   const id = opts.id || nuevoId();
+  /* El directorio de git del repositorio donde vive el espacio de trabajo. Se guarda para
+     poder desmontar el árbol cuando el espacio de trabajo YA NO EXISTE (ver `podar`): es el
+     caso que dejaba registros fantasma dentro del repositorio del usuario. */
+  const gdir = await git(['rev-parse', '--absolute-git-dir'], ws, { timeout: 15000 });
+  const gitDir = gdir.code === 0 ? String(gdir.stdout).trim() : '';
   const dir = path.join(os.tmpdir(), 'sagitari-arboles', id);
   await fsp.rm(dir, { recursive: true, force: true }).catch(() => {});
   await fsp.mkdir(path.dirname(dir), { recursive: true }).catch(() => {});
@@ -133,6 +139,7 @@ async function crear(ws, opts = {}) {
   const add = await git(['worktree', 'add', '--detach', dir, base], ws);
   if (add.code !== 0) {
     await fsp.rm(dir, { recursive: true, force: true }).catch(() => {});
+    await podar({ gitDir }); // el add pudo registrar el árbol antes de fallar
     return null;
   }
 
@@ -176,7 +183,7 @@ async function crear(ws, opts = {}) {
     if (rev.code === 0) base = String(rev.stdout).trim();
   }
 
-  const arbol = { id, ws, dir, base, creado: Date.now() };
+  const arbol = { id, ws, dir, base, gitDir, creado: Date.now() };
   VIVEN.set(id, arbol);
   return arbol;
 }
@@ -243,17 +250,68 @@ async function fusionar(arbol, opts = {}) {
   };
 }
 
+/** Poda los registros de árboles cuya carpeta ya no está. Se llama SOLO cuando el
+    desmontaje normal no pudo correr: si el comando de git falla (el espacio de trabajo
+    desapareció bajo los pies, git no está en el PATH, la carpeta está bloqueada), el
+    registro se queda dentro del repositorio DEL USUARIO y `git worktree list` acumula
+    fantasmas. La poda va contra el DIRECTORIO DE GIT y corre desde el temporal: es lo único
+    que sigue existiendo cuando lo que falla es, precisamente, el espacio de trabajo. */
+async function podar(arbol) {
+  if (!arbol || !arbol.gitDir) return;
+  await git(['--git-dir', arbol.gitDir, 'worktree', 'prune'], os.tmpdir(), { timeout: 15000 });
+}
+
+/** Conserva el árbol para que el usuario pueda mirarlo SIN dejar su registro dentro del
+    repositorio DEL USUARIO: se MUEVE a la carpeta de datos de la app (fuera del control de
+    git) y se poda la entrada de `.git/worktrees` — con la carpeta ya fuera de su sitio
+    original, `git worktree prune` la quita. Conservar el DIRECTORIO no obliga a conservar
+    el REGISTRO: cada conflicto dejaba un `arbol-<id>` fantasma para siempre, y ningún
+    camino del código volvía a llamar a `descartar` para él (el árbol sale de VIVEN). */
+async function conservarFueraDeGit(arbol) {
+  const destino = path.join(datadir.dataDir(), 'arboles', arbol.id);
+  let movido = false;
+  try {
+    await fsp.rm(destino, { recursive: true, force: true });
+    await fsp.mkdir(path.dirname(destino), { recursive: true });
+    await fsp.rename(arbol.dir, destino); // casi siempre el mismo disco: instantáneo
+    movido = true;
+  } catch {
+    try {
+      await fsp.cp(arbol.dir, destino, { recursive: true, force: true });
+      await fsp.rm(arbol.dir, { recursive: true, force: true });
+      movido = true;
+    } catch {}
+  }
+  arbol.conservado = true;
+  if (!movido) return; // no se pudo mover: se queda donde estaba (peor sitio, pero intacto)
+  /* El `.git` del árbol apunta al registro que se acaba de podar: si se queda, la carpeta
+     conservada parece un árbol de trabajo roto en vez de una copia para mirar. */
+  await fsp.rm(path.join(destino, '.git'), { force: true, recursive: true }).catch(() => {});
+  arbol.conservadoDir = destino;
+  arbol.dir = destino;
+  await podar(arbol);
+}
+
 /** Desmonta el árbol (siempre se llama, haya ido bien o mal la fusión). */
 async function descartar(arbol, opts = {}) {
   if (!arbol) return;
   VIVEN.delete(arbol.id);
   if (opts.conservar) {
-    // un conflicto merece que el usuario pueda mirar el árbol antes de perderlo
-    arbol.conservado = true;
-    return;
+    // un conflicto merece que el usuario pueda mirar el árbol antes de perderlo, pero sin
+    // dejar el registro dentro de su repositorio (ver `conservarFueraDeGit`)
+    await conservarFueraDeGit(arbol);
+    return arbol.conservadoDir ? { conservadoEn: arbol.conservadoDir } : {};
   }
-  await git(['worktree', 'remove', '--force', arbol.dir], arbol.ws).catch(() => {});
+  /* Primero el camino normal. Si el comando no puede correr —el espacio de trabajo ya no
+     existe, git no está en el PATH, la carpeta está bloqueada— el registro del árbol no se
+     puede quedar dentro del repositorio DEL USUARIO: se reintenta contra el directorio de
+     git, que sigue en pie aunque el espacio de trabajo se haya ido. */
+  const quitado = await git(['worktree', 'remove', '--force', arbol.dir], arbol.ws);
   await fsp.rm(arbol.dir, { recursive: true, force: true }).catch(() => {});
+  if (quitado.code !== 0) {
+    if (arbol.gitDir) await git(['--git-dir', arbol.gitDir, 'worktree', 'remove', '--force', arbol.dir], os.tmpdir(), { timeout: 15000 });
+    await podar(arbol); // y sin carpeta que conservar, la poda cierra el caso
+  }
   try {
     await fsp.rm(arbol.parche, { force: true });
   } catch {}

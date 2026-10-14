@@ -78,6 +78,10 @@ const ACTIONS = new Set([
 
 const sleep = (ms) => new Promise((r) => setTimeout(r, ms));
 
+/* Detener aborta la acción en vuelo (espera de carga, `settle`, `wait_for`…): este
+   es el mensaje que recibe el modelo en vez de dejarlo esperando a que acabe. */
+const CANCELADO = 'Error: acción del navegador cancelada por el usuario (Detener).';
+
 /* ============================================================================
    v2.5 — NAVEGADOR 2
 
@@ -391,6 +395,7 @@ class Browser {
     this._downloads = []; // v2.5: descargas vistas (para avisar dónde cayeron)
     this.downloadDir = path.join(os.tmpdir(), 'sagitari-downloads');
     this._queue = Promise.resolve(); // una acción de navegador a la vez (ver handle)
+    this._signal = null; // AbortSignal de la acción en vuelo (Detener la corta)
     // carpeta de datos del perfil activo (persistentes: los logins sobreviven)
     this.profileDir = ensureProfileDir('default');
   }
@@ -929,6 +934,7 @@ class Browser {
     // la página nueva (y el siguiente elements/content leían la vieja).
     await sleep(150);
     while (Date.now() < deadline) {
+      if (this._abortada()) return false; // Detener: no esperar a que cargue
       if (fired) return true; // el evento manda: es la carga de la página nueva
       try {
         if ((await this.evalJs('document.readyState', sessionId)) === 'complete') return true;
@@ -963,6 +969,7 @@ class Browser {
     } catch {}
     const deadline = Date.now() + timeoutMs;
     while (Date.now() < deadline) {
+      if (this._abortada()) return false; // Detener: no esperar al periodo de calma
       await sleep(80);
       try {
         const idle = await this.evalJs(
@@ -1495,6 +1502,7 @@ class Browser {
     const t0 = Date.now();
     let visto = false;
     while (Date.now() - t0 < timeout) {
+      if (this._abortada()) return CANCELADO;
       try {
         if ((await this.evalJs(expr, sessionId)) === true) {
           visto = true;
@@ -1596,8 +1604,11 @@ class Browser {
    * dos agentes a la vez se pisaban: el elements() de uno invalidaba el del otro y
    * su clic_index se despachaba contra la pestaña del otro.
    */
-  async handle(args, ownerId) {
-    const run = () => this._handle(args, ownerId);
+  async handle(args, ownerId, opts = {}) {
+    const signal = (opts && opts.signal) || null;
+    // Detener antes de encolar: no tiene sentido arrancar una acción ya cancelada
+    if (signal && signal.aborted) return CANCELADO;
+    const run = () => this._handle(args, ownerId, opts);
     const next = this._queue.then(run, run);
     this._queue = next.then(
       () => {},
@@ -1613,15 +1624,43 @@ class Browser {
     return res;
   }
 
-  async _handle(args, ownerId) {
+  async _handle(args, ownerId, opts = {}) {
+    /* El signal viaja en la INSTANCIA (no en cada firma): la cola garantiza una sola
+       acción a la vez, y así también lo ven los helpers que ya cuelgan de `this`
+       (waitReady, settle, waitFor). Se limpia al acabar. */
+    this._signal = (opts && opts.signal) || null;
+    try {
+      return await this._despachar(args, ownerId);
+    } finally {
+      this._signal = null;
+    }
+  }
+
+  /** ¿Se ha pedido Detener mientras corre esta acción? */
+  _abortada() {
+    return !!(this._signal && this._signal.aborted);
+  }
+
+  /** Sueño interrumpible: se corta en cuanto llega el abort (hasta 10 s de `wait`). */
+  async _dormir(ms) {
+    const fin = Date.now() + Math.max(0, Number(ms) || 0);
+    for (;;) {
+      if (this._abortada()) return;
+      const queda = fin - Date.now();
+      if (queda <= 0) return;
+      await sleep(Math.min(100, queda));
+    }
+  }
+
+  async _despachar(args, ownerId, { retried = false } = {}) {
     const a = args.action;
+    if (this._abortada()) return CANCELADO;
     if (!ACTIONS.has(a)) return `Acción desconocida: ${a}. Válidas: ${[...ACTIONS].join(', ')}.`;
     /* v2.5: con un diálogo abierto casi nada funciona (la página está pausada) y antes
        cada acción se quedaba 30 s hasta el timeout. Mejor decirlo en claro y de una. */
     if (this._dialog && !['dialog', 'logs', 'tabs', 'close', 'launch', 'new_tab', 'select_tab', 'screenshot'].includes(a)) {
       return `Error: la página tiene un diálogo abierto («${this._dialog.type}»: ${(this._dialog.message || '').slice(0, 120)}) que la tiene pausada. Contéstalo con action=dialog accept:true|false (text para un prompt) y sigue.`;
     }
-    let retried = false;
     try {
       if (a === 'launch') return await this.launch(args.browser, args.url);
       if (a === 'profile') return await this.switchProfile(args.profile);
@@ -1835,7 +1874,8 @@ class Browser {
 
         case 'wait': {
           const ms = Math.min(Math.max(0, Number(args.ms) || 1000), 10000);
-          await sleep(ms);
+          await this._dormir(ms);
+          if (this._abortada()) return CANCELADO;
           return `OK: esperados ${ms} ms.`;
         }
 
@@ -1909,9 +1949,12 @@ class Browser {
       // «Session with given id not found»; ahora se invalida la caché y se
       // reintenta UNA vez, que es lo que la autocuración promete.
       if (!retried && /session with given id/i.test(String(e && e.message))) {
-        retried = true;
+        /* Reintento DENTRO de la misma acción ya serializada: llamar otra vez a
+           `handle` encolaría esta continuación detrás del propio task que la espera y
+           se quedaría colgada para siempre (y con ella TODAS las acciones siguientes).
+           Se reentra en `_despachar` directamente, marcando `retried` para no repetir. */
         this._sessions.clear();
-        return this.handle(args);
+        return this._despachar(args, ownerId, { retried: true });
       }
       return 'Error: ' + e.message;
     }

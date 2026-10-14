@@ -1,12 +1,20 @@
 'use strict';
 
 // SAGITARI — Electron main process
-// Chat window + click-through screen-edge glow overlay + agent + voice + settings.
+// Chat window + click-through screen-edge glow overlay + agent + settings.
 
 const { app, ipcMain, desktopCapturer, screen, globalShortcut, shell, dialog } = require('electron');
 const path = require('path');
 const fs = require('fs');
 const fsp = require('fs/promises');
+
+/* Red de seguridad del proceso, EN LO ALTO. Los `require` de más abajo hacen trabajo real
+   al importarse (ipc-convs lee conversations.json, runlog abre su log…) y un fallo ahí se
+   quedaba sin red hasta mucho después. `registrarFallo` es una declaración de función (se
+   eleva) y tolera que sus dependencias aún no existan: cada acceso frágil va en su try. */
+let avisosDeFallo = 0;
+process.on('uncaughtException', (err) => registrarFallo('uncaughtException', err));
+process.on('unhandledRejection', (reason) => registrarFallo('unhandledRejection', reason));
 
 const {
   KEY_PREFIX,
@@ -19,6 +27,7 @@ const {
 } = require('./config');
 const { crearVentana } = require('./ventana');
 const { crearBandeja } = require('./bandeja');
+const { createRuntimes } = require('./runtimes');
 const log = require('./log');
 
 const DEV = process.argv.includes('--dev');
@@ -64,7 +73,14 @@ registerSkillsIpc(ipcMain, { skills, runlog: require('../agent/runlog') });
 
 // ---- memoria/hábitos/salud: router en main/ipc-memory.js (tercer router de la fase 4) ----
 const { registerMemoryIpc } = require('./ipc-memory');
-registerMemoryIpc(ipcMain, { memory: require('../agent/memory'), models: require('../agent/models'), habits: require('../agent/habits') });
+registerMemoryIpc(ipcMain, {
+  memory: require('../agent/memory'),
+  models: require('../agent/models'),
+  habits: require('../agent/habits'),
+  /* Perezoso a propósito: `getWin` se asigna al crear la ventana (más abajo) y el router
+     solo lo necesita cuando el almacén avisa de una propuesta, ya con la app en marcha. */
+  getWin: () => getWin(),
+});
 const marketplace = require('../agent/marketplace');
 const habits = require('../agent/habits');
 const { McpManager, serverSlug } = require('../agent/mcp');
@@ -78,7 +94,7 @@ registerMcpIpc(ipcMain, {
   mcpState,
   mcpExport,
   setAgentPolicy: (sec) => {
-    if (agent) agent.setPolicy(sec);
+    for (const a of runtimes.allAgents()) a.setPolicy(sec);
   },
   mcpConfig,
   serverSlug,
@@ -125,7 +141,11 @@ if (!gotLock) {
   try {
     process.stdout.write('SAGITARI ya está abierta: se muestra la ventana existente.\n');
   } catch {}
-  app.quit();
+  /* En un arranque de PRUEBA, perder el bloqueo es un fallo: el smoke mide que la app
+     abra ventana de verdad (su veredicto es el código de salida) y aquí no se llega a
+     crear ninguna. Salir con 0 hacía que el arnés lo contara como verde. */
+  if (HEADLESS) app.exit(9);
+  else app.quit();
 }
 app.on('second-instance', () => showWindow());
 
@@ -142,12 +162,12 @@ let config = {
     glowColor: 'match',
     glowStrength: 1,
     glassTint: 1,
-    ttsEnabled: true,
-    voiceLang: 'es-ES',
     glowEnabled: true,
     userName: 'Darío',
     mode: 'act',
     maxConcurrentTasks: 1,
+    // v4.4: tope de gasto por encargo de equipo en USD (0 = sin tope propio)
+    equipoPresupuestoUsd: 0,
     autoResumeTasks: true,
     llmTimeoutMs: 120000,
     showThinking: false,
@@ -159,17 +179,29 @@ let config = {
     promptCache: true,
     hookEditar: '',
     hookCerrar: '',
+    /* Fase 1 de memoria: aprender de las conversaciones (propone y espera aprobación) y
+       guardar sin preguntar (acepta solo lo propuesto). El aprendizaje es opt-out — viene
+       encendido porque sin él la memoria no se llena sola—; guardar solo, opt-in. */
+    memoryLearn: true,
+    memoryAutoSave: false,
   },
   mcp: { enabled: true, servers: [] }, // servidores MCP del usuario (ver main/mcp-config.js)
 };
 
-// Ventana principal: se crea aquí con dependencias lazy (agent y config se asignan más tarde)
+// Ventana principal: se crea aquí con dependencias lazy (agentes y config se asignan más tarde)
 const ventana = crearVentana({
   HIDDEN,
   DEV,
   INDEX_HTML: path.join(__dirname, '..', 'renderer', 'index.html'),
-  getAgent: () => agent,
+  /* ventana.js solo usa esto para parar el chat cuando el proceso de render se cae
+     ('render-process-gone'): con varias conversaciones hay que pararlas TODAS, así que
+     se le da el «parar todo» del registro (lo mismo que hace el cierre ordenado). */
+  getAgent: () => ({ stop: () => runtimes.stopAll() }),
   getConfig: () => config,
+  saveConfig,
+  /* La ventana ya está cargada: es el momento de soltar los avisos que llegaron antes de
+     que existiera (el historial ilegible se detecta al cargar conversations.json). */
+  onListo: () => soltarAvisos(),
 });
 const { createChatWindow, showWindow, glow, getWin } = ventana;
 
@@ -207,8 +239,17 @@ function configParaDisco() {
     providers: (config.providers || []).map(paint),
     active: paint(config.active),
     // los tokens de los servidores MCP viven en env/headers: mismo trato que las claves
-    mcp: { ...config.mcp, servers: ((config.mcp && config.mcp.servers) || []).map(protectServerSecrets) },
+    mcp: { ...config.mcp, servers: ((config.mcp && config.mcp.servers) || []).map(protegerServidorMcp) },
   };
+}
+
+/** env/headers siempre cifrados y la URL SOLO si lleva credenciales
+    (`https://usuario:token@host` o `?key=…`): un token pegado en la URL no puede quedar
+    en claro en config.json (que es justo lo que la migración a cifrado evita) ni viajar
+    sin enmascarar a la vista (ver mcpState). Una URL normal se guarda legible. */
+function protegerServidorMcp(s) {
+  const prot = protectServerSecrets(s);
+  return s && mcpConfig.urlLlevaCredenciales(s.url) ? { ...prot, url: protectKey(s.url) } : prot;
 }
 /** Alguna clave sin cifrar en memoria → hay que reescribir el fichero. */
 function needsKeyEncryption() {
@@ -216,30 +257,69 @@ function needsKeyEncryption() {
   const sinCifrar = (p) => !!(p && typeof p.apiKey === 'string' && p.apiKey && !p.apiKey.startsWith(KEY_PREFIX));
   if (sinCifrar(config.active) || (config.providers || []).some(sinCifrar)) return true;
   // los secretos de un servidor MCP también cuentan: si se quedaran en claro, un
-  // config.json copiado expondría los tokens igual que antes con las claves
-  return ((config.mcp && config.mcp.servers) || []).some((s) =>
-    [...Object.values(s.env || {}), ...Object.values(s.headers || {})].some((v) => v && !String(v).startsWith(KEY_PREFIX)),
+  // config.json copiado expondría los tokens igual que antes con las claves. La URL con
+  // credenciales es uno de esos secretos (y así migra a cifrado en el siguiente arranque).
+  return ((config.mcp && config.mcp.servers) || []).some(
+    (s) =>
+      [...Object.values(s.env || {}), ...Object.values(s.headers || {})].some((v) => v && !String(v).startsWith(KEY_PREFIX)) ||
+      (mcpConfig.urlLlevaCredenciales(s.url) && !String(s.url).startsWith(KEY_PREFIX)),
   );
 }
 
 function applyConfig(raw) {
   config = { ...config, ...raw, settings: { ...config.settings, ...(raw.settings || {}) } };
+  /* Una clave que NO se puede descifrar (config copiada de otro equipo o perfil, o
+     clave maestra recreada) es una condición ESPERADA y recuperable, no un fallo
+     interno: la app arranca, el proveedor queda marcado y se le pide al usuario que
+     la vuelva a escribir. Antes esto entraba por `registrarFallo` y sacaba un diálogo
+     modal «SAGITARI — fallo interno» antes de poder usar nada — con la clave intacta
+     en disco, que es justo lo que el propio módulo documenta que debe pasar. */
+  const ilegible = (p) => {
+    if (!p || typeof p !== 'object') return p;
+    try {
+      log.warn('[SAGITARI] hay una clave guardada que este equipo no puede descifrar: vuelve a escribirla en Ajustes');
+    } catch {}
+    try {
+      runlog.log({ agent: 'sagitari', event: 'key_unreadable' });
+    } catch {}
+    return { ...p, keyUnreadable: true };
+  };
   // de disco llegan cifradas: en memoria el agente necesita el valor real
-  if (config.active && config.active.apiKey)
-    config.active = { ...config.active, apiKey: revealKey(config.active.apiKey, (k, e) => registrarFallo(k, e)) };
-  config.providers = (config.providers || []).map((p) =>
-    p && p.apiKey ? { ...p, apiKey: revealKey(p.apiKey, (k, e) => registrarFallo(k, e)) } : p,
-  );
+  if (config.active && config.active.apiKey) {
+    config.active = ilegible({ ...config.active, apiKey: revealKey(config.active.apiKey) });
+  }
+  config.providers = (config.providers || []).map((p) => (p && p.apiKey ? ilegible({ ...p, apiKey: revealKey(p.apiKey) }) : p));
   config.security = {
     permissions: { ...((raw.security && raw.security.permissions) || {}) },
     guardrails: { ...securityDefaults.guardrails, ...((raw.security && raw.security.guardrails) || {}) },
+    /* Derivado, no un segundo sitio donde guardarlo: `autoEdits` es una preferencia del
+       usuario y vive en `settings` (que es lo que lee la interfaz), pero el motor de
+       permisos solo recibe la POLÍTICA. Al recomponer `security` en cada arranque, esto
+       mantiene al agente y al interruptor de acuerdo sin duplicar el dato. */
+    autoEdits: config.settings.autoEdits === true,
   };
   // MCP: la lista de servidores la valida el módulo puro (comando, URL, timeout)
   const mcpRaw = raw.mcp && Array.isArray(raw.mcp.servers) ? raw.mcp.servers : [];
   const servers = [];
-  for (const s of mcpRaw) {
+  for (const def of mcpRaw) {
+    let secretoIlegible = false;
+    const marcar = () => {
+      secretoIlegible = true;
+    };
+    /* La URL con credenciales viaja cifrada (ver configParaDisco): se descifra ANTES de
+       validarla. Si no se puede descifrar (config copiada de otro equipo o perfil), el
+       servidor NO se tumba ni se pierde: se conserva tal cual y se marca, como con env. */
+    const s = typeof def.url === 'string' && def.url.startsWith(KEY_PREFIX) ? { ...def, url: revealKey(def.url, marcar) } : def;
+    if (typeof s.url === 'string' && s.url.startsWith(KEY_PREFIX)) {
+      servers.push({ ...s, secretUnreadable: true });
+      continue;
+    }
     const v = mcpConfig.validateServer(s);
-    if (v.ok) servers.push(revealServerSecrets(v.value, (k) => revealKey(k, (kind, err) => registrarFallo(kind, err))));
+    // mismos tokens cifrados, mismo trato: ilegible se marca, no tumba el arranque
+    if (v.ok) {
+      const rev = revealServerSecrets(v.value, (k) => revealKey(k, marcar));
+      servers.push(secretoIlegible ? { ...rev, secretUnreadable: true } : rev);
+    }
   }
   config.mcp = { enabled: raw.mcp ? raw.mcp.enabled !== false : true, servers };
 }
@@ -283,15 +363,34 @@ function saveConfig() {
     console.error silencioso le deja creyendo que se guardó algo que se perderá al
     reiniciar. Se limita a un aviso cada 30 s: un disco lleno no debe inundar el chat. */
 let avisoDiscoAt = 0;
+/* Avisos que llegan ANTES de que exista la ventana (el historial de conversaciones
+   ilegible se detecta al cargar conversations.json, en el arranque): se guardan y se
+   sueltan en cuanto la ventana está cargada. Antes se enviaban a una ventana que aún no
+   existía y el usuario no se enteraba de nada (en la app empaquetada no hay consola). */
+const avisosPendientes = [];
+function enviarAviso(titulo, mensaje) {
+  const w = getWin();
+  if (!w || w.isDestroyed()) {
+    if (avisosPendientes.length < 5) avisosPendientes.push({ titulo, mensaje });
+    return;
+  }
+  try {
+    w.webContents.send('agent:event', { type: 'toast', title: titulo, message: mensaje });
+  } catch {}
+}
+/** La ventana ya está cargada: se sueltan los avisos que no cabían antes. */
+function soltarAvisos() {
+  if (!getWin() || getWin().isDestroyed()) return;
+  while (avisosPendientes.length) {
+    const a = avisosPendientes.shift();
+    enviarAviso(a.titulo, a.mensaje);
+  }
+}
 function avisarDisco(mensaje) {
   const now = Date.now();
   if (now - avisoDiscoAt < 30000) return;
   avisoDiscoAt = now;
-  try {
-    if (getWin() && !getWin().isDestroyed()) {
-      getWin().webContents.send('agent:event', { type: 'toast', title: 'No se pudo guardar', message: mensaje });
-    }
-  } catch {}
+  enviarAviso('No se pudo guardar', mensaje);
 }
 
 /* Persiste y, si falla, avisa al usuario: los controles de Ajustes ya han
@@ -305,9 +404,10 @@ function persistConfig() {
 
 // ---------- agent wiring (v1.3: agentes de chat Y de background) ----------
 const browser = new Browser();
-let agent = null; // agente del chat interactivo
+/* v4.3: ya no hay UN agente del chat. Cada conversación tiene el suyo en `runtimes`
+   (main/runtimes.js) y pueden trabajar varias a la vez; antes cada `conv:open`
+   reapuntaba el único agente y abrir otra pestaña le robaba el turno a la primera. */
 let taskManager = null; // cola de tareas en background (agent/tasks.js)
-// (el dictado push-to-talk vive en main/ipc-voz.js — quinto router de la fase 4)
 
 const runlog = require('../agent/runlog');
 
@@ -321,7 +421,6 @@ const runlog = require('../agent/runlog');
    logs/crash.log y se avisa en pantalla. La app NO se cierra: casi siempre el
    fallo está en una operación concreta y el resto sigue funcionando.
    --------------------------------------------------------------------------- */
-let avisosDeFallo = 0;
 function registrarFallo(kind, err) {
   const message = String((err && err.message) || err || 'desconocido');
   const stack = String((err && err.stack) || '').slice(0, 4000);
@@ -353,27 +452,33 @@ function registrarFallo(kind, err) {
   }
   return message;
 }
-process.on('uncaughtException', (err) => registrarFallo('uncaughtException', err));
-process.on('unhandledRejection', (reason) => registrarFallo('unhandledRejection', reason));
 
 /* ---- rastro del turno: el estado compacto vive en main/traza.js y lo comparten
-   agentEmit (aquí, cierra el turno) y el router ipc-chat (chat:send/retry, lo abren) ---- */
+   agentEmit (aquí, cierra el turno) y el router ipc-chat (chat:send/retry, lo abren).
+   UN rastro POR conversación: con varias pestañas a la vez, uno solo mezclaría las
+   tarjetas de un turno con las de otro. ---- */
 const { trazaApunta, trazaActual, trazaCerrar } = require('./traza');
 
-function agentEmit(e, isBackground) {
+function agentEmit(convId, e, isBackground) {
   // v1.3: los eventos de tareas en background se marcan para que el renderer NO
   // los mezcle con el chat interactivo (burbujas, estado busy, etc.).
-  const out = isBackground ? { ...e, bg: true } : e;
+  // v4.3: y todo evento del chat viaja con SU conversación: con varias pestañas, el
+  // renderer necesita saber a cuál pertenece cada burbuja, cada tarjeta y cada aviso
+  // (es lo que decide, por ejemplo, en qué pestaña sale la barra de deshacer).
+  const out = isBackground ? { ...e, bg: true } : { ...e, convId };
   if (getWin() && !getWin().isDestroyed()) getWin().webContents.send('agent:event', out);
   if (e.type === 'tool') glow('work', 'work');
-  // solo el chat interactivo escribe en la conversación actual
+  // solo el chat interactivo escribe en la conversación de la que sale el evento
   if (!isBackground) {
-    trazaApunta(e);
+    trazaApunta(convId, e);
     if (e.type === 'assistant_done') {
-      glow('think');
-      const c = currentConv();
+      /* El turno ha terminado: la luz vuelve a la CALMA. Antes se ponía en `think`, así
+         que el panel lateral se quedaba encendido para siempre al acabar cada turno —
+         el estado se veía como si el agente siguiera pensando. */
+      glow('off');
+      const c = convsApi.convById(convId);
       if (c && e.text) {
-        const tt = trazaActual();
+        const tt = trazaActual(convId);
         const conTraza = tt && (tt.tools.length || (tt.think && tt.think.text) || (tt.todos && tt.todos.length)) ? tt : null;
         // Se guarda la narración COMPLETA del turno, no solo el párrafo final:
         // reabrir la conversación enseña lo mismo que se vio en vivo.
@@ -383,7 +488,7 @@ function agentEmit(e, isBackground) {
         saveConvs();
       }
       // el turno se cierra: el rastro siguiente es de otro turno
-      trazaCerrar();
+      trazaCerrar(convId);
     }
   }
 }
@@ -400,10 +505,10 @@ function wireMcp() {
   return mcp;
 }
 
-function createAgent(isBackground = false) {
+function createAgent(isBackground = false, convId = null) {
   return new Agent({
     guardrailsPolicy: config.security,
-    emit: (e) => agentEmit(e, isBackground),
+    emit: (e) => agentEmit(convId, e, isBackground),
     screenshotFn: async () => {
       const sources = await desktopCapturer.getSources({ types: ['screen'], thumbnailSize: screen.getPrimaryDisplay().size });
       const s = sources[0];
@@ -416,9 +521,33 @@ function createAgent(isBackground = false) {
   });
 }
 
-function wireAgent() {
-  agent = createAgent(false);
-}
+/* ---- v4.3: registro de agentes vivos, uno por conversación (main/runtimes.js) ----
+   `convsApi` se consulta DENTRO de las funciones: el router de conversaciones se
+   registra más abajo, cuando ya existe el historial guardado. */
+const runtimes = createRuntimes({
+  createAgent: (convId) => createAgent(false, convId),
+  mensajesDe: (convId) => {
+    const c = convsApi.convById(convId);
+    return c ? c.messages : null;
+  },
+  convActual: () => {
+    const c = convsApi.currentConv();
+    return c ? c.id : null;
+  },
+  /* Al soltar una conversación (borrada, podada o al cerrar la app) se tira también lo
+     que solo a ella pertenecía: su rastro del turno y las pre-imágenes de sus cambios
+     (guardan CONTENIDO de archivos, así que dejarlas sería retener megas de una
+     conversación que ya no existe). El dueño se deriva del id de la conversación, que es
+     lo que el agente usa como dueño (ver agent/cambios.js).
+     EXCEPCIÓN: podar un runtime ocioso NO es borrar la conversación. Sus pre-imágenes son
+     las del ÚLTIMO turno, y el botón «Deshacer el cambio» sigue en pantalla: olvidarlas
+     dejaba el botón dando error. Se olvidan cuando la conversación desaparece o al cerrar
+     (y el siguiente turno de esa conversación las reemplaza él mismo). */
+  onDispose: (convId, motivo) => {
+    trazaCerrar(convId);
+    if (motivo !== 'podado') cambios.olvidar(getWorkspace(), runtimes.ownerOf(convId));
+  },
+});
 
 // ---- v1.3: TaskManager — cola de tareas en background con notificaciones ----
 function wireTaskManager() {
@@ -428,7 +557,8 @@ function wireTaskManager() {
     agentFactory: () => createAgent(true),
     // el chat y las tareas comparten run store: «Reanudar» no puede lanzar un
     // segundo agente sobre el run que el chat está ejecutando ahora mismo
-    isRunBusy: (runId) => !!(agent && agent.isBusy() && agent.currentRunId === runId),
+    // (y el chat puede ser CUALQUIERA de las conversaciones abiertas)
+    isRunBusy: (runId) => runtimes.allAgents().some((a) => a.isBusy() && a.currentRunId === runId),
     emit: (e) => {
       if (getWin() && !getWin().isDestroyed()) getWin().webContents.send('agent:event', e);
     },
@@ -469,6 +599,11 @@ registerConfigIpc(ipcMain, {
   glow,
   getWin: () => getWin(),
   isHidden: () => HIDDEN,
+  // un ajuste de seguridad puede llegar por `settings:set` (autoEdits) y hay que
+  // empujarlo a los agentes vivos: el motor de permisos lee la política, no los ajustes
+  setAgentPolicy: (sec) => {
+    for (const a of runtimes.allAgents()) a.setPolicy(sec);
+  },
 });
 
 // ---- modo/agentes/market: router en main/ipc-modo.js (noveno router de la fase 4) ----
@@ -476,11 +611,13 @@ const { registerModoIpc } = require('./ipc-modo');
 registerModoIpc(ipcMain, {
   config: () => config,
   saveConfig,
-  getAgent: () => agent,
+  runtimes,
   getSkills: () => skills,
   getHabits: () => habits,
   marketplace,
   fsp,
+  // Registro de agentes: los de serie más los que el usuario deja en disco.
+  getSubagents: () => require('../agent/subagents'),
 });
 
 // ---- chat/adjuntos/traza: router en main/ipc-chat.js (octavo router de la fase 4) ----
@@ -498,7 +635,7 @@ registerTareasIpc(ipcMain, {
   getTaskManager: () => wireTaskManager(),
   peekTaskManager: () => taskManager,
   checkpoints,
-  getAgent: () => agent,
+  runtimes,
   securityDefaults,
   DEFAULT_RISK,
   CONFIG_DIR,
@@ -514,19 +651,23 @@ const convsApi = registerConvsIpc(ipcMain, {
   configDir: () => CONFIG_DIR,
   writeJsonAtomic,
   onSaveError: (m) => avisarDisco(m),
+  /* Aviso CON título propio: se usa cuando el historial no se pudo leer (y hay que decir
+     qué se ha hecho con el fichero ilegible). Llega al renderer por el mismo canal que el
+     aviso de disco, y se encola si la ventana todavía no existe. */
+  avisar: (titulo, mensaje) => enviarAviso(titulo, mensaje),
   getWin: () => getWin(),
-  getAgent: () => agent,
+  runtimes,
   dialog,
   app,
   fs,
   path,
 });
-const { currentConv, saveConvs, getWorkspace } = convsApi;
+const { saveConvs, getWorkspace } = convsApi;
 
 // ---- cambios/instrucciones: router en main/ipc-cambios.js (undécimo router de la fase 4) ----
 const { registerCambiosIpc } = require('./ipc-cambios');
 registerCambiosIpc(ipcMain, {
-  getAgent: () => agent,
+  runtimes,
   getWorkspace,
   cambios,
   repomap,
@@ -557,14 +698,14 @@ registerMiscIpc(ipcMain, {
 const { registerChatIpc } = require('./ipc-chat');
 registerChatIpc(ipcMain, {
   config: () => config,
-  getAgent: () => agent,
-  ensureAgent: () => {
-    if (!agent) wireAgent();
-    return agent;
-  },
+  runtimes,
   convsApi,
   getSkills: () => skills,
   getGlow: (...a) => glow(...a),
+  /* El almacén de memoria, para el gancho de aprendizaje al cerrar el turno. Perezoso,
+     como los demás: `require` en el arranque ya no aporta nada y el módulo se resuelve
+     igual en cada cierre de turno. */
+  memory: () => require('../agent/memory'),
   getWin: () => getWin(),
   configDir: () => CONFIG_DIR,
   onError: (k, err) => registrarFallo(k, err),
@@ -598,6 +739,9 @@ function mcpState() {
       const v = vivo.get(s.id) || {};
       return {
         ...s,
+        // una URL `https://usuario:token@host` o `?key=SECRETO` es un secreto: viaja
+        // enmascarada y mcp:save recupera la guardada si el formulario la reenvía así
+        url: mcpConfig.enmascararUrl(s.url),
         env: enmascararMapaSecretos(s.env),
         headers: enmascararMapaSecretos(s.headers),
         permKey: 'mcp__' + serverSlug(s.id) + '__*',
@@ -624,10 +768,6 @@ function mcpExport() {
   }
   return { mcpServers };
 }
-
-// ---- voz/TTS/dictado: router en main/ipc-voz.js (quinto router de la fase 4) ----
-const { registerVozIpc } = require('./ipc-voz');
-const vozApi = registerVozIpc(ipcMain, { config: () => config, isHeadless: () => HEADLESS, getWin: () => getWin(), DATA_DIR });
 
 // ---------- app lifecycle ----------
 // copia las skills incluidas (skills-starter/) al perfil del usuario en el primer arranque
@@ -707,7 +847,11 @@ async function correrBancoYsalir() {
   });
   for (const m of informe.malas) console.error('[banco] tarea ignorada — ' + m.error);
   log.info('\n' + banco.tabla(informe));
-  if (hay('--json')) log.info(JSON.stringify(informe));
+  /* El informe en una línea va CRUDO a stdout: es la parte que lee una máquina
+     (scripts/banco.js extrae la línea que empieza por «{»). Con `log.info` la línea sale
+     con el prefijo «[fecha] [INFO] », así que el lanzador no la encontraba NI pasándole
+     el flag: `npm run banco -- --json` no imprimía nada. */
+  if (hay('--json')) process.stdout.write(JSON.stringify(informe) + '\n');
   try {
     const f = path.join(DATA_DIR, 'banco', 'informe-' + new Date().toISOString().replace(/[:.]/g, '-') + '.json');
     fs.mkdirSync(path.dirname(f), { recursive: true });
@@ -824,7 +968,7 @@ app.whenReady().then(() => {
   // este es el único momento en que se le puede contar.
   if (updateApi.getPending() && (!HEADLESS || UPDATE_API))
     setTimeout(() => {
-      sendUpdate({
+      updateApi.sendUpdate({
         type: 'install-failed',
         version: updateApi.getPending().version,
         path: updateApi.getPending().path,
@@ -858,10 +1002,22 @@ app.whenReady().then(() => {
 });
 
 app.on('window-all-closed', () => app.quit());
-app.on('before-quit', async () => {
-  try {
-    await vozApi.cerrar();
-  } catch {} // dictado + modo voz: reintento desarmado, procesos fuera
+
+/* Cierre ordenado en DOS FASES. Un handler `async` no sirve aquí: Electron NO espera la
+   promesa de `before-quit`, así que todo lo que va DESPUÉS del primer `await` es una
+   continuación desligada —la bandeja, taskManager.stopAll(), los agentes del chat, mcp.shutdown(),
+   el `Browser.close` de CDP y runlog.close() podían no llegar a ejecutarse antes de que el
+   proceso muriera (hijos MCP, Chrome/Edge huérfanos; últimas líneas de log perdidas)—. Se
+   previene el primer cierre, se limpia de verdad y entonces `app.quit()` vuelve a disparar
+   'before-quit', que ya pasa de largo. */
+let quitEnCurso = false;
+app.on('before-quit', (e) => {
+  if (quitEnCurso) return;
+  quitEnCurso = true; // marca antes de prevenir: un 2.º intento no repite la limpieza
+  e.preventDefault();
+  cerrarYsalir();
+});
+async function cerrarYsalir() {
   globalShortcut.unregisterAll();
   if (getTray()) {
     try {
@@ -874,20 +1030,20 @@ app.on('before-quit', async () => {
       taskManager.stopAll();
     } catch {}
   } // tareas en background → interrupted
-  if (agent && agent.isBusy()) {
-    try {
-      agent.stop();
-    } catch {}
-  } // chat en curso
+  runtimes.disposeAll(); // chat: para cada conversación en vuelo y vacía el registro
   if (mcp) {
     try {
       mcp.shutdown();
     } catch {}
   } // servidores MCP: procesos hijos fuera
   try {
-    browser.ws && browser.send('Browser.close');
+    // Sin `.catch`, Chrome terminando cierra el socket y el rechazo de esa petición en
+    // vuelo entra por 'unhandledRejection': al salir con la ventana ya destruida eso
+    // sacaba un diálogo de «fallo interno» y ensuciaba crash.log en un cierre normal.
+    if (browser.ws) browser.send('Browser.close').catch(() => {});
   } catch {} // Chrome/Edge lanzado por CDP
   try {
     runlog.close();
   } catch {} // logs de sesión
-});
+  app.quit();
+}

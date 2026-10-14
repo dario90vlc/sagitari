@@ -14,16 +14,20 @@
    en 40-vistas.js son un SyntaxError que deja la app entera sin arrancar (sin
    iconos, sin botones, sin nada). Lo único que sale de este fichero es window.ChatKit.
 
-   Cubre: identidad de los modos ACT/PLAN/THINK, el catálogo de herramientas
+   Cubre: identidad de los modos ACT/PLAN/THINK/EQUIPO, el catálogo de herramientas
    (etiqueta humana + icono), el resumen de sus argumentos, el formato de
    duración y el parser de planes del modo PLAN.
    ============================================================================ */
 const ChatKit = (function () {
   /* -------------------------------------------------------------------------
      1. MODOS — cada uno con identidad propia y real
-     Los tres perfiles existen ya en el backend (agent/agent.js: MODE_PROFILES):
+     Los CUATRO perfiles existen ya en el backend (agent/agent.js: MODE_PROFILES):
      distinta temperatura, distintos pasos máximos y distinto prompt. Aquí sólo
      se les da una cara: color, icono, lema y en qué se diferencian.
+     EQUIPO (v4.4) es el cuarto: el agente pasa a líder, reparte el encargo entre
+     compañeros vivos y agrega lo que devuelven. Su color es el ámbar `245,158,66`,
+     que es el valor FIJO que comparten la vista del chat, el segmento del
+     compositor y la píldora del sidebar (styles.css).
      ------------------------------------------------------------------------- */
   const MODES = {
     act: {
@@ -62,9 +66,22 @@ const ChatKit = (function () {
       tagline: 'Razona en profundidad antes de responder',
       bullets: ['Explora alternativas', 'Explica su razonamiento', 'Para decisiones y análisis'],
     },
+    equipo: {
+      key: 'equipo',
+      label: 'EQUIPO',
+      name: 'Equipo',
+      icon: 'team',
+      // el punto ámbar de siempre (.dot.a-y): el modo no estrena vocabulario visual
+      dot: 'a-y',
+      color: '#f59e42',
+      rgb: '245,158,66',
+      cls: 'equipo',
+      tagline: 'Reparte el encargo entre varios compañeros y agrega lo que devuelven',
+      bullets: ['Varios especialistas a la vez', 'Se hablan por un buzón y apuntan en el tablero', 'Para encargos que se pueden partir'],
+    },
   };
 
-  const MODE_ORDER = ['act', 'plan', 'think'];
+  const MODE_ORDER = ['act', 'plan', 'think', 'equipo'];
 
   /** Metadatos de un modo, con salto a ACT si el valor no existe. */
   function mode(key) {
@@ -105,6 +122,19 @@ const ChatKit = (function () {
     apply_patch: { label: 'Cambios en varios archivos', icon: 'save', verb: 'Aplicando cambios' },
     todo_write: { label: 'Lista de tareas', icon: 'list', verb: 'Actualizando la lista de tareas' },
     delegate: { label: 'Subagente', icon: 'agents', verb: 'Delegando' },
+    /* v4.4 — modo EQUIPO. Las cinco llevan ficha para que su tarjeta se lea en castellano
+       como las demás (el arnés falla si una herramienta nace sin etiqueta ni icono). */
+    team_spawn: { label: 'Compañero de equipo', icon: 'agents', verb: 'Levantando un compañero' },
+    team_send: { label: 'Mensaje al equipo', icon: 'send', verb: 'Mandando un mensaje' },
+    team_wait: { label: 'Esperar al equipo', icon: 'clock', verb: 'Esperando al equipo' },
+    team_board: { label: 'Tablero del equipo', icon: 'list', verb: 'Actualizando el tablero' },
+    team_done: { label: 'Encargo terminado', icon: 'check', verb: 'Cerrando su encargo' },
+    web_fetch: { label: 'Leer una web', icon: 'globe', verb: 'Leyendo la web' },
+    git_status: { label: 'Estado de git', icon: 'list', verb: 'Consultando git' },
+    git_diff: { label: 'Cambios de git', icon: 'file', verb: 'Mirando los cambios' },
+    git_log: { label: 'Historial de git', icon: 'history', verb: 'Revisando el historial' },
+    git_branch: { label: 'Ramas de git', icon: 'map', verb: 'Mirando las ramas' },
+    git_commit: { label: 'Commit de git', icon: 'save', verb: 'Guardando el commit' },
   };
 
   const FALLBACK_TOOL = { label: 'Herramienta', icon: 'tools', verb: 'Ejecutando' };
@@ -142,6 +172,11 @@ const ChatKit = (function () {
     delegate: ['agent', 'task'],
     notify: ['title', 'message'],
     system_info: ['query', 'what'],
+    web_fetch: ['url'],
+    git_diff: ['path'],
+    git_log: ['n'],
+    git_branch: ['action', 'name'],
+    git_commit: ['message'],
   };
 
   /** Un valor de argumento, aplanado a una línea corta y legible. */
@@ -208,11 +243,17 @@ const ChatKit = (function () {
      3. FORMATO — duración, tamaños y conteos en castellano
      ------------------------------------------------------------------------- */
 
-  /** Recorta a `max` caracteres, añadiendo puntos suspensivos sólo si corta. */
+  /** Recorta a `max` caracteres, añadiendo puntos suspensivos sólo si corta.
+      Corta por PUNTOS DE CÓDIGO, no por unidades UTF-16: un emoji fuera del BMP ocupa dos
+      unidades y un corte en medio dejaba un sustituto suelto («�») en pantalla. */
   function clip(text, max) {
     const s = String(text === null || text === undefined ? '' : text);
     const lim = max || 120;
-    return s.length > lim ? s.slice(0, lim - 1).trimEnd() + '…' : s;
+    if (s.length <= lim) return s; // ni un astral de más: no hay nada que cortar
+    const puntos = Array.from(s);
+    if (puntos.length <= lim) return s; // el corte en unidades no era real en puntos
+    const cortados = puntos.slice(0, lim - 1);
+    return cortados.join('').trimEnd() + '…';
   }
 
   /** Duración legible: 640 ms · 1,4 s · 1 min 12 s. */
@@ -420,9 +461,43 @@ const ChatKit = (function () {
     return { provider: prov ? { id: prov.id, name: prov.name || 'Proveedor' } : null, models, current, known: !!(prov && seen.size) };
   }
 
+  /* -------------------------------------------------------------------------
+     6. ÓRDENES DE BARRA — el registro puro de los comandos del chat
+     Una orden NO es un mensaje: el renderer la intercepta y no la manda al
+     modelo. Esta lista es la ÚNICA fuente de verdad: la paleta («/») y la
+     respuesta de «/help» pintan de aquí, así que no puede haber dos listas que
+     se contradigan. Sólo los nombres de esta lista son órdenes: un «/loquesea»
+     sigue siendo texto normal y se envía tal cual.
+     ------------------------------------------------------------------------- */
+  const COMMANDS = [
+    { name: 'clear', args: '', descripcion: 'Vacía el chat y empieza de cero' },
+    { name: 'new', args: '', descripcion: 'Empieza una conversación nueva (la anterior se guarda)' },
+    { name: 'compact', args: '', descripcion: 'Resume la conversación para liberar contexto' },
+    { name: 'cost', args: '', descripcion: 'Gasto y tokens de esta conversación' },
+    { name: 'model', args: '[modelo]', descripcion: 'Consulta o cambia el modelo activo' },
+    { name: 'help', args: '', descripcion: 'Lista las órdenes disponibles' },
+  ];
+
+  /**
+   * ¿Es este texto una orden de barra conocida?
+   * Devuelve { name, args } o null. El nombre va en minúsculas y tolera
+   * espacios delante; `args` es el resto ya recortado. Un «/» suelto, un
+   * «/desconocido» o un mensaje que lleva «/» por dentro (una ruta, «y/o»)
+   * devuelven null: no se toca el texto del usuario.
+   */
+  function parseCommand(text) {
+    const m = /^\s*\/([A-Za-z]+)(\s+[\s\S]*)?$/.exec(String(text === null || text === undefined ? '' : text));
+    if (!m) return null;
+    const name = m[1].toLowerCase();
+    if (!COMMANDS.some((c) => c.name === name)) return null;
+    return { name, args: m[2] ? m[2].trim() : '' };
+  }
+
   return {
     MODES,
     MODE_ORDER,
+    COMMANDS,
+    parseCommand,
     mode,
     nextMode,
     TOOLS,
