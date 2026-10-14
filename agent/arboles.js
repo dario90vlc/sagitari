@@ -35,6 +35,12 @@
      usuario trabaja en `proyecto/`, el subagente trabaja en `<árbol>/proyecto`. Sin
      esto una ruta relativa significaba otra cosa que sin aislamiento y sus archivos
      acababan fuera de la carpeta del usuario (`wsDir`, ver `crear`).
+   · Esa ruta relativa la calcula GIT (`--show-prefix`), nunca una resta de rutas
+     nuestras: la MISMA carpeta escrita de dos formas —el nombre corto de Windows (el
+     %TEMP% de la CI llega así), un enlace, la forma de MSYS— bastaba para que la resta
+     dijera «fuera del repositorio» y el aislamiento entero se rechazara (ver `ubicar`).
+   · El directorio base de los árboles y de sus parches es `SAGITARI_ARBOLES_DIR` si está
+     definido; si no, `%TEMP%/sagitari-arboles`, que es lo de siempre (ver `baseDir`).
 
    Todo con `git` explícito y sin shell, para que las rutas con espacios y acentos
    lleguen intactas. */
@@ -114,6 +120,85 @@ async function sinSeguimiento(ws) {
   return String(r.stdout).split('\0').filter(Boolean);
 }
 
+/** Directorio donde viven los árboles y sus parches. `SAGITARI_ARBOLES_DIR` lo cambia —las
+    pruebas lo apuntan dentro del repositorio, donde un árbol de git siempre se puede
+    crear—; sin él, el temporal del sistema, que es lo de siempre. */
+function baseDir() {
+  return process.env.SAGITARI_ARBOLES_DIR || path.join(os.tmpdir(), 'sagitari-arboles');
+}
+
+function esDirectorio(p) {
+  try {
+    return fs.statSync(p).isDirectory();
+  } catch {
+    return false;
+  }
+}
+
+/** ¿`p` es la raíz de un repositorio de verdad? El `.git` (carpeta o fichero) lo dice. La
+    fusión aplica ahí el parche: darla por buena sin serlo escribiría el trabajo del
+    subagente donde no toca. */
+function esRaizDeRepo(p) {
+  return esDirectorio(p) && fs.existsSync(path.join(p, '.git'));
+}
+
+/** Una ruta absoluta que devuelve git, en una que este proceso pueda usar. Git responde en
+    formato nativo salvo cuando le habla a un entorno MSYS (`/d/a/tmp/x`, `/cygdrive/d/...`):
+    es la misma carpeta escrita de otra manera. */
+function rutaDeGit(salida) {
+  const s = String(salida).replace(/[\r\n]+$/, '');
+  if (!s) return '';
+  if (process.platform === 'win32') {
+    const m = /^\/(?:cygdrive\/)?([a-zA-Z])(\/.*)?$/.exec(s);
+    if (m) return path.resolve(m[1].toUpperCase() + ':' + (m[2] || path.sep));
+  }
+  return path.resolve(s);
+}
+
+/** Sube desde el espacio de trabajo tantos niveles como tenga su ruta relativa. */
+function subir(ws, rel) {
+  const niveles = rel ? rel.split(path.sep).length : 0;
+  return path.resolve(ws, ...Array(niveles).fill('..'));
+}
+
+/** ¿`dir` es la raíz del mismo repositorio que `raizBruta`? Compara dos respuestas de GIT:
+    las escribe siempre igual, las escriba el sistema como las escriba. */
+async function esRaizDelMismoRepo(dir, raizBruta) {
+  const t = await git(['rev-parse', '--show-toplevel'], dir, { timeout: 15000 });
+  return t.code === 0 && String(t.stdout).replace(/[\r\n]+$/, '') === raizBruta;
+}
+
+/**
+ * Dónde cae el espacio de trabajo dentro de su repositorio: { rel, topLevel }. `rel` es su
+ * ruta relativa a la raíz (`''` si el espacio de trabajo ES la raíz) y `topLevel` esa raíz,
+ * que es contra quien se aplica el parche. Devuelve null si no se puede saber (y entonces se
+ * trabaja sobre el árbol compartido, como antes).
+ */
+async function ubicar(ws) {
+  /* Una llamada por dato: la raíz la da `--show-toplevel` y la relación con ella
+     `--show-prefix` (la ruta del directorio actual respecto a la raíz, vacía si ES la
+     raíz). Se piden por separado porque la línea del prefijo puede venir vacía y adivinar
+     dónde acaba la ruta dentro de una salida de dos líneas es justo el tipo de cuenta que
+     se rompe sola. */
+  const raiz = await git(['rev-parse', '--show-toplevel'], ws, { timeout: 15000 });
+  if (raiz.code !== 0) return null;
+  const brutoTop = String(raiz.stdout).replace(/[\r\n]+$/, '');
+  const pre = await git(['rev-parse', '--show-prefix'], ws, { timeout: 15000 });
+  if (pre.code !== 0) return null;
+  const prefijo = String(pre.stdout).replace(/[\r\n]+$/, '');
+  const rel = prefijo.replace(/\/+$/, '').split('/').join(path.sep);
+  if (!brutoTop || rel.split(path.sep).includes('..')) return null; // sin raíz, o fuera de ella
+  /* La raíz, escrita como la escribe el propio espacio de trabajo cuando es la misma: así
+     el resto de la app (que habla en rutas del espacio de trabajo) y el `git apply` de la
+     fusión trabajan sobre la misma cadena. Subir es el caso normal; si ese camino no lleva
+     a la raíz del repositorio (un enlace al mismo directorio: subir desde el enlace sale a
+     otra parte) manda la raíz que da git. */
+  let topLevel = subir(ws, rel);
+  if (rel && !(await esRaizDelMismoRepo(topLevel, brutoTop))) topLevel = rutaDeGit(brutoTop);
+  if (!esRaizDeRepo(topLevel)) return null;
+  return { rel, topLevel };
+}
+
 /**
  * Crea un árbol de trabajo aislado del estado ACTUAL del usuario.
  * Devuelve { id, ws, wsDir, rel, topLevel, dir, base, gitDir } — `wsDir` es la carpeta del
@@ -129,17 +214,13 @@ async function crear(ws, opts = {}) {
      caso que dejaba registros fantasma dentro del repositorio del usuario. */
   const gdir = await git(['rev-parse', '--absolute-git-dir'], ws, { timeout: 15000 });
   const gitDir = gdir.code === 0 ? String(gdir.stdout).trim() : '';
-  /* Dónde cae el espacio de trabajo DENTRO del repositorio: `''` si el espacio de trabajo
-     ES la raíz. El árbol es un checkout del repositorio entero (ver la cabecera), así que
-     la carpeta del subagente es `dir` con esta misma ruta relativa — no la raíz del
-     árbol—. Se calcula antes de crear nada: si el espacio de trabajo no cae dentro del
-     árbol (una ruta con enlaces que git resuelve de otra forma), no se aísla y se trabaja
-     sobre el árbol compartido, que es el camino seguro. */
-  const top = await git(['rev-parse', '--show-toplevel'], ws, { timeout: 15000 });
-  const topLevel = top.code === 0 ? path.resolve(String(top.stdout).trim()) : '';
-  const rel = topLevel ? path.relative(topLevel, path.resolve(ws)) : '';
-  if (!topLevel || rel.split(path.sep)[0] === '..') return null;
-  const dir = path.join(os.tmpdir(), 'sagitari-arboles', id);
+  /* Dónde cae el espacio de trabajo DENTRO del repositorio y contra qué raíz se aplicará el
+     parche (ver `ubicar`): se calcula antes de crear nada, porque sin saberlo el subagente
+     trabajaría en una carpeta que no es la del usuario. */
+  const sitio = await ubicar(ws);
+  if (!sitio) return null;
+  const { rel, topLevel } = sitio;
+  const dir = path.join(baseDir(), id);
   await fsp.rm(dir, { recursive: true, force: true }).catch(() => {});
   await fsp.mkdir(path.dirname(dir), { recursive: true }).catch(() => {});
 
@@ -244,7 +325,7 @@ async function fusionar(arbol, opts = {}) {
     .map((s) => s.trim())
     .filter(Boolean);
 
-  const tmp = path.join(os.tmpdir(), 'sagitari-arboles', arbol.id + '.patch');
+  const tmp = path.join(baseDir(), arbol.id + '.patch');
   await fsp.mkdir(path.dirname(tmp), { recursive: true }).catch(() => {});
   await fsp.writeFile(tmp, parche, 'utf8');
 

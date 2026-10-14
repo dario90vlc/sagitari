@@ -25,7 +25,7 @@
 - **Las promesas de privacidad de la vista ahora dicen la verdad.** La vista de la memoria ya no insinúa que nada sale del equipo: dice que los recuerdos y los hábitos que encajan con la conversación **se envían al modelo que tengas configurado**, igual que el resto del mensaje, y que nada entra sin tu aprobación (salvo que enciendas «guardar sin preguntar»). / **The view's privacy promises now tell the truth.** The memory view no longer hints that nothing leaves the machine: it says that the memories and habits that match the conversation **are sent to the model you have configured**, like the rest of the message, and that nothing enters without your approval (unless you turn on "save without asking").
 - **Se retira el modo voz.** Fuera el dictado y la respuesta hablada, con su micrófono, sus motores (Windows, Piper, Whisper), sus ajustes y sus atajos: esta versión no promete lo que ya no hace. / **Voice mode is retired.** Dictation and spoken answers are gone, with their microphone, their engines (Windows, Piper, Whisper), their settings and their shortcuts: this release does not promise what it no longer does.
 
-Recuento de pruebas: 445 en `npm test` y 737 en `npm run test:renderer` (49 archivos). / Test count: 445 in `npm test` and 737 in `npm run test:renderer` (49 files).
+Recuento de pruebas: 449 en `npm test` y 737 en `npm run test:renderer` (49 archivos). / Test count: 449 in `npm test` and 737 in `npm run test:renderer` (49 files).
 
 # SAGITARI 4.4.0
 

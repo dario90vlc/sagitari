@@ -31,6 +31,9 @@ Thumbs.db
 # Git worktrees aislados del harness
 .worktrees/
 
+# Árboles de trabajo aislados que crean las pruebas (agent/arboles.js)
+.tmp-arboles/
+
 # Local test debris
 _*.js
 _*.png

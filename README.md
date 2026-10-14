@@ -192,7 +192,7 @@ sagitari/
 | `npm start`             | Start the app in production          |
 | `npm run dev`           | Start the app in development mode    |
 | `npm run smoke`         | Run smoke test                       |
-| `npm test`              | Run the agent/main suite (445 tests) |
+| `npm test`              | Run the agent/main suite (449 tests) |
 | `npm run test:renderer` | Run the renderer suite (737 tests)   |
 | `npm run lint`          | Run ESLint                           |
 | `npm run lint:fix`      | Run ESLint with auto-fix             |
@@ -207,7 +207,7 @@ sagitari/
 Two suites, both green before every release:
 
 ```bash
-npm test              # 445 tests: the agent core and the main process
+npm test              # 449 tests: the agent core and the main process
 npm run test:renderer # 737 tests across 49 files: main-process modules and the renderer
 ```
 
@@ -257,6 +257,15 @@ three and is what `npm run smoke` calls; it also points the data profile at
 to `%APPDATA%` and the single-instance lock is never created (the app then exits
 with «SAGITARI ya está abierta» when nothing is open). `main/main.js` honours
 `SAGITARI_TEST_PROFILE` for the same reason, and `uicheck`/`shot-cdp` set it too.
+
+`npm test` needs the same help for a different write: the isolated git worktree each
+subagent gets (`agent/arboles.js`). The suite points `SAGITARI_ARBOLES_DIR` at
+`.tmp-arboles/` inside the workspace — a restricted token cannot create a worktree under
+`%TEMP%` — and deletes it when it finishes. Set the variable to keep them elsewhere; in
+production the default is `%TEMP%/sagitari-arboles`. That base directory never moves the
+workspace: inside the tree the subagent works in the same relative path it has in the
+repository, and its work is merged back into the user's folder even when the same path is
+spelled in more than one way (a Windows 8.3 short name, a link, an MSYS path).
 
 `contraste` reads the tokens from `renderer/styles.css`, composites each
 translucent surface over the base background, and reports every text/surface pair

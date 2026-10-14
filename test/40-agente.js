@@ -3650,6 +3650,7 @@ test('árboles: la fusión aplica solo lo que cambió el agente', async () => {
   if (!GIT_OK) return;
   const ws = repoDePrueba();
   const arbol = await arbolesMod.crear(ws);
+  ok(arbol, 'debería poder aislarse');
   fs.writeFileSync(path.join(arbol.dir, 'a.js'), 'module.exports = 3;\n');
   fs.writeFileSync(path.join(arbol.dir, 'nuevo.js'), 'const x = 1;\n');
   const preparados = [];
@@ -3670,6 +3671,7 @@ test('árboles: si el usuario tocó lo mismo, no se aplica NADA', async () => {
   if (!GIT_OK) return;
   const ws = repoDePrueba();
   const arbol = await arbolesMod.crear(ws);
+  ok(arbol, 'debería poder aislarse');
   fs.writeFileSync(path.join(arbol.dir, 'a.js'), 'module.exports = "agente";\n');
   fs.writeFileSync(path.join(ws, 'a.js'), 'module.exports = "usuario";\n'); // el usuario escribe encima
   const f = await arbolesMod.fusionar(arbol);
@@ -3690,6 +3692,7 @@ test('árboles: un subagente que no cambia nada no ensucia el proyecto', async (
   if (!GIT_OK) return;
   const ws = repoDePrueba();
   const arbol = await arbolesMod.crear(ws);
+  ok(arbol, 'debería poder aislarse');
   const f = await arbolesMod.fusionar(arbol);
   eq(f.ok, true);
   eq(f.vacio, true, 'sin cambios no hay parche');

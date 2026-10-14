@@ -28,6 +28,15 @@ const tmpDir = (prefix) => {
    de una sesión real, y el panel de registros de la app los mostraba. */
 process.env.SAGITARI_DATA_DIR = tmpDir('sagitari-datadir-');
 
+/* Los árboles de trabajo aislados (agent/arboles.js) se crean en `SAGITARI_ARBOLES_DIR`.
+   La suite los apunta DENTRO del repositorio —una carpeta ignorada por git— para que el
+   aislamiento se ejercite de verdad hasta en un equipo donde %TEMP% no admite un árbol de
+   git: ahí las pruebas de árboles no podrían comprobar nada de lo que existen para
+   comprobar. Se respeta el valor si ya venía puesto desde fuera. */
+const ARBOLES_DIR = process.env.SAGITARI_ARBOLES_DIR || path.join(__dirname, '..', '.tmp-arboles');
+const ARBOLES_DIR_PROPIO = !process.env.SAGITARI_ARBOLES_DIR;
+process.env.SAGITARI_ARBOLES_DIR = ARBOLES_DIR;
+
 let pass = 0,
   fail = 0;
 const failures = [];
@@ -167,6 +176,12 @@ async function runAll() {
   for (const d of TMP_DIRS) {
     try {
       fs.rmSync(d, { recursive: true, force: true });
+    } catch {}
+  }
+  // y los árboles de trabajo, que van dentro del repositorio (ver el principio del fichero)
+  if (ARBOLES_DIR_PROPIO) {
+    try {
+      fs.rmSync(ARBOLES_DIR, { recursive: true, force: true });
     } catch {}
   }
   clearTimeout(suiteTimer); // fin normal: el vigilante ya no hace falta
