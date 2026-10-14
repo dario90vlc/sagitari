@@ -304,6 +304,16 @@ async function esperarCdp(port, intentos = 60) {
 
     await send('Page.enable');
     await send('Emulation.setDeviceMetricsOverride', { width: WIDTH, height: HEIGHT, deviceScaleFactor: 1, mobile: false });
+    /* La ventana de la app es TRANSLÚCIDA, así que la captura salía con los píxeles
+       semitransparentes: en el visor de imágenes se ve bien (fondo oscuro), pero en el
+       README de GitHub —que pinta sobre blanco— las capturas se desvanecían. Aquí se
+       pinta la base de la app (--bg0) en la propia página, con `important` para ganar
+       a la hoja de estilos, y se le pide a Chrome el mismo fondo opaco. */
+    await send('Emulation.setDefaultBackgroundColorOverride', { color: { r: 6, g: 4, b: 15, a: 1 } });
+    await send('Runtime.evaluate', {
+      expression:
+        "for (const el of [document.documentElement, document.body]) if (el) el.style.setProperty('background-color', '#06040f', 'important');",
+    });
     console.error('  [cdp] métricas ' + WIDTH + 'x' + HEIGHT + ' ok');
 
     // Esperar a que el renderer haya pintado de verdad.
