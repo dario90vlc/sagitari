@@ -236,6 +236,34 @@ async function esperarCdp(port, intentos = 60) {
   const env = Object.assign({}, process.env);
   delete env.ELECTRON_RUN_AS_NODE;
   env.SAGITARI_TEST_PROFILE = path.join(APP_DIR, '.perfil-shots');
+  /* Sembrar un modelo activo en el perfil de capturas. Sin él, Ajustes enseña el asistente
+     de primer uso y TAPA sus pestañas —las capturas de Apariencia y de Permisos salían con
+     el panel de Modelo, o sea repetidas— y el pie de la app dice «sin modelo» en todas las
+     capturas. Se escribe solo si el perfil no tiene proveedor; son los valores del preset
+     real y este perfil es de usar y tirar (no se llama a ningún sitio). */
+  try {
+    const perfil = env.SAGITARI_TEST_PROFILE;
+    fs.mkdirSync(perfil, { recursive: true });
+    const cfgFile = path.join(perfil, 'config.json');
+    const cfg = fs.existsSync(cfgFile) ? JSON.parse(fs.readFileSync(cfgFile, 'utf8')) : {};
+    if (!Array.isArray(cfg.providers) || !cfg.providers.length) {
+      const baseUrl = 'https://opencode.ai/zen/go/v1';
+      const apiKey = 'sk-demo';
+      cfg.providers = [{ id: 'opencode-go', name: 'OpenCode Go', baseUrl, apiKey, models: ['claude-haiku-5-5', 'gpt-5', 'glm-4-6'] }];
+      cfg.active = {
+        providerId: 'opencode-go',
+        name: 'OpenCode Go',
+        baseUrl,
+        apiKey,
+        model: 'claude-haiku-5-5',
+        temperature: 0.7,
+        vision: false,
+      };
+      fs.writeFileSync(cfgFile, JSON.stringify(cfg, null, 2));
+    }
+  } catch (e) {
+    console.error('  aviso: no pude sembrar el modelo del perfil de capturas:', e.message);
+  }
 
   const child = spawn(
     electron,
@@ -375,9 +403,16 @@ async function esperarCdp(port, intentos = 60) {
         if (v !== 'OK') console.error('  demo de equipo no sembrada:', v);
         await sleep(700);
       }
-      /* Los dos paneles de Ajustes: primero la vista, luego su pestaña. */
+      /* Los dos paneles de Ajustes: primero la vista, luego su pestaña. Y antes de entrar,
+         se deja GUARDADA la pestaña que se quiere: la vista la restaura al pintarse, así
+         que fijarla aquí hace la captura determinista —pulsar la pestaña y esperar dejaba
+         a veces el panel de Modelo, y la captura salía con el nombre del otro—. */
       const sub = SUBVISTAS[vista];
       if (sub) {
+        await send('Runtime.evaluate', {
+          expression: `(function(){ try { localStorage.setItem('sagi.setTab','${sub.panel}'); return 'OK'; } catch(e) { return 'NO_STORE'; } })()`,
+          returnByValue: true,
+        });
         const nav = await send('Runtime.evaluate', {
           expression: `(function(){ var b=document.querySelector('.navitem[data-view="${sub.nav}"]'); if(!b) return 'NO_NAV'; b.click(); return 'OK'; })()`,
           returnByValue: true,
