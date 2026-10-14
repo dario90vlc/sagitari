@@ -54,6 +54,7 @@ const TODAS = [
    Seguridad son las que un lector busca) y sin esta tabla se fotografiaría la vista de
    Ajustes por defecto con el nombre del panel: la captura parecería buena y no lo sería. */
 const SUBVISTAS = {
+  settings: { nav: 'settings', sel: '.settab[data-set="model"]', panel: 'model' },
   apariencia: { nav: 'settings', sel: '.settab[data-set="apariencia"]', panel: 'apariencia' },
   seguridad: { nav: 'settings', sel: '.settab[data-set="security"]', panel: 'security' },
 };
@@ -330,6 +331,23 @@ async function esperarCdp(port, intentos = 60) {
         ws.send(JSON.stringify({ id: i, method, params }));
       });
 
+    /* La vista entra con un desvanecido, así que capturar «a los 900 ms» pillaba algunas a
+       media transición: la captura salía lavada, como si la sección no hubiera abierto. Se
+       espera a que la vista visible esté OPACA del todo (con tope de tiempo), no a un
+       número fijo. */
+    const esperarPintado = async () => {
+      for (let i = 0; i < 50; i++) {
+        const r = await send('Runtime.evaluate', {
+          expression:
+            "(function(){ var v=document.querySelector('.view.on'); if(!v) return 'OK'; return parseFloat(getComputedStyle(v).opacity || '1') >= 0.999 ? 'OK' : 'ESPERA'; })()",
+          returnByValue: true,
+        });
+        if (r.result && r.result.value === 'OK') break;
+        await sleep(100);
+      }
+      await sleep(250);
+    };
+
     await send('Page.enable');
     await send('Emulation.setDeviceMetricsOverride', { width: WIDTH, height: HEIGHT, deviceScaleFactor: 1, mobile: false });
     /* La ventana de la app es TRANSLÚCIDA, así que la captura salía con los píxeles
@@ -433,18 +451,37 @@ async function esperarCdp(port, intentos = 60) {
           continue;
         }
         await sleep(900);
-        /* La pestaña se activa por `onclick`, así que si el clic no prendió se
-           fotografiaría el panel de Modelo con el nombre del otro: se comprueba. */
-        const panel = await send('Runtime.evaluate', {
-          expression: `(function(){ var p=document.querySelector('#setWrap .setpanel.on'); return p ? p.dataset.panel : 'NONE'; })()`,
-          returnByValue: true,
-        });
-        if ((panel.result && panel.result.value) !== vista)
-          console.error('  aviso: ' + vista + ' dejó el panel en «' + (panel.result && panel.result.value) + '»');
+        /* La pestaña de Ajustes SE RECUERDA entre arranques, así que una captura puede
+           heredar el panel de la anterior y salir con el nombre del otro. Se comprueba el
+           panel que está de verdad activo y, si no es el pedido, se vuelve a pulsar la
+           pestaña; si aun así no cuadra, NO se guarda nada: una captura equivocada con el
+           nombre bueno es peor que no tenerla. */
+        const leerPanel = async () => {
+          const p = await send('Runtime.evaluate', {
+            expression: `(function(){ var p=document.querySelector('#setWrap .setpanel.on'); return p ? p.dataset.panel : 'NONE'; })()`,
+            returnByValue: true,
+          });
+          return p.result && p.result.value;
+        };
+        let panel = await leerPanel();
+        if (panel !== sub.panel) {
+          await send('Runtime.evaluate', {
+            expression: `(function(){ var b=document.querySelector('${sub.sel}'); if(b) b.click(); return 'OK'; })()`,
+            returnByValue: true,
+          });
+          await sleep(900);
+          panel = await leerPanel();
+        }
+        if (panel !== sub.panel) {
+          console.error('  OMITIDA ' + vista + ': el panel se quedó en «' + panel + '» (se pedía «' + sub.panel + '»)');
+          quedan--;
+          continue;
+        }
+        await esperarPintado();
         const shot = await send('Page.captureScreenshot', { format: 'png' });
         fs.writeFileSync(path.join(OUT_DIR, vista + '.png'), Buffer.from(shot.data, 'base64'));
         quedan--;
-        console.log('  ' + vista + '.png');
+        console.log('  ' + vista + '.png (panel «' + panel + '»)');
         continue;
       }
       const pulso = await send('Runtime.evaluate', {
@@ -459,6 +496,7 @@ async function esperarCdp(port, intentos = 60) {
         continue;
       }
       await sleep(900);
+      await esperarPintado();
       const shot = await send('Page.captureScreenshot', { format: 'png' });
       fs.writeFileSync(path.join(OUT_DIR, vista + '.png'), Buffer.from(shot.data, 'base64'));
       quedan--;

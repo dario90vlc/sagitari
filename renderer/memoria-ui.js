@@ -99,11 +99,18 @@ function htmlHecho(m) {
 
 /** Propuesta de «Recién aprendido»: lleva su frase literal y por qué se propuso. */
 function htmlPropuesta(p) {
-  const motivo = p.motivo ? `<small class="md">${esc(p.motivo)}</small>` : '';
-  const literal = p.origenTexto && p.origenTexto !== p.texto ? `<small class="md">Lo dijiste así: «${esc(p.origenTexto)}»</small>` : '';
-  const cuando = p.convTitulo ? `<small class="md">en ${esc(p.convTitulo)}</small>` : '';
+  /* Las piezas de la procedencia van separadas con «·», como el resto de la vista: sin
+     separador se leían pegadas («parece tu ciudadLo dijiste así: …»). */
+  const piezas = [
+    p.motivo || '',
+    p.origenTexto && p.origenTexto !== p.texto ? `Lo dijiste así: «${p.origenTexto}»` : '',
+    p.convTitulo ? `en ${p.convTitulo}` : '',
+  ]
+    .filter(Boolean)
+    .map((t) => esc(t));
+  const procedencia = piezas.length ? `<small class="md">${piezas.join(' · ')}</small>` : '';
   return `<div class="memitem" data-id="${esc(p.id)}">
-    <span class="mt"><span class="memtxt" data-texto>${esc(p.texto)}</span><br>${motivo}${literal}${cuando}${memTags(p.etiquetas) ? '<br>' + memTags(p.etiquetas) : ''}</span>
+    <span class="mt"><span class="memtxt" data-texto>${esc(p.texto)}</span><br>${procedencia}${memTags(p.etiquetas) ? '<br>' + memTags(p.etiquetas) : ''}</span>
     <button type="button" class="btn" data-acc="guardar">Guardar</button>
     <button type="button" class="btn ghost" data-acc="editar">Editar</button>
     <button type="button" class="btn ghost danger" data-acc="descartar">Descartar</button>
