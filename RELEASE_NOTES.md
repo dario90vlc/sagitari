@@ -14,6 +14,7 @@
 - **Árboles:** un agente del usuario con `run_command` se aísla en su árbol git; el `git` de los árboles se mata con `killTree`. / **Worktrees:** a user agent with `run_command` is isolated in its git worktree; worktree `git` processes are killed with `killTree`.
 - **Red:** `web_fetch` fija la IP ya validada (cierra la ventana TOCTOU); el borrado de tareas devuelve error si falla. / **Network:** `web_fetch` pins the already-validated IP (closes the TOCTOU window); task deletion returns an error on failure.
 - **Electron:** se valida el remitente de cada canal IPC y se deniegan por defecto los permisos del sistema; las cadenas IPC del renderer llevan su `.catch`. / **Electron:** every IPC channel validates its sender and system permissions are denied by default; the renderer's IPC chains carry their `.catch`.
+- **Registro:** la carpeta de logs respeta su tope aunque Windows tarde en soltar el fichero anterior; la poda reintenta hasta 10 s y las pruebas dejan de depender del reloj. / **Logs:** the logs folder keeps to its cap even when Windows is slow to release the previous file; the prune retries for up to 10 s and the tests no longer depend on the clock.
 
 Recuento de pruebas: 456 en `npm test` y 743 en `npm run test:renderer` (50 archivos). / Test count: 456 in `npm test` and 743 in `npm run test:renderer` (50 files).
 
