@@ -192,8 +192,8 @@ sagitari/
 | `npm start`             | Start the app in production          |
 | `npm run dev`           | Start the app in development mode    |
 | `npm run smoke`         | Run smoke test                       |
-| `npm test`              | Run the agent/main suite (452 tests) |
-| `npm run test:renderer` | Run the renderer suite (737 tests)   |
+| `npm test`              | Run the agent/main suite (456 tests) |
+| `npm run test:renderer` | Run the renderer suite (743 tests)   |
 | `npm run lint`          | Run ESLint                           |
 | `npm run lint:fix`      | Run ESLint with auto-fix             |
 | `npm run format`        | Format with Prettier                 |
