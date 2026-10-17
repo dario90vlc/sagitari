@@ -1173,6 +1173,30 @@ test('browser: kill deja el estado limpio y se puede repetir', () => {
   b.kill(); // sin navegador abierto no puede lanzar ningún taskkill
 });
 
+test('browser: un lanzamiento que no responde mata el proceso recién creado', async () => {
+  const b = new Browser();
+  b.profileDir = tmpDir('sagi-prof5-');
+  b._exeDe = async () => 'C:\\fake\\chrome.exe';
+  let matado = null;
+  b._lanzarProceso = (exe, args) => {
+    b.browserPid = 99999;
+    b.toBrowser = { write() {}, end() {} };
+    b.fromBrowser = { on() {}, destroy() {} };
+    b.child = { on() {} };
+    b.ws = { to: b.toBrowser, from: b.fromBrowser, close() {} };
+    return b.child;
+  };
+  b._esperarPuerto = async () => false;
+  b._matarArbol = (pid) => {
+    matado = pid;
+  };
+  const r = await b.launch('chrome');
+  ok(/no respondió/.test(r), 'devuelve error si no responde: ' + r);
+  eq(matado, 99999, 'mata el proceso recién creado antes de devolver el error');
+  eq(b.browserPid, null, 'y deja el pid limpio');
+  eq(b.ws, null, 'y la conexión también');
+});
+
 test('runlog: escribe, se lee y rota por bytes reales', async () => {
   const dir = tmpDir('sagi-logs-');
   runlog.__test._resetForTests({ dir, maxBytes: 400, maxLogs: 3 });
@@ -1186,10 +1210,38 @@ test('runlog: escribe, se lee y rota por bytes reales', async () => {
   fs.createWriteStream = abrir;
   runlog.close();
   ok(streams > 1, 'el tope por archivo fuerza rotación (' + streams + ' ficheros abiertos)');
-  // la poda corre unos cientos de ms después de la última rotación y reintenta:
-  // en Windows el fichero anterior puede seguir con el handle cerrándose
-  await new Promise((r) => setTimeout(r, 1200));
-  const files = fs.readdirSync(dir).filter((f) => f.endsWith('.jsonl'));
+  /* La poda corre en segundo plano y REINTENTA. En Windows `unlinkSync` falla con
+     EBUSY/EPERM mientras el handle del stream anterior se cierra; en un runner
+     lento eso dura más de lo que aguantaban los reintentos y la carpeta se quedaba
+     muy por encima del tope (pasó: 61-70 ficheros). Se simula ese bloqueo durante
+     2 s, que es más que los ~1 s que había y menos que el margen real (10 s): con
+     el arreglo retirado esta prueba falla. Se espera a que converja en vez de
+     mirar el reloj: lo que se comprueba es el TOPE. */
+  const unlinkReal = fs.unlinkSync;
+  const finBloqueo = Date.now() + 2000;
+  fs.unlinkSync = (...a) => {
+    if (Date.now() < finBloqueo) {
+      const e = new Error('EBUSY: resource busy or locked');
+      e.code = 'EBUSY';
+      throw e;
+    }
+    return unlinkReal(...a);
+  };
+  let files = [];
+  let vistoPico = false;
+  try {
+    for (let i = 0; i < 120; i++) {
+      files = fs.readdirSync(dir).filter((f) => f.endsWith('.jsonl'));
+      if (files.length > 3) vistoPico = true;
+      /* Hay que ver el PICO antes de dar la convergencia por buena: los write
+         streams crean los ficheros de forma asíncrona, así que una lectura
+         inmediata ve solo el activo y «pasaría» sin que la poda haya corrido. */
+      if (vistoPico && files.length <= 3) break;
+      await new Promise((r) => setTimeout(r, 100));
+    }
+  } finally {
+    fs.unlinkSync = unlinkReal;
+  }
   ok(files.length <= 3, 'no se conservan más ficheros de los permitidos (' + files.length + ')');
   /* El tope es de BYTES: contando caracteres UTF-16 cada línea de 60 «ñ» pesa la
      mitad de lo que ocupa en disco, así que el fichero se pasaba del tope al

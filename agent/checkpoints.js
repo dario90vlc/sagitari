@@ -359,11 +359,17 @@ function remove(runId) {
   if (LIVE_STATUS.includes(run.status)) {
     return { ok: false, error: 'La tarea está ' + run.status + ': deténla o cancélala antes de borrarla.' };
   }
+  let fallos = 0;
+  let exito = false;
   for (const s of ALL_STATUS) {
     try {
       fs.rmSync(path.join(dirFor(s), id), { recursive: true, force: true });
-    } catch {}
+      exito = true;
+    } catch {
+      fallos++;
+    }
   }
+  if (!exito && fallos > 0) return { ok: false, error: 'No se pudo borrar la tarea del disco.' };
   return { ok: true };
 }
 

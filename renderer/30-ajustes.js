@@ -1134,7 +1134,7 @@ function showSetTab(panel) {
   // El espacio de trabajo se puede cambiar desde su propia vista (y desde el asistente),
   // así que al entrar en «Datos» se relee: si no, la carpeta que enseña Ajustes puede ser
   // la de antes (y esa etiqueta es lo único que dice dónde aterrizan los archivos).
-  if (name === 'data') window.sagitari.workspaceGet().then(pintarEspacioTrabajo);
+  if (name === 'data') window.sagitari.workspaceGet().then(pintarEspacioTrabajo).catch((e) => console.warn('no se pudo leer la carpeta de trabajo:', e && e.message));
   // la pestaña «Acerca de» ya enseña el aviso: el punto del sidebar sobra
   // (solo si Ajustes está a la vista: fillSettings llama aquí al arrancar)
   if (name === 'about' && $('#view-settings').classList.contains('on')) setBadge('#nbUpdate', 0);

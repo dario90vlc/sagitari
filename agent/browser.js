@@ -384,6 +384,12 @@ class Browser {
     this._events = new Map(); // method -> esperadores de eventos CDP
     this._sessions = new Map(); // targetId -> sessionId (una sesión por pestaña)
     this.browserPid = null; // pid del navegador lanzado (para matar el árbol)
+    // v5.0.1: tubería de depuración (no hay puerto TCP). `toBrowser` es el fd 3
+    // (lo que SAGITARI escribe a Chrome), `fromBrowser` el fd 4 (lo que Chrome responde).
+    this.child = null;
+    this.toBrowser = null;
+    this.fromBrowser = null;
+    this._readBuffer = '';
     // Inventario de `elements()` y de qué ejecución es: sus coordenadas son
     // relativas al viewport de UNA página, así que un inventario viejo o de otra
     // ejecución no puede servir para clicar.
@@ -392,6 +398,7 @@ class Browser {
     this._invRev = 0; // v2.5: revisión del inventario (se dice en la respuesta)
     this._logs = []; // v2.5: consola + errores de red de la pestaña
     this._dialog = null; // v2.5: diálogo de la página esperando respuesta
+    this._dialogReciente = null; // v5.0.1: diálogo que se abrió (y pudo auto-cerrarse) en esta acción
     this._downloads = []; // v2.5: descargas vistas (para avisar dónde cayeron)
     this.downloadDir = path.join(os.tmpdir(), 'sagitari-downloads');
     this._queue = Promise.resolve(); // una acción de navegador a la vez (ver handle)
@@ -447,101 +454,93 @@ class Browser {
   }
 
   async alive() {
-    // A debugged browser on our port answers /json quickly.
-    try {
-      const t = await getJSON(`http://127.0.0.1:${this.port}/json`, 1800);
-      return Array.isArray(t) ? t : null;
-    } catch {
-      return null;
-    }
+    // Con la tubería no hay un puerto que sondear: la conexión viva es la prueba.
+    return this.ws ? true : null;
   }
 
   async connect() {
-    // Prefer the browser-wide endpoint (supports Target.* + sessions); fall
-    // back to a page socket (modern Chrome treats it as a browser socket too).
-    let url = null;
-    try {
-      const v = await getJSON(`http://127.0.0.1:${this.port}/json/version`, 1800);
-      if (v && v.webSocketDebuggerUrl) url = v.webSocketDebuggerUrl;
-    } catch {}
-    if (!url) {
-      const pages = await getJSON(`http://127.0.0.1:${this.port}/json`, 1800);
-      const page = pages.find((t) => t.type === 'page');
-      if (!page) throw new Error('El navegador no tiene pestañas.');
-      url = page.webSocketDebuggerUrl;
-    }
+    // Con la tubería no hay handshake HTTP: los streams ya existen tras el spawn.
+    // Solo se enganchan los listeners y se invalidan las sesiones CDP cacheadas.
     if (this.ws) {
       try {
         this.ws.close();
       } catch {}
       this.ws = null;
     }
-    this._sessions.clear(); // una conexión nueva invalida todas las sesiones CDP cacheadas
-    const sock = new WebSocket(url, { maxPayload: 64 * 1024 * 1024 });
-    this.ws = sock;
-    try {
-      await new Promise((res, rej) => {
-        // Con deadline propio: si el extremo acepta el TCP pero no completa el
-        // upgrade, 'open' no llega nunca y la herramienta se quedaba «cargando»
-        // para siempre (ws solo aplica timeout si se le pasa handshakeTimeout).
-        const timer = setTimeout(() => {
-          cleanup();
-          rej(new Error('CDP: el navegador no completó la conexión en 15 s.'));
-        }, 15000);
-        const cleanup = () => {
-          clearTimeout(timer);
-          sock.off('open', onOpen);
-          sock.off('error', onErr);
-        };
-        const onOpen = () => {
-          cleanup();
-          res();
-        };
-        const onErr = (e) => {
-          cleanup();
-          rej(e);
-        };
-        sock.once('open', onOpen);
-        sock.once('error', onErr);
-      });
-    } catch (e) {
-      try {
-        sock.close();
-      } catch {}
-      if (this.ws === sock) this.ws = null;
-      throw e;
-    }
-    // Listener 'error' PERMANENTE: tras el handshake, un error de socket (Chrome
-    // cerrado, RST) sin handler lanzaría una excepción no capturada y tumbaría
-    // el proceso principal de Electron.
-    sock.on('error', () => {});
-    sock.on('message', (m) => {
-      let msg;
-      try {
-        msg = JSON.parse(m);
-      } catch {
-        return;
-      }
-      if (msg.id && this._pending.has(msg.id)) {
-        const { resolve, reject } = this._pending.get(msg.id);
-        this._pending.delete(msg.id);
-        msg.error ? reject(new Error(msg.error.message || JSON.stringify(msg.error))) : resolve(msg.result);
-      } else if (msg.method) {
-        // v2.5: consola, errores de red, diálogos y descargas se van acumulando; el
-        // modelo los lee con action=logs y los avisos se pegan al resultado que toca
+    this._sessions.clear();
+    this._readBuffer = '';
+    if (!this.toBrowser || !this.fromBrowser) return;
+    const to = this.toBrowser;
+    const from = this.fromBrowser;
+    const conn = {
+      to,
+      from,
+      close: () => {
         try {
-          this._track(msg.method, msg.params);
+          to.end();
         } catch {}
-        this._emitEvent(msg.method, msg.params, msg.sessionId);
+        try {
+          from.destroy();
+        } catch {}
+      },
+    };
+    this.ws = conn;
+    from.on('data', (chunk) => {
+      if (this.ws !== conn) return;
+      this._readBuffer += chunk.toString('utf8');
+      let progressed = true;
+      while (progressed && this._readBuffer) {
+        progressed = false;
+        const idx = this._readBuffer.indexOf('\0');
+        let msg = null;
+        if (idx >= 0) {
+          msg = this._readBuffer.slice(0, idx);
+          this._readBuffer = this._readBuffer.slice(idx + 1);
+          progressed = true;
+        } else {
+          // Algunos mensajes llegan sin terminador NUL (o el NUL se queda en un chunk
+          // posterior): si el buffer acumulado ya es JSON válido, se procesa igual.
+          try {
+            JSON.parse(this._readBuffer);
+            msg = this._readBuffer;
+            this._readBuffer = '';
+            progressed = true;
+          } catch {
+            // incompleto: esperar más datos
+          }
+        }
+        if (msg === null) break;
+        if (!msg) continue;
+        let parsed;
+        try {
+          parsed = JSON.parse(msg);
+        } catch {
+          continue;
+        }
+        if (parsed.id && this._pending.has(parsed.id)) {
+          const { resolve, reject } = this._pending.get(parsed.id);
+          this._pending.delete(parsed.id);
+          parsed.error ? reject(new Error(parsed.error.message || JSON.stringify(parsed.error))) : resolve(parsed.result);
+        } else if (parsed.method) {
+          try {
+            this._track(parsed.method, parsed.params);
+          } catch {}
+          this._emitEvent(parsed.method, parsed.params, parsed.sessionId);
+        }
       }
     });
-    sock.on('close', () => {
-      // Solo el socket vigente limpia el estado: el cierre tardío de un socket
-      // viejo no debe anular una reconexión recién establecida.
-      if (this.ws !== sock) return;
+    from.on('end', () => {
+      if (this.ws !== conn) return;
       this.ws = null;
+      this.toBrowser = null;
+      this.fromBrowser = null;
+      this.child = null;
+      this.browserPid = null;
       this._sessions.clear();
       this._rejectPending('Navegador desconectado.');
+    });
+    from.on('error', () => {
+      /* se cierra por `end`; no se deja una excepción no capturada */
     });
   }
 
@@ -561,7 +560,7 @@ class Browser {
       this._pending.set(id, { resolve: wrap(resolve), reject: wrap(reject) });
       const payload = sessionId ? { id, method, params, sessionId } : { id, method, params };
       try {
-        this.ws.send(JSON.stringify(payload));
+        this.ws.to.write(JSON.stringify(payload) + '\0');
       } catch (e) {
         this._pending.delete(id);
         clearTimeout(timer);
@@ -621,8 +620,16 @@ class Browser {
   }
 
   async pages() {
-    const t = await getJSON(`http://127.0.0.1:${this.port}/json`, 2500);
-    return (Array.isArray(t) ? t : []).filter((p) => p.type === 'page' && !p.url.startsWith('devtools://'));
+    if (!this.ws) return [];
+    try {
+      const r = await this.send('Target.getTargets');
+      const infos = r && Array.isArray(r.targetInfos) ? r.targetInfos : [];
+      return infos
+        .filter((t) => t.type === 'page' && !(t.url || '').startsWith('devtools://'))
+        .map((t) => ({ id: t.targetId, type: t.type, title: t.title || '', url: t.url || '' }));
+    } catch {
+      return [];
+    }
   }
 
   async attach(targetId) {
@@ -682,9 +689,19 @@ class Browser {
         break;
       case 'Page.javascriptDialogOpening':
         this._dialog = { type: params.type || 'alert', message: params.message || '', url: params.url || '' };
+        this._dialogReciente = this._dialog;
         break;
       case 'Page.javascriptDialogClosed':
         this._dialog = null;
+        // El diálogo pudo auto-cerrarse (Chrome lo acepta solo cuando nadie lo
+        // contesta a tiempo). Se conserva la nota un rato para que la acción que
+        // lo abrió pueda avisar y `action=dialog` responder con sentido.
+        if (this._dialogReciente) {
+          const reciente = this._dialogReciente;
+          setTimeout(() => {
+            if (this._dialogReciente === reciente) this._dialogReciente = null;
+          }, 3000);
+        }
         break;
       case 'Browser.downloadWillBegin':
       case 'Page.downloadWillBegin':
@@ -753,11 +770,117 @@ class Browser {
 
   // ---------- lifecycle ----------
 
+  async _exeDe(want) {
+    const cands =
+      want === 'edge'
+        ? [
+            process.env['ProgramFiles(x86)'] + '\\Microsoft\\Edge\\Application\\msedge.exe',
+            'C:\\Program Files\\Microsoft\\Edge\\Application\\msedge.exe',
+          ]
+        : [
+            'C:\\Program Files\\Google\\Chrome\\Application\\chrome.exe',
+            process.env['ProgramFiles(x86)'] + '\\Google\\Chrome\\Application\\chrome.exe',
+            process.env.LOCALAPPDATA + '\\Google\\Chrome\\Application\\chrome.exe',
+          ];
+    for (const c of cands) {
+      if (c && fs.existsSync(c)) return c;
+    }
+    return null;
+  }
+
+  // Limpia un Chrome huérfano que siga vivo con nuestro perfil. Con la tubería no se
+  // puede «adoptar» (no hay puerto que escuchar), así que si Chrome dejó un
+  // DevToolsActivePort en el perfil y responde, le pedimos Browser.close por su
+  // WebSocket. Si no responde, el fichero es viejo y lo ignoramos.
+  async _cerrarHuerfano() {
+    const port = this._portFromProfile();
+    if (!port) return;
+    let url = null;
+    try {
+      const v = await getJSON(`http://127.0.0.1:${port}/json/version`, 1200);
+      if (v && v.webSocketDebuggerUrl) url = v.webSocketDebuggerUrl;
+    } catch {}
+    if (!url) return;
+    try {
+      const sock = new WebSocket(url, { maxPayload: 64 * 1024 * 1024 });
+      await new Promise((res) => {
+        const t = setTimeout(() => {
+          try {
+            sock.close();
+          } catch {}
+          res();
+        }, 3000);
+        sock.once('open', () => {
+          try {
+            sock.send(JSON.stringify({ id: 1, method: 'Browser.close' }));
+          } catch {}
+          setTimeout(() => {
+            try {
+              sock.close();
+            } catch {}
+            res();
+          }, 200);
+        });
+        sock.once('error', () => {
+          clearTimeout(t);
+          try {
+            sock.close();
+          } catch {}
+          res();
+        });
+      });
+    } catch {}
+  }
+
+  _lanzarProceso(exe, args) {
+    let child;
+    try {
+      child = spawn(exe, args, { windowsHide: true, stdio: ['ignore', 'ignore', 'ignore', 'pipe', 'pipe'] });
+    } catch (e) {
+      return null;
+    }
+    child.on('error', () => {}); // nunca dejar una excepción no capturada
+    this.child = child;
+    this.browserPid = child.pid;
+    this.toBrowser = child.stdio[3];
+    this.fromBrowser = child.stdio[4];
+    this.activeId = null;
+    child.on('exit', () => {
+      if (this.child !== child) return;
+      this.child = null;
+      this.toBrowser = null;
+      this.fromBrowser = null;
+      this.browserPid = null;
+      if (this.ws) {
+        this.ws = null;
+        this._sessions.clear();
+        this._rejectPending('Navegador desconectado.');
+      }
+    });
+    return child;
+  }
+
+  async _esperarPuerto(deadlineMs) {
+    const deadline = Date.now() + deadlineMs;
+    while (Date.now() < deadline) {
+      await sleep(250);
+      if (!this.ws) return false; // el proceso murió
+      try {
+        await Promise.race([
+          this.send('Browser.getVersion'),
+          new Promise((_, rej) => setTimeout(() => rej(new Error('probe timeout')), Math.max(100, deadline - Date.now()))),
+        ]);
+        return true;
+      } catch {}
+    }
+    return false;
+  }
+
   async launch(browserArg, url) {
     const want = (browserArg || 'chrome').toLowerCase();
     fs.mkdirSync(this.profileDir, { recursive: true }); // asegura el perfil activo
 
-    // 1) Already connected? Just (maybe) navigate — never spawn a second window.
+    // 1) Ya conectado: navega o informa.
     if (this.ws) {
       if (url) {
         await this.currentSession();
@@ -767,70 +890,24 @@ class Browser {
       return `OK: el navegador ya está abierto (${n} pestaña${n === 1 ? '' : 's'}). Usa navigate, new_tab, select_tab…`;
     }
 
-    // 2) A debugged instance on our remembered port is still alive → reconnect.
-    if (this.port) {
-      const t = await this.alive();
-      if (t) {
-        await this.connect();
-        const pg = t.find((x) => x.type === 'page');
-        if (pg) this.activeId = pg.id;
-        if (url) return this.navigate(url);
-        return `OK: reconectado al navegador abierto (puerto CDP ${this.port}).`;
-      }
-    }
+    // 2) Limpia un Chrome huérfano que siga vivo con nuestro perfil (antes se
+    //    reconectaba a él; con la tubería ya no se puede, así que se cierra).
+    await this._cerrarHuerfano();
 
-    // 2b) Un navegador huérfano (Electron murió sin cerrarlo) sigue vivo con
-    //     nuestro perfil bloqueado: al reabrir, Chrome delega en esa instancia y
-    //     NO abre puerto nuevo, así que el arranque acababa en «no respondió al
-    //     puerto de depuración» con el zombie inalcanzable. Chrome deja el puerto
-    //     en DevToolsActivePort dentro del perfil: se lee y se reconecta.
-    if (!this.port) {
-      const discovered = this._portFromProfile();
-      if (discovered) {
-        this.port = discovered;
-        if (await this.alive()) {
-          await this.connect();
-          const pg = (await this.pages()).find((x) => x.type === 'page');
-          if (pg) this.activeId = pg.id;
-          if (url) return this.navigate(url);
-          return `OK: reconectado al navegador que ya estaba abierto (puerto CDP ${this.port}).`;
-        }
-        this.port = 0;
-      }
-    }
-
-    // 3) Fresh spawn (the only case where a new window appears).
-    const find = (b) => {
-      const cands =
-        b === 'edge'
-          ? [
-              process.env['ProgramFiles(x86)'] + '\\Microsoft\\Edge\\Application\\msedge.exe',
-              'C:\\Program Files\\Microsoft\\Edge\\Application\\msedge.exe',
-            ]
-          : [
-              'C:\\Program Files\\Google\\Chrome\\Application\\chrome.exe',
-              process.env['ProgramFiles(x86)'] + '\\Google\\Chrome\\Application\\chrome.exe',
-              process.env.LOCALAPPDATA + '\\Google\\Chrome\\Application\\chrome.exe',
-            ];
-      for (const c of cands) {
-        if (c && fs.existsSync(c)) return c;
-      }
-      return null;
-    };
-    let exe = find(want);
+    // 3) Busca el ejecutable.
+    let exe = await this._exeDe(want);
     let used = want;
     if (!exe) {
       used = want === 'edge' ? 'chrome' : 'edge';
-      exe = find(used);
+      exe = await this._exeDe(used);
     }
     if (!exe) return 'Error: no encontré Chrome ni Edge instalado en este equipo.';
 
-    this.port = 9223 + Math.floor(Math.random() * 500);
+    // 4) Lanza con la tubería de depuración (sin puerto TCP: nada que escuchar).
+    this.port = 0;
     const target = url || 'about:blank';
-    // spawn + array de argumentos (sin shell): comillas, &, | o ^ de la ruta o la
-    // URL no pueden inyectar comandos en cmd.exe.
     const args = [
-      `--remote-debugging-port=${this.port}`,
+      '--remote-debugging-pipe',
       `--user-data-dir=${this.profileDir}`,
       '--no-first-run',
       '--no-default-browser-check',
@@ -853,50 +930,55 @@ class Browser {
       '--start-maximized',
       target,
     ];
-    const child = spawn(exe, args, { windowsHide: true, stdio: 'ignore' });
-    child.on('error', () => {}); // nunca dejar una excepción no capturada
-    this.browserPid = child.pid;
-    this.activeId = null;
+    const child = this._lanzarProceso(exe, args);
+    if (!child) return 'Error: no pude lanzar el navegador.';
 
-    // Sondeo corto de condición (el puerto CDP responde) con timeout de ~9 s.
-    const spawnDeadline = Date.now() + 9000;
-    let ok = false;
-    while (Date.now() < spawnDeadline) {
-      await sleep(250);
-      if (await this.alive()) {
-        ok = true;
-        break;
-      }
-    }
-    if (!ok) return 'Error: el navegador no respondió al puerto de depuración.';
     await this.connect();
+    const ok = await this._esperarPuerto(9000);
+    if (!ok) {
+      this.kill();
+      return 'Error: el navegador no respondió al canal de depuración.';
+    }
 
     const list = await this.pages();
     if (list.length) {
       this.activeId = list[0].id;
       if (url) return this.navigate(url); // navigate ya espera la carga (waitReady)
     }
-    return `OK: navegador abierto (${used}, puerto CDP ${this.port})${url ? ', navegando a ' + url : ''}.`;
+    return `OK: navegador abierto (${used})${url ? ', navegando a ' + url : ''}.`;
   }
 
   kill() {
     try {
-      if (this.ws) {
-        this.send('Browser.close').catch(() => {});
-        this.ws.close();
-      }
+      if (this.ws) this.ws.close();
     } catch {}
-    // Mata el árbol del proceso lanzado (Chrome abre hijos; taskkill /T los alcanza).
     if (this.browserPid) {
       try {
-        spawn('taskkill', ['/PID', String(this.browserPid), '/T', '/F'], { windowsHide: true, stdio: 'ignore' });
+        this._matarArbol(this.browserPid);
       } catch {}
-      this.browserPid = null;
     }
     this.ws = null;
+    this.toBrowser = null;
+    this.fromBrowser = null;
+    this.child = null;
+    this.browserPid = null;
     this.activeId = null;
     this._sessions.clear();
+    this._lastElements = null;
     this._rejectPending('Navegador cerrado.');
+  }
+
+  _matarArbol(pid) {
+    if (!pid) return;
+    if (process.platform === 'win32') {
+      try {
+        spawn('taskkill', ['/PID', String(pid), '/T', '/F'], { windowsHide: true, stdio: 'ignore' });
+      } catch {}
+    } else {
+      try {
+        process.kill(pid, 'SIGTERM');
+      } catch {}
+    }
   }
 
   // ---------- helpers ----------
@@ -1179,8 +1261,8 @@ class Browser {
   /** ¿Ha aparecido un diálogo? Se espera un poco: el evento viaja aparte del clic. */
   async _esperarDialogo(ms = 1200) {
     const fin = Date.now() + ms;
-    while (!this._dialog && Date.now() < fin) await sleep(100);
-    return !!this._dialog;
+    while (!(this._dialog || this._dialogReciente) && Date.now() < fin) await sleep(100);
+    return !!(this._dialog || this._dialogReciente);
   }
 
   /** Inventario clicable/legible de la página con índices estables y coordenadas:
@@ -1570,26 +1652,29 @@ class Browser {
 
   /** Contesta a un diálogo de la página (alert/confirm/prompt/beforeunload). */
   async dialog(args) {
-    if (!this._dialog) return 'No hay ningún diálogo abierto ahora mismo.';
-    const d = this._dialog;
+    const d = this._dialog || this._dialogReciente;
+    if (!d) return 'No hay ningún diálogo abierto ahora mismo.';
     const accept = args.accept !== false;
-    try {
-      await this.send(
-        'Page.handleJavaScriptDialog',
-        { accept, promptText: args.text ? String(args.text) : undefined },
-        await this.sessionIdOf(),
-      );
-    } catch (e) {
-      return 'Error al contestar al diálogo: ' + e.message;
+    if (this._dialog) {
+      try {
+        await this.send(
+          'Page.handleJavaScriptDialog',
+          { accept, promptText: args.text ? String(args.text) : undefined },
+          await this.sessionIdOf(),
+        );
+      } catch (e) {
+        // El diálogo ya se cerró (Chrome lo aceptó solo): no es un error para el modelo.
+        if (!/No dialog is showing|no dialog/i.test(String(e.message))) return 'Error al contestar al diálogo: ' + e.message;
+      }
     }
     this._dialog = null;
+    this._dialogReciente = null;
     return `OK: diálogo «${d.type}» ${accept ? 'aceptado' : 'cancelado'}${d.message ? ' («' + d.message.slice(0, 120) + '»)' : ''}.`;
   }
 
   /** Aviso para pegar al resultado de cualquier acción si hay un diálogo bloqueando. */
-  _dialogNote() {
-    if (!this._dialog) return '';
-    const d = this._dialog;
+  _dialogNote(d = this._dialog) {
+    if (!d) return '';
     return `\nATENCIÓN: la página tiene un diálogo abierto («${d.type}»: ${(d.message || '').slice(0, 120)}) que la bloquea. Contéstalo con action=dialog accept:true|accept:false (y text para un prompt).`;
   }
 
@@ -1617,8 +1702,9 @@ class Browser {
     // v2.5: si hay un diálogo abierto, la página está bloqueada para el resto de
     // acciones: se avisa en el resultado de CUALQUIER acción (menos la que lo cierra)
     const res = await next;
-    if (!this._dialog || args.action === 'dialog') return res;
-    const nota = this._dialogNote();
+    const dialogo = this._dialog || this._dialogReciente;
+    if (!dialogo || args.action === 'dialog') return res;
+    const nota = this._dialogNote(dialogo);
     if (typeof res === 'string') return res + nota;
     if (res && typeof res === 'object' && typeof res.text === 'string') return { ...res, text: res.text + nota };
     return res;
@@ -1672,10 +1758,9 @@ class Browser {
         return 'OK: navegador cerrado.';
       }
       if (!this.ws) {
-        // autocuración: si hay una instancia viva en nuestro puerto, reconnecta; si no, lanza
-        if (this.port && (await this.alive())) {
-          await this.connect();
-        } else return await this.launch(args.browser, args.url);
+        // Con la tubería no se reutiliza una instancia anterior: se lanza una nueva
+        // (cualquier Chrome huérfano con nuestro perfil se limpia dentro de launch).
+        return await this.launch(args.browser, args.url);
       }
 
       switch (a) {

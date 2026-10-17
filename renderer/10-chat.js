@@ -213,7 +213,7 @@ function crearPestana(rt) {
        siguiente flecha no tendría dónde apoyarse. */
     Promise.resolve(openConversation(rt.id, rt.titulo)).then(() => {
       if (rt.tab && rt.tab.isConnected) rt.tab.focus();
-    });
+    }).catch((e) => console.warn('no se pudo abrir la conversación:', e && e.message));
   });
   t.addEventListener('keydown', (ev) => {
     // un div con role=tab no se activa solo: Enter y espacio son suyos
@@ -387,6 +387,15 @@ function eventoDeOtraPestana(ev) {
       // sus cambios son suyos: la barra de deshacer se ofrecerá al volver a su pestaña
       rt.cambios = Array.isArray(ev.files) ? ev.files : [];
       break;
+    case 'guardrail':
+      /* El turno de esa conversación se detuvo por un tope de seguridad. Su tarjeta y su
+         chip son suyos (no se pintan aquí), pero el aviso es de la app y conviene verlo:
+         sin esto, un tope en la pestaña de al lado pasaba en silencio. */
+      rt.busy = false;
+      reflejarTurno(rt);
+      showToast('Límite de seguridad: ' + String(ev.reason || '').slice(0, 100));
+      feed('Límite de seguridad', 'err');
+      break;
     case 'context':
       rt.ctx = ev;
       break;
@@ -528,11 +537,11 @@ function goto(view, opts) {
   if (view === 'projects')
     window.sagitari.workspaceGet().then((w) => {
       $('#projPath').value = w;
-    });
+    }).catch((e) => console.warn('no se pudo leer la carpeta de trabajo:', e && e.message));
   if (view === 'equipo') {
     renderEquipo(); // lo que ya se sabe, al instante
     // el tope de compañeros vive en el motor (meta:get): cuando llegue, se completa la nota
-    cargarLimiteEquipo().then(renderEquipo);
+    cargarLimiteEquipo().then(renderEquipo).catch((e) => console.warn('no se pudo cargar el tope del equipo:', e && e.message));
   }
   if (view === 'history') renderHistory();
   if (view === 'settings') {

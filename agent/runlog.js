@@ -59,7 +59,11 @@ function pruneOldLogs() {
       }
       // Los write streams crean sus archivos de forma asíncrona. Releer la carpeta
       // evita que una poda temprana vea solo el archivo activo y deje los demás.
-      if (intento < 10) {
+      // En Windows, además, `unlinkSync` falla con EBUSY/EPERM mientras el handle
+      // del stream anterior se cierra: en un runner lento más de 1 s, así que con
+      // ~1 s de reintentos la carpeta se quedaba muy por encima del tope. Se
+      // reintenta hasta ~10 s (el tope de ficheros no puede depender del reloj).
+      if (intento < 100) {
         pruneTimer = setTimeout(() => paso(intento + 1), 100);
         if (pruneTimer.unref) pruneTimer.unref();
       }
@@ -337,6 +341,9 @@ module.exports = {
      escribir 8 MB ni tocar los logs reales del usuario. */
   __test: {
     _resetForTests: ({ dir, maxBytes, maxLogs } = {}) => {
+      // Una poda en curso no debe tocar el almacén que se configura ahora: puede
+      // seguir reintentando segundos después de cambiar de carpeta.
+      clearTimeout(pruneTimer);
       try {
         stream && stream.end();
       } catch {}

@@ -268,10 +268,11 @@ function crearEquipo({ lider = null, limite = LIMITE_MIEMBROS, presupuestoUsd = 
       if (corte) return { ok: false, error: `el equipo está parado (${corte}); no se levantan más compañeros en este turno.` };
       const s = specDe(spec);
       if (!s) return { ok: false, error: 'falta el especialista: pasa el id del registro (research, coding, review…).' };
-      if (miembros.size >= lim) {
+      const vivos = [...miembros.values()].filter((m) => !m.cerrado).length;
+      if (vivos >= lim) {
         return {
           ok: false,
-          error: `el equipo ya tiene ${lim} compañeros (el tope): espera a que terminen con team_wait o reparte tú el trabajo que queda.`,
+          error: `el equipo ya tiene ${vivos} compañeros vivos (el tope de ${lim}): espera a que terminen con team_wait o reparte tú el trabajo que queda.`,
         };
       }
       const task = textoLargo(tarea, 4000);

@@ -2,9 +2,16 @@
    Script clásico: comparte el scope global con los demás 1x-*.js.
    El orden de carga en index.html preserva el orden original. */
 /* exported renderMarket, pintarCtxMeter, resetCtxMeter, pintarRailEquipo */
-/* global hiloActual, equipoDe, estadoEquipo, badgeEquipoPermisos, equipoEvento, equipoChat, equipoPermiso, equipoFicha */
+/* global hiloActual, eventoDeOtraPestana, equipoDe, estadoEquipo, badgeEquipoPermisos, equipoEvento */
+/* global equipoChat, equipoPermiso, equipoFicha */
 // ============ activity feed + live agents ============
 const FEED_MAX = 6;
+/* v5.0.1: eventos que NO pertenecen a una conversación concreta y por eso se atienden
+   mire donde mire el usuario: la confirmación (su turno la espera, y el id viaja con la
+   conversación que la pidió), el aviso de la app, y el cierre/estado de una tarea en
+   segundo plano (panel de Tareas). Todo lo demás viaja con `convId` y solo se pinta en su
+   pestaña. Al añadir un tipo de evento nuevo: si es del turno, NO va aquí. */
+const EVENTOS_DE_LA_APP = new Set(['confirm_request', 'toast', 'task_done', 'task_interrupted', 'task_update']);
 /* TABLERO: reloj de estación del rail (hora local tabular, late 1 vez por segundo
    y solo si el rail existe; el intervalo vive mientras la ventana viva). */
 function tickBoardClock() {
@@ -531,6 +538,17 @@ window.sagitari.onAgentEvent((ev) => {
     equipoChat(ev);
     return;
   }
+  /* v5.0.1: cada evento del turno viaja con SU conversación (`convId`). Si no es la que
+     está a la vista, no se pinta aquí: antes la respuesta de una pestaña se colaba en la
+     burbuja de la otra (delta, busy, assistant_done…), porque este manejador es único y
+     escribía siempre en la vista activa. `eventoDeOtraPestana` deja a la dueña al día
+     —ocupada, con sus cambios que deshacer— y su historial se repinta al volver a ella.
+     Lo que NO es de una conversación sigue su camino: una confirmación tiene que poder
+     responderse mire donde mire el usuario (su turno la está esperando) y los avisos y el
+     panel de Tareas son de la app. Sin conversación conocida (`hiloActual()` null, en el
+     arranque) tampoco se desvía nada: no hay a quién atribuir el evento. */
+  const abierto = hiloActual();
+  if (abierto && ev.convId && ev.convId !== abierto && !EVENTOS_DE_LA_APP.has(ev.type)) return eventoDeOtraPestana(ev);
   switch (ev.type) {
     /* El contexto crece MIENTRAS el turno trabaja: si sólo se pintara al cambiar de ficha,
        el medidor mentiría durante toda la respuesta. */
@@ -1358,7 +1376,7 @@ function openSkillMenu() {
     refreshSkillList().then(() => {
       skillIdx = skillList.length ? 0 : -1;
       renderSkillMenu(m[1]);
-    });
+    }).catch((e) => console.warn('no se pudo refrescar la lista de skills:', e && e.message));
   } else closeSkillMenu();
 }
 function closeSkillMenu() {
