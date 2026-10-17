@@ -110,8 +110,10 @@ async function hostPermitido(host, { resolver = dns.promises.lookup } = {}) {
     for (const d of dirs || []) {
       if (ipBloqueada(d && d.address)) return { ok: false, motivo: `«${h}» resuelve a una dirección privada (${d.address})` };
     }
+    const ip = (dirs && dirs.length && dirs[0] && dirs[0].address) || h;
+    return { ok: true, ip };
   }
-  return { ok: true };
+  return { ok: true, ip: h };
 }
 
 /* --------------------------------------------------------------------------- *
@@ -261,18 +263,48 @@ async function traer(url, opts = {}) {
   const ac = new AbortController();
   const timer = setTimeout(() => ac.abort(), TIMEOUT_MS);
   if (opts.registerKillable) opts.registerKillable({ stop: () => ac.abort() });
+  const dispatchers = [];
   try {
     let res = null;
     let bytes = 0;
     for (let salto = 0; salto <= MAX_REDIRECCIONES; salto++) {
       const puerta = await hostPermitido(actual.hostname, opts.resolver ? { resolver: opts.resolver } : {});
       if (!puerta.ok) throw new Error(`no salgo a la red interna: ${puerta.motivo}`);
+      // Fijar la resolución: conectar a la IP ya validada (cierra la ventana TOCTOU
+      // entre la comprobación de arriba y la petición real, que volvía a resolver).
+      let dispatcher = null;
+      const hostLimpio = String(actual.hostname || '').replace(/^\[|\]$/g, '');
+      if (!net.isIP(hostLimpio) && puerta.ip) {
+        const ip = puerta.ip;
+        const { Agent } = require('undici');
+        dispatcher = new Agent({
+          connect(opts, callback) {
+            const isHttps = opts.protocol === 'https:';
+            const port = opts.port || (isHttps ? 443 : 80);
+            const servername = opts.servername || opts.hostname;
+            const mod = isHttps ? require('node:tls') : require('node:net');
+            const socketOpts = isHttps ? { host: ip, port, servername } : { host: ip, port };
+            // `entregar` se llama como MUCHO una vez: un error del socket después de
+            // conectar no puede volver a disparar el callback del conector de undici.
+            let settled = false;
+            const entregar = (err, socket) => {
+              if (settled) return;
+              settled = true;
+              callback(err, socket);
+            };
+            const socket = mod.connect(socketOpts, () => entregar(null, socket));
+            socket.once('error', (e) => entregar(e));
+          },
+        });
+        dispatchers.push(dispatcher);
+      }
       try {
         res = await fetchFn(actual.href, {
           method: 'GET',
           redirect: 'manual', // las redirecciones las sigo yo para poder re-comprobarlas
           signal: ac.signal,
           headers: { 'User-Agent': USER_AGENT, Accept: 'text/html,application/xhtml+xml,text/plain,application/json;q=0.9,*/*;q=0.5' },
+          dispatcher,
         });
       } catch (e) {
         if (ac.signal.aborted) throw new Error(`se agotó el tiempo (${TIMEOUT_MS / 1000} s) o se canceló la descarga de ${actual.href}`);
@@ -321,6 +353,11 @@ async function traer(url, opts = {}) {
     return { url: actual.href, status: res.status, texto: `${cabecera}\n\n${limpio.slice(0, max)}${recorte}` };
   } finally {
     clearTimeout(timer);
+    for (const d of dispatchers) {
+      try {
+        d.close();
+      } catch {}
+    }
   }
 }
 

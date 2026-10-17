@@ -840,7 +840,11 @@ async function executeTool(name, args, ctx) {
       if (bloqCwd) return bloqCwd.replace('no puedo escribir en', 'no puedo ejecutar en');
       // chcp 65001 fuerza UTF-8 en cmd.exe para que los acentos no lleguen corruptos
       const r = await run(`chcp 65001>nul & ${args.command}`, { cwd: cwdPedido, timeout, registerKillable: ctx.registerKillable });
-      return `exit=${r.code}\nSTDOUT:\n${clip(r.stdout)}\nSTDERR:\n${clip(r.stderr, 3000)}`;
+      /* v5.0.1: el resultado dice si el comando FALLÓ, no solo qué imprimió. El agente
+         deducía el fallo del texto (prefijo «Error…»), y un `exit=1` no lo lleva: el
+         comando contaba como comprobación buena y la puerta de cierre se daba por hecha
+         tras una ejecución en rojo. El texto es el mismo de siempre para el modelo. */
+      return { text: `exit=${r.code}\nSTDOUT:\n${clip(r.stdout)}\nSTDERR:\n${clip(r.stderr, 3000)}`, failed: r.code !== 0 };
     }
     case 'read_file': {
       const p = inWs(args.path);

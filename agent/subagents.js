@@ -689,8 +689,12 @@ const RESULT_TAGS = {
  * DETAILS con lista de rutas) y varios bloques (se queda con el ÚLTIMO de cada
  * etiqueta, que es el cierre real), y si el modelo no respeta el formato cae al
  * texto plano en vez de devolver vacío.
+ *
+ * `corte` (opcional) dice que la vuelta del subagente NO llegó a su informe final:
+ * `{ cortado: true, motivo: 'limite' | 'detenido' }`. En ese caso no puede salir OK
+ * —ver abajo—, porque el último texto es un preámbulo, no un cierre.
  */
-function parseSubagentResult(text) {
+function parseSubagentResult(text, corte = null) {
   const t = String(text || '');
   const rx = /^[ \t]*(RESULT|RESULTADO|DETAILS|DETALLES|EVIDENCE|EVIDENCIA|STATUS|ESTADO)[ \t]*:[ \t]*(.*)$/i;
   const blocks = {}; // campo -> [ {buf: []} ] en orden de aparición
@@ -716,16 +720,49 @@ function parseSubagentResult(text) {
       .split('\n')
       .map((s) => s.trim())
       .find(Boolean) || '';
-  const result = last('result') || firstLine.slice(0, 200);
+  let result = last('result') || firstLine.slice(0, 200);
   const details = last('details');
   const evidence = last('evidence');
   const statusWord = (last('status').match(/[A-Za-zÁÉÍÓÚÑ]+/) || [''])[0].toUpperCase();
-  const status = ['OK', 'PARTIAL', 'FAILED'].includes(statusWord)
+  const explicito = ['OK', 'PARTIAL', 'FAILED'].includes(statusWord);
+  let status = explicito
     ? statusWord
     : /error|no pude|no se pudo|falló|fallo|imposible|denegad/i.test(t)
       ? 'FAILED'
       : 'OK';
+  /* v5.0.1: el estado por DEFECTO (no había bloque STATUS) no puede ser OK si el
+     subagente no cerró: se agotó su presupuesto de pasos, lo detuvo el usuario o
+     terminó sin decir nada. Su último texto es un preámbulo, y ese OK fantasma
+     desactivaba la puerta de cierre del turno —peor aún viniendo del verificador—.
+     Un STATUS explícito sí manda: si el informe llegó, se cree lo que dice. */
+  if (!explicito && status === 'OK' && (corte || !t.trim())) status = 'PARTIAL';
+  // sin texto que enseñar, se dice POR QUÉ no hay informe (el motivo lo sabe el bucle)
+  if (!result && status === 'PARTIAL' && corte)
+    result =
+      corte.motivo === 'detenido'
+        ? 'detenido por el usuario antes de dar su informe'
+        : 'se agotó su presupuesto de pasos sin dar su informe final';
   return { status, result, details, evidence };
+}
+
+/* ---------- aislamiento por árbol git ---------- */
+
+/**
+ * ¿Esta vuelta puede ESCRIBIR en el proyecto del usuario?
+ *
+ * Un especialista de serie con `write_file`/`edit_file`/`apply_patch` sí. Y un agente
+ * del USUARIO con `run_command`: una orden puede escribir (una redirección, un script,
+ * `git checkout`) sin declarar ninguna herramienta de escritura, así que se le aísla
+ * igual que a los que sí las declaran.
+ *
+ * Un integrado de serie con `run_command` (verificador, revisor) lo usa para LEER y
+ * comprobar el proyecto REAL: aislarlo le cambiaría la ruta de su evidencia y le
+ * añadiría una fusión que no tiene que hacer. Por eso NO cuenta aquí.
+ */
+function escribeProyecto(spec) {
+  const t = (spec && spec.allowTools) || [];
+  if (['write_file', 'edit_file', 'apply_patch'].some((x) => t.includes(x))) return true;
+  return !!(spec && spec.origen === 'disco' && t.includes('run_command'));
 }
 
 module.exports = {
@@ -741,6 +778,7 @@ module.exports = {
   buildSubagentBrief,
   formatDelegationBoard,
   parseSubagentResult,
+  escribeProyecto,
   // v4.1: agentes del usuario (carpeta <datos>/agents/<id>/AGENT.md)
   listar,
   recargar,

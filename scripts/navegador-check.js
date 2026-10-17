@@ -18,6 +18,7 @@
    ============================================================================ */
 
 const fs = require('fs');
+const http = require('http');
 const os = require('os');
 const path = require('path');
 const { Browser } = require('../agent/browser');
@@ -83,6 +84,18 @@ const sleep = (ms) => new Promise((r) => setTimeout(r, ms));
   const archivo = path.join(dir, 'prueba.html');
   fs.writeFileSync(archivo, PAGINA, 'utf8');
 
+  // La página se sirve por HTTP: navigate() rechaza file:// (y chrome:/about:) por
+  // seguridad, así que el check anterior lanzaba el navegador y lo cerraba sin probar nada.
+  const servidor = http.createServer((req, res) => {
+    res.writeHead(200, { 'Content-Type': 'text/html; charset=utf-8' });
+    res.end(PAGINA);
+  });
+  await new Promise((resolve, reject) => {
+    servidor.listen(0, '127.0.0.1', () => resolve());
+    servidor.on('error', reject);
+  });
+  const url = `http://127.0.0.1:${servidor.address().port}/prueba.html`;
+
   const b = new Browser();
   // perfil APARTE: la comprobación no toca el perfil del usuario
   await b.switchProfile('navegador-check');
@@ -90,7 +103,7 @@ const sleep = (ms) => new Promise((r) => setTimeout(r, ms));
 
   let abierto = false;
   try {
-    const lanzado = await b.launch('chrome', 'file:///' + archivo.replace(/\\/g, '/'));
+    const lanzado = await b.launch('chrome', url);
     abierto = !/Error/.test(String(lanzado));
 
     if (!abierto) {
@@ -223,6 +236,9 @@ const sleep = (ms) => new Promise((r) => setTimeout(r, ms));
     } catch {}
     try {
       b.kill();
+    } catch {}
+    try {
+      servidor.close();
     } catch {}
     try {
       fs.rmSync(dir, { recursive: true, force: true });

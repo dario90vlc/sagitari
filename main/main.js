@@ -4,6 +4,23 @@
 // Chat window + click-through screen-edge glow overlay + agent + settings.
 
 const { app, ipcMain, desktopCapturer, screen, globalShortcut, shell, dialog } = require('electron');
+
+// Defensa en profundidad (auditoría #12): validar el remitente de cada
+// ipcMain.handle. El renderer corre con contextIsolation + sandbox + CSP, así que
+// hoy no hay XSS que pueda llamar al puente; fijarlo aquí cierra la puerta a que
+// aparezca en el futuro sin tener que tocar los 90 y pico manejadores uno a uno.
+const _ipcHandleOriginal = ipcMain.handle.bind(ipcMain);
+ipcMain.handle = (channel, handler) => {
+  const envuelto = async (event, ...args) => {
+    const url = event && event.senderFrame && event.senderFrame.url ? String(event.senderFrame.url) : '';
+    if (!/^file:/i.test(url)) {
+      log.warn('[ipc] remitente no autorizado para ' + channel + ': ' + (url || '(sin url)'));
+      return { ok: false, error: 'remitente no autorizado' };
+    }
+    return handler(event, ...args);
+  };
+  return _ipcHandleOriginal(channel, envuelto);
+};
 const path = require('path');
 const fs = require('fs');
 const fsp = require('fs/promises');
@@ -906,6 +923,18 @@ async function correrBancoYsalir() {
 
 app.whenReady().then(() => {
   if (!gotLock) return;
+  // Deniega por defecto cualquier petición de permiso (cámara, micrófono,
+  // geolocalización…). El modo voz se retiró y no hay contenido remoto, así que hoy
+  // no se pide nada; fijarlo cierra la puerta a que aparezca sin querer.
+  try {
+    const { session } = require('electron');
+    session.defaultSession.setPermissionRequestHandler((webContents, permission, callback) => {
+      log.warn('[permisos] denegado por defecto: ' + permission);
+      callback(false);
+    });
+  } catch (e) {
+    log.warn('[permisos] no se pudo fijar el manejador: ' + ((e && e.message) || e));
+  }
   loadConfig();
   if (BANCO) {
     correrBancoYsalir().catch((e) => {
@@ -1045,10 +1074,12 @@ async function cerrarYsalir() {
     } catch {}
   } // servidores MCP: procesos hijos fuera
   try {
-    // Sin `.catch`, Chrome terminando cierra el socket y el rechazo de esa petición en
-    // vuelo entra por 'unhandledRejection': al salir con la ventana ya destruida eso
-    // sacaba un diálogo de «fallo interno» y ensuciaba crash.log en un cierre normal.
     if (browser.ws) browser.send('Browser.close').catch(() => {});
+    // Respaldo: si Chrome no atiende la orden (o el lanzamiento falló a medias), el
+    // proceso no se queda vivo con el perfil del usuario. taskkill /T /F mata el árbol.
+    try {
+      browser.kill();
+    } catch {}
   } catch {} // Chrome/Edge lanzado por CDP
   try {
     runlog.close();

@@ -310,6 +310,7 @@ class Guardrails {
     this.approvals = new Map(); // remembered confirmations: signature -> expiry
     this.delegations = 0; // subagentes lanzados en este turno
     this._stall = 0; // pasos consecutivos sin progreso
+    this._budgetOver = null; // v5.0.1: gasto delegado que rebasó el tope (detiene el turno en el siguiente paso)
   }
 
   /** Hot-reload policy from Settings without losing run counters. */
@@ -342,6 +343,7 @@ class Guardrails {
     this.delegations = 0;
     this._stall = 0;
     this._lastToolName = null; // si no, la señal de progreso quedaba contaminada entre ejecuciones
+    this._budgetOver = null; // v5.0.1
   }
 
   /**
@@ -366,6 +368,9 @@ class Guardrails {
   /** Call once per model turn. Returns {ok, reason?}. */
   checkStep() {
     this.steps++;
+    if (this._budgetOver) {
+      return { ok: false, reason: this._budgetOver };
+    }
     const g = this.policy.guardrails;
     if (g.maxDurationMs > 0 && Date.now() - this.startedAt > g.maxDurationMs) {
       return { ok: false, reason: `Tiempo máximo de ejecución alcanzado (${Math.round(g.maxDurationMs / 60000)} min).` };
@@ -457,10 +462,12 @@ class Guardrails {
     }
     const g = this.policy.guardrails;
     if (g.maxTokens > 0 && this.tokensUsed >= g.maxTokens) {
-      return { ok: false, reason: `Límite de tokens alcanzado (${g.maxTokens}) — incluye el consumo de los subagentes.` };
+      this._budgetOver = `Límite de tokens alcanzado (${g.maxTokens}) — incluye el consumo de los subagentes.`;
+      return { ok: false, reason: this._budgetOver };
     }
     if (g.maxCostUsd > 0 && this.costUsd >= g.maxCostUsd) {
-      return { ok: false, reason: `Límite de coste estimado alcanzado ($${g.maxCostUsd}) — incluye el consumo de los subagentes.` };
+      this._budgetOver = `Límite de coste estimado alcanzado ($${g.maxCostUsd}) — incluye el consumo de los subagentes.`;
+      return { ok: false, reason: this._budgetOver };
     }
     return { ok: true };
   }

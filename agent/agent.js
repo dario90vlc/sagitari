@@ -1636,7 +1636,13 @@ class Agent {
     // orquestador recibe un PARTIAL honesto en vez de un vacío.
     if (p.onFinal) {
       const lastAssistant = [...messages].reverse().find((m) => m.role === 'assistant' && m.content);
-      p.onFinal(lastAssistant ? String(lastAssistant.content) : '');
+      /* v5.0.1: además del texto se dice QUÉ pasó. Sin esta señal el orquestador parseaba
+         un preámbulo sin bloque STATUS y caía al OK por defecto: un subagente cortado por
+         el tope de pasos (o detenido) podía dar por verificado el turno. */
+      p.onFinal(lastAssistant ? String(lastAssistant.content) : '', {
+        cortado: true,
+        motivo: signal.aborted ? 'detenido' : 'limite',
+      });
     }
   }
 
@@ -1862,7 +1868,19 @@ class Agent {
     this.meta.toolCalls++;
     const images = result && typeof result === 'object' ? result.images : undefined;
     const text = result && typeof result === 'object' ? result.text : String(result);
-    return { action: 'ok', text, images, failed: typeof text === 'string' && text.startsWith('Error'), args, confirmed };
+    /* v5.0.1: un ejecutor puede declarar el fallo de forma EXPLÍCITA (`run_command` lo
+       hace con exit ≠ 0). Deducirlo del texto no sirve para todo: una salida real que
+       empieza por «exit=1» no lleva el prefijo «Error…» y pasaba por buena, así que el
+       turno se apuntaba el comando como comprobación y la puerta de cierre se saltaba. */
+    const falloExplicito = result && typeof result === 'object' && typeof result.failed === 'boolean' ? result.failed : null;
+    return {
+      action: 'ok',
+      text,
+      images,
+      failed: falloExplicito === null ? typeof text === 'string' && text.startsWith('Error') : falloExplicito,
+      args,
+      confirmed,
+    };
   }
 
   /**
@@ -2212,7 +2230,7 @@ class Agent {
        Es lo que permite que dos especialistas trabajen de verdad a la vez: sin esto
        el semáforo los serializa, pero se siguen leyendo los archivos a medio cambiar. */
     let arbol = null;
-    const escribeElArbol = ['write_file', 'edit_file', 'apply_patch'].some((t) => spec.allowTools.includes(t));
+    const escribeElArbol = subagents.escribeProyecto(spec);
     if (escribeElArbol && ctx.settings.settings && ctx.settings.settings.arbolesAislados !== false) {
       try {
         arbol = await arboles.crear(ws);
@@ -2281,6 +2299,7 @@ class Agent {
       budget: { steps: spec.maxSteps, note: 'pasos de herramienta de esta subtarea' },
     });
     let finalText = '';
+    let corteSubagente = null; // cómo terminó la vuelta cuando no hubo informe final (v5.0.1)
     /* v3.0 — el árbol de trabajo aislado se DESMONTA pase lo que pase: si algo lanza
        entre crearlo y descartarlo (la ejecución del subagente, su absorción de gasto,
        la fusión…), el worktree se quedaba registrado para siempre en
@@ -2295,8 +2314,9 @@ class Agent {
           brief,
           subagents.toolDefsFor(spec.key),
           signal,
-          (text) => {
+          (text, corte) => {
             finalText = text;
+            corteSubagente = corte || null;
           },
           // v2.2: enrutado por especialidad (si el usuario lo activó) — el verificador y el
           // archivador no necesitan el modelo más caro para leer y comprobar
@@ -2390,9 +2410,11 @@ class Agent {
         } catch {}
       }
     }
-    const parsed = subagents.parseSubagentResult(finalText);
-    // v2.1: una verificación que no falla cuenta como prueba para el cierre
-    if (spec.key === 'verification' && parsed.status !== 'FAILED') this._verified = true;
+    const parsed = subagents.parseSubagentResult(finalText, corteSubagente);
+    // v2.1/v5.0.1: solo una verificación que CIERRA con OK cuenta como prueba para el
+    // cierre. Un PARTIAL (no llegó a comprobar) o un FAILED no pueden dar por verificado
+    // el turno; antes bastaba con «no ha fallado», que dejaba pasar al que se quedó a medias.
+    if (spec.key === 'verification' && parsed.status === 'OK') this._verified = true;
     // v2.4: si el propio modelo pidió la revisión, la puerta del cierre no la repite
     if (spec.key === 'review') this._reviewed = true;
     this._delegations.push({ agent: spec.key, task: taskText, status: parsed.status, result: parsed.result });
@@ -2560,6 +2582,10 @@ class Agent {
       }
       const spec = subagents.SUBAGENTS[String(a.agent || '').trim()];
       if (!spec) return `Error: no conozco el especialista «${a.agent}». Disponibles: ${subagents.SUBAGENT_KEYS.join(', ')}.`;
+      // v5.0.1: el cupo de subagentes por turno (maxDelegations) cuenta también aquí —
+      // antes solo `delegate` lo consultaba, así que team_spawn podía rebasar el tope.
+      const cupo = this.guardrails.checkDelegation();
+      if (!cupo.ok) return 'Error: ' + cupo.reason;
       const r = eq.levantar(spec, { tarea: a.task, expect: a.expect });
       if (!r.ok) return 'Error: ' + r.error;
       if (onStatus) onStatus(`${spec.emoji} ${spec.name} (${r.id}): ${String(a.task || '').slice(0, 80)}`);
@@ -2671,7 +2697,7 @@ class Agent {
     // el freno PROPIO del compañero (lo aborta el motor al cortar por presupuesto, o el líder al Detener)
     const signal = (sub && sub._aborto && sub._aborto.signal) || signal0 || this._equipoSignal || new AbortController().signal;
     const wsBase = (settings.settings && settings.settings.workspace) || path.join(os.homedir(), 'Desktop', 'Sagitari');
-    const escribe = ['write_file', 'edit_file', 'apply_patch'].some((t) => (spec.allowTools || []).includes(t));
+    const escribe = subagents.escribeProyecto(spec);
     /* Árbol aislado por VUELTA, no por compañero: quien escribe trabaja aislado y sus
        cambios vuelven fusionados y verificados. Después de fusionar se DESCARTA, porque el
        parche se calcula contra la línea base del árbol: reutilizarlo aplicaría dos veces
@@ -2714,6 +2740,7 @@ class Agent {
     const tools = [...subagents.toolDefsFor(spec.key), ...defsEquipoParaMiembro()];
     let finalText = '';
     let fallo = null;
+    let corteMiembro = null; // v5.0.1: su vuelta se cortó (tope/Detener) sin informe final
     try {
       await sub._runWithSystem(
         subagents.subagentSystemPrompt(spec.key, ws, { skillsIndex, suggested }),
@@ -2721,8 +2748,9 @@ class Agent {
         brief,
         tools,
         signal,
-        (t) => {
+        (t, corte) => {
           finalText = t;
+          corteMiembro = corte || null;
         },
         // `defs`: el compañero VE solo sus herramientas (las de equipo incluidas); la
         // delegación de siempre sigue viendo el catálogo completo y filtrando al ejecutar.
@@ -2803,16 +2831,28 @@ class Agent {
     if (fallo) {
       return { ok: false, resumen: `${spec.name} no pudo terminar su vuelta: ${(fallo && fallo.message) || fallo}`, evidencia: '' };
     }
-    const parsed = subagents.parseSubagentResult(finalText);
+    const parsed = subagents.parseSubagentResult(finalText, corteMiembro);
     /* La fusión hay que contarla: si no entró, el líder NO puede presentar ese trabajo
        como hecho — es justo el error que esto viene a evitar. */
     let notaFusion = '';
     if (arbol && fusion && !fusion.ok && !fusion.vacio) {
       notaFusion = `\nFUSIÓN CON CONFLICTO: sus cambios NO se aplicaron al proyecto del usuario (${fusion.conflicto}). Dilo tal cual; no lo presentes como hecho.`;
     }
+    /* v5.0.1: un compañero cortado (tope de pasos o Detener) no cerró su informe; lo que
+       entrega es el preámbulo de lo que estaba haciendo. Se dice para que el líder no lo
+       presente como trabajo terminado. */
+    const motivoCorte = !corteMiembro
+      ? ''
+      : corteMiembro.motivo === 'detenido'
+        ? 'lo detuviste'
+        : 'se agotó su presupuesto de pasos';
+    const notaCorte =
+      corteMiembro && parsed.status !== 'FAILED'
+        ? `\nSIN TERMINAR: ${spec.name} no llegó a cerrar su informe (${motivoCorte}); su trabajo no está completo.`
+        : '';
     return {
       ok: parsed.status !== 'FAILED',
-      resumen: `${parsed.result}${parsed.details ? '\nDETALLES: ' + parsed.details : ''}${notaFusion}`.slice(0, 4000),
+      resumen: `${parsed.result}${parsed.details ? '\nDETALLES: ' + parsed.details : ''}${notaFusion}${notaCorte}`.slice(0, 4000),
       evidencia: String(parsed.evidence || '').slice(0, 2000),
     };
   }

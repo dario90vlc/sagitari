@@ -420,6 +420,100 @@ test('subagents: parseSubagentResult tolera multilínea, español y evidencia', 
   eq(subagents.parseSubagentResult('RESULT: no pude abrir el archivo (permiso denegado)').status, 'FAILED', 'sin STATUS, el texto decide');
 });
 
+test('subagents: escribeProyecto aisla a los agentes que pueden escribir', () => {
+  // un integrado de serie con run_command (verificador, revisor) lo usa para LEER el proyecto real: NO se aísla
+  eq(subagents.escribeProyecto(subagents.SUBAGENTS.verification), false, 'el verificador no crea árbol (lee el proyecto real)');
+  eq(subagents.escribeProyecto(subagents.SUBAGENTS.review), false, 'el revisor tampoco');
+  // un agente del USUARIO con run_command puede escribir sin declarar herramientas de escritura: se aísla
+  eq(subagents.escribeProyecto({ allowTools: ['run_command'], origen: 'disco' }), true, 'un agente propio con run_command se aísla');
+  // un agente del usuario solo de lectura: no se aísla
+  eq(subagents.escribeProyecto({ allowTools: ['read_file'], origen: 'disco' }), false, 'solo lectura no necesita árbol');
+  // herramientas de escritura: siempre se aísla
+  eq(subagents.escribeProyecto({ allowTools: ['write_file'] }), true, 'write_file aísla');
+  eq(subagents.escribeProyecto({ allowTools: ['edit_file'] }), true, 'edit_file aísla');
+  eq(subagents.escribeProyecto({ allowTools: ['apply_patch'] }), true, 'apply_patch aísla');
+  // sin herramientas: no se aísla
+  eq(subagents.escribeProyecto({ allowTools: [] }), false, 'sin herramientas no hay nada que aislar');
+  // el cableado: ambos sitios usan el ayudante (no la lista antigua)
+  const src = fs.readFileSync(path.join(__dirname, '..', 'agent', 'agent.js'), 'utf8');
+  ok(/const escribeElArbol = subagents\.escribeProyecto\(spec\)/.test(src), 'la delegación usa el ayudante');
+  ok(/const escribe = subagents\.escribeProyecto\(spec\)/.test(src), 'y el compañero de equipo también');
+});
+
+test('web: hostPermitido devuelve la IP validada (cierra el TOCTOU)', async () => {
+  const web = require('../agent/web');
+  // host literal (IP): se devuelve tal cual, sin resolver
+  const ip = await web.hostPermitido('8.8.8.8');
+  eq(ip.ok, true, 'una IP pública pasa');
+  eq(ip.ip, '8.8.8.8', 'y se devuelve como ip fijada');
+  // host bloqueado por nombre: no sale
+  const bloqueado = await web.hostPermitido('localhost');
+  eq(bloqueado.ok, false, 'localhost bloqueado');
+  // host con resolver mock que devuelve una IP pública: se devuelve esa IP
+  const resuelto = await web.hostPermitido('example.com', { resolver: async () => [{ address: '93.184.216.34' }] });
+  eq(resuelto.ok, true, 'un nombre que resuelve a IP pública pasa');
+  eq(resuelto.ip, '93.184.216.34', 'y se devuelve la IP resuelta para fijarla');
+  // host con resolver mock que devuelve IP privada: bloqueado
+  const rebind = await web.hostPermitido('evil.example', { resolver: async () => [{ address: '127.0.0.1' }] });
+  eq(rebind.ok, false, 'un nombre que resuelve a IP privada se bloquea (anti-rebinding)');
+  // traer con fetchFn mock: pasa el dispatcher fijado (o undefined si es IP literal)
+  const capturado = [];
+  const r = await web.traer('http://93.184.216.34/x', { fetchFn: async (url, opts) => { capturado.push(opts); return new Response('ok', { status: 200, headers: { 'content-type': 'text/plain' } }); } });
+  eq(r.status, 200, 'traer funciona con fetchFn mock');
+  ok(capturado.length === 1, 'se llamó al fetch una vez');
+  // para una IP literal no hace falta dispatcher (ya es la IP)
+  eq(capturado[0].dispatcher, null, 'con IP literal no se crea dispatcher');
+  // con un NOMBRE que resuelve a IP pública, `traer` crea el dispatcher que FIJA esa IP
+  // (el corazón del arreglo: la petición real ya no vuelve a resolver por su cuenta)
+  const capturado2 = [];
+  const r2 = await web.traer('http://example.com/y', {
+    resolver: async () => [{ address: '93.184.216.34' }],
+    fetchFn: async (url, opts) => { capturado2.push(opts); return new Response('ok', { status: 200, headers: { 'content-type': 'text/plain' } }); },
+  });
+  eq(r2.status, 200, 'traer con un nombre público funciona');
+  ok(capturado2[0].dispatcher && typeof capturado2[0].dispatcher === 'object', 'con un nombre se crea el dispatcher que fija la IP');
+  ok(typeof capturado2[0].dispatcher.close === 'function', 'el dispatcher es un Agent de undici (se cierra en el finally)');
+});
+
+test('subagents: una vuelta CORTADA no puede salir OK (ni dar por verificado el turno)', () => {
+  /* El bucle entrega lo último que dijo el subagente cuando se corta por el tope de pasos
+     o por Detener: eso es un preámbulo, no un informe. Sin `corte` el parser cae al OK por
+     defecto —por eso la puerta de cierre se desactivaba con una verificación fantasma—. */
+  eq(
+    subagents.parseSubagentResult('Voy a revisar los archivos del proyecto…').status,
+    'OK',
+    'un informe sin formato pero COMPLETO sigue siendo OK (no se rompe lo de siempre)',
+  );
+  const corte = { cortado: true, motivo: 'limite' };
+  eq(
+    subagents.parseSubagentResult('Voy a revisar los archivos…', corte).status,
+    'PARTIAL',
+    'cortado por el tope de pasos pasa a PARTIAL',
+  );
+  const detenido = subagents.parseSubagentResult('', { cortado: true, motivo: 'detenido' });
+  eq(detenido.status, 'PARTIAL', 'detenido y sin texto, también PARTIAL');
+  ok(/detenido por el usuario/.test(detenido.result), 'y se dice por qué sin inventarse un informe: ' + detenido.result);
+  eq(subagents.parseSubagentResult('', null).status, 'PARTIAL', 'una vuelta vacía tampoco es OK');
+  eq(
+    subagents.parseSubagentResult('RESULT: ok\nSTATUS: OK', corte).status,
+    'OK',
+    'un STATUS explícito manda: si el informe llegó, se cree lo que dice',
+  );
+  eq(
+    subagents.parseSubagentResult('RESULT: no pude\nSTATUS: FAILED', corte).status,
+    'FAILED',
+    'y un FAILED explícito sigue siendo FAILED',
+  );
+  // el cableado: el corte del bucle tiene que LLEGAR al parser y a la puerta de cierre
+  const src = fs.readFileSync(path.join(__dirname, '..', 'agent', 'agent.js'), 'utf8');
+  ok(/parseSubagentResult\(finalText, corteSubagente\)/.test(src), 'la delegación le pasa el corte al parser');
+  ok(/parseSubagentResult\(finalText, corteMiembro\)/.test(src), 'y el compañero de equipo también');
+  ok(
+    /spec\.key === 'verification' && parsed\.status === 'OK'/.test(src),
+    'solo un OK cierra como verificado (un PARTIAL ya no cuela)',
+  );
+});
+
 test('subagents: la guía de delegación viaja en el prompt del orquestador', () => {
   const { systemPrompt } = require('../agent/agent');
   const sys = systemPrompt();
@@ -591,6 +685,44 @@ test('agent: no se pide verificación si nada cambió, si ya se comprobó o si e
     settings: { mode: 'act', modelRouting: false, workspace: ws3, verifyGate: false, reviewGate: false },
   });
   eq(n3, 3, 'con la verificación desactivada cierra sin la vuelta extra');
+});
+
+test('agent: un comando que FALLA no vale como comprobación de cierre', async () => {
+  const { Agent } = require('../agent/agent');
+  const base = { active: { name: 'x', baseUrl: 'https://api.openai.com/v1', apiKey: 'k', model: 'gpt-4o' } };
+  const events = [];
+  const ws = tmpDir('sagi-gate-falla-');
+  /* Dos escrituras y, después, una ejecución EN ROJO (exit 1). El modelo lanzó «su»
+     comprobación, pero falló: el turno NO puede cerrarse como verificado. Antes sí lo
+     hacía, porque `failed` se deducía del texto y un `exit=1` no empieza por «Error»,
+     así que el comando contaba como bueno y la puerta de cierre se saltaba. */
+  const guion = [
+    () => toolTurn('f1', 'write_file', { path: 'a.txt', content: 'uno' }),
+    () => toolTurn('f2', 'write_file', { path: 'b.txt', content: 'dos' }),
+    () => toolTurn('f3', 'run_command', { command: 'exit 1' }),
+    () => sseTurn('Hecho: los creé y los comprobé.'),
+    () => sseTurn('Verificado: revisé los dos archivos.'),
+  ];
+  let n = 0;
+  const agent = new Agent({
+    fetchFn: async () => guion[Math.min(n++, guion.length - 1)](),
+    emit: () => {},
+    screenshotFn: async () => ({}),
+  });
+  agent.emit = autoApprove(agent, events);
+  await agent.chat('crea dos archivos', {
+    ...base,
+    settings: { mode: 'act', modelRouting: false, workspace: ws, reviewGate: false },
+  });
+  ok(
+    events.some((e) => e.type === 'tool_result' && e.name === 'run_command' && e.ok === false),
+    'la tarjeta del comando dice que falló:',
+  );
+  eq(n, 5, 'el comando en rojo NO cuenta como comprobación: se pide la vuelta de verificación');
+  ok(
+    events.some((e) => e.type === 'status' && /Verificando/.test(e.text || '')),
+    'y la interfaz ve que toca comprobar de verdad:',
+  );
 });
 
 test('ajustes: la verificación de cierre viene activada y es desactivable', () => {
@@ -1103,6 +1235,25 @@ test('guardrails: el tope de delegaciones por turno se explica y no corta el tur
     aviso && !/termina la tarea con tus herramientas/.test(aviso.reason),
     'con un motivo para leer, no la instrucción interna del prompt: ' + (aviso || {}).reason,
   );
+});
+
+test('guardrails: el gasto delegado que rebasa el tope detiene el turno', () => {
+  const g = new Guardrails({ guardrails: { maxTokens: 100, maxCostUsd: 0 } });
+  g.beginRun();
+  const sub = new Guardrails({ guardrails: { maxTokens: 100 } });
+  sub.beginRun();
+  sub.addTokens(80, { prompt_tokens: 60, completion_tokens: 20, total_tokens: 80 });
+  eq(g.absorb(sub).ok, true, 'el primer absorb cabe');
+  eq(g.tokensUsed, 80, 'y se suma al padre');
+  sub.addTokens(40, { prompt_tokens: 30, completion_tokens: 10, total_tokens: 40 });
+  const over = g.absorb(sub);
+  eq(over.ok, false, 'el presupuesto global debe saltar con el consumo delegado');
+  ok(/tokens/i.test(over.reason), 'con su motivo: ' + over.reason);
+  ok(g.checkStep().ok === false, 'y el siguiente paso del turno se detiene por el tope');
+  ok(/tokens/i.test(g.checkStep().reason), 'con el mismo motivo');
+  // un turno nuevo vuelve a tener su cupo (beginRun limpia el tope rebasado)
+  g.beginRun();
+  ok(g.checkStep().ok, 'beginRun limpia el tope rebasado');
 });
 
 test('agent: sin criterio de éxito se usa la petición del usuario como reserva', async () => {
@@ -3267,7 +3418,7 @@ test('browser 2: logs, diálogos y errores se explican sin abrir un navegador', 
   ok(/dime a qué esperar/.test(await b.waitFor({}, 's')), 'wait_for sin criterio se explica');
   eq((await b._resolve({}, 's', 'A')).error, 'necesito index, selector o text para saber sobre qué actuar');
   eq((await b._resolve({ index: 9 }, 's', 'A')).error.includes('índice 9 inválido'), true, 'un índice que no existe no clica nada');
-  eq(await b.dialog({}), 'No hay ningún diálogo abierto ahora mismo.');
+  eq(await b.dialog({}), 'OK: diálogo «confirm» aceptado («¿Borrar todo?»).', 'tras cerrarse, dialog() confirma que ya está atendido');
   eq(b.setDownloadDir('/tmp/x'), undefined, 'la carpeta de descargas se puede fijar');
   eq(b.downloadDir, '/tmp/x');
 });

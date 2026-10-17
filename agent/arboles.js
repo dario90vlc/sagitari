@@ -50,6 +50,7 @@ const fs = require('fs');
 const fsp = require('fs/promises');
 const path = require('path');
 const { spawn } = require('child_process');
+const { killTree } = require('./proc');
 const datadir = require('./datadir');
 
 const VIVEN = new Map(); // id -> { ws, dir, base }  (los que siguen en pie)
@@ -92,7 +93,7 @@ function git(args, cwd, opts = {}) {
     child.on('close', (code) => finish(code == null ? -1 : code));
     const timer = setTimeout(() => {
       try {
-        child.kill();
+        killTree(child);
       } catch {}
       finish(1);
     }, opts.timeout || 120000);

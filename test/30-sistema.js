@@ -1173,6 +1173,30 @@ test('browser: kill deja el estado limpio y se puede repetir', () => {
   b.kill(); // sin navegador abierto no puede lanzar ningún taskkill
 });
 
+test('browser: un lanzamiento que no responde mata el proceso recién creado', async () => {
+  const b = new Browser();
+  b.profileDir = tmpDir('sagi-prof5-');
+  b._exeDe = async () => 'C:\\fake\\chrome.exe';
+  let matado = null;
+  b._lanzarProceso = (exe, args) => {
+    b.browserPid = 99999;
+    b.toBrowser = { write() {}, end() {} };
+    b.fromBrowser = { on() {}, destroy() {} };
+    b.child = { on() {} };
+    b.ws = { to: b.toBrowser, from: b.fromBrowser, close() {} };
+    return b.child;
+  };
+  b._esperarPuerto = async () => false;
+  b._matarArbol = (pid) => {
+    matado = pid;
+  };
+  const r = await b.launch('chrome');
+  ok(/no respondió/.test(r), 'devuelve error si no responde: ' + r);
+  eq(matado, 99999, 'mata el proceso recién creado antes de devolver el error');
+  eq(b.browserPid, null, 'y deja el pid limpio');
+  eq(b.ws, null, 'y la conexión también');
+});
+
 test('runlog: escribe, se lee y rota por bytes reales', async () => {
   const dir = tmpDir('sagi-logs-');
   runlog.__test._resetForTests({ dir, maxBytes: 400, maxLogs: 3 });
