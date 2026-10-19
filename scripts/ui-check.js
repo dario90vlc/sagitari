@@ -1481,13 +1481,39 @@ const AFTER = {
     console.log('  ok   el compañero escribió el archivo de verdad (con tu permiso)');
   } else {
     failed++;
-    console.log('  FALLO el compañero no escribió ' + ARCHIVO_PERMISO + ' en el espacio de trabajo');
+    // Con el motivo: qué hay en el espacio de trabajo, qué dijo la tarjeta y qué pasó
+    // con el árbol aislado (el archivo puede haberse quedado ahí).
+    let enWs = '';
+    try {
+      enWs = fs.readdirSync(WS_TEST).slice(0, 12).join(',');
+    } catch {}
+    console.log(
+      '  FALLO el compañero no escribió ' +
+        ARCHIVO_PERMISO +
+        ' en el espacio de trabajo (workspace: [' +
+        enWs +
+        '] | tarjeta: ' +
+        JSON.stringify(trasElClick) +
+        ')',
+    );
   }
   if (arbolVisto) {
     console.log('  ok   el compañero trabajó en un árbol aislado de verdad y el archivo llegó fusionado');
   } else {
     failed++;
-    console.log('  FALLO el compañero no trabajó en un árbol aislado (el aislamiento no ocurrió)');
+    console.log(
+      '  FALLO el compañero no trabajó en un árbol aislado (el aislamiento no ocurrió) | tarjeta: ' +
+        JSON.stringify(trasElClick) +
+        ' | workspace: [' +
+        (() => {
+          try {
+            return fs.readdirSync(WS_TEST).slice(0, 12).join(',');
+          } catch {
+            return '';
+          }
+        })() +
+        ']',
+    );
   }
   /* Y la tarjeta lo cuenta: sin insignia (el permiso ya se contestó) y con el compañero
      terminado. Su fila sigue viva aunque el líder ya cerrara su parte. */
