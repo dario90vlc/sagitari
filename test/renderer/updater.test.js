@@ -205,7 +205,11 @@ test('el destino cuelga de una carpeta propia', () => {
 console.log('updater.js — tareas programadas');
 
 test('taskTimePlus suma minutos', () => {
-  assertEqual(updater.taskTimePlus(5, new Date('2026-01-01T10:00:00Z')), '11:05');
+  /* La función devuelve la hora LOCAL (es lo que `schtasks /st` pide). La base se
+     construye en hora local: con un instante UTC fijo, el caso dependía del huso de la
+     máquina (en un runner en UTC daba «10:05» y las pruebas se caían allí y no aquí). */
+  assertEqual(updater.taskTimePlus(5, new Date(2026, 0, 1, 10, 0).getTime()), '10:05');
+  assertEqual(updater.taskTimePlus(2, new Date(2026, 0, 1, 23, 59).getTime()), '00:01', 'cruza la medianoche');
 });
 
 test('taskRunLine lanza powershell oculto', () => {
@@ -327,8 +331,11 @@ test('con la huella correcta el camino normal sigue instalando', () => {
     graceMs: 0,
   });
   const diario = fs.readFileSync(e.logPath, 'utf8');
-  assertOk(fs.existsSync(e.marca), 'el instalador verificado sí se ejecuta');
-  assertEqual(r.status, 0, 'y el guion termina sin error');
+  assertOk(
+    fs.existsSync(e.marca),
+    'el instalador verificado sí se ejecuta (código ' + r.status + '; diario: ' + diario.replace(/\s+/g, ' ').slice(0, 300) + ')',
+  );
+  assertEqual(r.status, 0, 'y el guion termina sin error (diario: ' + diario.replace(/\s+/g, ' ').slice(0, 200) + ')');
   assertOk(/instalador lanzado/.test(diario), 'el diario registra el lanzamiento');
 });
 
