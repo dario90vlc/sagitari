@@ -422,8 +422,15 @@ function installHelperScript({ name, installer, args = '/S --updated', logPath, 
             // antes de cerrar la app. Aquí se vuelve a comprobar JUSTO antes de
             // ejecutarlo, que es el único momento que cierra la ventana entre la
             // verificación y el Start-Process.
+            // La huella se calcula con .NET y NO con `Get-FileHash`: si la app se lanzó
+            // desde PowerShell 7, la 5.1 hereda su PSModulePath y no encuentra el módulo
+            // del cmdlet (el mismo tropiezo que documenta `signatureOf` más abajo), con
+            // lo que esta puerta diría «la huella no coincide» sobre un instalador
+            // correcto y no se instalaría nada. Lo cazó la suite de interfaz en la CI.
             '$huella = ""',
-            'if ($codigo -eq 0) { try { $huella = (Get-FileHash -Algorithm SHA512 -LiteralPath ' + q(installer) + ').Hash.ToLower() } catch { $huella = "" } }',
+            'if ($codigo -eq 0) { try { $sha = [System.Security.Cryptography.SHA512]::Create(); $fs = [System.IO.File]::OpenRead(' +
+              q(installer) +
+              '); try { $huella = ([System.BitConverter]::ToString($sha.ComputeHash($fs)) -replace "-","").ToLower() } finally { $fs.Dispose(); $sha.Dispose() } } catch { $huella = "" } }',
             "if ($codigo -eq 0 -and $huella -ne '" + huellaHex + "') { Diag ('el instalador NO coincide con la huella SHA-512 publicada; no se ejecuta (real=' + $huella + ')'); $codigo = 2 }",
           ]
         : []),

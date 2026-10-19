@@ -282,9 +282,9 @@ test('el guion comprueba la huella SHA-512 del instalador antes de ejecutarlo', 
     logPath: 'C:/t/instalar.log',
     expected: esperado,
   });
-  assertOk(s.includes('Get-FileHash -Algorithm SHA512'), 'debe usar Get-FileHash SHA-512');
+  assertOk(s.includes('[System.Security.Cryptography.SHA512]::Create()'), 'calcula el SHA-512 sin depender de un cmdlet (Get-FileHash puede no estar: PSModulePath heredado de PowerShell 7)');
   assertOk(s.includes(hex), 'la huella esperada viaja dentro del guion');
-  assertOk(s.indexOf('Get-FileHash') < s.indexOf('Start-Process -FilePath'), 'se comprueba ANTES de lanzarlo');
+  assertOk(s.indexOf('SHA512') < s.indexOf('Start-Process -FilePath'), 'se comprueba ANTES de lanzarlo');
   assertOk(s.includes('$codigo = 2'), 'una huella que no cuadra deja el instalador sin ejecutar');
 });
 
@@ -375,7 +375,7 @@ test('programarInstalacion lleva la huella esperada al .ps1 que ejecuta la tarea
     execFn: async () => ({ code: 0, stdout: '', stderr: '' }),
   });
   const txt = fs.readFileSync(path.join(dir, 'sagitari-instalar.ps1'), 'utf8');
-  assertOk(txt.includes('Get-FileHash -Algorithm SHA512'), 'el ayudante comprueba la huella');
+  assertOk(txt.includes('[System.Security.Cryptography.SHA512]::Create()'), 'el ayudante comprueba la huella (sin depender de Get-FileHash)');
   assertOk(txt.includes(hex), 'y la huella esperada llega hasta el .ps1');
 });
 
