@@ -112,6 +112,24 @@ console.log('runlog.js — el fichero no guarda texto entero (ninguna clave se l
 /* El registro en disco no puede ser un vertedero: el texto COMPLETO de una edición
    (`old_string`/`new_string` de edit_file y de apply_patch) duplicaba el fichero en cada
    línea. Se mide donde se ve de verdad: en el .jsonl. */
+/* Windows: el `.jsonl` lo mantiene abierto el stream del log hasta que el sistema suelta
+   el descriptor, y eso ocurre DESPUÉS de `close()`, que solo pide el cierre. Borrar la
+   carpeta sin esperar falla con ENOTEMPTY y el error salía como si el test no midiera lo
+   que dice medir (era el fallo intermitente de esta suite en la CI: depende de cuándo
+   suelte el descriptor). Se reintenta hasta que se suelte. */
+async function borrarCuandoSeLibre(dir) {
+  for (let i = 0; i < 100; i++) {
+    try {
+      fs.rmSync(dir, { recursive: true, force: true });
+      return;
+    } catch (e) {
+      if (e.code !== 'ENOTEMPTY' && e.code !== 'EPERM' && e.code !== 'EBUSY') throw e;
+      await new Promise((r) => setTimeout(r, 10));
+    }
+  }
+  fs.rmSync(dir, { recursive: true, force: true }); // último intento: si falla, que se vea
+}
+
 async function conLog(fn) {
   const dir = fs.mkdtempSync(path.join(os.tmpdir(), 'sagi-runlog-'));
   runlog.__test._resetForTests({ dir });
@@ -127,7 +145,7 @@ async function conLog(fn) {
   } finally {
     runlog.close();
     runlog.__test._resetForTests({});
-    fs.rmSync(dir, { recursive: true, force: true });
+    await borrarCuandoSeLibre(dir);
   }
 }
 
