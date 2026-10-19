@@ -226,6 +226,9 @@ class Agent {
     this._equipoSignal = null; // señal del turno en el que vive el equipo
     this._equipoSettings = null; // settings del mismo turno (los compañeros los heredan)
     this._miembro = null;
+    /* Un compañero que cierra su encargo (`team_done`) termina su vuelta: el bucle lo
+       mira en cada paso para no seguir pidiendo trabajo después de cerrar. */
+    this._equipoCerrado = false;
     this.guardrails = new Guardrails(opts.guardrailsPolicy || {}); // límites + permisos
     this._llmTimeoutMs = null; // ms sin datos del proveedor antes de cortar (null = default)
     /* v2.6: varias confirmaciones en vuelo a la vez (dos write_file en el MISMO
@@ -1134,6 +1137,16 @@ class Agent {
     const toolDefs = p.toolDefs || allToolDefs();
 
     while (true) {
+      /* Un compañero de equipo que YA cerró su encargo (`team_done`) termina su vuelta
+         aquí: antes el bucle le seguía pidiendo modelos y herramientas —el resultado de la
+         herramienta solo SE LO PIDE al modelo, no lo obliga— hasta agotar su presupuesto de
+         pasos, y la vuelta acababa CORTADA (sin informe) aunque el trabajo estuviera hecho y
+         cerrado, con la tarjeta del equipo en rojo. Se entrega el cierre sin texto y SIN
+         corte: su informe viaja en el `team_done`. */
+      if (this._equipoCerrado) {
+        if (p.onFinal) p.onFinal('');
+        return;
+      }
       // ---- guardrail: límites de pasos / tiempo (configurables; 0 = sin límite) ----
       const stepCheck = this.guardrails.checkStep();
       if (!stepCheck.ok) {
@@ -2710,6 +2723,9 @@ class Agent {
       }
       const r = eq.cerrar(de, { resumen: a.resumen, evidencia: a.evidencia });
       if (!r.ok) return 'Error: ' + r.error;
+      /* Cerrado el encargo, su vuelta termina (ver el bucle): el aviso del texto es para
+         el modelo, pero la garantía tiene que estar en el código. */
+      this._equipoCerrado = true;
       return 'Encargo cerrado con tu resumen y tu evidencia. El líder ya puede agregar con ello: no sigas trabajando.';
     }
 
@@ -2945,6 +2961,9 @@ class Agent {
     const cfg = this.activeConfig(settings);
     if (!cfg || !cfg.baseUrl || !cfg.model) throw new Error('sin proveedor/modelo activo');
     this._mode = MODE_PROFILES.act;
+    /* Cada vuelta es nueva: el compañero puede volver a trabajar aunque en la anterior
+       cerrara su encargo (un mensaje del buzón arranca otra). */
+    this._equipoCerrado = false;
     // El límite de silencio del usuario vale también dentro de un subagente: sin
     // esto, delegar ignoraba el ajuste (300 s o «sin límite») y cortaba a los 120 s
     // por defecto, con un error que contradecía lo que dice Ajustes.

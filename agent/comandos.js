@@ -225,6 +225,11 @@ const LANZADORES = new Set([
   'call', 'xargs',
 ]);
 
+/* Lanzadores que no están en la lista de arriba porque su nombre no se escribe igual en
+   los dos mundos (`start` de cmd, `Start-Process` de PowerShell): se comparan en
+   minúsculas, igual que los demás. */
+const LANZADORES_TEXTO = new Set(['start', 'start-process']);
+
 /* Intérpretes cuyo argumento ES una línea de órdenes: su interior se vuelve a
    trocear para que la barrera juzgue la orden de dentro (`cmd /c del …`,
    `powershell -Command "Remove-Item …"`) y no el nombre del intérprete. */
@@ -245,6 +250,97 @@ function esAccesorio(token) {
   return /^[-/][a-z0-9]/i.test(t) || /^[a-z_][a-z0-9_]*=/i.test(t) || /^\d+$/.test(t);
 }
 
+/* Opciones de `start` que CONSUMEN el token siguiente (`start /d C:\dir format C:`). */
+const START_CON_VALOR = new Set(['/d', '/node', '/affinity', '/machine', '/i', '/min', '/max', '/low', '/normal', '/high', '/realtime', '/abovenormal', '/belownormal']);
+
+/**
+ * Quita de delante lo que NO cambia QUÉ orden se ejecuta: decoradores de cmd.exe (`@`),
+ * redirecciones (`>nul`, `2>nul`, `>>log`), lanzadores (`start`, `sudo`…), la construcción
+ * `if <condición>`, `for … do`, `ftype nombre=` y paréntesis.
+ *
+ * Sin esto, anteponer una palabra dejaba la orden fuera del alcance de las reglas (que van
+ * ancladas al principio del subcomando): `start format C: /q` se quedaba en «start»,
+ * «inocuo», y la barrera de prohibidos se esquivaba — la MISMA clase de evasión que
+ * escribir el ejecutable con su extensión o con comillas.
+ */
+function desnudar(tokens) {
+  let t = tokens.slice();
+  let seguir = true;
+  while (seguir && t.length) {
+    seguir = false;
+    // 1) decoradores de eco y redirecciones al principio (`@`, `>nul`, `2>nul`, `>>log`)
+    while (t.length) {
+      const p = String(t[0]);
+      if (/^@+$/.test(p)) {
+        t.shift();
+        continue;
+      }
+      if (/^\d*(>>?|>&)/.test(p)) {
+        t.shift();
+        /* `> archivo` escrito en DOS tokens: el destino se va con la redirección. Si el
+           token ya trae el destino (`>nul`, `2>nul`, `>>log`, `>&1`), no hay nada más
+           que quitar — quitarlo se comía la orden de detrás. */
+        if (/^\d*(>>?|>&)$/.test(p) && t.length) t.shift();
+        continue;
+      }
+      if (/^@/.test(p)) {
+        t[0] = p.slice(1); // `@echo` o `@format`: el `@` es del shell, no de la orden
+        if (!t[0]) t.shift();
+        continue;
+      }
+      break;
+    }
+    // 2) lanzadores (con sus opciones): `start`, `sudo`, `wsl`, `cmd /c`…
+    while (t.length && (LANZADORES.has(String(t[0]).toLowerCase()) || LANZADORES_TEXTO.has(String(t[0]).toLowerCase()))) {
+      const lanzador = String(t.shift()).toLowerCase();
+      while (t.length && (esAccesorio(t[0]) || (lanzador === 'start' && START_CON_VALOR.has(String(t[0]).toLowerCase())))) {
+        const opcion = String(t.shift()).toLowerCase();
+        // opciones que se comen el valor siguiente (`start /d C:\dir …`)
+        if (START_CON_VALOR.has(opcion) && t.length && !esAccesorio(t[0])) t.shift();
+      }
+      seguir = true;
+    }
+    // 3) `if <condición> <orden>`: se salta la condición (formas documentadas de cmd)
+    if (t.length && String(t[0]).toLowerCase() === 'if') {
+      let k = 1;
+      if (String(t[k] || '').toLowerCase() === 'not') k++;
+      const forma = String(t[k] || '').toLowerCase();
+      if (forma === 'exist' || forma === 'defined' || forma === 'errorlevel' || forma === 'cmdextversion') k += 2;
+      else if (/==/.test(String(t[k] || ''))) k += 1;
+      else k += 2;
+      t = t.slice(k);
+      seguir = true;
+    }
+    // 4) `for … do <orden>`
+    const iDo = t.findIndex((x) => String(x).toLowerCase() === 'do');
+    if (t.length && String(t[0]).toLowerCase() === 'for' && iDo > 0) {
+      t = t.slice(iDo + 1);
+      seguir = true;
+    }
+    // 5) `ftype nombre=<orden>` / `assoc .ext=<orden>`
+    if (t.length && ['ftype', 'assoc'].includes(String(t[0]).toLowerCase())) {
+      const iIgual = t.findIndex((x, n) => n > 0 && String(x).includes('='));
+      if (iIgual > 0) {
+        const cola = String(t[iIgual]).slice(String(t[iIgual]).indexOf('=') + 1);
+        t = (cola ? [cola] : []).concat(t.slice(iIgual + 1));
+        seguir = true;
+      }
+    }
+    // 6) paréntesis que agrupan (`(format C: /q)` o `( format C: /q )`)
+    if (t.length && String(t[0]).startsWith('(')) {
+      const primero = String(t.shift()).replace(/^\(+/, '');
+      if (primero) t.unshift(primero);
+      seguir = true;
+    }
+    if (t.length && String(t[t.length - 1]).endsWith(')')) {
+      const ultimo = String(t.pop()).replace(/\)+$/, '');
+      if (ultimo) t.push(ultimo);
+      seguir = true;
+    }
+  }
+  return t;
+}
+
 /**
  * Subcomandos de una línea, ya normalizados: `{ exe: 'format', texto: 'format C: /q' }`.
  * `texto` empieza por el nombre del ejecutable (sin ruta ni extensión) y sigue con
@@ -254,13 +350,11 @@ function subcomandosDe(linea, profundidad = 0) {
   const lista = [];
   for (const tokens of trocear(linea)) {
     if (!tokens.length) continue;
-    let i = 0;
-    while (i < tokens.length && LANZADORES.has(String(tokens[i]).toLowerCase())) {
-      i++;
-      while (i < tokens.length && esAccesorio(tokens[i])) i++;
-    }
-    if (i >= tokens.length) i = 0; // era un lanzador suelto (`sudo`): se deja tal cual
-    const resto = tokens.slice(i);
+    /* Primero se quitan decoradores y construcciones (`start`, `@`, `>nul`, `if`, `for…do`,
+       `ftype x=`): si no, la orden de dentro queda escondida detrás de una palabra que no
+       está prohibida y la barrera se esquiva anteponiéndola. */
+    const resto = desnudar(tokens);
+    if (!resto.length) continue;
     const exe = nombreEjecutable(resto[0]);
     const args = resto.slice(1);
     lista.push({ exe, texto: [exe].concat(args).join(' ') });

@@ -157,5 +157,39 @@ test('comando vacío no es compuesta', () => {
   assertEqual(comandos.compuesta(''), false);
 });
 
+console.log('comandos.js — anteponer una palabra tampoco evade la barrera');
+
+/* La revisión del diff cazó que la clasificación por tokens —que arregla la evasión por
+   extensión y por comillas— dejaba pasar el MISMO comando con un prefijo de cmd.exe
+   delante: `start`, `@`, una redirección, `if`, `for…do` o `ftype x=`. Las reglas van
+   ancladas al principio, así que estos prefijos hay que quitarlos antes de mirar la orden
+   (agent/comandos.js → `desnudar`). Son prohibidos: no se ejecutan ni con permiso. */
+for (const t of [
+  'start format C: /q',
+  'start /wait format C: /q',
+  '>nul format C: /q',
+  '2>nul format C: /q',
+  '> log.txt format C: /q',
+  '@format C: /q',
+  'if exist x format C: /q',
+  'if not exist x del /s /q C:\\',
+  'for %i in (*) do del /s /q C:\\',
+  'ftype x=format C: /q',
+  '(format C: /q)',
+  'start powershell -c "cipher /w:C:"',
+]) {
+  test('anteponer «' + t.slice(0, 22) + '» sigue siendo prohibido', () => {
+    assertEqual(comandos.clasificar(t).nivel, 'prohibido');
+  });
+}
+
+/* Y el otro lado: los prefijos NO pueden convertir en prohibido lo que solo menciona la
+   orden (escribirla en un `echo`, en un mensaje de commit o en una lista). */
+for (const t of ['start notepad', 'if exist x echo hola', 'for %i in (*) do echo %i', '> salida.txt echo hola', '(echo hola)']) {
+  test('pero «' + t.slice(0, 22) + '» sigue siendo normal', () => {
+    assertEqual(comandos.clasificar(t).nivel, 'normal');
+  });
+}
+
 console.log(`\n${passed} pasaron, ${failed} fallaron`);
 process.exit(failed ? 1 : 0);
