@@ -198,8 +198,9 @@ por defecto. Verificado en el arranque real con dos servidores sembrados.
 | E | Baja | Herramientas | `sudo -u root <comando prohibido>` queda en «sensible» (confirmación) y no en «prohibido»: sin una tabla de opciones por lanzador no se puede saber cuántos valores consume cada bandera |
 | F | Baja | Publicación | 12 avisos de `npm audit`, todos en el toolchain de desarrollo (no se distribuyen); el único de runtime es `ws` y no aparece en ningún aviso |
 | G | Baja | Publicación | `prettier --check` marca 6 archivos (`agent/agent.js`, `agent/subagents.js`, `renderer/10-chat.js`, `renderer/20-app.js`, `renderer/30-ajustes.js`, `test/40-agente.js`); no corre en CI y no se tocó para no ensuciar el diff de esta release |
+| H | Baja | Memoria | Una contradicción escrita con prefijo conversacional («Recuerda que no me gusta el té») no se reconoce contra el hecho canónico del mismo objeto: `mismoHecho` no la ve porque las palabras del valor pierden los términos cortos, así que conviven las dos. La causa está en `tokenizarRaiz`/`valorPalabras` (`agent/memoria-v2.js`); las formas canónicas sí se resuelven |
 
-Fuera de estos siete, no queda ningún hallazgo de esta pasada sin cerrar.
+Fuera de estos ocho, no queda ningún hallazgo de esta pasada sin cerrar.
 
 ---
 
