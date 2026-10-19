@@ -101,7 +101,18 @@ jobs:
         run: npm run smoke
 
       - name: UI check (la interfaz responde de verdad)
-        run: npm run uicheck
+        # Si falla, que lo CUENTE: cada comprobación fallida va como anotación (desde
+        # fuera, el log del runner no se puede leer y el fallo solo dice «la interfaz
+        # falló»).
+        run: |
+          npm run uicheck 2>&1 | Tee-Object -FilePath uicheck-output.log
+          if ($LASTEXITCODE -ne 0) {
+            foreach ($f in (Select-String -Path uicheck-output.log -Pattern 'FALLO|UI-CHECK' -Context 0,1)) {
+              $texto = ($f.Line + ' ' + ($f.Context.PostContext -join ' '))
+              Write-Output ('::error::' + ($texto -replace '%','%25' -replace "`r",'%0D' -replace "`n",'%0A'))
+            }
+            exit $LASTEXITCODE
+          }
 
       - name: Build installer + portable
         # --publish never: electron-builder NO publica. Si ve GH_TOKEN crea la

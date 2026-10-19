@@ -108,7 +108,15 @@ jobs:
       - name: UI check (la interfaz responde de verdad)
         # smoke sólo prueba que la ventana se abre; esto se conecta a la ventana
         # real y comprueba que el renderer está vivo (iconos, cableado, vistas).
-        run: npm run uicheck
+        run: |
+          npm run uicheck 2>&1 | Tee-Object -FilePath uicheck-output.log
+          if ($LASTEXITCODE -ne 0) {
+            foreach ($f in (Select-String -Path uicheck-output.log -Pattern 'FALLO|UI-CHECK' -Context 0,1)) {
+              $texto = ($f.Line + ' ' + ($f.Context.PostContext -join ' '))
+              Write-Output ('::error::' + ($texto -replace '%','%25' -replace "`r",'%0D' -replace "`n",'%0A'))
+            }
+            exit $LASTEXITCODE
+          }
 
       - name: Upload artifact on failure
         if: failure()
