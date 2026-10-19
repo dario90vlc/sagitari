@@ -1,7 +1,8 @@
 'use strict';
 
 /* Guardrails + permissions for the SAGITARI agent (v1.1 security block, v1.2 cost+stall).
-   Pure logic, no Electron / no I/O → fully unit-testable (test/guardrails.test.js).
+   Sin Electron y sin más I/O que el realpath de las rutas → unit-testable
+   (test/guardrails.test.js).
 
    Permission levels:
      safe       → runs automatically
@@ -22,8 +23,9 @@
 
 const LEVELS = ['safe', 'confirm', 'restricted'];
 
-/* Para comparar rutas (¿está esta escritura dentro del proyecto?): sigue siendo lógica
-   pura, sin I/O ni Electron. */
+/* Para comparar rutas (¿está esta escritura dentro del proyecto?): sin Electron. La
+   ruta se compara primero como texto y, si sale «dentro», se confirma con el camino
+   REAL (el mismo realpath que el confinamiento de executors.js). */
 const path = require('path');
 const os = require('os');
 
@@ -135,7 +137,9 @@ const TOOLS_ESCRITURA = new Set(['write_file', 'edit_file', 'apply_patch']);
    cualquier ruta absoluta del disco (Documentos, .ssh, la carpeta de Inicio…), que además
    era lo único que el usuario veía —la tarjeta— y dejaba de ver. La comparación es por
    CARPETA (`<raíz>/`), nunca por prefijo de texto: `C:\proj-viejo` no está dentro de
-   `C:\proj`. Si no se puede resolver (sin espacio de trabajo, sin home para `~`), se
+   `C:\proj`. Tampoco basta la ruta tal cual: un junction de dentro hacia fuera se llama
+   «de dentro» y escribe fuera, así que la decisión se confirma con el camino REAL. Si no
+   se puede resolver (sin espacio de trabajo, sin home para `~`, sin camino real), se
    pregunta: el fallo conservador es preguntar, no escribir a ciegas. */
 
 /** Normaliza una ruta para compararla (barras '/', sin barra final, minúsculas). */
@@ -146,13 +150,35 @@ function normalizarRuta(p) {
     .toLowerCase();
 }
 
+/* Camino REAL de una ruta (resuelve junctions y enlaces). Se delega en el de
+   executors.js —el mismo criterio que el confinamiento de rutas, en un solo sitio— y el
+   require es perezoso porque executors carga memory → runlog → guardrails: arriba sería
+   un ciclo (runlog se quedaría con un guardrails a medio cargar, sin SENSITIVE_FIELD_RX). */
+let caminoRealFn = null;
+function caminoReal(p) {
+  if (!caminoRealFn) caminoRealFn = require('./executors').caminoReal;
+  return caminoRealFn(p);
+}
+
 /** ¿`abs` cae dentro de `workspace`? */
 function dentroDelEspacio(workspace, abs) {
   const w = String(workspace || '');
   if (!w) return false;
   const raiz = normalizarRuta(path.resolve(w));
   const a = normalizarRuta(abs);
-  return a === raiz || a.startsWith(raiz + '/');
+  if (!(a === raiz || a.startsWith(raiz + '/'))) return false;
+  /* v5.0.2: el texto no basta. Un junction DENTRO del espacio de trabajo que apunte
+     fuera tiene ruta «de dentro» y archivo real «de fuera», así que abarataría una
+     escritura que cae fuera —exactamente lo que el ajuste NO promete—. Igual que hace
+     el confinamiento de executors.js, se comparan también los caminos REALES (con el
+     ancestro que existe, así una ruta nueva también pasa por el junction) y, si algo no
+     se puede resolver, la duda es tarjeta: nunca se convierte en permiso. */
+  const raizReal = caminoReal(raiz);
+  const absReal = caminoReal(abs);
+  if (raizReal == null || absReal == null) return false;
+  const r = normalizarRuta(raizReal);
+  const ar = normalizarRuta(absReal);
+  return ar === r || ar.startsWith(r + '/');
 }
 
 /** Ruta absoluta que va a tocar una escritura, resuelta como lo hace el ejecutor

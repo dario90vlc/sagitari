@@ -1245,11 +1245,13 @@ const AFTER = {
   await new Promise((r) => setTimeout(r, 300));
 
   /* La paleta de `/` ofrece las ÓRDENES de barra por encima de las skills, y su lista
-     sale de ChatKit.COMMANDS: si alguien añade una orden y la paleta no la pinta, esto
-     lo dice. */
+     sale de ChatKit.COMMANDS: si alguien añade una orden y la paleta no la pinta, esto lo
+     dice. Y lo que de verdad tiene que cumplirse es que TODA orden anunciada se pueda
+     despachar: el mínimo de «al menos 5» venía de cuando la lista tenía seis —tres de
+     ellas sin existir detrás, así que la paleta mentía y el conteo no probaba nada—. */
   await judge(
-    'la paleta de «/» ofrece las órdenes de barra',
-    '(function(){ var i=document.querySelector("#chatInput"); if(!i) return false; i.value="/"; i.dispatchEvent(new Event("input",{bubbles:true})); var m=document.querySelector("#skillMenu"); if(!m||m.hidden) return false; var t=m.textContent||""; var c=(typeof ChatKit!=="undefined"&&ChatKit.COMMANDS)||[]; if(c.length<5) return {ordenes:c.length}; var faltan=c.map(function(x){return x.name}).filter(function(n){return t.indexOf("/"+n)<0}); if(faltan.length) return {faltan:faltan}; return /ÓRDENES/.test(t); })()',
+    'la paleta de «/» ofrece las órdenes de barra (y todas existen)',
+    '(function(){ var i=document.querySelector("#chatInput"); if(!i) return false; i.value="/"; i.dispatchEvent(new Event("input",{bubbles:true})); var m=document.querySelector("#skillMenu"); if(!m||m.hidden) return false; var t=m.textContent||""; var c=(typeof ChatKit!=="undefined"&&ChatKit.COMMANDS)||[]; if(!c.length) return {ordenes:0}; var faltan=c.map(function(x){return x.name}).filter(function(n){return t.indexOf("/"+n)<0}); if(faltan.length) return {faltan:faltan}; var sinDespacho=c.map(function(x){return x.name}).filter(function(n){return !ChatKit.parseCommand("/"+n)}); if(sinDespacho.length) return {sinDespacho:sinDespacho}; return /ÓRDENES/.test(t); })()',
   );
   /* Y una barra que NO es orden no puede tragarse el mensaje: es la diferencia entre
      una orden y escribir «mira / esto». */

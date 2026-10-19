@@ -139,6 +139,25 @@ function textOf(buf, name) {
   return text;
 }
 
+/** Ficha compacta de un adjunto para el HISTORIAL (conversations.json) y para el modelo
+    en los turnos siguientes. El texto de un adjunto solo viaja en el turno en que se
+    adjuntó: `blockFor` lo mete en el mensaje en curso, pero guardarlo dejaba cada
+    conversación con cientos de miles de caracteres que se releen enteros al arrancar y se
+    reescriben en cada turno. La ficha conserva lo que el usuario ve en la tarjeta (nombre,
+    tipo y tamaño) y le dice al modelo que ahí hubo un archivo. */
+function cardFor(att) {
+  const a = att || {};
+  const size = a.size ? Math.round(a.size / 1024) + ' KB' : 'n/a';
+  const kind = a.kind === 'image' ? 'imagen' : a.kind === 'binary' ? 'binario' : 'texto';
+  const nota = a.kind === 'image' ? 'miniatura guardada en la conversación' : 'contenido no conservado en el historial';
+  return `--- ARCHIVO ADJUNTO: ${a.name} (${size}, ${kind}) --- (${nota})`;
+}
+
+/** Fichas de varios adjuntos, una por línea y en orden (ver `cardFor`). */
+function cardsFor(atts) {
+  return (atts || []).map(cardFor).join('\n');
+}
+
 /** Bloque que se añade al mensaje: recorta al techo real y lo deja dicho. */
 function blockFor(att) {
   const a = att || {};
@@ -198,5 +217,7 @@ module.exports = {
   textOf,
   blockFor,
   blocksFor,
+  cardFor,
+  cardsFor,
   insideDir,
 };

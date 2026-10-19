@@ -12,7 +12,7 @@
  * se indexa por el id de conversación; sin id (los usos de antes) la clave es '' y el
  * comportamiento es el de siempre. */
 
-const { enmascararArgs } = require('../agent/runlog'); // texto libre que puede ser un secreto
+const { enmascararArgs, redactText } = require('../agent/runlog'); // máscara del log: campos sensibles y patrones
 
 /* ---- rastro del turno: lo que el usuario ve en las tarjetas ----
    Las tarjetas de herramienta, el razonamiento y sus tiempos NO se guardaban en la
@@ -26,8 +26,14 @@ const { enmascararArgs } = require('../agent/runlog'); // texto libre que puede 
    rastro no puede crecer sin freno (el argumento de un write_file es un archivo completo,
    y un resultado de run_command puede traer miles de líneas). */
 const MAX_TRAZA = 80; // herramientas por turno que se conservan
+/* TODO el texto libre del rastro pasa por aquí, así que la máscara del log vive en este
+   único sitio: se enmascaran los patrones ANTES de recortar —al revés, un secreto que
+   cayera justo en el corte quedaría medio escrito— y así un resultado de `run_command`
+   (un `set` con una clave, un `curl` con `Authorization`, un JWT) no viaja en claro a
+   conversations.json. Va aquí y no en cada llamada para que un sitio nuevo que guarde
+   texto en el rastro no pueda olvidarse de la máscara. */
 const clipTraza = (s, n) => {
-  const t = String(s == null ? '' : s);
+  const t = redactText(String(s == null ? '' : s));
   return t.length > n ? t.slice(0, n) + '\n… (recortado: ' + (t.length - n) + ' caracteres más)' : t;
 };
 function argsTraza(name, args) {
@@ -50,6 +56,8 @@ function argsTraza(name, args) {
   // una contraseña tecleada en la web o escrita en el portapapeles no viaja al
   // historial: el rastro se guarda en conversations.json, así que lleva la misma
   // máscara que el log (misma tabla de campos sensibles, un solo sitio que decida).
+  // Los patrones de secreto (`Bearer …`, `sk-…`, JWT) los pone clipTraza, igual que
+  // `redactValue` en el log.
   for (const [k, v] of Object.entries(enmascararArgs(name, args))) out[k] = clipArg(v);
   return out;
 }

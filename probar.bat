@@ -75,6 +75,10 @@ rem shadow DOM, iframes, clicks sin tapar): solo se puede comprobar contra un na
 rem real. Si el equipo no tiene Chrome ni Edge, el paso se salta solo y no falla.
 set PASO=Navegador real: inventario, clics y dialogos
 echo [paso 5] %PASO% ...
+rem Esta bateria SI admite saltarse la prueba del navegador (un equipo sin Chrome ni
+rem Edge es normal): se pide por escrito y el script lo dice en pantalla. Quien lea su
+rem codigo de salida sin pedirlo (una puerta automatica) la ve fallar, no verde.
+set SAGITARI_NAVCHECK_ALLOW_SKIP=1
 call npm run navcheck > "%LOG%" 2>&1
 if errorlevel 1 goto fallo
 findstr /C:"saltado" "%LOG%" >nul

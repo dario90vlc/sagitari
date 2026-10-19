@@ -138,6 +138,17 @@ async function main() {
     assertSinRotos(linea, 'primeraLineaUtil');
   });
 
+  await test('sin nombre configurado, la burbuja del usuario se firma «Tú»', async () => {
+    /* El ajuste ya no trae nombre de fábrica: vacío tiene que leerse como «Tú»,
+       no como el nombre de otra persona. */
+    const { m } = montarVistas();
+    await m.listo();
+    m.w.eval('CFG.settings.userName = ""');
+    m.w.bubble('user');
+    assertEqual(m.$('#messages .msg.me .msg-who').textContent, 'Tú', 'la cabecera del mensaje propio:');
+    assertEqual(m.$('#messages .msg.me .avatar').textContent, 'T', 'la inicial del avatar:');
+  });
+
   await test('la inicial del avatar de un nombre con emoji no es media mitad', async () => {
     const { m } = montarVistas();
     await m.listo();

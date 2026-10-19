@@ -360,16 +360,24 @@ function remove(runId) {
     return { ok: false, error: 'La tarea está ' + run.status + ': deténla o cancélala antes de borrarla.' };
   }
   let fallos = 0;
-  let exito = false;
+  /* `fs.rmSync(..., { force: true })` NO falla si la ruta no existe, así que contar los
+     intentos como «éxito» no decía nada: de las 8 carpetas de estado basta que 7 no
+     existan para que el borrado se diera por bueno aunque la que SÍ existía no se
+     pudiera borrar (EPERM/EBUSY típicos de Windows: antivirus, fichero abierto). Se
+     mira el resultado de verdad: solo cuenta lo que existía y hay que comprobar que ya
+     no está. Si queda algo, la tarea reaparecería al listar y la interfaz no puede
+     decir «eliminada». */
   for (const s of ALL_STATUS) {
+    const dir = path.join(dirFor(s), id);
+    if (!fs.existsSync(dir)) continue;
     try {
-      fs.rmSync(path.join(dirFor(s), id), { recursive: true, force: true });
-      exito = true;
+      fs.rmSync(dir, { recursive: true, force: true });
     } catch {
       fallos++;
     }
+    if (fs.existsSync(dir)) fallos++;
   }
-  if (!exito && fallos > 0) return { ok: false, error: 'No se pudo borrar la tarea del disco.' };
+  if (fallos > 0) return { ok: false, error: 'No se pudo borrar la tarea del disco.' };
   return { ok: true };
 }
 

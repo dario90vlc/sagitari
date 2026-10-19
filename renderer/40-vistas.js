@@ -292,7 +292,12 @@ const MODE_META = Object.fromEntries(
 const MODE_ORDER = K.MODE_ORDER;
 async function setMode(m) {
   if (m === mode) return;
-  mode = await window.sagitari.setMode(m);
+  const r = await window.sagitari.setMode(m);
+  /* El canal devuelve la cadena del modo nuevo; si el guardado en disco falló devuelve
+     `{ok:false,error}` (y el toast del proceso principal ya avisa). Asignarlo tal cual
+     dejaba la interfaz en «Act» en pantalla mientras el ajuste seguía siendo el de antes. */
+  if (r && typeof r === 'object') return;
+  mode = r;
   updateModeUI();
   const M = K.mode(mode);
   showToast('Modo ' + M.label + ' — ' + M.tagline);
@@ -1737,7 +1742,14 @@ if (modelMenu)
       if (!cfg || !cfg.baseUrl) return closeModelMenu();
       row.classList.add('on');
       row.querySelector('.sm-name').textContent = 'Detectando…';
-      const r = await window.sagitari.listModels(cfg.baseUrl, cfg.apiKey);
+      // Sin decir el protocolo, una base Anthropic/Responses de terceros cuya ruta no
+      // lo delata se sondeaba con Bearer y la detección fallaba (401/404) justo donde la
+      // pestaña Modelo sí acierta. Se manda el `format`/`providerId` del proveedor activo
+      // (como 30-ajustes.js) para que main elija las cabeceras y la ruta correctas.
+      const r = await window.sagitari.listModels(cfg.baseUrl, cfg.apiKey, {
+        format: cfg.format,
+        providerId: cfg.id,
+      });
       if (!r.ok) {
         showToast('No se pudieron detectar: ' + r.error);
         closeModelMenu();

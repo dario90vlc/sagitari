@@ -422,7 +422,187 @@ test('ventana: si el renderer se cae, la interfaz se recupera (o se ofrece reini
   );
 });
 
-/* ---------- banco: el informe en una línea llega a máquina ---------- */
+/* ---------- sec:setGuardrail: el tope de gasto admite decimales ----------
+   Hallazgo 2 de la revisión de la interfaz: el panel edita `maxCostUsd` con decimales
+   (0,5 $, `step="0.1"`) pero el router aplicaba `Math.floor` a TODAS las claves, así que
+   0,5 se guardaba como 0 — y 0 es «sin tope» para el motor (`agent/guardrails.js`: solo
+   corta con `maxCostUsd > 0`): el guardarraíl que el usuario creía activo estaba apagado. */
+
+test('sec:setGuardrail: el tope de gasto en dólares conserva los decimales', () => {
+  const { registerTareasIpc } = require('../main/ipc-tareas');
+  const dir = tmpDir('sagi-gr-coste-');
+  const config = { security: { guardrails: { maxCostUsd: 0, maxSteps: 60, loopThreshold: 5 } } };
+  const handlers = new Map();
+  registerTareasIpc(
+    { handle: (c, fn) => handlers.set(c, fn) },
+    {
+      config: () => config,
+      persistConfig: () => ({ ok: true }),
+      getTaskManager: () => null,
+      peekTaskManager: () => null,
+      checkpoints: { list: () => [], safeRunId: require('../agent/checkpoints').safeRunId },
+      runtimes: { liveIds: () => [], allAgents: () => [] },
+      securityDefaults: {},
+      DEFAULT_RISK: {},
+      CONFIG_DIR: dir,
+      runlog: { readRecent: () => [] },
+      getWin: () => null,
+    },
+  );
+  const r = handlers.get('sec:setGuardrail')(null, { maxCostUsd: 0.5, maxSteps: 12.7, loopThreshold: 1 });
+  eq(r.guardrails.maxCostUsd, 0.5, 'el tope de gasto tiene que conservar el decimal (0 = sin tope):');
+  eq(r.guardrails.maxSteps, 12, 'las cuentas de pasos siguen siendo enteras:');
+  eq(r.guardrails.loopThreshold, 2, 'el umbral de bucle sigue con su mínimo de 2:');
+});
+
+/* ---------- lo que el paquete debe llevar: requires de runtime declarados ---------- */
+
+/* electron-builder copia a `node_modules/` SOLO las dependencias de producción (el
+   paquete real trae `node_modules/ws` y nada más). Un `require('x')` de runtime que no
+   esté en `dependencies` funciona en desarrollo —porque `x` está en el árbol de
+   desarrollo— y falla en la app instalada con el error crudo de Node delante del
+   usuario. Pasó con `undici` en `agent/web.js` (5.0.1): `web_fetch` devolvía
+   «Cannot find module 'undici'» en todos los equipos y en las pruebas salía verde.
+   Esta prueba cierra la clase entera: lo que el código pide en tiempo de ejecución o es
+   builtin, o es `electron`, o está declarado como dependencia. */
+test('runtime: cada require de un paquete está en dependencies (o es builtin/electron)', () => {
+  const Module = require('module');
+  const pkg = JSON.parse(fs.readFileSync(path.join(__dirname, '..', 'package.json'), 'utf8'));
+  const deps = new Set(Object.keys(pkg.dependencies || {}));
+  const builtins = new Set(Module.builtinModules.flatMap((m) => [m, 'node:' + m]));
+  const faltan = [];
+  for (const dir of ['main', 'agent', 'renderer']) {
+    const base = path.join(__dirname, '..', dir);
+    for (const f of fs.readdirSync(base).filter((x) => x.endsWith('.js'))) {
+      const src = fs.readFileSync(path.join(base, f), 'utf8');
+      for (const m of src.matchAll(/require\(\s*['"]([^'".][^'"]*)['"]\s*\)/g)) {
+        const spec = m[1];
+        if (builtins.has(spec) || spec === 'electron' || deps.has(spec)) continue;
+        faltan.push(dir + '/' + f + ' → ' + spec);
+      }
+    }
+  }
+  eq(faltan.join(', '), '', 'requires de runtime que el paquete instalado NO llevaría');
+});
+
+test('claveGuardadaPara: la URL se compara normalizada (espacios y barra final)', () => {
+  /* Hallazgo 11 de la revisión de IPC: «Detectar modelos» podía salir en 401 con la
+     clave guardada intacta porque el sondeo buscaba la credencial comparando la URL byte
+     a byte, y el campo del formulario guarda lo que escribe el usuario. */
+  const { claveGuardadaPara } = require('../main/ipc-config');
+  const config = { providers: [{ id: 'p1', baseUrl: 'https://api.x/v1', apiKey: 'k-guardada' }] };
+  eq(claveGuardadaPara(config, { baseUrl: 'https://api.x/v1' }), 'k-guardada', 'la misma URL exacta:');
+  eq(claveGuardadaPara(config, { baseUrl: 'https://api.x/v1/' }), 'k-guardada', 'con barra final es el mismo proveedor:');
+  eq(claveGuardadaPara(config, { baseUrl: ' https://api.x/v1 ' }), 'k-guardada', 'y con espacios sueltos:');
+  eq(claveGuardadaPara(config, { providerId: 'p1', baseUrl: 'https://otra/v9' }), 'k-guardada', 'el id manda aunque la URL no coincida:');
+  eq(claveGuardadaPara(config, { baseUrl: 'https://otra/v9' }), '', 'una URL de otro proveedor no encuentra credencial:');
+  eq(claveGuardadaPara(config, { baseUrl: '' }), '', 'sin URL ni id no hay nada que buscar:');
+});
+
+/* ---------- checkpoints: un borrado que no ocurre no puede decir «ok» ----------
+   Hallazgo 7 de la revisión del agente: `fs.rmSync(..., { force: true })` NO falla si la
+   ruta no existe, así que contar los intentos como éxito daba `ok:true` con solo que las
+   otras siete carpetas de estado no estuvieran: la tarea reaparecía al listar mientras la
+   interfaz decía «eliminada». */
+
+test('checkpoints: si el borrado del disco falla, remove() no puede decir ok', () => {
+  const fsMod = require('fs');
+  const dir = tmpDir('sagi-tareas-borrado-');
+  checkpoints.__test._resetForTests(dir);
+  const run = checkpoints.newRun({ goal: 'revisar', status: 'completed' });
+  checkpoints.save(run);
+  const carpeta = path.join(dir, 'completed', run.runId);
+  ok(fsMod.existsSync(path.join(carpeta, 'run.json')), 'la tarea está en disco antes de borrarla:');
+  const original = fsMod.rmSync;
+  /* Solo falla la carpeta que EXISTE (EBUSY/EPERM de un fichero abierto o del antivirus);
+     las que no existen siguen comportándose como siempre — sin lanzar, porque `force` es
+     justo lo que hacía que el borrado se diera por bueno sin haber borrado nada. */
+  fsMod.rmSync = (p, opts) => {
+    if (fsMod.existsSync(p)) {
+      const e = new Error('EBUSY: resource busy or locked');
+      e.code = 'EBUSY';
+      throw e;
+    }
+    return original.call(fsMod, p, opts);
+  };
+  let r;
+  try {
+    r = checkpoints.remove(run.runId);
+  } finally {
+    fsMod.rmSync = original;
+  }
+  eq(r.ok, false, 'un borrado que no ocurrió no puede devolver ok (la tarea reaparecería al listar):');
+  ok(fsMod.existsSync(path.join(carpeta, 'run.json')), 'y el run.json tiene que seguir ahí, que es lo que hay que decir:');
+  eq(checkpoints.remove(run.runId).ok, true, 'con el disco sano el borrado sigue funcionando:');
+  ok(!fsMod.existsSync(path.join(carpeta, 'run.json')), 'y la tarea desaparece de verdad:');
+});
+
+test('tasks: una interrumpida cuyo backoff vence se reintenta sin reiniciar la app', () => {
+  /* `autoResume()` corría una sola vez al arrancar (`main.js`): si el reloj de espera
+     (`nextAttemptAt`, 60 s · 2^n, hasta 64 min) no había vencido al abrir la app, la
+     tarea se quedaba interrumpida toda la sesión. Ahora `_tick` (cada 20 s) también la
+     recupera cuando le toca. */
+  const { TaskManager } = require('../agent/tasks');
+  const dir = tmpDir('sagi-tareas-backoff-');
+  checkpoints.__test._resetForTests(dir);
+  const run = checkpoints.newRun({ goal: 'seguir con lo pendiente', status: 'interrupted' });
+  run.nextAttemptAt = new Date(Date.now() - 1000).toISOString(); // el backoff ya venció
+  checkpoints.save(run);
+  const tm = new TaskManager({
+    getSettings: () => ({ active: { baseUrl: 'https://api.x/v1', model: 'm' }, settings: {} }),
+    agentFactory: () => ({ chat: async () => {} }),
+    emit: () => {},
+    notify: () => {},
+  });
+  tm._tick();
+  tm.dispose();
+  const despues = checkpoints.read(run.runId);
+  ok(Number(despues.attempts) >= 1, 'la tarea se reintenta sin reiniciar la app: ' + JSON.stringify({ attempts: despues.attempts, status: despues.status }));
+  ok(Date.parse(despues.nextAttemptAt) > Date.now(), 'y el backoff se reprograma: ' + despues.nextAttemptAt);
+});
+
+/* ---------- el «Modo» de una tarea en background tiene que llegar al agente ----------
+   Hallazgo 2 de la revisión de IPC: el modo elegido al encolar una tarea (vista Tareas,
+   Act/Plan/Think) se guardaba en el `run` y no se aplicaba nunca. El agente lee el modo
+   de `settings.settings.mode`, así que una tarea encolada en PLAN corría con el modo
+   GLOBAL (ACT por defecto) y ESCRIBÍA archivos, contra lo que promete el modo. */
+
+test('tasks: una tarea encolada en PLAN se ejecuta en PLAN (no con el modo global)', async () => {
+  const { TaskManager } = require('../agent/tasks');
+  const dir = tmpDir('sagi-tareas-modo-');
+  checkpoints.__test._resetForTests(dir);
+  const vistos = [];
+  const tm = new TaskManager({
+    getSettings: () => ({ active: { baseUrl: 'https://api.x/v1', model: 'm' }, settings: { mode: 'act' } }),
+    agentFactory: () => ({
+      chat: async (prompt, settings) => {
+        vistos.push(settings.settings.mode);
+      },
+    }),
+    emit: () => {},
+    notify: () => {},
+  });
+  const r = tm.enqueue({ goal: 'revisa el proyecto', mode: 'plan' });
+  ok(r.ok, 'la tarea entra en la cola: ' + JSON.stringify(r));
+  for (let i = 0; i < 60 && !vistos.length; i++) await new Promise((res) => setTimeout(res, 10));
+  eq(vistos[0], 'plan', 'el agente recibe el modo de la tarea, no el global «act»:');
+  eq(checkpoints.read(r.runId).mode, 'plan', 'y el run sigue diciendo en qué modo se encoló:');
+});
+
+test('tasks: un modo desconocido al encolar cae en ACT (no se guarda basura en el run)', () => {
+  const { TaskManager } = require('../agent/tasks');
+  const dir = tmpDir('sagi-tareas-modo2-');
+  checkpoints.__test._resetForTests(dir);
+  const tm = new TaskManager({
+    getSettings: () => ({ active: null, settings: {} }),
+    agentFactory: () => ({ chat: async () => {} }),
+    emit: () => {},
+    notify: () => {},
+  });
+  const r = tm.enqueue({ goal: 'x', mode: 'destructor' });
+  ok(r.ok, 'la tarea entra en la cola: ' + JSON.stringify(r));
+  eq(checkpoints.read(r.runId).mode, 'act', 'el modo guardado en el run:');
+});
 
 test('banco: el lanzador pasa --json al hijo (es quien imprime el informe)', () => {
   const banco = require('../scripts/banco');
@@ -438,4 +618,128 @@ test('banco: el lanzador pasa --json al hijo (es quien imprime el informe)', () 
   const i = MAIN_SRC.indexOf("hay('--json')");
   ok(i > -1, 'la app tiene que imprimir el informe en una línea');
   ok(/process\.stdout\.write/.test(MAIN_SRC.slice(i, i + 140)), 'y hacerlo sin el prefijo del log (o el lanzador no lo encuentra)');
+});
+
+/* ---------- guardado de configuración: el canal tiene que poder decir la verdad ----------
+   Hallazgo 4 de la revisión de IPC: workspace:set/workspace:pick (convs), shell:openPath
+   (misc) y mode:set (modo) llamaban al saveConfig crudo y respondían como si hubiera
+   guardado. Con config.json no escribible (datos en solo lectura, disco lleno, fichero
+   bloqueado) la interfaz daba el cambio por bueno y al reiniciar volvía el valor anterior.
+   Ahora propagan el {ok:false,error} de saveConfig. */
+
+const ctxConvConSave = (dir, datos, saveConfig) => ({ ...ctxConv(dir, []), configDir: () => datos, saveConfig });
+
+test('workspace:set: un guardado que falla se propaga como ok:false (antes salía ok:true)', () => {
+  const { registerConvsIpc } = require('../main/ipc-convs');
+  const dir = tmpDir('sagi-ws-fallo-');
+  const datos = tmpDir('sagi-ws-datos-');
+  const destino = tmpDir('sagi-ws-destino-');
+  const handlers = new Map();
+  const error = 'EPERM: config.json en solo lectura';
+  registerConvsIpc(
+    { handle: (c, fn) => handlers.set(c, fn) },
+    ctxConvConSave(dir, datos, () => ({ ok: false, error })),
+  );
+  const r = handlers.get('workspace:set')(null, destino);
+  eq(r.ok, false, 'no puede dar por bueno un cambio que se perderá al reiniciar');
+  eq(r.error, error, 'el error de disco tiene que llegar a la interfaz');
+});
+
+test('workspace:set: un guardado correcto mantiene la forma {ok:true, path}', () => {
+  const { registerConvsIpc } = require('../main/ipc-convs');
+  const { validarWorkspaceRuta } = require('../main/workspace-ruta');
+  const dir = tmpDir('sagi-ws-ok-');
+  const datos = tmpDir('sagi-ws-okdatos-');
+  const destino = tmpDir('sagi-ws-okdestino-');
+  const handlers = new Map();
+  registerConvsIpc(
+    { handle: (c, fn) => handlers.set(c, fn) },
+    ctxConvConSave(dir, datos, () => ({ ok: true })),
+  );
+  const r = handlers.get('workspace:set')(null, destino);
+  eq(r.ok, true, 'con disco sano sigue siendo un éxito');
+  eq(r.path, validarWorkspaceRuta(destino, datos).real, 'y la ruta sigue viniendo de vuelta');
+  eq(Object.keys(r).sort().join(','), 'ok,path', 'sin campos de más en el caso bueno');
+});
+
+test('workspace:pick: el diálogo también propaga el fallo de guardado', async () => {
+  const { registerConvsIpc } = require('../main/ipc-convs');
+  const dir = tmpDir('sagi-pick-fallo-');
+  const datos = tmpDir('sagi-pick-datos-');
+  const destino = tmpDir('sagi-pick-destino-');
+  const handlers = new Map();
+  const error = 'EROFS: sistema de ficheros de solo lectura';
+  const ctx = {
+    ...ctxConvConSave(dir, datos, () => ({ ok: false, error })),
+    dialog: { showOpenDialog: async () => ({ canceled: false, filePaths: [destino] }) },
+  };
+  registerConvsIpc({ handle: (c, fn) => handlers.set(c, fn) }, ctx);
+  const r = await handlers.get('workspace:pick')();
+  eq(r.ok, false, 'elegir carpeta tampoco puede dar por fijado lo que no se guardó');
+  eq(r.error, error);
+});
+
+test('mode:set: un guardado que falla se propaga; con disco sano sigue devolviendo el modo', () => {
+  const { registerModoIpc } = require('../main/ipc-modo');
+  const os = require('os');
+  const mk = (saveConfig) => {
+    const handlers = new Map();
+    const config = { settings: { mode: 'act' } };
+    registerModoIpc(
+      { handle: (c, fn) => handlers.set(c, fn), on: () => {} },
+      {
+        config: () => config,
+        saveConfig,
+        runtimes: { peek: () => null, allAgents: () => [] },
+        getSkills: () => ({ skillsDir: () => os.tmpdir(), listSkills: async () => [] }),
+        getHabits: () => ({ observe: () => {} }),
+        marketplace: { catalog: () => [], searchGitHub: async () => [] },
+        fsp: fs.promises,
+      },
+    );
+    return handlers;
+  };
+  const error = 'EACCES: permiso denegado al escribir config.json';
+  const malo = mk(() => ({ ok: false, error })).get('mode:set')(null, 'plan');
+  eq(malo.ok, false, 'sin persistir no puede responder como si el modo hubiera quedado guardado');
+  eq(malo.error, error);
+  const bueno = mk(() => ({ ok: true })).get('mode:set')(null, 'plan');
+  eq(bueno, 'plan', 'en el caso bueno sigue devolviendo el modo (lo que espera el renderer)');
+});
+
+test('shell:openPath: un guardado que falla devuelve ok:false en vez de dar la carpeta por fijada', async () => {
+  const { registerMiscIpc } = require('../main/ipc-misc');
+  const os = require('os');
+  const datos = tmpDir('sagi-open-datos-');
+  const destino = tmpDir('sagi-open-destino-');
+  const mk = (saveConfig) => {
+    const handlers = new Map();
+    const config = { settings: {} };
+    registerMiscIpc(
+      { handle: (c, fn) => handlers.set(c, fn), on: () => {} },
+      {
+        config: () => config,
+        saveConfig,
+        getWin: () => null,
+        getWorkspace: () => config.settings.workspace || '',
+        configDir: () => datos,
+        getGlow: () => {},
+        app: { getPath: (k) => (k === 'desktop' ? os.tmpdir() : os.tmpdir()), quit: () => {}, minimize: () => {}, maximize: () => {} },
+        shell: { openPath: async () => '', openExternal: () => {} },
+        dialog: {},
+        fsp: fs.promises,
+        fs,
+        path,
+      },
+    );
+    return handlers;
+  };
+  const error = 'ENOSPC: no queda espacio en el dispositivo';
+  const r = await mk(() => ({ ok: false, error })).get('shell:openPath')(null, destino);
+  eq(r.ok, false, 'la carpeta se abre, pero fijarla como workspace no puede mentir');
+  eq(r.error, error);
+  const ok2 = await mk(() => ({ ok: true })).get('shell:openPath')(null, destino);
+  eq(ok2.ok, true, 'con disco sano sigue abriendo y fijando la carpeta');
+  eq(ok2.path, destino, 'y devuelve la misma ruta de antes');
+  ok('workspace' in ok2, 'sin perder el campo workspace que ya devolvía');
 });

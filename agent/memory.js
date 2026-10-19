@@ -25,7 +25,9 @@
    Un fichero que NO se ha podido leer no se pisa jamás: `estado()` lo declara (la vista
    enseña su pantalla de recuperación) y `save()` no escribe hasta que una lectura
    completa funcione. Si lo que falla es el CONTENIDO (JSON ilegible), el original se
-   conserva en cuarentena y el almacén sigue siendo utilizable. */
+   conserva en cuarentena y el almacén sigue siendo utilizable; si la cuarentena tampoco
+   pudo conservarlo, el almacén queda bloqueado para escribir (el original sigue en su
+   sitio) hasta que `restaurarCopia()` reponga una copia. */
 
 const fs = require('fs');
 const path = require('path');
@@ -143,6 +145,11 @@ function load() {
     lectura = {
       ok: false,
       tipo: 'ilegible',
+      /* Sin copia conservada el original ilegible sigue EN SU SITIO: escribir lo pisaría.
+         `bloqueado` lo dice para que `save()` y las operaciones que escriben se frenen
+         hasta que `restaurarCopia()` reponga el almacén (con la cuarentena hecha, en
+         cambio, el original ya está a salvo y el almacén puede seguir). */
+      bloqueado: !conservado,
       error:
         'el fichero no se pudo interpretar (' +
         e.message +
@@ -167,8 +174,10 @@ function estado() {
 function save() {
   if (!cache) return false;
   /* Un almacén que no se ha podido LEER no se pisa: escribir ahora perdería los hechos
-     que no hemos visto. Se reescribe en cuanto la lectura funcione. */
-  if (lectura.tipo === 'io') return false;
+     que no hemos visto. Vale para el error de E/S (`io`) y para el fichero ilegible que
+     no se pudo conservar (`bloqueado`): en los dos el original sigue donde estaba. Se
+     reescribe en cuanto la lectura funcione. */
+  if (lectura.tipo === 'io' || lectura.bloqueado) return false;
   try {
     atomicWrite(MEMORY_FILE, JSON.stringify({ version: v2.ESQUEMA, hechos: cache }, null, 2));
     lectura = { ok: true, tipo: 'ok', error: '' };
@@ -179,9 +188,10 @@ function save() {
   }
 }
 
-/** El bloqueo por error de E/S, para las operaciones que escriben. `null` = no hay bloqueo. */
+/** El bloqueo para las operaciones que escriben: error de E/S o fichero ilegible que no
+    se pudo conservar. `null` = no hay bloqueo. */
 function bloqueo() {
-  return lectura.tipo === 'io' ? { ok: false, error: lectura.error } : null;
+  return lectura.tipo === 'io' || lectura.bloqueado ? { ok: false, error: lectura.error } : null;
 }
 
 /* El esquema y la tokenización viven en el módulo puro: aquí solo se reexportan para no
@@ -314,13 +324,29 @@ function add({ text, source = 'user', origen, importance = 0.5, confidence = 0.8
   const clave = v2.claveHecho(t);
   let i = -1;
   if (clave) {
+    /* Primero el hecho que habla del MISMO objeto (mismo valor, o su negación): es donde
+       se resuelve una corrección o una contradicción. Antes se cogía el PRIMERO del mismo
+       predicado, que puede ser otro objeto: con «me gusta el té» y «me gusta el café»,
+       «no me gusta el té» se comparaba con el del café y la contradicción del té seguía
+       viva (y viajaba al prompt). */
     i = list0.findIndex((m) => {
       if (m.papelera) return false;
-      const otra = v2.claveHecho(m.text);
-      return !!otra && otra.pred === clave.pred;
+      const r = v2.relacionHechos(m.text, t);
+      return r === 'mismo' || r === 'contradice';
     });
+    /* Si no hay ninguno de ESE objeto, sirve cualquiera del mismo predicado (los dos
+       valores conviven; el filtro de valor de más abajo decide qué hacer). */
+    if (i < 0)
+      i = list0.findIndex((m) => {
+        if (m.papelera) return false;
+        const otra = v2.claveHecho(m.text);
+        return !!otra && otra.pred === clave.pred;
+      });
   }
-  if (i < 0) i = list0.findIndex((m) => !m.papelera && v2.similitud(m.text, t) >= v2.FUSION_UMBRAL);
+  /* Sin clave reconocible no hay valor con el que decidir: solo es el mismo dato si el
+     texto coincide salvo mayúsculas, acentos o espacios de más (misma huella). El parecido
+     léxico a secas fusionaba «usa siempre pnpm» con «usa siempre npm» y dejaba uno solo. */
+  if (i < 0) i = list0.findIndex((m) => !m.papelera && m.hash === v2.hashTexto(t));
   const creado = () => v2.normalizarHecho({ text: t, origen, source, importance, confidence, etiquetas, origenTexto });
   if (i >= 0) {
     const antes = { ...list0[i] };

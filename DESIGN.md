@@ -1,7 +1,7 @@
 # DESIGN.md — SAGITARI · Holo con momentos
 
 Mundo visual vigente: la identidad holográfica hecha a mano (el filo vivo de las
-superficies, seis paletas, modos ACT/PLAN/THINK con su color) más los momentos con
+superficies, seis paletas, modos ACT/PLAN/THINK/EQUIPO con su color) más los momentos con
 entidad propia: el recorrido, las cáusticas, el slider de vidrio, las puertas y el
 reloj. La ronda del deck mate se revirtió a petición del usuario: el
 mate plano dejaba la UI muerta y la Chakra Petch envejecía.

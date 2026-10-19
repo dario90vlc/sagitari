@@ -94,6 +94,32 @@ test('maneja varias líneas data', () => {
   assertEqual(r.length, 2);
 });
 
+console.log('mcp-transport.js — tope de mensaje');
+
+test('expone el tope por mensaje', () => {
+  assertOk(typeof mt.MAX_MESSAGE_BYTES === 'number' && mt.MAX_MESSAGE_BYTES > 0, 'MAX_MESSAGE_BYTES');
+});
+
+test('una línea desmedida sin salto dispara onOverflow UNA sola vez', () => {
+  const avisos = [];
+  const feed = mt.createLineReader(
+    () => {},
+    (motivo) => avisos.push(motivo),
+  );
+  // una sola línea sin '\n': el búfer crecería sin límite si no se cortara
+  feed('x'.repeat(mt.MAX_MESSAGE_BYTES + 1));
+  feed('x'.repeat(mt.MAX_MESSAGE_BYTES + 1));
+  assertEqual(avisos.length, 1);
+  assertOk(/pasó de/.test(avisos[0]), 'el motivo explica el tope: ' + avisos[0]);
+});
+
+test('dentro del tope los mensajes siguen llegando', () => {
+  const vistos = [];
+  const feed = mt.createLineReader((m) => vistos.push(m));
+  feed('{"jsonrpc":"2.0","id":1,"method":"a"}\n');
+  assertEqual(vistos.length, 1);
+});
+
 console.log('mcp-transport.js — estructura');
 
 test('DEFAULT_TIMEOUT_MS es un número positivo', () => {

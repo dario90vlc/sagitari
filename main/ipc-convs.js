@@ -169,7 +169,11 @@ function registerConvsIpc(ipcMain, ctx) {
       if (!fs.existsSync(real)) fs.mkdirSync(real, { recursive: true });
       if (!fs.statSync(real).isDirectory()) return { ok: false, error: 'La ruta no es una carpeta' };
       cfg().settings.workspace = real;
-      saveConfig();
+      // El disco puede fallar (datos en solo lectura, disco lleno, fichero bloqueado) y
+      // saveConfig devuelve {ok:false}: hay que reenviarlo o la interfaz da por bueno un
+      // cambio que se pierde al reiniciar y el agente trabaja en otra carpeta de la que dice.
+      const saved = saveConfig();
+      if (!saved.ok) return { ok: false, error: saved.error };
       return { ok: true, path: real };
     } catch (err) {
       return { ok: false, error: err.message };
@@ -187,7 +191,11 @@ function registerConvsIpc(ipcMain, ctx) {
       const real = v.real;
       if (!fs.statSync(real).isDirectory()) return { ok: false, error: 'La ruta no es una carpeta' };
       cfg().settings.workspace = real;
-      saveConfig();
+      // El disco puede fallar (datos en solo lectura, disco lleno, fichero bloqueado) y
+      // saveConfig devuelve {ok:false}: hay que reenviarlo o la interfaz da por bueno un
+      // cambio que se pierde al reiniciar y el agente trabaja en otra carpeta de la que dice.
+      const saved = saveConfig();
+      if (!saved.ok) return { ok: false, error: saved.error };
       return { ok: true, path: real };
     } catch (err) {
       return { ok: false, error: err.message };

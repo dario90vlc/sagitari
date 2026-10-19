@@ -94,8 +94,10 @@ function registerMcpIpc(ipcMain, ctx) {
     config.mcp.enabled = enabled !== false;
     const m = wireMcp();
     // Al reencender el interruptor hay que reconectar lo que el arranque no arrancó:
-    // sin esto los servidores autoStart se quedan en 'idle' y MCP no aporta nada.
-    if (config.mcp.enabled) for (const s of config.mcp.servers || []) if (s.autoStart && s.enabled) m.ensure(s.id).catch(() => {});
+    // sin esto los servidores se quedan en 'idle' y MCP no aporta nada. El interruptor
+    // por servidor es `enabled` (ver el mismo criterio en el arranque, main.js).
+    if (config.mcp.enabled)
+      for (const s of config.mcp.servers || []) if (s.enabled !== false && !s.invalid) m.ensure(s.id).catch(() => {});
     return persistConfig();
   });
 

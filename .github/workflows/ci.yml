@@ -50,6 +50,11 @@ jobs:
           done
           exit $status
 
+      - name: Lint (ESLint 9)
+        # `node --check` sólo mira la sintaxis: un cambio que incumple las reglas del
+        # proyecto (eslint.config.js) llegaba hasta la release sin que nada lo notara.
+        run: npm run lint
+
       - name: Unit tests
         shell: bash
         # tee guarda la salida completa para el artefacto de fallo; pipefail
@@ -77,6 +82,12 @@ jobs:
         run: |
           npm test 2>&1 | Tee-Object -FilePath test-output-pwsh.log
           if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
+
+      - name: Unit tests (renderer, jsdom)
+        # `npm test` no carga test/renderer/*: sin este paso, la suite de la interfaz
+        # (744 pruebas) no la corría ningún automatismo, aunque las notas de la release
+        # y el README publican que las dos suites están verdes.
+        run: npm run test:renderer
 
       - name: Smoke test (la app arranca de verdad)
         run: npm run smoke

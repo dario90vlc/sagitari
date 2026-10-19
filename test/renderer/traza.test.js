@@ -88,5 +88,65 @@ test('MAX_TRAZA es un número positivo', () => {
   assertOk(typeof traza.MAX_TRAZA === 'number' && traza.MAX_TRAZA > 0, 'MAX_TRAZA');
 });
 
+console.log('traza.js — redacción de secretos en el rastro guardado');
+
+/* El rastro se persiste en conversations.json, así que lo que un `run_command` imprima
+   no puede quedar en claro: misma máscara que el log (runlog.js), no una copia. */
+test('el resultado de una herramienta no guarda una cabecera Authorization', () => {
+  traza.trazaNueva('secretos-1');
+  traza.trazaApunta('secretos-1', { type: 'tool', name: 'run_command', args: { command: 'curl https://api' } });
+  traza.trazaApunta('secretos-1', { type: 'tool_result', name: 'run_command', ok: true, durationMs: 5, result: 'Authorization: Bearer abcdef1234567890' });
+  const r = traza.trazaActual('secretos-1').tools[0].result;
+  assertOk(!r.includes('abcdef1234567890'), 'el token no puede guardarse: ' + r);
+  assertOk(r.includes('[REDACTED]'), 'debe quedar la marca de redacción: ' + r);
+});
+
+test('el resultado no guarda una variable de entorno con clave ni un JWT', () => {
+  traza.trazaNueva('secretos-2');
+  traza.trazaApunta('secretos-2', { type: 'tool', name: 'run_command', args: { command: 'set' } });
+  traza.trazaApunta('secretos-2', {
+    type: 'tool_result',
+    name: 'run_command',
+    ok: true,
+    durationMs: 5,
+    result: 'API_KEY=sk-live1234567890abcdef\ntoken=eyJhbGciOiJIUzI1NiJ9.eyJzdWIiOiIxIn0.abcd1234',
+  });
+  const r = traza.trazaActual('secretos-2').tools[0].result;
+  assertOk(!r.includes('sk-live1234567890abcdef'), 'la clave no puede guardarse: ' + r);
+  assertOk(!r.includes('eyJhbGciOiJIUzI1NiJ9'), 'el JWT no puede guardarse: ' + r);
+});
+
+test('el razonamiento guardado también va redactado', () => {
+  traza.trazaNueva('secretos-3');
+  traza.trazaApunta('secretos-3', { type: 'thinking_done', text: 'uso la clave sk-live1234567890abcdef para el curl', durationMs: 3 });
+  const r = traza.trazaActual('secretos-3').think.text;
+  assertOk(!r.includes('sk-live1234567890abcdef'), 'el razonamiento no puede guardar la clave: ' + r);
+  assertOk(r.includes('[REDACTED]'), 'debe quedar la marca de redacción: ' + r);
+});
+
+test('un texto normal llega igual al historial', () => {
+  const texto = 'carpeta /home/usuario/proyecto lista\nsalida normal sin secretos: 42 filas';
+  traza.trazaNueva('secretos-4');
+  traza.trazaApunta('secretos-4', { type: 'tool', name: 'run_command', args: { command: 'ls -la /home/usuario/proyecto' } });
+  traza.trazaApunta('secretos-4', { type: 'tool_result', name: 'run_command', ok: true, durationMs: 5, result: texto });
+  const t = traza.trazaActual('secretos-4').tools[0];
+  assertEqual(t.result, texto, 'un texto sin secretos no se toca');
+  assertEqual(t.args.command, 'ls -la /home/usuario/proyecto', 'un comando normal no se toca');
+});
+
+test('los argumentos con un secreto tampoco se guardan en claro', () => {
+  traza.trazaNueva('secretos-5');
+  traza.trazaApunta('secretos-5', { type: 'tool', name: 'run_command', args: { command: 'curl -H "Authorization: Bearer abcdef1234567890" https://api' } });
+  const r = traza.trazaActual('secretos-5').tools[0].args.command;
+  assertOk(!r.includes('abcdef1234567890'), 'el argumento no puede guardar el token: ' + r);
+});
+
+test('un resultado vacío no se convierte en el texto "undefined"', () => {
+  traza.trazaNueva('secretos-6');
+  traza.trazaApunta('secretos-6', { type: 'tool', name: 'run_command', args: {} });
+  traza.trazaApunta('secretos-6', { type: 'tool_result', name: 'run_command', ok: true, durationMs: 1 });
+  assertEqual(traza.trazaActual('secretos-6').tools[0].result, '', 'sin resultado debe quedar vacío');
+});
+
 console.log(`\n${passed} pasaron, ${failed} fallaron`);
 process.exit(failed ? 1 : 0);

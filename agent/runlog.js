@@ -337,6 +337,10 @@ module.exports = {
   redactToolArgs,
   redactEvent,
   enmascararArgs,
+  /* Patrones de secreto en texto libre (`Bearer …`, `sk-…`, JWT…). Se exporta para que
+     quien persista texto fuera del log —la traza del turno en `main/traza.js`— use esta
+     misma tabla en vez de copiarla: dos listas divergen y una se queda vieja. */
+  redactText,
   /* Redirige el almacén y los topes para poder probar rotación y tamaño sin
      escribir 8 MB ni tocar los logs reales del usuario. */
   __test: {

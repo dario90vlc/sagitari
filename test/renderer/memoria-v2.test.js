@@ -201,6 +201,58 @@ test('migrarV1 deduplica por huella aunque cambien mayúsculas y tildes', () => 
   assertEqual(r.hechos.length, 1);
 });
 
+/* Sonda de la auditoría: cuatro entradas v1 distintas se quedaban en dos («prefiero el
+   café» se fusionaba con «prefiero el té» y «…en Windows» con «…en Linux») porque la
+   migración decidía por parecido de texto. El valor tiene que mandar también al migrar. */
+test('migrarV1 no fusiona hechos distintos que se parecen (el valor manda)', () => {
+  const r = v2.migrarV1([
+    { id: 'c1', text: 'Prefiero el café' },
+    { id: 'c2', text: 'Prefiero el té' },
+    { id: 'w1', text: 'El usuario usa VS Code en Windows' },
+    { id: 'w2', text: 'El usuario usa VS Code en Linux' },
+  ]);
+  assertDeep(
+    r.hechos.map((h) => h.text).sort(),
+    ['El usuario usa VS Code en Linux', 'El usuario usa VS Code en Windows', 'Prefiero el café', 'Prefiero el té'],
+    'no se puede perder ningún hecho distinto',
+  );
+  assertEqual(r.fusiones.length, 0, 'no hay nada que fusionar');
+});
+
+test('migrarV1 registra los DOS ids distintos de cada fusión', () => {
+  const r = v2.migrarV1([
+    { id: 'viejo', text: 'El usuario se llama Darío', date: '2026-01-01T00:00:00.000Z' },
+    { id: 'nuevo', text: 'Me llamo Darío', date: '2026-02-01T00:00:00.000Z' },
+  ]);
+  assertEqual(r.hechos.length, 1, 'el mismo dato sigue quedando en uno');
+  assertEqual(r.fusiones.length, 1);
+  assertEqual(r.fusiones[0].seQueda, 'nuevo', 'se queda el id del más reciente');
+  assertEqual(r.fusiones[0].seFusiona, 'viejo', 'y se registra el absorbido, distinto del anterior');
+  assertEqual(r.fusiones[0].texto, 'Me llamo Darío');
+  assertEqual(r.fusiones[0].textoFusionado, 'El usuario se llama Darío', 'se puede reconstruir qué se fusionó');
+});
+
+test('migrarV1 es idempotente: migrar el resultado no vuelve a fusionar nada', () => {
+  const src = [
+    { id: 'a', text: 'El usuario se llama Darío', date: '2026-10-12T10:00:00.000Z' },
+    { id: 'b', text: 'Recuerda que me llamo Dario', date: '2026-10-13T10:00:00.000Z' },
+    { id: 'c', text: 'Prefiero el café' },
+    { id: 'd', text: 'Prefiero el té' },
+  ];
+  const uno = v2.migrarV1(src);
+  const dos = v2.migrarV1(uno.hechos);
+  assertDeep(dos.hechos.map((h) => h.text), uno.hechos.map((h) => h.text), 'la segunda pasada no cambia nada');
+  assertEqual(dos.fusiones.length, 0, 'no queda nada por fusionar');
+});
+
+test('mismoHecho solo fusiona por valor o por huella, nunca por parecido', () => {
+  assertOk(v2.mismoHecho('El usuario se llama Darío', 'Recuerda que me llamo Dario'), 'mismo dato, otra forma');
+  assertOk(v2.mismoHecho('Prefiere informes en PDF', 'prefiere informes en pdf'), 'misma huella');
+  assertOk(!v2.mismoHecho('Prefiero el té', 'Prefiero el café'), 'se parecen y son datos distintos');
+  assertOk(!v2.mismoHecho('El usuario usa VS Code en Windows', 'El usuario usa VS Code en Linux'), 'sin clave no hay valor que comparar');
+  assertOk(!v2.mismoHecho('El usuario vive en Madrid', 'El usuario trabaja en Madrid'), 'predicados distintos');
+});
+
 console.log('memoria-v2.js — proponerHechos (extracción heurística)');
 
 /* Casos verificados por el frente de extracción antes del congelado v2. El riesgo real

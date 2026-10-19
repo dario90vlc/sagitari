@@ -52,6 +52,10 @@ _*.ps1
 # Capturas de npm run shots (se generan, no se versionan)
 shots/
 
+# Copia del PNG de diseño que deja scripts/make-assets.js dentro de assets (la fuente
+# no se versiona: es un activo de diseño)
+renderer/assets/logo-full.png
+
 # Directorios de trabajo de asistentes locales (no se versionan)
 .agent/
 

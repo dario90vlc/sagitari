@@ -133,11 +133,13 @@ function detectar(workspace) {
     p.tipos.push('python');
     p.indicadores.push(...pyCfg);
     const pytest = hay(dir, 'pytest.ini') || hay(dir, 'tox.ini') || pyCfg.includes('pyproject.toml');
-    p.tests = pytest ? 'python -m pytest -q' : 'python -m unittest';
+    // No pisar lo que ya encontró otra rama (p. ej. `npm test` en un repo mixto
+    // Node+Python): el `||` respeta el orden de preferencia ya establecido.
+    p.tests = p.tests || (pytest ? 'python -m pytest -q' : 'python -m unittest');
     const lint = ['ruff.toml', '.ruff.toml', '.flake8'].find((n) => hay(dir, n));
     if (lint) {
       p.indicadores.push(lint);
-      p.lint = lint.includes('ruff') ? 'ruff check .' : 'flake8';
+      p.lint = p.lint || (lint.includes('ruff') ? 'ruff check .' : 'flake8');
     }
   }
 

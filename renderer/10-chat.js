@@ -13,7 +13,7 @@
    completeToolCard, delegationCard, restaurarTraza, equipoChip, equipoCierra, equipoChat,
    refrescarEquipoChat, mostrarDeshacer, toolChip, todosCard, pinImage, currentConvId, hiloActual,
    cerrarDiffPanel, abrirRuntime, pintarHiloActivo, fijarTurno, eventoDeOtraPestana,
-   rtActual, reflejarTurno, pintarPestanas */
+   rtActual, reflejarTurno, pintarPestanas, sysline */
 'use strict';
 
 const $ = (s) => document.querySelector(s);
@@ -969,6 +969,20 @@ async function copyText(text, okMsg) {
     showToast('No se pudo copiar');
     return false;
   }
+}
+
+/**
+ * Línea del sistema dentro del hilo (clase `.sysline`, ver styles.css): la salida de una
+ * orden de barra —/cost, /compact— o el motivo por el que no se pudo hacer. NO es un
+ * turno: no lleva avatar ni burbuja ni viaja al modelo. La usa el compositor (20-app.js)
+ * al despachar `K.parseCommand`.
+ */
+function sysline(texto) {
+  const el = document.createElement('div');
+  el.className = 'sysline';
+  el.textContent = String(texto == null ? '' : texto);
+  rtActual().el.appendChild(el);
+  scroll(true);
 }
 
 /**
@@ -2310,14 +2324,9 @@ function finishAssistant(finalText, opts) {
   const stream = holder._openEl && holder._openEl.isConnected ? holder._openEl : holder.querySelector('.stream');
   // texto ya streameado: al Detener (o si la ejecución falla) NO se tira, se conserva
   const acc = holder._stream || '';
-  // Narración visible del turno: tramos congelados entre herramientas + tramo abierto.
-  // Antes aquí solo sobrevivía el párrafo final y la respuesta larga "se volvía corta".
-  const shown = ((holder._frozenText || '') + '\n\n' + (holder._openText || '')).trim();
   const fin = String(finalText || '').trim();
   const runMode0 = (pendingTurn && pendingTurn.mode) || mode;
   const planConTarjeta = runMode0 === 'plan' && !!(pendingTurn && pendingTurn.plan);
-  // lo que se ofrece para copiar/leer: la historia completa, no solo el cierre
-  const narrativa = planConTarjeta ? finalText : shown && fin && !shown.endsWith(fin) ? shown + '\n\n' + finalText : shown || finalText;
   if (planConTarjeta) {
     if (stream) stream.remove();
   } else if (stream) {
@@ -2340,12 +2349,26 @@ function finishAssistant(finalText, opts) {
   } else if (!planConTarjeta && holder._openText) {
     // Sin elemento porque ningún frame llegó a crearlo (ventana oculta): el
     // tramo abierto se pinta entero de una vez, en su sitio (al final).
+    // Si el acumulado se quedó corto respecto al texto del turno, manda el del turno
+    // (misma corrección que la rama del stream: si no, se pintaba el trozo y luego la
+    // respuesta entera otra vez).
+    const abierto = (holder._openText || '').trim();
+    if (fin && abierto && fin.startsWith(abierto) && fin.length > abierto.length) holder._openText = fin;
     const s = document.createElement('div');
     s.className = 'stream-done';
     s.innerHTML = fmt(holder._openText);
     holder.appendChild(s);
   }
   holder._openEl = null;
+  /* La narración visible se mide AQUÍ, DESPUÉS de reponer el stream, no antes: la rama
+     de arriba acaba de corregir `_openText` con el texto completo del turno (`fin`) cuando
+     los deltas se perdieron —el usuario miraba otra pestaña y `eventoDeOtraPestana` los
+     descarta, así que el tramo abierto se quedó corto—. Medido antes, `shown` no terminaba
+     en `fin` y la rama final creía que faltaba texto y volvía a añadir la respuesta
+     ENTERA: el mismo texto aparecía dos veces en el hilo. */
+  const shown = ((holder._frozenText || '') + '\n\n' + (holder._openText || '')).trim();
+  // lo que se ofrece para copiar/leer: la historia completa, no solo el cierre
+  const narrativa = planConTarjeta ? finalText : shown && fin && !shown.endsWith(fin) ? shown + '\n\n' + finalText : shown || finalText;
   const keptText = finalText ? '' : o.interrupted ? (planConTarjeta ? acc : shown) : '';
   if (finalText && planConTarjeta) {
     if (finalText) {

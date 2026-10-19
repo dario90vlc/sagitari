@@ -22,7 +22,8 @@ const ChatKit = (function () {
   /* -------------------------------------------------------------------------
      1. MODOS — cada uno con identidad propia y real
      Los CUATRO perfiles existen ya en el backend (agent/agent.js: MODE_PROFILES):
-     distinta temperatura, distintos pasos máximos y distinto prompt. Aquí sólo
+     distinta temperatura y distinto prompt (el presupuesto de pasos NO es del modo:
+     lo fija el guardarraíl del usuario en Ajustes). Aquí sólo
      se les da una cara: color, icono, lema y en qué se diferencian.
      EQUIPO (v4.4) es el cuarto: el agente pasa a líder, reparte el encargo entre
      compañeros vivos y agrega lo que devuelven. Su color es el ámbar `245,158,66`,
@@ -51,8 +52,8 @@ const ChatKit = (function () {
       color: '#a78bfa',
       rgb: '167,139,250',
       cls: 'plan',
-      tagline: 'Presenta un plan y lo ejecuta paso a paso',
-      bullets: ['Plan numerado antes de actuar', 'Verás los pasos marcarse solos', 'Para tareas largas o delicadas'],
+      tagline: 'Propón un plan y aplícalo en ACT',
+      bullets: ['Plan numerado antes de tocar nada', 'Solo lectura: no modifica el sistema', 'Pide cambiar a ACT para aplicarlo'],
     },
     think: {
       key: 'think',
@@ -470,11 +471,15 @@ const ChatKit = (function () {
      sigue siendo texto normal y se envía tal cual.
      ------------------------------------------------------------------------- */
   const COMMANDS = [
-    { name: 'clear', args: '', descripcion: 'Vacía el chat y empieza de cero' },
+    /* Solo lo que la app HACE de verdad: `/compact` y `/cost` los ejecuta el proceso
+       principal (`main/ipc-chat.js`); `/new` y `/help` los contesta el renderer (el
+       botón «+» y esta misma lista). `clear` y `model` estuvieron aquí sin existir
+       detrás —`/clear` era además lo mismo que `/new`— y el usuario recibía «orden
+       desconocida» después de escribirla: la paleta no puede prometer lo que no hay. Si
+       algún día se implementan, vuelven a esta lista y ya está. */
     { name: 'new', args: '', descripcion: 'Empieza una conversación nueva (la anterior se guarda)' },
     { name: 'compact', args: '', descripcion: 'Resume la conversación para liberar contexto' },
     { name: 'cost', args: '', descripcion: 'Gasto y tokens de esta conversación' },
-    { name: 'model', args: '[modelo]', descripcion: 'Consulta o cambia el modelo activo' },
     { name: 'help', args: '', descripcion: 'Lista las órdenes disponibles' },
   ];
 

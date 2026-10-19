@@ -188,7 +188,9 @@ let config = {
     glowStrength: 1,
     glassTint: 1,
     glowEnabled: true,
-    userName: 'Darío',
+    // El nombre del usuario no viene de fábrica: lo escribe su dueño en
+    // Ajustes ▸ Personal. Vacío = no se le manda al modelo y la interfaz dice «Tú».
+    userName: '',
     mode: 'act',
     maxConcurrentTasks: 1,
     // v4.4: tope de gasto por encargo de equipo en USD (0 = sin tope propio)
@@ -310,10 +312,19 @@ function applyConfig(raw) {
     return { ...p, keyUnreadable: true };
   };
   // de disco llegan cifradas: en memoria el agente necesita el valor real
-  if (config.active && config.active.apiKey) {
-    config.active = ilegible({ ...config.active, apiKey: revealKey(config.active.apiKey) });
-  }
-  config.providers = (config.providers || []).map((p) => (p && p.apiKey ? ilegible({ ...p, apiKey: revealKey(p.apiKey) }) : p));
+  /* `revealKey` avisa por callback SOLO cuando no puede descifrar. Marcar por el hecho
+     de llamarla marcaba TODAS las claves, también las que se descifran bien: el usuario
+     veía «hay una clave que este equipo no puede descifrar, vuelve a escribirla» en cada
+     arranque y el flag `keyUnreadable` quedaba escrito en config.json para siempre. */
+  const revelada = (p) => {
+    let fallo = null;
+    const apiKey = revealKey(p.apiKey, (kind, err) => {
+      fallo = err;
+    });
+    return fallo ? ilegible({ ...p, apiKey }) : { ...p, apiKey, keyUnreadable: false };
+  };
+  if (config.active && config.active.apiKey) config.active = revelada(config.active);
+  config.providers = (config.providers || []).map((p) => (p && p.apiKey ? revelada(p) : p));
   config.security = {
     permissions: { ...((raw.security && raw.security.permissions) || {}) },
     guardrails: { ...securityDefaults.guardrails, ...((raw.security && raw.security.guardrails) || {}) },
@@ -344,6 +355,14 @@ function applyConfig(raw) {
     if (v.ok) {
       const rev = revealServerSecrets(v.value, (k) => revealKey(k, marcar));
       servers.push(secretoIlegible ? { ...rev, secretUnreadable: true } : rev);
+    } else {
+      /* Un servidor que no pasa la validación (una entrada editada a mano, o de otra
+         versión de la app) NO se puede tirar en silencio: el siguiente guardado —el de
+         la geometría de la ventana, por ejemplo— reescribe la lista entera y lo borraría
+         del disco sin que nadie se entere. Se conserva marcado, no se arranca solo y la
+         vista lo puede enseñar como inválido. */
+      servers.push({ ...s, invalid: String((v && v.error) || 'no válido') });
+      log.warn('[SAGITARI] servidor MCP conservado pero inválido (no se arranca): ' + (s.id || '?') + ' — ' + (v && v.error));
     }
   }
   config.mcp = { enabled: raw.mcp ? raw.mcp.enabled !== false : true, servers };
@@ -795,9 +814,14 @@ function mcpExport() {
 }
 
 // ---------- app lifecycle ----------
-// copia las skills incluidas (skills-starter/) al perfil del usuario en el primer arranque
+// copia las skills incluidas (skills-starter/) al perfil del usuario UNA sola vez
 function seedStarterSkills() {
   try {
+    // La siembra es de una sola vez y queda apuntada en `migraciones` (igual que la
+    // reparación del nombre de fábrica): si corriera en cada arranque, una skill de
+    // serie borrada desde la interfaz reaparecería al reiniciar, que es justo lo que
+    // el diálogo de borrado promete que no pasa («no se puede deshacer»).
+    if (config.migraciones && config.migraciones.skillsStarter) return;
     const src = path.join(__dirname, '..', 'skills-starter');
     for (const name of fs.readdirSync(src)) {
       const dest = path.join(skills.skillsDir(), name, 'SKILL.md');
@@ -806,6 +830,8 @@ function seedStarterSkills() {
         fs.copyFileSync(path.join(src, name, 'SKILL.md'), dest);
       }
     }
+    config.migraciones = { ...(config.migraciones || {}), skillsStarter: true };
+    saveConfig();
   } catch (e) {
     console.error('seedStarterSkills', e.message);
   }
@@ -957,6 +983,20 @@ app.whenReady().then(() => {
   } else if (!encryptionAvailable() && (config.providers || []).some((p) => p && p.apiKey)) {
     console.warn('[SAGITARI] el sistema no ofrece cifrado: las claves se guardan en claro en config.json');
   }
+  /* Reparación: hasta la 5.0.1 el nombre del usuario venía PUESTO de fábrica
+     («Darío», el del autor) y todo perfil que hubiera guardado sus ajustes lo
+     tiene escrito en config.json: el agente se dirigía al dueño de la máquina
+     con el nombre de otro. Se retira UNA vez y se apunta en `migraciones` (mirar
+     solo el valor no basta: a quien de verdad se llame así se lo quitaríamos en
+     cada arranque). Escribirlo en Ajustes ▸ Personal ya no se toca nunca más. */
+  if (!config.migraciones || !config.migraciones.nombreFabrica) {
+    config.migraciones = { ...(config.migraciones || {}), nombreFabrica: true };
+    if (String(config.settings.userName || '').trim() === 'Darío') {
+      config.settings.userName = '';
+      log.info('[SAGITARI] nombre de usuario de fábrica retirado: escríbelo en Ajustes ▸ Personal');
+    }
+    saveConfig();
+  }
   // Reparación: si el proveedor activo se quedó sin clave pero el proveedor
   // guardado con la misma URL la tiene, se recupera. Una activación con el campo
   // de clave vacío dejaba la app en 401 en cada turno sin que el usuario pudiera
@@ -983,13 +1023,17 @@ app.whenReady().then(() => {
   } catch {}
   runlog.log({ agent: 'sagitari', event: 'app_boot', version: app.getVersion() });
   // MCP: el gestor y su catálogo se montan con la configuración ya cargada (y su
-  // migración a cifrado hecha), y los servidores marcados como automáticos se
-  // conectan en segundo plano: uno que tarde en arrancar no retrasa la ventana.
+  // migración a cifrado hecha), y los servidores habilitados se conectan en segundo
+  // plano: uno que tarde en arrancar no retrasa la ventana.
   wireMcp();
-  // Con el interruptor global apagado no se conecta nada: arrancar procesos para un
-  // catálogo que no se va a servir es trabajo y ruido inútiles.
+  /* Con el interruptor global apagado no se conecta nada: arrancar procesos para un
+     catálogo que no se va a servir es trabajo y ruido inútiles.
+     Y `autoStart` NO decide aquí: no hay ningún control que lo ponga, así que quedaba en
+     `false` para siempre y el catálogo MCP nacía vacío en cada arranque (`toolDefs` solo
+     ofrece servidores `ready`): el modelo no veía ninguna herramienta MCP hasta que el
+     usuario probaba cada servidor a mano. El interruptor real es `enabled`. */
   if (config.mcp.enabled !== false)
-    for (const s of config.mcp.servers || []) if (s.autoStart && s.enabled) mcp.ensure(s.id).catch(() => {});
+    for (const s of config.mcp.servers || []) if (s.enabled !== false && !s.invalid) mcp.ensure(s.id).catch(() => {});
   createChatWindow();
   createTray();
 

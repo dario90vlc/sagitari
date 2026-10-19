@@ -4,6 +4,7 @@
    Sin spawn: se ejecuta directo con node. */
 
 const os = require('os');
+const fs = require('fs');
 const path = require('path');
 const guardrails = require(path.join(__dirname, '..', '..', 'agent', 'guardrails.js'));
 
@@ -178,6 +179,70 @@ test('con el ajuste apagado nada se abarata', () => {
   const d = g.decide('write_file', { path: 'a.md', content: 'x' }, { workspace: WS_PRUEBA });
   assertEqual(d.action, 'confirm');
 });
+
+console.log('guardrails.js — un junction de dentro hacia fuera NO abarata la escritura');
+
+/* Un junction creado DENTRO del espacio de trabajo que apunta FUERA se llama «de dentro»
+   por su ruta, pero el archivo real está fuera: comparar solo el texto abarataba una
+   escritura de fuera sin tarjeta, que es justo lo que el ajuste NO promete. Se prueba con
+   un junction de verdad (en Windows no pide permisos); si el entorno no deja crearlo, se
+   prueba la decisión con rutas ya resueltas y se dice. */
+const BASE_ENLACE = fs.mkdtempSync(path.join(os.tmpdir(), 'sagi-guardrails-enlace-'));
+const WS_ENLACE = path.join(BASE_ENLACE, 'ws');
+const FUERA_ENLACE = path.join(BASE_ENLACE, 'fuera');
+fs.mkdirSync(WS_ENLACE, { recursive: true });
+fs.mkdirSync(FUERA_ENLACE, { recursive: true });
+let hayJunction = false;
+try {
+  fs.symlinkSync(FUERA_ENLACE, path.join(WS_ENLACE, 'enlace'), 'junction');
+  hayJunction = true;
+} catch (e) {
+  console.log(`  (este entorno no deja crear el junction: ${e.code}; se prueba la decisión)`);
+}
+
+if (hayJunction) {
+  test('un junction de dentro hacia fuera pide confirmación', () => {
+    const g = new guardrails.Guardrails({ autoEdits: true });
+    const d = g.decide('write_file', { path: path.join(WS_ENLACE, 'enlace', 'notas.md'), content: 'x' }, { workspace: WS_ENLACE });
+    assertEqual(d.action, 'confirm', 'el archivo real cae fuera del proyecto');
+  });
+
+  test('un junction de dentro hacia fuera tampoco se abarata en apply_patch', () => {
+    const g = new guardrails.Guardrails({ autoEdits: true });
+    const patch = { changes: [{ path: path.join(WS_ENLACE, 'enlace', 'a.js'), old_string: 'a', new_string: 'b' }] };
+    assertEqual(g.decide('apply_patch', patch, { workspace: WS_ENLACE }).action, 'confirm');
+  });
+
+  test('una ruta normal y una que aún no existe siguen abaratándose con el junction al lado', () => {
+    const g = new guardrails.Guardrails({ autoEdits: true });
+    assertEqual(g.decide('write_file', { path: path.join(WS_ENLACE, 'src', 'a.js'), content: 'x' }, { workspace: WS_ENLACE }).action, 'allow');
+    assertEqual(g.decide('edit_file', { path: path.join(WS_ENLACE, 'no', 'existe', 'a.md') }, { workspace: WS_ENLACE }).action, 'allow');
+  });
+} else {
+  test('sin junction: una ruta del proyecto sigue abaratándose (parte pura)', () => {
+    const g = new guardrails.Guardrails({ autoEdits: true });
+    assertEqual(g.decide('write_file', { path: path.join(WS_ENLACE, 'src', 'a.js'), content: 'x' }, { workspace: WS_ENLACE }).action, 'allow');
+  });
+}
+
+/* Cuando la ruta no se puede resolver, la duda es tarjeta. Un espacio de trabajo en una
+   unidad que no existe deja la comparación por texto diciendo «dentro» y el camino real
+   sin resolver: antes eso abarataba, ahora pregunta. */
+const LETRA_LIBRE = ['Q', 'R', 'S', 'T', 'U'].find((l) => !fs.existsSync(`${l}:\\`));
+if (LETRA_LIBRE) {
+  test('una ruta que no se puede resolver NO se abarata', () => {
+    const g = new guardrails.Guardrails({ autoEdits: true });
+    const ws = `${LETRA_LIBRE}:\\proyecto-inexistente`;
+    const d = g.decide('write_file', { path: `${ws}\\a.md`, content: 'x' }, { workspace: ws });
+    assertEqual(d.action, 'confirm', 'sin camino real, la duda se pregunta');
+  });
+} else {
+  console.log('  (sin letra de unidad libre para probar la duda)');
+}
+
+try {
+  fs.rmSync(BASE_ENLACE, { recursive: true, force: true });
+} catch {}
 
 console.log(`\n${passed} pasaron, ${failed} fallaron`);
 process.exit(failed ? 1 : 0);

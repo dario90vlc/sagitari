@@ -149,7 +149,7 @@ Useful shortcuts:
 | `Ctrl+Alt+S`   | Show or hide the panel               |
 | `Alt+Shift+S`  | Bring SAGITARI to the front          |
 | `Ctrl+Shift+G` | Trigger a glow pulse                 |
-| `Alt+M`        | Cycle ACT → PLAN → THINK             |
+| `Alt+M`        | Cycle ACT → PLAN → THINK → EQUIPO    |
 | `/` in chat    | Open the commands and skills palette |
 
 ## Download
@@ -192,8 +192,8 @@ sagitari/
 | `npm start`             | Start the app in production          |
 | `npm run dev`           | Start the app in development mode    |
 | `npm run smoke`         | Run smoke test                       |
-| `npm test`              | Run the agent/main suite (456 tests) |
-| `npm run test:renderer` | Run the renderer suite (743 tests)   |
+| `npm test`              | Run the agent/main suite (498 tests) |
+| `npm run test:renderer` | Run the renderer suite (810 tests)   |
 | `npm run lint`          | Run ESLint                           |
 | `npm run lint:fix`      | Run ESLint with auto-fix             |
 | `npm run format`        | Format with Prettier                 |
@@ -207,8 +207,8 @@ sagitari/
 Two suites, both green before every release:
 
 ```bash
-npm test              # 456 tests: the agent core and the main process
-npm run test:renderer # 743 tests across 50 files: main-process modules and the renderer
+npm test              # 498 tests: the agent core and the main process
+npm run test:renderer # 810 tests across 51 files: main-process modules and the renderer
 ```
 
 `npm test` (`test/run.js`) covers the agent loop end to end: guardrails,

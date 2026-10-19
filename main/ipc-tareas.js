@@ -134,6 +134,16 @@ function registerTareasIpc(ipcMain, ctx) {
     // (cualquier tarea moriría al arrancar): se exige el mínimo que detecta algo.
     for (const [k, v] of Object.entries(patch || {})) {
       if (!(k in g)) continue;
+      /* `maxCostUsd` es un tope en DÓLARES y el panel lo edita con decimales (0,5 $):
+         `Math.floor` lo dejaba en 0, y 0 es «sin tope» para el motor de guardarraíles
+         (`agent/guardrails.js`: solo corta con `maxCostUsd > 0`), así que el guardarraíl
+         que el usuario creía activo quedaba apagado. El resto de claves son cuentas
+         enteras (pasos, repeticiones). */
+      if (k === 'maxCostUsd') {
+        const n = Number(v);
+        g[k] = Number.isFinite(n) && n > 0 ? n : 0;
+        continue;
+      }
       g[k] = Math.max(k === 'loopThreshold' ? 2 : 0, Math.floor(Number(v) || 0));
     }
     // la política es GLOBAL: la llevan todas las conversaciones vivas, no solo una

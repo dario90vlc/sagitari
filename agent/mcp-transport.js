@@ -11,21 +11,38 @@ const { killTree } = require('./proc');
 
 const DEFAULT_TIMEOUT_MS = 60000;
 
+/* Tope de un mensaje del servidor: ni el búfer de stdio ni el cuerpo HTTP pueden
+   crecer sin límite. 8 MB es holgadísimo para un mensaje MCP real (el resultado que
+   acaba viendo el modelo se recorta mucho antes, en agent/mcp.js), así que pasarse
+   solo lo hace un servidor roto o comprometido —y ahí hay que cortar la conexión en
+   vez de dejar que el proceso principal se coma la memoria. */
+const MAX_MESSAGE_BYTES = 8 * 1024 * 1024;
+
 /**
  * Lector incremental: entrega cada mensaje JSON completo y cuenta el ruido.
  * Algunos servidores escriben un banner de arranque en stdout antes del primer
  * mensaje; una línea que no parsea no puede tumbar la conexión.
+ * `onOverflow(motivo)`: se llama UNA vez si un mensaje pasa de MAX_MESSAGE_BYTES sin
+ * terminar (una sola línea sin salto basta para llenar el búfer); a partir de ahí el
+ * lector deja de acumular. El transporte decide cómo matar la conexión.
  */
-function createLineReader(onMessage) {
+function createLineReader(onMessage, onOverflow) {
   let buf = '';
   let noise = 0;
+  let pendientes = 0; // bytes de `buf` (Buffer.byteLength sería O(n) por chunk)
+  let roto = false;
   const dec = new StringDecoder('utf8'); // la conversión tiene que ser incremental:
   // un chunk puede cortar un carácter multibyte
   return (chunk) => {
-    buf += typeof chunk === 'string' ? chunk : dec.write(chunk);
+    if (roto) return;
+    const s = typeof chunk === 'string' ? chunk : dec.write(chunk);
+    buf += s;
+    pendientes += Buffer.byteLength(s, 'utf8');
     let idx;
     while ((idx = buf.indexOf('\n')) >= 0) {
-      const line = buf.slice(0, idx).replace(/\r$/, '');
+      const crudo = buf.slice(0, idx);
+      const line = crudo.replace(/\r$/, '');
+      pendientes -= Buffer.byteLength(crudo, 'utf8') + 1; // + el '\n'
       buf = buf.slice(idx + 1);
       if (!line.trim()) continue;
       let msg = null;
@@ -36,6 +53,16 @@ function createLineReader(onMessage) {
         continue;
       }
       onMessage(msg, noise);
+    }
+    if (pendientes > MAX_MESSAGE_BYTES) {
+      roto = true;
+      buf = '';
+      pendientes = 0;
+      if (typeof onOverflow === 'function') {
+        onOverflow(
+          `un mensaje del servidor MCP pasó de ${Math.round(MAX_MESSAGE_BYTES / (1024 * 1024))} MB sin terminar; se cortó la conexión.`,
+        );
+      }
     }
   };
 }
@@ -284,26 +311,41 @@ function createStdioTransport({ command, args = [], cwd, env = {}, defaultTimeou
   // `rpc` se declara ANTES de los listeners que lo usan: `const rpc =` más abajo
   // dejaría a esos callbacks cerrando sobre una variable en zona muerta temporal.
   let rpc = null;
-  const avisarSalida = (code) => {
+  // Muerte única: ninguna petición en vuelo puede quedarse esperando y quien escuche
+  // recibe el motivo. `aviso` es lo que se le pasa al callback (el código del hijo
+  // cuando lo hay); el motivo es siempre texto para poder enseñarlo.
+  const terminar = (motivo, aviso) => {
     if (exited) return;
     exited = true;
-    if (rpc)
-      rpc.fail(
-        `el servidor MCP terminó (código ${code === null || code === undefined ? 'desconocido' : code}).` +
-          (stderr ? '\n' + stderr.trim().split('\n').slice(-4).join('\n') : ''),
-      );
+    if (rpc) rpc.fail(motivo);
     for (const h of exitHandlers) {
       try {
-        h(code);
+        h(aviso);
       } catch {}
     }
   };
+  const avisarSalida = (code) =>
+    terminar(
+      `el servidor MCP terminó (código ${code === null || code === undefined ? 'desconocido' : code}).` +
+        (stderr ? '\n' + stderr.trim().split('\n').slice(-4).join('\n') : ''),
+      code,
+    );
   child.on('error', (e) => avisarSalida('error: ' + e.message));
   child.on('exit', (code) => avisarSalida(code));
 
-  const feed = createLineReader((m, noise) => {
-    if (m && rpc) rpc.handleMessage(m);
-  });
+  const feed = createLineReader(
+    (m, noise) => {
+      if (m && rpc) rpc.handleMessage(m);
+    },
+    // Un mensaje desmedido mataría la memoria del proceso: se corta la conexión y se
+    // mata el hijo para que deje de escribir (mismo trato que una salida anómala).
+    (motivo) => {
+      terminar(motivo, motivo);
+      try {
+        killTree(child);
+      } catch {}
+    },
+  );
   child.stdout.on('data', feed);
   rpc = new Rpc({
     send: (text) => {
@@ -365,12 +407,87 @@ function parseSseText(text) {
 }
 
 /**
+ * Separa las credenciales que van DENTRO de la URL (`https://usuario:token@host/mcp`).
+ * La Fetch API prohíbe el userinfo: `fetch` lanzaría «Request cannot be constructed
+ * from a URL that includes credentials» y ese mensaje —con el token dentro— acabaría
+ * en el log y en la vista. Aquí se saca del URL y se convierte en una cabecera Basic,
+ * con la URL limpia como única forma de conectar.
+ */
+function partirUserinfo(raw) {
+  let u = null;
+  try {
+    u = new URL(String(raw));
+  } catch {
+    return { url: String(raw), authorization: null };
+  }
+  if (!u.username && !u.password) return { url: String(raw), authorization: null };
+  // `new URL` percent-codifica el userinfo; el valor original es el decodificado. Una
+  // secuencia `%` inválida no puede reventar aquí (se deja tal cual, que es lo que el
+  // usuario escribió) ni saltarse la validación de URL con un URIError.
+  const dec = (s) => {
+    try {
+      return decodeURIComponent(s);
+    } catch {
+      return s;
+    }
+  };
+  const basic = Buffer.from(`${dec(u.username)}:${dec(u.password)}`, 'utf8').toString('base64');
+  u.username = '';
+  u.password = '';
+  return { url: u.toString(), authorization: 'Basic ' + basic };
+}
+
+/**
+ * Lee un cuerpo HTTP con un tope duro. `res.text()` carga TODO en memoria antes de
+ * mirar nada, así que un servidor roto o comprometido podría llenar la memoria del
+ * proceso principal con un cuerpo sin fin. Al pasarse del tope se corta la lectura.
+ */
+async function leerCuerpoAcotado(res, maxBytes) {
+  const motivo = `el cuerpo del servidor MCP pasó de ${Math.round(maxBytes / (1024 * 1024))} MB; se cortó la conexión.`;
+  if (!res.body || typeof res.body.getReader !== 'function') {
+    const texto = await res.text();
+    if (Buffer.byteLength(texto, 'utf8') > maxBytes) throw new Error(motivo);
+    return texto;
+  }
+  const lector = res.body.getReader();
+  const trozos = [];
+  let total = 0;
+  try {
+    for (;;) {
+      const { done, value } = await lector.read();
+      if (done) break;
+      total += value.byteLength;
+      if (total > maxBytes) {
+        try {
+          await lector.cancel();
+        } catch {}
+        throw new Error(motivo);
+      }
+      trozos.push(Buffer.from(value));
+    }
+  } finally {
+    try {
+      lector.releaseLock();
+    } catch {}
+  }
+  return Buffer.concat(trozos).toString('utf8');
+}
+
+/**
  * Servidor MCP remoto: POST con JSON-RPC; la respuesta puede ser JSON directo o
  * un flujo SSE (streamable HTTP). El id de sesión que devuelva `initialize` se
  * reenvía en las peticiones siguientes.
  */
 function createHttpTransport({ url, headers = {}, defaultTimeoutMs, fetchFn = fetch, onNotice }) {
-  if (!httpUrlAllowed(url)) throw new Error('La URL del servidor MCP debe ser https (o http en localhost).');
+  // Las credenciales del userinfo nunca viajan en la URL a fetch (la Fetch API las
+  // rechaza y el token acabaría en el mensaje de error): se convierten en cabecera
+  // Basic. Una cabecera Authorization puesta a mano manda sobre el userinfo.
+  const { url: urlLimpia, authorization } = partirUserinfo(url);
+  if (!httpUrlAllowed(urlLimpia)) throw new Error('La URL del servidor MCP debe ser https (o http en localhost).');
+  const base = { ...headers };
+  if (authorization && !Object.keys(base).some((k) => k.toLowerCase() === 'authorization')) {
+    base.Authorization = authorization;
+  }
   let session = null;
   const exitHandlers = [];
   let muerto = null;
@@ -392,16 +509,20 @@ function createHttpTransport({ url, headers = {}, defaultTimeoutMs, fetchFn = fe
     defaultTimeoutMs,
   });
   async function enviar(text) {
-    const cabeceras = { 'content-type': 'application/json', accept: 'application/json, text/event-stream', ...headers };
+    const cabeceras = { 'content-type': 'application/json', accept: 'application/json, text/event-stream', ...base };
     if (session) cabeceras['mcp-session-id'] = session;
     try {
       // El temporizador del Rpc acota la espera lógica; este signal acota la
       // petición HTTP de verdad (si no, una petición colgada deja el socket vivo
       // para siempre aunque la llamada ya haya fallado por timeout).
-      const res = await fetchFn(url, {
+      const res = await fetchFn(urlLimpia, {
         method: 'POST',
         headers: cabeceras,
         body: text,
+        // Sin esto, un endpoint comprometido contesta 302 a otro origen y las
+        // cabeceras secretas viajan allí, saltándose el «solo https» de
+        // httpUrlAllowed. Con `error`, fetch rechaza cualquier redirección.
+        redirect: 'error',
         signal: AbortSignal.timeout((defaultTimeoutMs || DEFAULT_TIMEOUT_MS) + 2000),
       });
       const sid = res.headers.get('mcp-session-id');
@@ -411,7 +532,7 @@ function createHttpTransport({ url, headers = {}, defaultTimeoutMs, fetchFn = fe
         return;
       }
       const tipo = String(res.headers.get('content-type') || '');
-      const body = await res.text();
+      const body = await leerCuerpoAcotado(res, MAX_MESSAGE_BYTES);
       // 202 sin cuerpo: es lo que la spec manda para notificaciones y respuestas, así
       // que no hay nada que interpretar (y no puede contar como caída del servidor)
       if (!body.trim()) return;
@@ -442,6 +563,7 @@ function createHttpTransport({ url, headers = {}, defaultTimeoutMs, fetchFn = fe
 
 module.exports = {
   DEFAULT_TIMEOUT_MS,
+  MAX_MESSAGE_BYTES,
   createLineReader,
   Rpc,
   buildCmdLine,

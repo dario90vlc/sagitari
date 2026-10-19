@@ -1,6 +1,8 @@
 'use strict';
 // Builds SAGITARI logo assets from the source PNG using Electron nativeImage.
-// Run: npx electron scripts/make-assets.js
+// Run: npx electron scripts/make-assets.js [ruta-al-logo-fuente.png]
+// La fuente NO está en el repositorio (es un PNG de diseño): sin argumento se busca
+// `sagitari_logo_transparente.png` en la raíz y el script falla diciendo qué falta.
 
 const { app, nativeImage } = require('electron');
 const fs = require('fs');

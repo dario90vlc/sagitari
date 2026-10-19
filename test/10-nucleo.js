@@ -339,6 +339,34 @@ test('memory: añadir un hecho parecido lo consolida en vez de duplicarlo', () =
   memory.__test._resetForTests(path.join(MEM_DIR, 'memory.json'));
 });
 
+/* Sonda de la auditoría (defecto alto): cuatro hechos v1 distintos se quedaban en DOS al
+   migrar, porque la fusión decidía por parecido de texto («prefiero el café» con
+   «prefiero el té», «…en Windows» con «…en Linux»). La migración tiene que usar el valor. */
+test('memory: la migración v1 no fusiona hechos distintos que se parecen', () => {
+  const dir = tmpDir('sagi-memmig4-');
+  const f = path.join(dir, 'memory.json');
+  fs.writeFileSync(
+    f,
+    JSON.stringify([
+      { id: 'c1', text: 'Prefiero el café' },
+      { id: 'c2', text: 'Prefiero el té' },
+      { id: 'w1', text: 'El usuario usa VS Code en Windows' },
+      { id: 'w2', text: 'El usuario usa VS Code en Linux' },
+    ]),
+    'utf8',
+  );
+  memory.__test._resetForTests(f);
+  const textos = memory.list().map((m) => m.text);
+  eq(textos.length, 4, 'ningún hecho distinto se pierde al migrar: ' + JSON.stringify(textos));
+  ok(textos.includes('Prefiero el café') && textos.includes('Prefiero el té'), 'las dos preferencias siguen');
+  ok(
+    textos.includes('El usuario usa VS Code en Windows') && textos.includes('El usuario usa VS Code en Linux'),
+    'y los dos sistemas también: ' + JSON.stringify(textos),
+  );
+  eq(memory.listTrash().length, 0, 'la migración no manda nada a la papelera');
+  memory.__test._resetForTests(path.join(MEM_DIR, 'memory.json'));
+});
+
 /* ---------- memoria v2: el valor manda en la fusión ----------
    La similitud léxica sola fusionaba «prefiero el té» con «prefiero el café» y el primero
    desaparecía sin rastro. Aquí se fija la regla: mismo dato → se consolida; valor distinto
@@ -421,6 +449,48 @@ test('memory: dos datos distintos que se parecen («vive en» / «trabaja en») 
   memory.__test._resetForTests(path.join(MEM_DIR, 'memory.json'));
 });
 
+/* Sonda de la auditoría (defecto medio): con «me gusta el té» y «me gusta el café» vivos,
+   «no me gusta el té» se comparaba con el PRIMERO del mismo predicado (el café), así que
+   la contradicción del té se quedaba viva y los tres viajaban al prompt. */
+test('memory: la contradicción se resuelve sobre el hecho del MISMO objeto, no sobre el primero del predicado', () => {
+  const dir = tmpDir('sagi-memcontra-');
+  memory.__test._resetForTests(path.join(dir, 'memory.json'));
+  memory.add({ text: 'Al usuario le gusta el té' });
+  memory.add({ text: 'Al usuario le gusta el café' });
+  memory.add({ text: 'Al usuario no le gusta el té' });
+  const vivos = memory.list().map((m) => m.text);
+  eq(vivos.length, 2, 'la contradicción del té se resuelve: ' + JSON.stringify(vivos));
+  ok(vivos.includes('Al usuario le gusta el café'), 'el café (otro objeto) no se toca: ' + JSON.stringify(vivos));
+  ok(vivos.includes('Al usuario no le gusta el té'), 'gana la última versión del té');
+  ok(!vivos.includes('Al usuario le gusta el té'), 'y la versión vieja no convive con su contraria');
+  const tapados = memory.listTrash().map((m) => m.text);
+  eq(tapados.length, 1, 'lo sustituido queda recuperable: ' + JSON.stringify(tapados));
+  eq(tapados[0], 'Al usuario le gusta el té');
+  memory.__test._resetForTests(path.join(MEM_DIR, 'memory.json'));
+});
+
+/* Sonda de la auditoría (defecto medio): dos hechos sin clave reconocible se fusionaban
+   por parecido léxico y el recurso dejaba SOLO el texto nuevo, sin papelera. */
+test('memory: dos hechos sin clave no se fusionan por parecerse (no se pierde ninguno)', () => {
+  const dir = tmpDir('sagi-mempnpm-');
+  memory.__test._resetForTests(path.join(dir, 'memory.json'));
+  memory.add({ text: 'Usa siempre pnpm para instalar dependencias' });
+  memory.add({ text: 'Usa siempre npm para instalar dependencias' });
+  const textos = memory.list().map((m) => m.text).sort();
+  eq(textos.length, 2, 'conviven los dos: ' + JSON.stringify(textos));
+  eq(memory.listTrash().length, 0, 'y ninguno se tira por parecerse');
+  memory.__test._resetForTests(path.join(MEM_DIR, 'memory.json'));
+});
+
+test('memory: sin clave, el mismo dato escrito con otros acentos se deduplica por huella', () => {
+  const dir = tmpDir('sagi-memhuella-');
+  memory.__test._resetForTests(path.join(dir, 'memory.json'));
+  memory.add({ text: 'Usa el tema oscuro en la configuración' });
+  memory.add({ text: 'Usa el tema oscuro en la configuracion' });
+  eq(memory.list().length, 1, 'una sola entrada: ' + JSON.stringify(memory.list().map((m) => m.text)));
+  memory.__test._resetForTests(path.join(MEM_DIR, 'memory.json'));
+});
+
 test('memory: el techo del almacén no borra en silencio (lo que sobra va a la papelera)', () => {
   const dir = tmpDir('sagi-memtecho-');
   const f = path.join(dir, 'memory.json');
@@ -488,6 +558,49 @@ test('memory: un memory.json ilegible no se disfraza de memoria vacía (avisa y 
   ok(m && m.id, 'se puede volver a escribir');
   eq(memory.estado().ok, true, 'y el almacén vuelve a estar disponible');
   eq(memory.list().length, 1);
+  memory.__test._resetForTests(path.join(MEM_DIR, 'memory.json'));
+});
+
+/* Sonda de la auditoría (defecto alto): cuando la cuarentena NO pudo conservar el original
+   ilegible, el almacén seguía aceptando escrituras: `cache` se quedaba en una lista vacía
+   y `save()` reescribía el fichero, pisando el original que seguía en su sitio sin poder
+   leerse. La cuarentena se fuerza a fallar (renameSync no puede mover el fichero), que es
+   exactamente el caso «no se pudo conservar». */
+test('memory: un memory.json ilegible que NO se pudo conservar bloquea cualquier escritura', () => {
+  const dir = tmpDir('sagi-memroto-');
+  const f = path.join(dir, 'memory.json');
+  fs.writeFileSync(f, '{{{', 'utf8');
+  const renameReal = fs.renameSync;
+  fs.renameSync = () => {
+    const e = new Error('EPERM: no se pudo mover el fichero');
+    e.code = 'EPERM';
+    throw e;
+  };
+  try {
+    memory.__test._resetForTests(f);
+    eq(memory.list().length, 0, 'no se inventa una memoria vacía que no es cierta');
+    const est = memory.estado();
+    eq(est.ok, false, 'el almacén se declara no disponible: ' + JSON.stringify(est));
+    eq(est.bloqueado, true, 'y marca el bloqueo de escritura: ' + JSON.stringify(est));
+    eq(memory.add({ text: 'No se debe guardar' }), null, 'no se acepta un hecho');
+    eq(memory.wipe().ok, false, 'olvidarlo todo tampoco');
+    eq(memory.trashEmpty().ok, false, 'ni se toca la papelera');
+    eq(
+      fs.readdirSync(dir).filter((n) => /\.(tmp|bak)$/.test(n)).length,
+      0,
+      'no se intenta escribir nada: ' + JSON.stringify(fs.readdirSync(dir)),
+    );
+    eq(fs.readFileSync(f, 'utf8'), '{{{', 'y el original ilegible sigue intacto');
+  } finally {
+    fs.renameSync = renameReal;
+  }
+  /* Con una copia buena, restaurar es la salida: repone el almacén y vuelve a escribirse. */
+  fs.writeFileSync(f + '.bak', JSON.stringify({ version: 2, hechos: [{ id: 'c1', text: 'Hecho rescatado' }] }), 'utf8');
+  const r = memory.restaurarCopia();
+  ok(r.ok, 'se restaura la copia: ' + r.error);
+  eq(memory.estado().ok, true, 'el almacén vuelve a estar disponible');
+  ok(memory.list().some((x) => /Hecho rescatado/.test(x.text)), 'con el hecho de la copia');
+  ok(memory.add({ text: 'Ya se puede escribir' }), 'y se vuelve a poder guardar');
   memory.__test._resetForTests(path.join(MEM_DIR, 'memory.json'));
 });
 
@@ -2348,6 +2461,128 @@ test('mcp: un timeout del tope HTTP no marca el servidor como caido', async () =
     srv.closeAllConnections?.();
     srv.close();
   }
+});
+
+/* ---------- MCP: credenciales de la URL y topes de tamaño ---------- */
+test('mcp: el userinfo se traduce a cabecera Basic y no viaja en la URL a fetch', async () => {
+  let capt = null;
+  const fetchFn = async (u, opts) => {
+    capt = { u, headers: opts.headers, redirect: opts.redirect };
+    const body = JSON.parse(opts.body);
+    return new Response(JSON.stringify({ jsonrpc: '2.0', id: body.id, result: { ok: true } }), {
+      status: 200,
+      headers: { 'content-type': 'application/json' },
+    });
+  };
+  // `https` con userinfo: antes, `fetch` lo rechazaba («Request cannot be constructed
+  // from a URL that includes credentials») y el token acababa en el mensaje de error.
+  const tr = mcpTransport.createHttpTransport({ url: 'https://usuario:token-secreto@ejemplo.com/mcp', fetchFn });
+  const r = await tr.rpc.request('initialize', {}, { timeoutMs: 2000 });
+  eq(r.ok, true, 'la URL con userinfo por fin conecta');
+  eq(capt.u, 'https://ejemplo.com/mcp', 'la URL que ve fetch no lleva credenciales');
+  eq(capt.headers.Authorization, 'Basic ' + Buffer.from('usuario:token-secreto').toString('base64'), 'el userinfo viaja como Basic');
+  eq(capt.redirect, 'error', 'no se siguen redirecciones: las cabeceras secretas no pueden saltar de origen');
+});
+
+test('mcp: una cabecera Authorization manual manda sobre el userinfo', async () => {
+  let capt = null;
+  const fetchFn = async (u, opts) => {
+    capt = opts.headers;
+    const body = JSON.parse(opts.body);
+    return new Response(JSON.stringify({ jsonrpc: '2.0', id: body.id, result: {} }), {
+      status: 200,
+      headers: { 'content-type': 'application/json' },
+    });
+  };
+  const tr = mcpTransport.createHttpTransport({
+    url: 'https://usuario:otro@ejemplo.com/mcp',
+    headers: { Authorization: 'Bearer manual' },
+    fetchFn,
+  });
+  await tr.rpc.request('initialize', {}, { timeoutMs: 2000 });
+  eq(capt.Authorization, 'Bearer manual', 'lo que puso el usuario no se pisa con el userinfo');
+});
+
+test('mcp: un 302 no arrastra las cabeceras secretas a otro origen', async () => {
+  const http = require('http');
+  const destino = [];
+  const atacante = http.createServer((req, res) => {
+    destino.push(req.headers.authorization);
+    res.writeHead(200, { 'content-type': 'application/json' });
+    res.end('{}');
+  });
+  await new Promise((r) => atacante.listen(0, '127.0.0.1', r));
+  const malo = http.createServer((req, res) => {
+    res.writeHead(302, { location: 'http://127.0.0.1:' + atacante.address().port + '/mcp' });
+    res.end();
+  });
+  await new Promise((r) => malo.listen(0, '127.0.0.1', r));
+  try {
+    const tr = mcpTransport.createHttpTransport({
+      url: 'http://127.0.0.1:' + malo.address().port + '/mcp',
+      headers: { Authorization: 'Bearer secreto' },
+      defaultTimeoutMs: 2000,
+    });
+    let err = null;
+    try {
+      await tr.rpc.request('initialize', {}, { timeoutMs: 2000 });
+    } catch (e) {
+      err = e;
+    }
+    eq(destino.length, 0, 'el otro origen no recibe nada (ni la cabecera con el token)');
+    ok(err, 'la petición falla en vez de seguir la redirección');
+  } finally {
+    malo.closeAllConnections?.();
+    malo.close();
+    atacante.closeAllConnections?.();
+    atacante.close();
+  }
+});
+
+test('mcp: un cuerpo http desmedido corta la conexión en vez de comerse la memoria', async () => {
+  const http = require('http');
+  const srv = http.createServer((req, res) => {
+    req.on('data', () => {});
+    req.on('end', () => {
+      res.writeHead(200, { 'content-type': 'application/json' });
+      res.end('A'.repeat(mcpTransport.MAX_MESSAGE_BYTES + 1024));
+    });
+  });
+  await new Promise((r) => srv.listen(0, '127.0.0.1', r));
+  const muertes = [];
+  try {
+    const tr = mcpTransport.createHttpTransport({ url: 'http://127.0.0.1:' + srv.address().port + '/mcp', defaultTimeoutMs: 4000 });
+    tr.onExit((m) => muertes.push(m));
+    let err = null;
+    try {
+      await tr.rpc.request('initialize', {}, { timeoutMs: 4000 });
+    } catch (e) {
+      err = e;
+    }
+    ok(err, 'la petición falla');
+    ok(muertes.length === 1 && /pasó de/.test(muertes[0]), 'el motivo explica el tope: ' + muertes.join(' | '));
+  } finally {
+    srv.closeAllConnections?.();
+    srv.close();
+  }
+});
+
+test('mcp: un mensaje stdio desmedido mata el transporte con un error claro', async () => {
+  const dir = tmpDir('sagi-mcp-big-');
+  const script = path.join(dir, 'grande.js');
+  fs.writeFileSync(
+    script,
+    "process.stdout.write('x'.repeat(" + (mcpTransport.MAX_MESSAGE_BYTES + 4096) + '));\nsetInterval(() => {}, 1000);\n',
+    'utf8',
+  );
+  const tr = mcpTransport.createStdioTransport({ command: process.execPath, args: [script], cwd: dir });
+  const muertes = [];
+  tr.onExit((m) => muertes.push(m));
+  // sondeo con deadline: el hijo tiene que escribir y el lector, cortar
+  for (let i = 0; i < 200 && !muertes.length; i++) await new Promise((r) => setTimeout(r, 25));
+  tr.kill();
+  ok(muertes.length === 1, 'el desborde mata el transporte una sola vez');
+  ok(/pasó de/.test(muertes[0]), 'el motivo explica el tope: ' + muertes[0]);
 });
 
 /* ---------- MCP: registro, nombres y catálogo ---------- */

@@ -82,5 +82,25 @@ test('maneja front-matter con bloque YAML', () => {
   assertOk(result.meta.description.includes('Línea 2'), 'debe incluir la segunda línea');
 });
 
+test('acepta un SKILL.md con BOM UTF-8', () => {
+  const raw = '\uFEFF---\nname: con-bom\ndescription: Qué hace\n---\nCuerpo';
+  const result = parseFrontMatter(raw);
+  assertOk(result, 'un BOM delante no puede invalidar el front-matter');
+  assertEqual(result.meta.name, 'con-bom');
+  assertEqual(result.meta.description, 'Qué hace');
+  assertEqual(result.body, 'Cuerpo');
+});
+
+test('decodifica un SKILL.md guardado en UTF-16 (Out-File de PowerShell)', () => {
+  // es el texto que llega cuando un fichero utf16le (con su BOM FF FE) se lee como
+  // utf8: cada carácter ASCII trae su \0 al lado y el BOM queda como dos U+FFFD
+  const bytes = Buffer.from('---\nname: en-utf16\ndescription: y\n---\nCuerpo', 'utf16le');
+  const raw = '\uFFFD\uFFFD' + bytes.toString('utf8');
+  const result = parseFrontMatter(raw);
+  assertOk(result, 'un SKILL.md en UTF-16 no puede desaparecer en silencio');
+  assertEqual(result.meta.name, 'en-utf16');
+  assertEqual(result.body, 'Cuerpo');
+});
+
 console.log(`\n${passed} pasaron, ${failed} fallaron`);
 process.exit(failed ? 1 : 0);

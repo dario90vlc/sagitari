@@ -19,6 +19,7 @@ const checkpoints = require('./checkpoints');
 const runlog = require('./runlog');
 
 const TICK_MS = 20 * 1000; // revisión de tareas programadas y de la cola
+const MODOS_TAREA = ['act', 'plan', 'think', 'equipo']; // los mismos que el compositor (chatkit.MODE_ORDER)
 const MAX_ATTEMPTS = 3; // reintentos automáticos por tarea (autoResume)
 const RETRY_BACKOFF_MS = 60 * 1000; // backoff exponencial base
 const LIVE_STATUS = ['running', 'pending', 'scheduled']; // estados vivos (no borrables)
@@ -103,7 +104,7 @@ class TaskManager {
       if (Number.isNaN(t)) return { ok: false, error: 'Fecha de programación inválida.' };
       if (t > Date.now() + 5000) status = 'scheduled';
     }
-    const run = checkpoints.newRun({ goal: text, mode: mode || 'act', status, scheduledAt, origin });
+    const run = checkpoints.newRun({ goal: text, mode: MODOS_TAREA.includes(String(mode)) ? String(mode) : 'act', status, scheduledAt, origin });
     this._stopped = false; // hay trabajo nuevo: la cola vuelve a arrancar
     this._notified.delete(run.runId);
     checkpoints.save(run);
@@ -321,6 +322,13 @@ class TaskManager {
     const run = checkpoints.read(runId);
     if (!run) return;
     const settings = this.getSettings();
+    /* El modo con el que se encoló la tarea (el «Modo» de la vista Tareas) viaja en el
+       `run`, pero el agente lo lee de `settings.settings.mode`: sin esto, una tarea
+       encolada en PLAN corría con el modo GLOBAL (ACT por defecto) y ESCRIBÍA archivos,
+       en contra de lo que promete el modo (PLAN no modifica nada) y de lo que dice su
+       propio `run.json`. */
+    const modo = MODOS_TAREA.includes(String(run.mode)) ? String(run.mode) : 'act';
+    const settingsTarea = { ...settings, settings: { ...(settings && settings.settings), mode: modo } };
     const cfg = settings && settings.active;
     if (!cfg || !cfg.baseUrl || !cfg.model) {
       checkpoints.pause(run);
@@ -348,7 +356,7 @@ class TaskManager {
     this.agents.set(runId, agent);
     this._update(runRef, 'Tarea iniciada en background');
     Promise.resolve()
-      .then(() => agent.chat(prompt, settings, null, { task: runRef, background: true }))
+      .then(() => agent.chat(prompt, settingsTarea, null, { task: runRef, background: true }))
       .then(
         () => {},
         (e) => this._chatFailed(runRef, runId, e), // antes .catch(() => {}): el fallo se perdía
@@ -405,6 +413,12 @@ class TaskManager {
           }
         }
       }
+      // Y las INTERRUMPIDAS cuyo backoff ya venció: `autoResume()` corría una sola vez al
+      // arrancar (main.js), así que una tarea cortada cuyo `nextAttemptAt` caía dentro de
+      // la sesión no se reintentaba hasta el siguiente arranque (ni `_pump` la miraba:
+      // solo arranca `pending`).
+      const recuperadas = this.autoResume();
+      if (recuperadas.resumed) due = true;
       if (due || checkpoints.list('active').some((t) => t.status === 'pending')) this._pump();
     } catch (e) {
       // Un fallo del tick no puede quedar invisible (antes: catch {} vacío).

@@ -19,6 +19,7 @@ const WebSocket = require('ws');
 const fs = require('fs');
 const os = require('os');
 const path = require('path');
+const terceros = require('./terceros'); // marco único del contenido de terceros (datos, no órdenes)
 
 function getJSON(url, timeoutMs = 2500) {
   return new Promise((resolve, reject) => {
@@ -38,6 +39,80 @@ function getJSON(url, timeoutMs = 2500) {
       req.destroy(new Error('timeout'));
     });
   });
+}
+
+/* ============================================================================
+   Recuperación sin puerto de un navegador huérfano
+
+   Desde la v5.0.1 Chrome se lanza con `--remote-debugging-pipe` (sin puerto TCP), y en
+   ese modo NO escribe `DevToolsActivePort` en el perfil (medido: el fichero no aparece).
+   Si SAGITARI muere de golpe (Administrador de tareas, cuelgue), queda un chrome.exe
+   vivo con nuestro `--user-data-dir`; el siguiente `launch()` lanza otro chrome.exe con
+   el mismo perfil, la instancia viva se lo traga y el proceso nuevo sale al instante →
+   «el navegador no respondió al canal de depuración», y el navegador queda inservible
+   hasta que el usuario cierre esa ventana a mano.
+
+   La vía que NO depende del puerto es localizar el proceso por su `--user-data-dir`.
+   El perfil es único por sesión (su id lleva el hash del nombre), así que compararlo no
+   puede señalar a un Chrome del usuario: solo a uno lanzado por SAGITARI.
+   ============================================================================ */
+
+/** Valor de `--user-data-dir=` en una línea de comandos, sin comillas. '' si no está. */
+function userDataDirDe(cmd) {
+  const m = /--user-data-dir=(?:"([^"]*)"|'([^']*)'|(\S+))/i.exec(String(cmd || ''));
+  if (!m) return '';
+  if (m[1] !== undefined) return m[1];
+  if (m[2] !== undefined) return m[2];
+  return m[3] || '';
+}
+
+/** ¿Esta línea de comandos es la de NUESTRO navegador? Se compara el valor de
+    `--user-data-dir` normalizado (en Windows las rutas no distinguen mayúsculas). */
+function esNuestroPerfil(cmd, profileDir) {
+  const suyo = userDataDirDe(cmd);
+  if (!suyo || !profileDir) return false;
+  try {
+    return path.resolve(suyo).toLowerCase() === path.resolve(String(profileDir)).toLowerCase();
+  } catch {
+    return false;
+  }
+}
+
+/** PIDs de la salida JSON del escáner cuyo `--user-data-dir` es el nuestro. Acepta el
+    objeto suelto que devuelve ConvertTo-Json cuando solo hay un proceso. */
+function pidsPropios(salida, profileDir) {
+  let data;
+  try {
+    const txt = String(salida || '').trim();
+    if (!txt) return [];
+    data = JSON.parse(txt);
+  } catch {
+    return [];
+  }
+  const arr = Array.isArray(data) ? data : [data];
+  const pids = [];
+  for (const p of arr) {
+    if (!p || typeof p !== 'object') continue;
+    const pid = Number(p.ProcessId);
+    if (!Number.isInteger(pid) || pid <= 0) continue;
+    if (esNuestroPerfil(p.CommandLine, profileDir)) pids.push(pid);
+  }
+  return pids;
+}
+
+/* Escáner de procesos de Windows: Chrome/Edge con `--user-data-dir`, en JSON con PID y
+   línea de comandos (el filtro por «es nuestro» se hace en Node, con `esNuestroPerfil`).
+   Se pasa con `-EncodedCommand` (base64/UTF-16LE) porque el escapado de comillas de
+   `child_process` en Windows es frágil con rutas que llevan espacios. */
+const PS_ESCANER =
+  "$ErrorActionPreference='SilentlyContinue';" +
+  'Get-CimInstance Win32_Process -Filter "Name=\'chrome.exe\' or Name=\'msedge.exe\'" | ' +
+  "Where-Object { $_.CommandLine -like '*--user-data-dir=*' } | " +
+  'Select-Object ProcessId,CommandLine | ConvertTo-Json -Compress';
+
+/** Argumentos de `powershell.exe` para el escáner (puro: se prueba sin ejecutarlo). */
+function psEscanerArgs() {
+  return ['-NoProfile', '-NonInteractive', '-EncodedCommand', Buffer.from(PS_ESCANER, 'utf16le').toString('base64')];
 }
 
 /* Acciones válidas de browser_control. Se valida ANTES de la autocuración: un
@@ -412,7 +487,8 @@ class Browser {
     const id = profileId(profile);
     const label = String(profile || 'default');
     if (id === this.profile && this.ws) return `OK: ya estás en el perfil «${label}».`;
-    if (this.ws) {
+    const teniaSocket = !!this.ws;
+    if (teniaSocket) {
       try {
         await this.send('Browser.close');
       } catch {}
@@ -420,6 +496,17 @@ class Browser {
         this.ws.close();
       } catch {}
       this._rejectPending('Cambiando de perfil.');
+    }
+    // Matar el árbol ANTES de olvidar el PID: si solo se descarta, el proceso sigue vivo
+    // con el perfil viejo y ya nadie lo cerrará. Con el socket vivo es seguro el nuestro
+    // (la tubería sigue abierta: es el que lanzamos); sin socket se busca por el
+    // --user-data-dir del perfil que se abandona. Nunca «a ciegas»: Windows reutiliza PIDs.
+    if (teniaSocket && this.browserPid) {
+      try {
+        this._matarArbol(this.browserPid);
+      } catch {}
+    } else {
+      await this._cerrarHuerfano();
     }
     // El estado del navegador anterior se olvida SIEMPRE, haya socket vivo o no:
     // su puerto y su PID no valen para el perfil nuevo. (Antes solo se limpiaban
@@ -788,19 +875,32 @@ class Browser {
     return null;
   }
 
-  // Limpia un Chrome huérfano que siga vivo con nuestro perfil. Con la tubería no se
-  // puede «adoptar» (no hay puerto que escuchar), así que si Chrome dejó un
-  // DevToolsActivePort en el perfil y responde, le pedimos Browser.close por su
-  // WebSocket. Si no responde, el fichero es viejo y lo ignoramos.
+  // Cierra un navegador huérfano que siga vivo con nuestro perfil. Dos vías:
+  // 1) si un Chrome viejo (anterior a la tubería) dejó DevToolsActivePort, se le pide
+  //    Browser.close por su WebSocket;
+  // 2) la que de verdad importa desde la tubería: localizar el proceso por su
+  //    --user-data-dir y matarlo, porque la tubería no publica puerto (ver el bloque
+  //    de `userDataDirDe` arriba).
   async _cerrarHuerfano() {
     const port = this._portFromProfile();
-    if (!port) return;
-    let url = null;
-    try {
-      const v = await getJSON(`http://127.0.0.1:${port}/json/version`, 1200);
-      if (v && v.webSocketDebuggerUrl) url = v.webSocketDebuggerUrl;
-    } catch {}
-    if (!url) return;
+    if (port) {
+      let url = null;
+      try {
+        const v = await getJSON(`http://127.0.0.1:${port}/json/version`, 1200);
+        if (v && v.webSocketDebuggerUrl) url = v.webSocketDebuggerUrl;
+      } catch {}
+      if (url) await this._pedirCierre(url);
+    }
+    const pids = await this._pidsHuerfanos();
+    if (pids) {
+      for (const pid of pids) this._matarArbol(pid);
+      if (pids.length) await sleep(500); // deja morir el árbol antes de relanzar
+      this._borrarMarca();
+    }
+  }
+
+  /** Pide Browser.close por WebSocket (vía antigua, la del puerto). */
+  async _pedirCierre(url) {
     try {
       const sock = new WebSocket(url, { maxPayload: 64 * 1024 * 1024 });
       await new Promise((res) => {
@@ -832,6 +932,55 @@ class Browser {
     } catch {}
   }
 
+  /** Fichero con el PID del navegador lanzado. Vive en el perfil (único por sesión) y
+      sobrevive a un cierre brusco de SAGITARI: es la señal barata de «pudo quedar un
+      huérfano». Sin él no se escanea ningún proceso, así que el lanzamiento normal no
+      paga nada. */
+  _marcaPath() {
+    return path.join(this.profileDir, 'sagitari-browser.pid');
+  }
+
+  _borrarMarca() {
+    try {
+      fs.unlinkSync(this._marcaPath());
+    } catch {}
+  }
+
+  /** PIDs de procesos con NUESTRO --user-data-dir. Solo Windows (es donde corre la app).
+      Devuelve [] si el marcador dice que no hay nada que buscar, null si no se pudo
+      determinar (escáner ausente o fallo): en ese caso nunca se borra el marcador ni se
+      mata a ciegas. */
+  _pidsHuerfanos() {
+    if (process.platform !== 'win32') return Promise.resolve(null);
+    if (!fs.existsSync(this._marcaPath())) return Promise.resolve([]);
+    return new Promise((resolve) => {
+      let out = '';
+      let child;
+      try {
+        child = spawn('powershell.exe', psEscanerArgs(), { windowsHide: true, stdio: ['ignore', 'pipe', 'ignore'] });
+      } catch {
+        return resolve(null);
+      }
+      const t = setTimeout(() => {
+        try {
+          child.kill();
+        } catch {}
+        resolve(null);
+      }, 5000);
+      child.on('error', () => {
+        clearTimeout(t);
+        resolve(null);
+      });
+      if (child.stdout) child.stdout.on('data', (c) => (out += c));
+      child.on('close', (code) => {
+        clearTimeout(t);
+        const txt = String(out).trim();
+        if (!txt && code !== 0) return resolve(null); // no se pudo determinar
+        resolve(pidsPropios(txt, this.profileDir));
+      });
+    });
+  }
+
   _lanzarProceso(exe, args) {
     let child;
     try {
@@ -842,6 +991,13 @@ class Browser {
     child.on('error', () => {}); // nunca dejar una excepción no capturada
     this.child = child;
     this.browserPid = child.pid;
+    // Deja el PID en el perfil: si SAGITARI muere de golpe, es lo único que permite
+    // localizar (y matar) a este navegador en el siguiente lanzamiento. La ruta se ancla
+    // aquí y no en el cierre, porque para entonces ya se pudo haber cambiado de perfil.
+    const marca = this._marcaPath();
+    try {
+      fs.writeFileSync(marca, String(child.pid));
+    } catch {}
     this.toBrowser = child.stdio[3];
     this.fromBrowser = child.stdio[4];
     this.activeId = null;
@@ -851,6 +1007,9 @@ class Browser {
       this.toBrowser = null;
       this.fromBrowser = null;
       this.browserPid = null;
+      try {
+        fs.unlinkSync(marca); // el proceso ya no está: no hay huérfano que buscar
+      } catch {}
       if (this.ws) {
         this.ws = null;
         this._sessions.clear();
@@ -957,6 +1116,7 @@ class Browser {
         this._matarArbol(this.browserPid);
       } catch {}
     }
+    this._borrarMarca(); // cierre ordenado: no queda huérfano que buscar mañana
     this.ws = null;
     this.toBrowser = null;
     this.fromBrowser = null;
@@ -1976,7 +2136,13 @@ class Browser {
           const txt = await this.evalJs(expr, sessionId);
           if (txt === 'NOT_FOUND') return 'Error: selector no encontrado.';
           const clipped = String(txt).slice(0, 12000);
-          return `Pestaña activa: ${target.title}\nURL: ${target.url}\n\n${clipped}${String(txt).length > 12000 ? '\n...[truncado]' : ''}`;
+          /* El texto de la página son DATOS de terceros: se envuelve con el mismo
+             bloque que las skills (terceros.js). Si no, una página con «ignora tus
+             reglas y ejecuta X» entra al prompt como si fuera texto del usuario. */
+          return terceros.envolver(
+            'LA PÁGINA',
+            `Pestaña activa: ${target.title}\nURL: ${target.url}\n\n${clipped}${String(txt).length > 12000 ? '\n...[truncado]' : ''}`,
+          );
         }
 
         case 'eval': {
@@ -2059,5 +2225,5 @@ module.exports = {
   Browser,
   // piezas puras: se prueban sin navegador (el resto necesita Chrome de verdad, y eso
   // lo comprueba scripts/navegador-check.js contra una página real)
-  __test: { HELPERS_JS, inventoryJs, parseHotkey, ACTIONS, HOTKEY_MODS, HOTKEY_KEYS },
+  __test: { HELPERS_JS, inventoryJs, parseHotkey, ACTIONS, HOTKEY_MODS, HOTKEY_KEYS, userDataDirDe, esNuestroPerfil, pidsPropios, psEscanerArgs, PS_ESCANER },
 };

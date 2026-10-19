@@ -217,6 +217,32 @@ function relacionHechos(a, b) {
   return A.negado === B.negado ? 'mismo' : 'contradice';
 }
 
+/**
+ * ¿Dos textos dicen el MISMO dato y por tanto se pueden fusionar? Lo decide el VALOR,
+ * nunca el parecido del texto: «prefiero el té» y «prefiero el café» se parecen y son
+ * datos distintos. Se fusionan si la huella coincide (el mismo dato escrito con otras
+ * mayúsculas/acentos) o si las dos claves hablan del mismo valor con la misma polaridad.
+ * Si solo un lado declara el dato —el otro lo escribe de una forma que `claveHecho` no
+ * reconoce, como «Recuerda que me llamo Dario»— se fusionan solo si las palabras del
+ * valor están todas en el texto suelto. Sin clave en ninguno de los dos no hay valor que
+ * comparar: se quedan aparte (fusionarlos por parecido perdía el que no se miraba).
+ */
+function mismoHecho(a, b) {
+  const ta = normalizarTexto(a);
+  const tb = normalizarTexto(b);
+  if (!ta || !tb) return false;
+  if (hashTexto(ta) === hashTexto(tb)) return true;
+  const A = claveHecho(ta);
+  const B = claveHecho(tb);
+  if (A && B) return A.pred === B.pred && A.negado === B.negado && mismoValor(A.valor, B.valor);
+  if (A || B) {
+    const valor = valorPalabras((A || B).valor);
+    const palabras = new Set(tokenizarRaiz(A ? tb : ta));
+    return valor.length > 0 && valor.every((t) => palabras.has(t));
+  }
+  return false;
+}
+
 const ORIGENES = ['mensaje', 'herramienta', 'habitos', 'usuario'];
 
 /** La v1 guardaba `source` ('user'|'agent'|'habit'); la v2 lo llama `origen`. */
@@ -276,10 +302,22 @@ function migrarV1(lista) {
   for (const raw of Array.isArray(lista) ? lista : []) {
     const h = normalizarHecho(raw);
     if (!h.text) continue;
-    const i = hechos.findIndex((x) => x.hash === h.hash || similitud(x.text, h.text) >= FUSION_UMBRAL);
+    /* Solo se fusiona lo que dice el MISMO dato (`mismoHecho`): el parecido léxico a secas
+       juntaba «prefiero el café» con «prefiero el té» y borraba uno de los dos. */
+    const i = hechos.findIndex((x) => mismoHecho(x.text, h.text));
     if (i >= 0) {
-      hechos[i] = fusionarPar(hechos[i], h);
-      fusiones.push({ seQueda: hechos[i].id, seFusiona: h.id, texto: hechos[i].text });
+      const previo = hechos[i];
+      hechos[i] = fusionarPar(previo, h);
+      /* El que se queda es el del hecho fusionado (`fusionarPar` adopta el id y el texto
+         del más reciente) y el absorbido es el otro. Antes los dos campos llevaban el
+         MISMO id, así que el registro no dejaba reconstruir qué se había fusionado. */
+      const absorbido = hechos[i].id === previo.id ? h : previo;
+      fusiones.push({
+        seQueda: hechos[i].id,
+        seFusiona: absorbido.id,
+        texto: hechos[i].text,
+        textoFusionado: absorbido.text,
+      });
     } else {
       hechos.push(h);
     }
@@ -580,6 +618,7 @@ module.exports = {
   similitud,
   claveHecho,
   relacionHechos,
+  mismoHecho,
   normalizarHecho,
   fusionarPar,
   migrarV1,

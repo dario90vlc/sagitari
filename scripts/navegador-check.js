@@ -107,9 +107,17 @@ const sleep = (ms) => new Promise((r) => setTimeout(r, ms));
     abierto = !/Error/.test(String(lanzado));
 
     if (!abierto) {
+      /* Sin Chrome ni Edge no se comprueba NADA: salir con 0 hacía que quien lea el
+         código de salida contase como verde una comprobación que no se ejecutó. El
+         salto solo se permite si quien llama lo pide por escrito (probar.bat, que lo
+         dice en pantalla al usuario). */
       console.log('  (no hay Chrome ni Edge instalado: la comprobación se salta)');
-      console.log('\nNAVEGADOR-CHECK::{"ok":true,"saltado":true}');
-      process.exit(0);
+      if (process.env.SAGITARI_NAVCHECK_ALLOW_SKIP === '1') {
+        console.log('\nNAVEGADOR-CHECK::{"ok":true,"saltado":true}');
+        process.exit(0);
+      }
+      console.error('\nNAVEGADOR-CHECK::{"ok":false,"error":"no hay Chrome ni Edge instalado: la comprobación no probó nada (usa SAGITARI_NAVCHECK_ALLOW_SKIP=1 para saltarla)"}');
+      process.exit(1);
     }
 
     const sess = await b.sessionIdOf();

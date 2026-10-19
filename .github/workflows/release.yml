@@ -75,6 +75,11 @@ jobs:
       - name: Unit tests
         run: npm test
 
+      - name: Unit tests (renderer, jsdom)
+        # Las notas que se publican afirman que las DOS suites están verdes: la de la
+        # interfaz tiene que correr aquí o la release promete algo que nadie comprobó.
+        run: npm run test:renderer
+
       - name: Smoke test (la app arranca de verdad)
         run: npm run smoke
 

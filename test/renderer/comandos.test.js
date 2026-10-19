@@ -57,6 +57,70 @@ test('clasifica comando vacío como normal', () => {
   assertEqual(c.nivel, 'normal');
 });
 
+console.log('comandos.js — el nombre del ejecutable no evade la barrera');
+
+test('clasifica format.com C: /q como prohibido (la extensión no cambia la orden)', () => {
+  const c = comandos.clasificar('format.com C: /q');
+  assertEqual(c.nivel, 'prohibido');
+});
+
+test('clasifica cipher.exe /w:C: como prohibido', () => {
+  const c = comandos.clasificar('cipher.exe /w:C:');
+  assertEqual(c.nivel, 'prohibido');
+});
+
+test('clasifica vssadmin.exe delete shadows /all como prohibido', () => {
+  const c = comandos.clasificar('vssadmin.exe delete shadows /all');
+  assertEqual(c.nivel, 'prohibido');
+});
+
+test('la ruta del ejecutable tampoco evade: C:\\Windows\\System32\\format.exe C: /q', () => {
+  const c = comandos.clasificar('C:\\Windows\\System32\\format.exe C: /q');
+  assertEqual(c.nivel, 'prohibido');
+});
+
+test('las comillas no esconden la raíz: del /s /q "C:\\"', () => {
+  const c = comandos.clasificar('del /s /q "C:\\"');
+  assertEqual(c.nivel, 'prohibido');
+});
+
+test('un encadenado no tapa la orden de dentro: echo hola && format.com C: /q', () => {
+  const c = comandos.clasificar('echo hola && format.com C: /q');
+  assertEqual(c.nivel, 'prohibido');
+});
+
+test('un lanzador por delante no esconde la orden: sudo del /s /q C:\\', () => {
+  const c = comandos.clasificar('sudo del /s /q C:\\');
+  assertEqual(c.nivel, 'prohibido');
+});
+
+test('un intérprete por delante tampoco: cmd /c · bash -c', () => {
+  assertEqual(comandos.clasificar('cmd /c del /s /q C:\\').nivel, 'prohibido');
+  assertEqual(comandos.clasificar('bash -c "rm -rf /"').nivel, 'prohibido');
+});
+
+console.log('comandos.js — mencionar la orden no es ejecutarla');
+
+test('echo format C: sigue siendo normal: solo lo menciona', () => {
+  const c = comandos.clasificar('echo format C: es peligroso');
+  assertEqual(c.nivel, 'normal');
+});
+
+test('el mensaje de un git commit -m que menciona la orden es normal', () => {
+  const c = comandos.clasificar('git commit -m "arregla el format C: del script"');
+  assertEqual(c.nivel, 'normal');
+});
+
+test('buscar la palabra (git log --grep) es normal', () => {
+  const c = comandos.clasificar('git log --grep="cipher /w"');
+  assertEqual(c.nivel, 'normal');
+});
+
+test('una mención dentro de un intérprete también es normal', () => {
+  const c = comandos.clasificar('powershell -Command "echo format C: es inocente"');
+  assertEqual(c.nivel, 'normal');
+});
+
 console.log('comandos.js — esSeguro');
 
 test('git status es seguro', () => {

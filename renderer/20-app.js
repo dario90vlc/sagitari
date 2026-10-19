@@ -3,7 +3,7 @@
    El orden de carga en index.html preserva el orden original. */
 /* exported renderMarket, pintarCtxMeter, resetCtxMeter, pintarRailEquipo */
 /* global hiloActual, eventoDeOtraPestana, equipoDe, estadoEquipo, badgeEquipoPermisos, equipoEvento */
-/* global equipoChat, equipoPermiso, equipoFicha */
+/* global equipoChat, equipoPermiso, equipoFicha, sysline, newConversation */
 // ============ activity feed + live agents ============
 const FEED_MAX = 6;
 /* v5.0.1: eventos que NO pertenecen a una conversación concreta y por eso se atienden
@@ -534,8 +534,17 @@ window.sagitari.onAgentEvent((ev) => {
      se pinta con ellos (`equipoChat`). Sin estos dos enganches la vista Equipo sale vacía y
      la tarjeta no nace, aunque el motor sí mande los eventos. */
   if (/^team_/.test(String(ev.type || ''))) {
+    /* Este bloque va ANTES de la guarda de `convId` de más abajo, así que hay que
+       comprobarla aquí: el ESTADO del equipo se acumula para CUALQUIER conversación
+       (lo leen la vista Equipo y el contador del menú, que son de toda la app), pero la
+       TARJETA del hilo sólo se pinta en la conversación a la vista. Sin esta comprobación
+       un `team_*` de otra pestaña pintaba estado, feed, una burbuja y una tarjeta DENTRO
+       del hilo visible y la dejaba enganchada al equipo de la otra conversación (los
+       siguientes eventos la seguían repintando ahí). Mismo criterio que la guarda de
+       abajo: sin conversación conocida (`hiloActual()` null) no se desvía nada. */
     equipoEvento(ev);
-    equipoChat(ev);
+    const visible = hiloActual();
+    if (!visible || !ev.convId || ev.convId === visible) equipoChat(ev);
     return;
   }
   /* v5.0.1: cada evento del turno viaja con SU conversación (`convId`). Si no es la que
@@ -1117,10 +1126,49 @@ async function sendFrom(elId) {
   const text = el.value.trim();
   const atts = pendingAttachments.slice();
   if (!text && !atts.length) return;
+  /* Órdenes de barra (`/cost`, `/compact`…): NO son mensajes. Se despachan al proceso
+     principal —que es quien tiene el gasto y el contexto— y su salida va a una línea de
+     sistema del hilo. Antes el renderer no las miraba y viajaban como mensaje normal al
+     modelo, gastando un turno y guardándose «/cost» en el historial. */
+  const cmd = K.parseCommand(text);
+  if (cmd) {
+    el.value = '';
+    el.style.height = '';
+    clearAttachments();
+    await despacharOrden(cmd);
+    return;
+  }
   el.value = '';
   el.style.height = '';
   clearAttachments();
   await enviarTexto(text, atts);
+}
+
+/** Despacha una orden de barra al proceso principal y deja su resultado (o el motivo del
+    fallo) como línea de sistema en el hilo. El registro de órdenes es el de ChatKit
+    (`K.parseCommand`): la paleta «/» y esta ruta despachan la MISMA lista. */
+async function despacharOrden(cmd) {
+  const nombre = '/' + cmd.name + (cmd.args ? ' ' + cmd.args : '');
+  /* `/new` arranca una conversación nueva —lo mismo que el botón «+»— y `/help` lo
+     contesta el propio renderer con la lista de ChatKit, la MISMA que pinta la paleta al
+     escribir «/»: no hace falta cruzar el IPC para repetirla ni puede contradecirse con
+     lo que se ve. */
+  if (cmd.name === 'new') {
+    await newConversation();
+    sysline('Conversación nueva. La anterior queda guardada en el historial.');
+    return;
+  }
+  if (cmd.name === 'help') {
+    sysline('Órdenes: ' + K.COMMANDS.map((c) => '/' + c.name + (c.args ? ' ' + c.args : '') + ' — ' + c.descripcion).join(' · '));
+    return;
+  }
+  try {
+    const r = await window.sagitari.chatCommand(hiloActual(), cmd.name, cmd.args);
+    if (r && r.ok === false) sysline('No se pudo «' + nombre + '»: ' + (r.error || 'orden no disponible'));
+    else sysline((r && r.text) || 'Hecho.');
+  } catch (e) {
+    sysline('No se pudo «' + nombre + '»: ' + ((e && e.message) || e));
+  }
 }
 
 // ============ adjuntos: archivos, documentos e imágenes ============

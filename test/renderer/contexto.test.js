@@ -103,5 +103,41 @@ test('mide mensaje con tool_calls', () => {
   assertOk(m.caracteres > 0, 'debe tener caracteres');
 });
 
+test('recortarMensajes no deja el envío sin la petición del usuario (turno largo)', () => {
+  /* Un turno con UN mensaje de usuario y muchos pasos con herramientas supera el tope:
+     el recorte quitaba bloques hasta dejar SOLO el prompt del sistema, así que el
+     modelo recibía la conversación sin la pregunta. */
+  const grande = 'x'.repeat(4000);
+  const mensajes = [
+    { role: 'system', content: 'SISTEMA' },
+    { role: 'user', content: 'Petición del usuario' },
+  ];
+  for (let i = 0; i < 10; i++) {
+    mensajes.push({ role: 'assistant', content: grande + ' paso ' + i });
+    mensajes.push({ role: 'tool', content: grande + ' resultado ' + i });
+  }
+  const r = contexto.recortarMensajes(mensajes, [], { model: 'x', contextWindow: 8000, maxTokens: 4096 });
+  assertOk(
+    r.messages.some((m) => String(m.content).includes('Petición del usuario')),
+    'la petición del usuario no puede desaparecer del envío: quedaron ' + r.messages.length + ' mensaje(s)',
+  );
+});
+
+test('recortarMensajes suelta turnos antiguos y conserva el turno en curso', () => {
+  const grande = 'x'.repeat(4000);
+  const mensajes = [{ role: 'system', content: 'SISTEMA' }];
+  for (let t = 1; t <= 6; t++) {
+    mensajes.push({ role: 'user', content: 'petición ' + t }, { role: 'assistant', content: grande }, { role: 'tool', content: grande });
+  }
+  const r = contexto.recortarMensajes(mensajes, [], { model: 'x', contextWindow: 8000, maxTokens: 4096 });
+  assertOk(r.quitados > 0, 'con ese tamaño tiene que soltar bloques: ' + JSON.stringify(r.messages.map((m) => m.role)));
+  assertEqual(r.messages[0].role, 'system', 'el sistema sigue primero:');
+  assertEqual(r.messages[1].role, 'user', 'el envío continúa por una petición del usuario (no por una respuesta):');
+  assertOk(
+    r.messages.some((m) => m.role === 'user' && String(m.content) === 'petición 6'),
+    'el turno en curso viaja entero: ' + JSON.stringify(r.messages.filter((m) => m.role === 'user').map((m) => m.content)),
+  );
+});
+
 console.log(`\n${passed} pasaron, ${failed} fallaron`);
 process.exit(failed ? 1 : 0);

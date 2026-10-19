@@ -33,7 +33,10 @@ function registerModoIpc(ipcMain, ctx) {
     try {
       ctx.getHabits().observe('mode', { mode: cfg().settings.mode });
     } catch {}
-    saveConfig();
+    // El modo se aplica en memoria igual, pero si no se pudo persistir la interfaz
+    // tiene que enterarse (antes daba el cambio por bueno y al reiniciar volvía el otro).
+    const saved = saveConfig();
+    if (!saved.ok) return { ok: false, error: saved.error };
     return cfg().settings.mode;
   });
 

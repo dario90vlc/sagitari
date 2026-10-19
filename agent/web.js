@@ -22,6 +22,7 @@
 
 const dns = require('dns');
 const net = require('net');
+const terceros = require('./terceros'); // marco único del contenido de terceros (datos, no órdenes)
 
 const MAX_BYTES = 5 * 1024 * 1024; // tope de descarga: aborta al pasarse (ver leerConTope)
 const MAX_CHARS_DEF = 12000; // lo que entra al contexto por defecto
@@ -341,7 +342,12 @@ async function traer(url, opts = {}) {
       return {
         url: actual.href,
         status: res.status,
-        texto: `${cabecera}\n\n(El servidor devolvió un archivo binario: no lo puedo leer como texto. Puedo bajarlo con run_command si hace falta.)`,
+        /* El texto de la web son DATOS de terceros: va envuelto con el mismo bloque
+           que las skills (terceros.js) para que el modelo no lo tome por órdenes. */
+        texto: terceros.envolver(
+          'LA WEB',
+          `${cabecera}\n\n(El servidor devolvió un archivo binario: no lo puedo leer como texto. Puedo bajarlo con run_command si hace falta.)`,
+        ),
       };
     }
     const limpio = esHtml ? aTexto(cuerpo) : limpiarTexto(cuerpo);
@@ -350,7 +356,12 @@ async function traer(url, opts = {}) {
       limpio.length > max
         ? `\n\n...[recortado: ${max} de ${limpio.length} caracteres. Pide solo lo que necesites o vuelve a llamarme con max_chars mayor]`
         : '';
-    return { url: actual.href, status: res.status, texto: `${cabecera}\n\n${limpio.slice(0, max)}${recorte}` };
+    // El cuerpo NO se escapa ni se recorta aquí de más: el recorte ya está hecho (max).
+    return {
+      url: actual.href,
+      status: res.status,
+      texto: terceros.envolver('LA WEB', `${cabecera}\n\n${limpio.slice(0, max)}${recorte}`),
+    };
   } finally {
     clearTimeout(timer);
     for (const d of dispatchers) {

@@ -131,7 +131,18 @@ function registerChatIpc(ipcMain, ctx) {
       } catch {
         return { ok: false, error: 'La ruta no existe' };
       }
-      if (attach.insideDir(full, configDir())) return { ok: false, error: 'ruta no permitida' };
+      // La guarda compara en el MISMO espacio: `full` ya viene resuelto por realpath, así
+      // que el directorio de datos también tiene que estarlo. Comparando contra la ruta
+      // sin resolver, un junction o symlink por el que se llegue al directorio de datos
+      // (una carpeta redirigida, por ejemplo) no se parecía a la ruta real y el fichero
+      // se colaba como adjunto: ahí viven las API keys y las conversaciones.
+      let dataDir = configDir();
+      try {
+        dataDir = await fsp.realpath(dataDir);
+      } catch {
+        // El directorio de datos todavía no existe (primer arranque): se compara tal cual.
+      }
+      if (attach.insideDir(full, dataDir)) return { ok: false, error: 'ruta no permitida' };
       const st = await fsp.stat(full);
       if (!st.isFile()) return { ok: false, error: 'no es un archivo regular' };
       if (st.size > attach.MAX_FILE_BYTES) return { ok: false, error: `Supera ${Math.round(attach.MAX_FILE_BYTES / 1048576)} MB` };
@@ -189,9 +200,22 @@ function registerChatIpc(ipcMain, ctx) {
     const atts = Array.isArray(attachments) ? attachments : [];
     const imgAtts = atts.filter((a) => a && a.kind === 'image' && a.dataUrl);
     const txtAtts = atts.filter((a) => a && a.kind === 'text');
-    let body = text || (imgAtts.length && !txtAtts.length ? '(análisis de imagen)' : '');
+    // `frase` es lo que el usuario escribió: lo que se pinta en la burbuja y lo que se
+    // guarda. El VOLCADO de los adjuntos viaja solo en `body`, que es el mensaje de ESTE
+    // turno: antes se guardaba `body` entero, así que cada adjunto metía hasta
+    // `attach.MAX_ADJUNTOS_CHARS` caracteres en conversations.json —un fichero que se lee
+    // completo al arrancar y se reescribe en cada turno, con copia `.bak`— y el renderer
+    // tenía que recortarlos con una expresión regular al repintar.
+    let frase = text || (imgAtts.length && !txtAtts.length ? '(análisis de imagen)' : '');
+    if (!frase && !txtAtts.length) frase = '(adjunto sin texto)';
+    // Este marcador lo recorta el renderer al repintar (renderer/40-vistas.js): la ficha
+    // guardada tiene que empezar por el mismo texto o la burbuja al reabrir enseñaría la
+    // ficha como si fuera prosa del usuario.
+    const marcaAdj = 'He adjuntado archivos para que los uses en tu respuesta:\n\n';
+    const fichaAdj = atts.length ? marcaAdj + attach.cardsFor(atts) : '';
+    let body = frase;
     if (txtAtts.length) {
-      body = (body ? body + '\n\n' : '') + 'He adjuntado archivos para que los uses en tu respuesta:\n\n' + attach.blocksFor(txtAtts);
+      body = (body ? body + '\n\n' : '') + marcaAdj + attach.blocksFor(txtAtts);
     }
     if (!body) body = '(adjunto sin texto)';
     // comando manual de skill: "/skill <resto>" — el usuario fuerza la skill
@@ -201,7 +225,10 @@ function registerChatIpc(ipcMain, ctx) {
       if (s && s.enabled) {
         // inyecta la skill en el contexto del agente (como mensaje de sistema)
         a.history.push({ role: 'system', content: `SKILL ACTIVADA POR EL USUARIO: ${s.name}\n\n${s.body}` });
-        body = (sm[2] || '').trim() || `Aplica la skill ${s.name}.`;
+        // la skill manda: su texto sustituye al de la frase (y sigue siendo lo único que
+        // se envía y lo único que se guarda, igual que antes)
+        frase = (sm[2] || '').trim() || `Aplica la skill ${s.name}.`;
+        body = frase;
         if (getWin() && !getWin().isDestroyed())
           getWin().webContents.send('agent:event', { type: 'status', convId: c.id, text: `Skill ${s.name} aplicada` });
       }
@@ -211,18 +238,29 @@ function registerChatIpc(ipcMain, ctx) {
     // el modo queda grabado con la pregunta: en el chat se ve con qué modo se
     // pidió cada cosa (ACT ejecuta, PLAN planifica, THINK razona)
     const sentMode = (cfg().settings && cfg().settings.mode) || 'act';
-    // en la conversación guardamos los metadatos de los adjuntos (no el texto
-    // completo: las conversaciones pueden ser grandes y se leen en cada arranque).
-    // Las imágenes se guardan como MINIATURA (320 px): un pantallazo de 5 MB en
-    // base64 se relee entero en cada arranque y nunca se vuelve a enviar al
-    // modelo (el turno ya pasó). Sin miniatura, la tarjeta al reabrir enseña el
-    // chip con el nombre, igual que los adjuntos de texto.
+    // en la conversación guardamos la frase del usuario y la FICHA de los adjuntos (no el
+    // texto completo: las conversaciones pueden ser grandes y se leen en cada arranque).
+    // El marcador de la ficha es el mismo que el renderer recorta al repintar, así que al
+    // reabrir el hilo se ve la frase con su chip, como antes. Las imágenes se guardan como
+    // MINIATURA (320 px): un pantallazo de 5 MB en base64 se relee entero en cada arranque
+    // y nunca se vuelve a enviar al modelo (el turno ya pasó). Sin miniatura, la tarjeta al
+    // reabrir enseña el chip con el nombre, igual que los adjuntos de texto.
     const attMeta = atts.map((a) => {
       const kind = a.kind || (a.dataUrl ? 'image' : 'text');
       const thumb = kind === 'image' && a.dataUrl ? thumbnailOf(a.dataUrl) : undefined;
       return { name: a.name, kind, size: a.size || 0, ...(thumb ? { dataUrl: thumb } : {}) };
     });
-    c.messages.push({ role: 'user', content: body, ts: Date.now(), mode: sentMode, attachments: attMeta.length ? attMeta : undefined });
+    // Al reabrir el hilo —y en los turnos siguientes, que el agente se hidrata de aquí— el
+    // modelo ve la frase y la ficha, no el volcado: si necesita el contenido otra vez, que
+    // lo pida (el adjunto se reenvía entero en el turno en que se adjunta y solo en él).
+    const guardado = [frase, fichaAdj].filter(Boolean).join('\n\n');
+    c.messages.push({
+      role: 'user',
+      content: guardado || '(adjunto sin texto)',
+      ts: Date.now(),
+      mode: sentMode,
+      attachments: attMeta.length ? attMeta : undefined,
+    });
     c.updatedAt = Date.now();
     convsApi.saveConvs();
     glow('think');

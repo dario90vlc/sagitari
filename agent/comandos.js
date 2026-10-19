@@ -33,28 +33,28 @@
  *  negarlo ahí convertiría la barrera en un estorbo y el usuario la apagaría.
  * --------------------------------------------------------------------------- */
 const PROHIBIDOS = [
-  { rx: /\bformat\s+[a-z]:/i, motivo: 'formatear una unidad de disco' },
-  { rx: /\bdiskpart\b/i, motivo: 'diskpart: gestiona las particiones del disco' },
-  { rx: /\bmkfs(\.[a-z0-9]+)?\b/i, motivo: 'crear un sistema de archivos sobre un dispositivo' },
-  { rx: /\bdd\s+[^\n]*\bof=\s*(\/dev\/|[a-z]:)/i, motivo: 'escribir directamente sobre un dispositivo o unidad' },
-  { rx: /\b(bcdedit|bootrec|bootsect)\b/i, motivo: 'modificar el arranque del sistema' },
-  { rx: /\b(vssadmin|wbadmin)\s+delete\b/i, motivo: 'borrar las copias de seguridad o los puntos de restauración' },
-  { rx: /\bcipher\s+\/w/i, motivo: 'sobrescribir el espacio libre de la unidad (irreversible)' },
+  { rx: /^format\s+[a-z]:/i, motivo: 'formatear una unidad de disco' },
+  { rx: /^diskpart\b/i, motivo: 'diskpart: gestiona las particiones del disco' },
+  { rx: /^mkfs(\.[a-z0-9]+)?\b/i, motivo: 'crear un sistema de archivos sobre un dispositivo' },
+  { rx: /^dd\s+[^\n]*\bof=\s*(\/dev\/|[a-z]:)/i, motivo: 'escribir directamente sobre un dispositivo o unidad' },
+  { rx: /^(bcdedit|bootrec|bootsect)\b/i, motivo: 'modificar el arranque del sistema' },
+  { rx: /^(vssadmin|wbadmin)\s+delete\b/i, motivo: 'borrar las copias de seguridad o los puntos de restauración' },
+  { rx: /^cipher\s+\/w/i, motivo: 'sobrescribir el espacio libre de la unidad (irreversible)' },
   // borrar la RAÍZ de una unidad (del /s /q C:\ · rd /s /q C:\ · rm -rf /)
-  { rx: /\b(del|erase|rd|rmdir)\b[^\n]*\s[a-z]:[\\/]?\s*$/i, motivo: 'borrar la raíz de una unidad' },
-  { rx: /\b(del|erase|rd|rmdir)\b[^\n]*\s[a-z]:[\\/](?=\s|$)/i, motivo: 'borrar la raíz de una unidad' },
-  { rx: /\brm\s+-[a-z]*[rf][a-z]*\s+\/(?:\s|$)/i, motivo: 'borrar la raíz del sistema de archivos' },
+  { rx: /^(del|erase|rd|rmdir)\b[^\n]*\s[a-z]:[\\/]?\s*$/i, motivo: 'borrar la raíz de una unidad' },
+  { rx: /^(del|erase|rd|rmdir)\b[^\n]*\s[a-z]:[\\/](?=\s|$)/i, motivo: 'borrar la raíz de una unidad' },
+  { rx: /^rm\s+-[a-z]*[rf][a-z]*\s+\/(?:\s|$)/i, motivo: 'borrar la raíz del sistema de archivos' },
   {
-    rx: /\bRemove-Item\b[^\n]*-[^\n]*Recurse[^\n]*\b(?:[a-z]:[\\/]\s*$|[a-z]:[\\/](?=\s|")|C:\\Windows|C:\\Program Files)/i,
+    rx: /^Remove-Item\b[^\n]*-[^\n]*Recurse[^\n]*\b(?:[a-z]:[\\/]\s*$|[a-z]:[\\/](?=\s|")|C:\\Windows|C:\\Program Files)/i,
     motivo: 'borrar de forma recursiva una raíz del sistema',
   },
   // borrar dentro de Windows / Program Files
   {
-    rx: /\b(del|erase|rd|rmdir|rm|Remove-Item)\b[^\n]*\bC:[\\/](Windows|Program Files|ProgramData|Users[\\/][^\\/]+[\\/](AppData|Documents))[\\/]/i,
+    rx: /^(del|erase|rd|rmdir|rm|Remove-Item)\b[^\n]*\bC:[\\/](Windows|Program Files|ProgramData|Users[\\/][^\\/]+[\\/](AppData|Documents))[\\/]/i,
     motivo: 'borrar dentro de las carpetas del sistema',
   },
-  { rx: /\bmls\b|\bcacls\b/i, motivo: 'operación no soportada en Windows' },
-  { rx: /:\s*\(\s*\)\s*\{[^\n]*\|[^\n]*:&/, motivo: 'bomba de procesos' },
+  { rx: /^(mls|cacls)\b/i, motivo: 'operación no soportada en Windows' },
+  { rx: /^:\s*\(\s*\)\s*\{[^\n]*\|[^\n]*:&/, motivo: 'bomba de procesos' },
 ];
 
 /* --------------------------------------------------------------------------- *
@@ -149,6 +149,136 @@ function compuesta(cmd) {
   return /(&&|\|\||;|`|\$\(|>>|>|<\()/.test(cmd) || /\|/.test(cmd);
 }
 
+/* --------------------------------------------------------------------------- *
+ *  TROCEADO — de la línea a la orden
+ *
+ *  Clasificar sobre el texto crudo deja dos agujeros con la misma raíz. La regla
+ *  exige un espacio entre el nombre del ejecutable y sus argumentos, así que
+ *  basta escribirlo de otra forma (`format.com C:`, `cipher.exe /w:C:`,
+ *  `C:\Windows\System32\format.exe C:`) para que no la vea; y al revés, una
+ *  palabra peligrosa que solo se MENCIONA (un `echo`, el mensaje de un
+ *  `git commit -m`) contaba como si fuera la orden. Por eso las reglas de las
+ *  listas se escriben contra UN subcomando —ancladas con `^`, que es donde va
+ *  la orden— y aquí se parte la línea en subcomandos (los separadores de cmd:
+ *  `&`, `&&`, `|`, `||`, y el `;` de PowerShell) y cada uno en tokens, para
+ *  aplicarlas al subcomando normalizado: el ejecutable pierde la ruta y la
+ *  extensión, y las comillas se caen (la barrera mira QUÉ orden es, no cómo se
+ *  escribió).
+ * --------------------------------------------------------------------------- */
+
+/* Separadores que parten la línea en órdenes independientes. Dentro de comillas
+   dobles no separan, que es como los trata cmd.exe en el caso corriente. */
+const SEPARADORES_ORDEN = new Set(['&', '|', ';']);
+
+/** Trocea una línea en subcomandos; cada uno es su lista de tokens, sin comillas. */
+function trocear(linea) {
+  const subcomandos = [];
+  let tokens = [];
+  let token = '';
+  let hayToken = false;
+  let enComillas = false;
+  const cerrarToken = () => {
+    if (!hayToken) return;
+    tokens.push(token);
+    token = '';
+    hayToken = false;
+  };
+  const cerrarSubcomando = () => {
+    cerrarToken();
+    if (tokens.length) subcomandos.push(tokens);
+    tokens = [];
+  };
+  for (const ch of String(linea)) {
+    if (ch === '"') {
+      enComillas = !enComillas;
+      hayToken = true;
+      continue;
+    }
+    if (!enComillas && SEPARADORES_ORDEN.has(ch)) {
+      cerrarSubcomando();
+      continue;
+    }
+    if (!enComillas && /\s/.test(ch)) {
+      cerrarToken();
+      continue;
+    }
+    token += ch;
+    hayToken = true;
+  }
+  cerrarSubcomando();
+  return subcomandos;
+}
+
+/** Nombre del ejecutable sin ruta ni extensión: `C:\...\format.com` → `format`. */
+function nombreEjecutable(token) {
+  const partes = String(token).split(/[\\/]/);
+  const base = partes[partes.length - 1] || String(token);
+  return base.replace(/\.(exe|com)$/i, '');
+}
+
+/* Palabras que se limitan a lanzar la orden que va detrás (elevar, medir el
+   tiempo, fijar el entorno). Si la barrera se quedara en ellas, anteponer un
+   `sudo` esquivaría la lista entera. */
+const LANZADORES = new Set([
+  'sudo', 'doas', 'runas', 'time', 'nice', 'nohup', 'env', 'setsid', 'exec',
+  'command', 'stdbuf', 'timeout', 'ionice', 'chrt', 'taskset', 'busybox', 'wsl',
+  'call', 'xargs',
+]);
+
+/* Intérpretes cuyo argumento ES una línea de órdenes: su interior se vuelve a
+   trocear para que la barrera juzgue la orden de dentro (`cmd /c del …`,
+   `powershell -Command "Remove-Item …"`) y no el nombre del intérprete. */
+const BANDERAS_INTERIOR = {
+  cmd: ['/c', '/k'],
+  powershell: ['-command', '-c', '-commandwithargs'],
+  pwsh: ['-command', '-c', '-commandwithargs'],
+  bash: ['-c'],
+  sh: ['-c'],
+  dash: ['-c'],
+  ksh: ['-c'],
+  zsh: ['-c'],
+};
+
+/** Accesorio de un lanzador: una opción, una variable de entorno o un número. */
+function esAccesorio(token) {
+  const t = String(token);
+  return /^[-/][a-z0-9]/i.test(t) || /^[a-z_][a-z0-9_]*=/i.test(t) || /^\d+$/.test(t);
+}
+
+/**
+ * Subcomandos de una línea, ya normalizados: `{ exe: 'format', texto: 'format C: /q' }`.
+ * `texto` empieza por el nombre del ejecutable (sin ruta ni extensión) y sigue con
+ * sus argumentos sin comillas: es contra eso contra lo que se aplican las reglas.
+ */
+function subcomandosDe(linea, profundidad = 0) {
+  const lista = [];
+  for (const tokens of trocear(linea)) {
+    if (!tokens.length) continue;
+    let i = 0;
+    while (i < tokens.length && LANZADORES.has(String(tokens[i]).toLowerCase())) {
+      i++;
+      while (i < tokens.length && esAccesorio(tokens[i])) i++;
+    }
+    if (i >= tokens.length) i = 0; // era un lanzador suelto (`sudo`): se deja tal cual
+    const resto = tokens.slice(i);
+    const exe = nombreEjecutable(resto[0]);
+    const args = resto.slice(1);
+    lista.push({ exe, texto: [exe].concat(args).join(' ') });
+    if (profundidad >= 3) continue;
+    const banderas = BANDERAS_INTERIOR[String(exe).toLowerCase()];
+    if (!banderas) continue;
+    const corte = args.findIndex((a) => banderas.includes(String(a).toLowerCase()));
+    if (corte < 0) continue;
+    // las comillas simples las gasta el shell de fuera: al intérprete le llega la orden ya sin ellas
+    const interior = args
+      .slice(corte + 1)
+      .join(' ')
+      .replace(/'/g, '');
+    if (interior) lista.push(...subcomandosDe(interior, profundidad + 1));
+  }
+  return lista;
+}
+
 /**
  * Clasifica un comando. Devuelve siempre un objeto:
  *   { nivel: 'normal'|'sensible'|'prohibido', motivo, regla }
@@ -161,8 +291,15 @@ function clasificar(cmd) {
     .trim();
   if (!t) return { nivel: 'normal', motivo: '', regla: '' };
 
+  /* Las reglas van ancladas al principio del subcomando, así que se prueban
+     contra cada subcomando normalizado; la línea entera se prueba también para
+     no depender de cómo se trocee (una bomba de procesos vive en los propios
+     separadores). */
+  const subcomandos = subcomandosDe(t);
+  const dispara = (rx) => rx.test(t) || subcomandos.some((s) => rx.test(s.texto));
+
   for (let i = 0; i < PROHIBIDOS.length; i++) {
-    if (PROHIBIDOS[i].rx.test(t)) {
+    if (dispara(PROHIBIDOS[i].rx)) {
       return { nivel: 'prohibido', motivo: PROHIBIDOS[i].motivo, regla: 'prohibido#' + i };
     }
   }
@@ -171,7 +308,7 @@ function clasificar(cmd) {
   if (!compuesta(t) && PERMITIDOS.test(t)) return { nivel: 'normal', motivo: '', regla: '' };
 
   for (let i = 0; i < SENSIBLES.length; i++) {
-    if (SENSIBLES[i].rx.test(t)) {
+    if (dispara(SENSIBLES[i].rx)) {
       return { nivel: 'sensible', motivo: SENSIBLES[i].motivo, regla: 'sensible#' + i };
     }
   }

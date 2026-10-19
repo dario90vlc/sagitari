@@ -32,6 +32,12 @@ const claveDueno = (workspace, owner) => String(owner || '') + '\0' + String(wor
 const guardados = new Map();
 /* clave -> Set(rutas cuya pre-imagen NO se pudo leer: no se pueden restaurar) */
 const noRestaurables = new Map();
+/* clave -> Map(rutaAbsoluta -> raíz por la que ESA ruta es legítima de este turno).
+   Normalmente es el propio espacio de trabajo, pero la fusión de un árbol aislado aplica
+   el parche contra la raíz del REPOSITORIO, que con el espacio de trabajo en una
+   subcarpeta (`<repo>/proyecto`) queda por encima: sin esta raíz, esas rutas caían fuera
+   de `dentroDelEspacio` y «Deshacer» las descartaba en silencio. */
+const raices = new Map();
 
 /** El contenido de un archivo tal y como estaba, o null si no existía / no es texto. */
 function leerAntes(absPath) {
@@ -40,7 +46,13 @@ function leerAntes(absPath) {
     if (!st.isFile() || st.size > MAX_BYTES_ORIGINAL) return '';
     const buf = fs.readFileSync(absPath);
     if (buf.subarray(0, 8192).includes(0)) return '';
-    return buf.toString('utf8');
+    const texto = buf.toString('utf8');
+    /* Si el archivo no está en UTF-8 (un .txt/.csv en ANSI/CP1252) la vuelta a texto ya
+       ha metido U+FFFD: esa pre-imagen es basura y restaurarla escribiría basura encima.
+       Se devuelve «sin pre-imagen» y `recordar` lo marca como no restaurable, igual que
+       con un binario: el Deshacer lo dice en vez de fingirlo. */
+    if (!Buffer.from(texto, 'utf8').equals(buf)) return '';
+    return texto;
   } catch {
     return null;
   } // no existía: la pre-imagen es «nada»
@@ -51,13 +63,19 @@ function leerAntes(absPath) {
  * escribe dos veces en el mismo turno, el diff debe partir de cómo estaba al
  * empezar, no de la escritura intermedia.
  */
-function recordar(workspace, absPath, contenidoAnterior, owner = '') {
+function recordar(workspace, absPath, contenidoAnterior, owner = '', raiz = null) {
   if (!workspace || !absPath) return;
   const k = claveDueno(workspace, owner);
   if (!guardados.has(k)) guardados.set(k, new Map());
   const mapa = guardados.get(k);
   if (mapa.has(absPath)) return;
   if (mapa.size >= MAX_ARCHIVOS * 4) return; // un turno que toca cien archivos no se revisa así
+  /* La raíz bajo la que esta ruta es legítima: el espacio de trabajo, salvo que el
+     llamante declare otra (la fusión de un árbol aislado pasa la raíz del repositorio y
+     sus archivos pueden caer fuera del espacio de trabajo del usuario). Se guarda junto a
+     la pre-imagen para que «Deshacer» sepa que esa ruta es de este turno. */
+  if (!raices.has(k)) raices.set(k, new Map());
+  raices.get(k).set(absPath, raiz || workspace);
   let antes = contenidoAnterior;
   if (antes === undefined) {
     antes = leerAntes(absPath);
@@ -106,6 +124,12 @@ function dentroDelEspacio(workspace, abs) {
   const raiz = normalRuta(w);
   const a = normalRuta(abs);
   return a === raiz || a.startsWith(raiz + '/');
+}
+
+/** Raíz por la que una ruta registrada en este turno es legítima (ver `raices`). */
+function raizDe(k, abs, workspace) {
+  const m = raices.get(k);
+  return (m && m.get(abs)) || workspace;
 }
 
 /* --------------------------------------------------------------------------- *
@@ -390,7 +414,7 @@ function archivoRevertir(workspace, archivo, owner = '') {
   const clave = normalRuta(archivo);
   let abs = null;
   for (const [a] of mapa) {
-    if (normalRuta(a) === clave || normalRuta(nombreRel(workspace, a)) === clave) {
+    if (normalRuta(a) === clave || normalRuta(nombreRel(raizDe(k, a, workspace), a)) === clave) {
       abs = a;
       break;
     }
@@ -401,16 +425,18 @@ function archivoRevertir(workspace, archivo, owner = '') {
   if (no && no.has(abs)) {
     return {
       ok: false,
-      error: `no puedo revertir «${nombreRel(workspace, abs)}»: no se pudo leer antes (es binario o demasiado grande) y escribir la pre-imagen lo dejaría peor`,
+      error: `no puedo revertir «${nombreRel(raizDe(k, abs, workspace), abs)}»: no se pudo leer antes (es binario o demasiado grande) y escribir la pre-imagen lo dejaría peor`,
     };
   }
-  /* Solo se toca lo que está DENTRO del espacio de trabajo: la lista sale de la pre-imagen,
-     pero una entrada de fuera no se restaura ni aunque esté en el mapa. */
-  if (!dentroDelEspacio(workspace, abs))
-    return { ok: false, error: `«${nombreRel(workspace, abs)}» está fuera del espacio de trabajo: no lo toco` };
+  /* Solo se toca lo que está DENTRO de la raíz declarada de la ruta (el espacio de
+     trabajo, o la raíz del repositorio con la que la fusionó el árbol aislado): una
+     entrada fuera de esa raíz no se restaura ni aunque esté en el mapa. */
+  const raiz = raizDe(k, abs, workspace);
+  if (!dentroDelEspacio(raiz, abs))
+    return { ok: false, error: `«${nombreRel(raiz, abs)}» está fuera del espacio de trabajo: no lo toco` };
 
   const antes = mapa.get(abs);
-  const rel = nombreRel(workspace, abs);
+  const rel = nombreRel(raiz, abs);
   try {
     if (antes === null) {
       if (fs.existsSync(abs)) fs.unlinkSync(abs);
@@ -425,6 +451,7 @@ function archivoRevertir(workspace, archivo, owner = '') {
   if (!mapa.size) {
     guardados.delete(k);
     noRestaurables.delete(k);
+    raices.delete(k);
   }
   return { ok: true, rel, borrado: antes === null, accion: antes === null ? 'borrado' : 'restaurado' };
 }
@@ -452,7 +479,7 @@ function planDeshacer(workspace, owner = '') {
   const no = noRestaurables.get(k) || new Set();
   const out = [];
   for (const [abs, antes] of mapa) {
-    const rel = nombreRel(workspace, abs);
+    const rel = nombreRel(raizDe(k, abs, workspace), abs);
     if (no.has(abs)) out.push({ ruta: rel, rutaAbs: abs, accion: 'no-restaurable' });
     else if (antes === null) out.push({ ruta: rel, rutaAbs: abs, accion: 'borrar' });
     else out.push({ ruta: rel, rutaAbs: abs, accion: 'restaurar' });
@@ -463,9 +490,12 @@ function planDeshacer(workspace, owner = '') {
 /**
  * Deshace los cambios del turno: restaura lo que se modificó, borra lo que se creó.
  *
- * Solo toca lo que está DENTRO del espacio de trabajo y solo los archivos que este
- * turno tocó (la lista sale de la pre-imagen, no de adivinar). Después se olvida el
- * turno: no se puede deshacer dos veces ni «deshacer» un deshacer que ya no aplica.
+ * Solo toca lo que está DENTRO de la raíz declarada de cada ruta (el espacio de trabajo,
+ * o la raíz del repositorio con la que la registró la fusión de un árbol aislado) y solo
+ * los archivos que este turno tocó (la lista sale de la pre-imagen, no de adivinar). Una
+ * ruta fuera de su raíz no se toca Y se cuenta como fallo: no se puede decir «deshecho»
+ * de algo que sigue ahí. Después se olvida el turno: no se puede deshacer dos veces ni
+ * «deshacer» un deshacer que ya no aplica.
  *
  * @returns {{archivos: Array<{ruta, accion}>, restaurados: number, borrados: number, fallos: number}}
  */
@@ -475,17 +505,25 @@ function deshacer(workspace, { soloRel = null } = {}, owner = '') {
   const vacio = { archivos: [], restaurados: 0, borrados: 0, fallos: 0 };
   if (!mapa || !mapa.size) return vacio;
   const no = noRestaurables.get(k) || new Set();
+  /* Raíz declarada al registrar: el espacio de trabajo, o la que pasó la fusión de un
+     árbol aislado (la raíz del repositorio). Sin esto, los archivos que la fusión puso
+     fuera del espacio de trabajo (el caso normal con el espacio en una subcarpeta) se
+     descartaban aquí sin restaurarse ni contarse. */
   const archivos = [];
   let restaurados = 0,
     borrados = 0,
     fallos = 0;
   for (const [abs, antes] of mapa) {
-    if (!dentroDelEspacio(workspace, abs)) {
-      archivos.push({ ruta: nombreRel(workspace, abs), accion: 'fuera-del-espacio' });
+    const raiz = raizDe(k, abs, workspace);
+    if (!dentroDelEspacio(raiz, abs)) {
+      /* Ni siquiera su raíz declarada lo cubre: no se toca, y se cuenta como fallo para
+         que la interfaz NO pueda decir «deshechos» cuando no lo está. */
+      archivos.push({ ruta: nombreRel(raiz, abs), accion: 'fuera-del-espacio' });
+      fallos++;
       continue;
     }
-    if (soloRel && nombreRel(workspace, abs) !== soloRel) continue;
-    const rel = nombreRel(workspace, abs);
+    if (soloRel && nombreRel(raiz, abs) !== soloRel) continue;
+    const rel = nombreRel(raiz, abs);
     if (no.has(abs)) {
       archivos.push({ ruta: rel, accion: 'no-restaurable' });
       fallos++;
@@ -520,11 +558,14 @@ function archivosTocados(workspace, owner = '') {
 }
 
 function olvidar(workspace, owner = '') {
-  guardados.delete(claveDueno(workspace, owner));
+  const k = claveDueno(workspace, owner);
+  guardados.delete(k);
+  raices.delete(k);
 }
 function limpiar() {
   guardados.clear();
   noRestaurables.clear();
+  raices.clear();
 }
 
 module.exports = {

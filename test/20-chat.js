@@ -978,6 +978,105 @@ test('adjuntos: un archivo por encima del tope se rechaza antes de leerlo', asyn
   ok(attach.kindOf('grande.txt', attach.MAX_FILE_BYTES + 1) === 'text', 'el tipo no decide el rechazo: lo decide el tamaño en main.js');
 });
 
+/* Monta el router de chat con el módulo REAL de adjuntos para mirar los dos lados del
+   turno: lo que viaja al modelo (`enviado`) y lo que se escribe en conversations.json. */
+function montarChatConAdjuntos({ configDir: dirDatos, rutaConvs }) {
+  const { registerChatIpc } = require('../main/ipc-chat');
+  const attach = require('../main/attachments');
+  const handlers = {};
+  const conv = { id: 'c1', title: 'Prueba', messages: [], updatedAt: 0 };
+  const visto = { enviado: null };
+  registerChatIpc(
+    { handle: (n, f) => (handlers[n] = f) },
+    {
+      config: () => ({ settings: {} }),
+      runtimes: {
+        agentFor: () => ({
+          chat: async (body) => {
+            visto.enviado = body;
+          },
+          isBusy: () => false,
+        }),
+      },
+      convsApi: {
+        convById: () => conv,
+        currentConv: () => conv,
+        ensureConv: () => conv,
+        saveConvs: () => fs.writeFileSync(rutaConvs, JSON.stringify({ convs: [conv] })),
+      },
+      getSkills: () => ({ getSkill: async () => null }),
+      getGlow: () => () => {},
+      getWin: () => null,
+      configDir: () => dirDatos,
+      onError: () => {},
+      dialog: {},
+      fsp: fs.promises,
+      fs,
+      path,
+      attach,
+    },
+  );
+  return { handlers, conv, visto };
+}
+
+test('adjuntos: el historial guarda la ficha del adjunto, no su texto completo', async () => {
+  const dir = tmpDir('sagi-adj-hist-');
+  const { handlers, conv, visto } = montarChatConAdjuntos({ configDir: dir, rutaConvs: path.join(dir, 'conversations.json') });
+  // Un adjunto por encima del tope por archivo: antes se guardaba el volcado entero
+  // (hasta MAX_ADJUNTOS_CHARS) dentro del mensaje del usuario.
+  const relleno = 'SECRETO-DEL-ADJUNTO '.repeat(6000);
+  await handlers['chat:send'](null, {
+    convId: 'c1',
+    text: 'resume esto',
+    attachments: [{ name: 'notas.txt', kind: 'text', size: relleno.length, text: relleno }],
+  });
+  // El turno no cambia: el modelo sigue viendo el texto del archivo.
+  ok(visto.enviado.includes('SECRETO-DEL-ADJUNTO'), 'el mensaje del turno lleva el texto del adjunto');
+  // Lo que se escribe en disco, sí: solo la frase del usuario y la ficha.
+  const enDisco = fs.readFileSync(path.join(dir, 'conversations.json'), 'utf8');
+  ok(!enDisco.includes('SECRETO-DEL-ADJUNTO'), 'conversations.json no puede llevar el texto del adjunto');
+  ok(enDisco.length < 2000, 'el fichero se queda en la ficha (van ' + enDisco.length + ' bytes, el volcado son ' + relleno.length + ')');
+  const guardado = conv.messages[conv.messages.length - 1];
+  ok(guardado.content.includes('resume esto'), 'la frase del usuario sí se guarda');
+  ok(guardado.content.includes('notas.txt'), 'y la ficha del adjunto, con su nombre');
+  eq(guardado.attachments.length, 1, 'los metadatos del adjunto siguen ahí (la tarjeta al reabrir)');
+  // El renderer recorta la ficha al repintar con esta misma expresión (renderer/40-vistas.js):
+  // si la ficha guardada no empezara por el marcador, la burbuja la enseñaría como prosa.
+  const pintado = guardado.content.replace(/He adjuntado archivos para que los uses en tu respuesta:\n\n[\s\S]*$/, '').trim();
+  eq(pintado, 'resume esto', 'al reabrir, la burbuja enseña la frase y no la ficha');
+});
+
+test('adjuntos: al directorio de datos no se llega por un junction', async () => {
+  const dir = tmpDir('sagi-adj-junction-');
+  const datos = path.join(dir, 'datos');
+  const enlace = path.join(dir, 'enlace');
+  fs.mkdirSync(datos, { recursive: true });
+  fs.writeFileSync(path.join(datos, 'config.json'), '{"apiKey":"sk-secreta"}');
+  let hayJunction = true;
+  try {
+    fs.symlinkSync(datos, enlace, 'junction');
+  } catch (e) {
+    // Sin permisos para crear el enlace no se puede probar el caso real: se dice y se sigue.
+    hayJunction = false;
+    console.log('  (junction no disponible aquí: ' + e.message + ')');
+  }
+  // El directorio de datos se declara por el ENLACE (sin resolver), como cuando la carpeta
+  // del perfil está redirigida: ahí `configDir()` y el realpath del fichero no coinciden.
+  const { handlers } = montarChatConAdjuntos({ configDir: enlace, rutaConvs: path.join(dir, 'conversations.json') });
+  if (hayJunction) {
+    const porEnlace = await handlers['attachments:read'](null, path.join(enlace, 'config.json'));
+    eq(porEnlace.ok, false, 'el config.json al que se llega por el junction no se puede adjuntar');
+    eq(porEnlace.error, 'ruta no permitida', 'y se rechaza por la guarda de rutas, no por otra cosa');
+    const porReal = await handlers['attachments:read'](null, path.join(datos, 'config.json'));
+    eq(porReal.ok, false, 'tampoco por la ruta real (misma carpeta de datos)');
+  }
+  // Un fichero de fuera sigue leyéndose: la guarda no se ha vuelto un muro.
+  const ajeno = path.join(dir, 'apunte.txt');
+  fs.writeFileSync(ajeno, 'hola');
+  const fuera = await handlers['attachments:read'](null, ajeno);
+  eq(fuera.ok, true, 'un fichero de fuera se sigue pudiendo adjuntar');
+});
+
 test('icono incluido: BMP en los tamaños pequeños (o Windows cae al icono genérico)', () => {
   const buf = fs.readFileSync(path.join(__dirname, '..', 'renderer', 'assets', 'sagitari.ico'));
   const icons = ico.parseIco(buf);

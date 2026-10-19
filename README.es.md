@@ -150,7 +150,7 @@ Atajos útiles:
 | `Ctrl+Alt+S`   | Mostrar u ocultar el panel          |
 | `Alt+Shift+S`  | Traer SAGITARI al frente            |
 | `Ctrl+Shift+G` | Lanzar un pulso de glow             |
-| `Alt+M`        | Ciclar ACT → PLAN → THINK           |
+| `Alt+M`        | Ciclar ACT → PLAN → THINK → EQUIPO |
 | `/` en el chat | Abrir la paleta de órdenes y skills |
 
 ## Descarga

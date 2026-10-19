@@ -469,6 +469,96 @@ test('skills: los triggers son literales, no expresiones regulares del repo', as
   eq(hits.length, 0);
 });
 
+test('skills: createSkill avisa en vez de pisar una skill existente', async () => {
+  const id = 'no-pisar-' + Date.now().toString(36);
+  await skills.createSkill({ name: id, description: 'original', body: 'CONTENIDO-ORIGINAL' });
+  let lanzo = false;
+  try {
+    await skills.createSkill({ name: id, description: 'nueva', body: 'CONTENIDO-NUEVO' });
+  } catch {
+    lanzo = true;
+  }
+  ok(lanzo, 'la segunda alta sobre el mismo id debe rechazarse');
+  const md = fs.readFileSync(path.join(SKILLS_TMP, id, 'SKILL.md'), 'utf8');
+  ok(md.includes('CONTENIDO-ORIGINAL'), 'el contenido original no puede perderse: ' + md);
+  ok(!md.includes('CONTENIDO-NUEVO'), 'la segunda alta no puede escribir nada');
+  await skills.deleteSkill(id);
+});
+
+test('skills: un SKILL.md con BOM o en UTF-16 se lista, no desaparece', async () => {
+  const bom = path.join(SKILLS_TMP, 'skill-con-bom');
+  fs.mkdirSync(bom, { recursive: true });
+  fs.writeFileSync(
+    path.join(bom, 'SKILL.md'),
+    Buffer.concat([Buffer.from([0xef, 0xbb, 0xbf]), Buffer.from('---\nname: skill-con-bom\ndescription: Con BOM – acentos\n---\ncuerpo', 'utf8')]),
+  );
+  const u16 = path.join(SKILLS_TMP, 'skill-en-utf16');
+  fs.mkdirSync(u16, { recursive: true });
+  fs.writeFileSync(
+    path.join(u16, 'SKILL.md'),
+    Buffer.concat([Buffer.from([0xff, 0xfe]), Buffer.from('---\nname: skill-en-utf16\ndescription: En UTF-16 – acentos\n---\ncuerpo', 'utf16le')]),
+  );
+  skills.invalidarIndice();
+  const listado = await skills.listSkills();
+  const sBom = listado.find((s) => s.id === 'skill-con-bom');
+  const sU16 = listado.find((s) => s.id === 'skill-en-utf16');
+  ok(sBom, 'la skill con BOM sigue en el listado');
+  ok(sU16, 'la skill en UTF-16 sigue en el listado');
+  eq(sBom.description, 'Con BOM – acentos', 'el BOM se descarta y los acentos se leen');
+  eq(sU16.description, 'En UTF-16 – acentos', 'y el UTF-16 se decodifica de verdad, sin mojibake');
+  await skills.deleteSkill('skill-con-bom');
+  await skills.deleteSkill('skill-en-utf16');
+});
+
+test('skills-starter: la siembra es de una sola vez (una skill de serie borrada no vuelve)', () => {
+  const vm = require('vm');
+  const base = tmpDir('sagi-seed-');
+  const origen = path.join(base, 'skills-starter');
+  const perfil = path.join(base, 'perfil', 'skills');
+  for (const n of ['skill-a', 'skill-b']) {
+    fs.mkdirSync(path.join(origen, n), { recursive: true });
+    fs.writeFileSync(path.join(origen, n, 'SKILL.md'), `---\nname: ${n}\ndescription: de serie\n---\ncuerpo`);
+  }
+  // seedStarterSkills vive en main.js y no está exportado: se extrae el cuerpo REAL
+  // del fichero y se ejecuta con fs/path/config de mentira para probar su comportamiento.
+  const i = MAIN_SRC.indexOf('function seedStarterSkills(');
+  ok(i >= 0, 'seedStarterSkills debe existir en main.js');
+  let nivel = 0;
+  let fin = -1;
+  for (let k = MAIN_SRC.indexOf('{', i); k < MAIN_SRC.length; k++) {
+    if (MAIN_SRC[k] === '{') nivel++;
+    else if (MAIN_SRC[k] === '}' && --nivel === 0) {
+      fin = k + 1;
+      break;
+    }
+  }
+  const config = { migraciones: {} };
+  let guardados = 0;
+  const fn = vm.runInNewContext('(' + MAIN_SRC.slice(i, fin) + ')', {
+    fs,
+    path,
+    console,
+    __dirname: path.join(base, 'main'),
+    skills: { skillsDir: () => perfil },
+    config,
+    saveConfig: () => {
+      guardados++;
+    },
+  });
+  fn(); // primer arranque
+  ok(
+    fs.existsSync(path.join(perfil, 'skill-a', 'SKILL.md')) && fs.existsSync(path.join(perfil, 'skill-b', 'SKILL.md')),
+    'el primer arranque copia las skills incluidas',
+  );
+  eq(config.migraciones.skillsStarter, true, 'la siembra queda apuntada en la configuración');
+  eq(guardados, 1, 'y se persiste una vez');
+  fs.rmSync(path.join(perfil, 'skill-b'), { recursive: true, force: true }); // el usuario la borra desde Ajustes
+  fn(); // siguiente arranque
+  ok(!fs.existsSync(path.join(perfil, 'skill-b', 'SKILL.md')), 'la skill borrada no puede reaparecer al reiniciar');
+  ok(fs.existsSync(path.join(perfil, 'skill-a', 'SKILL.md')), 'las demás siguen intactas');
+  eq(guardados, 1, 'el segundo arranque no reescribe la configuración');
+});
+
 test('permisos: la tabla de riesgo es única y no tiene claves muertas', () => {
   const { RISK, toolDefs } = require('../agent/tools');
   const { DEFAULT_RISK } = require('../agent/guardrails');
@@ -1104,6 +1194,69 @@ test('browser: el puerto CDP se recupera del perfil', () => {
   eq(b._portFromProfile(), 9333, 'lee el puerto que dejó Chrome en el perfil');
 });
 
+test('browser: el huérfano se reconoce por su --user-data-dir (la tubería no deja puerto)', () => {
+  const { __test } = require('../agent/browser');
+  const { userDataDirDe, esNuestroPerfil, pidsPropios, psEscanerArgs, PS_ESCANER } = __test;
+  const dir = 'C:\\Users\\Usuario\\AppData\\Roaming\\SagitariAI\\browser-profiles\\default-1a2b3c4';
+
+  // El valor se extrae igual con comillas (ruta con espacios) que sin ellas.
+  eq(userDataDirDe('--user-data-dir=' + dir + ' --no-first-run'), dir);
+  eq(userDataDirDe('"chrome.exe" --remote-debugging-pipe --user-data-dir="' + dir + '"'), dir);
+
+  // Es NUESTRO aunque la ruta cambie de caja (Windows no distingue mayúsculas)…
+  ok(esNuestroPerfil('chrome.exe --user-data-dir=' + dir.toUpperCase(), dir), 'el mismo perfil en otra caja sigue siendo el nuestro');
+  // …y NO lo son ni el Chrome del usuario, ni otro perfil de SAGITARI, ni un proceso sin el flag.
+  eq(esNuestroPerfil('chrome.exe --user-data-dir=C:\\Users\\Usuario\\AppData\\Local\\Google\\Chrome\\User Data', dir), false, 'el perfil del usuario no se toca');
+  eq(esNuestroPerfil('chrome.exe --user-data-dir=C:\\Users\\Usuario\\AppData\\Roaming\\SagitariAI\\browser-profiles\\trabajo-9z8y7x6', dir), false, 'otro perfil de SAGITARI no se toca');
+  eq(esNuestroPerfil('chrome.exe --type=renderer', dir), false, 'sin --user-data-dir no es nuestro');
+
+  // Del JSON del escáner solo salen los PIDs de nuestro perfil (lista u objeto suelto).
+  const salida = JSON.stringify([
+    { ProcessId: 111, CommandLine: 'chrome.exe --user-data-dir=' + dir },
+    { ProcessId: 222, CommandLine: 'chrome.exe --user-data-dir=C:\\otro' },
+    { ProcessId: 333, CommandLine: '"msedge.exe" --user-data-dir="' + dir + '"' },
+    { ProcessId: 0, CommandLine: 'chrome.exe --user-data-dir=' + dir }, // PID inválido
+  ]);
+  eq(pidsPropios(salida, dir).join(','), '111,333');
+  eq(pidsPropios(JSON.stringify({ ProcessId: 444, CommandLine: 'chrome --user-data-dir=' + dir }), dir).join(','), '444');
+  eq(pidsPropios('esto no es json', dir).length, 0, 'una salida ilegible no mata a nadie');
+
+  // El escáner va en -EncodedCommand (las comillas de child_process en Windows son frágiles
+  // con rutas con espacios) y filtra por el flag, no por un puerto.
+  const args = psEscanerArgs();
+  eq(args[0], '-NoProfile');
+  eq(args[2], '-EncodedCommand');
+  const script = Buffer.from(args[3], 'base64').toString('utf16le');
+  eq(script, PS_ESCANER, 'lo exportado es lo que se ejecuta');
+  ok(script.includes('--user-data-dir'), 'filtra por --user-data-dir');
+  ok(script.includes('Win32_Process'), 'enumera procesos de Windows');
+});
+
+test('browser: sin marcador de PID no se escanea ningún proceso', async () => {
+  const b = new Browser();
+  b.profileDir = tmpDir('sagi-prof6-');
+  const pids = await b._pidsHuerfanos();
+  eq(Array.isArray(pids) && pids.length, 0, 'sin marcador no hay nada que buscar (y no se lanza PowerShell)');
+});
+
+test('browser: el huérfano de nuestro perfil se mata antes de lanzar', async () => {
+  const b = new Browser();
+  b.profileDir = tmpDir('sagi-prof7-');
+  const matados = [];
+  b._matarArbol = (pid) => matados.push(pid);
+  b._pidsHuerfanos = async () => [111, 222];
+  await b._cerrarHuerfano();
+  eq(matados.join(','), '111,222', 'mata el árbol de cada proceso huérfano de nuestro perfil');
+
+  // Si el escáner no pudo determinar nada (null), no se mata a ciegas ni se pierde la marca.
+  const marca = path.join(b.profileDir, 'sagitari-browser.pid');
+  fs.writeFileSync(marca, '999');
+  b._pidsHuerfanos = async () => null;
+  await b._cerrarHuerfano();
+  eq(matados.join(','), '111,222', 'sin veredicto no se mata nada más');
+  ok(fs.existsSync(marca), 'y el marcador se conserva para el próximo intento');
+});
+
 test('browser: una acción desconocida no lanza un navegador', async () => {
   const b = new Browser();
   b.profileDir = tmpDir('sagi-prof2-');
@@ -1158,6 +1311,29 @@ test('browser: cambiar de perfil olvida el estado del anterior', async () => {
   eq(b._lastElements, null, 'ni el inventario de la página anterior');
   eq(b._sessions.size, 0);
   ok(b.profileDir.startsWith(PROF_TMP), 'y el perfil nuevo usa su propia carpeta');
+});
+
+test('browser: cambiar de perfil mata el árbol antes de olvidar el PID', async () => {
+  const b = new Browser();
+  b.profileDir = tmpDir('sagi-prof8-');
+  const matados = [];
+  b._matarArbol = (pid) => matados.push(pid);
+  b.send = async () => {}; // «Browser.close» atendido
+  b.ws = { close() {} }; // hay tubería viva: el proceso es seguro el nuestro
+  b.browserPid = 4242;
+  await b.switchProfile('otro');
+  eq(matados.join(','), '4242', 'no se descarta el PID sin matar el proceso del perfil abandonado');
+  eq(b.browserPid, null);
+
+  // Sin socket no se dispara a un PID «a ciegas»: Windows reutiliza los números.
+  const b2 = new Browser();
+  b2.profileDir = tmpDir('sagi-prof9-');
+  const m2 = [];
+  b2._matarArbol = (pid) => m2.push(pid);
+  b2.browserPid = 4242;
+  b2._pidsHuerfanos = async () => [];
+  await b2.switchProfile('otro');
+  eq(m2.length, 0, 'sin socket no se mata por PID');
 });
 
 test('browser: kill deja el estado limpio y se puede repetir', () => {

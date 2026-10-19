@@ -64,6 +64,16 @@ test('cada modo tiene color, icono y lema', () => {
   }
 });
 
+test('la cara de PLAN no promete ejecución y remite a ACT', () => {
+  // PLAN es solo lectura (agent/agent.js soloLectura): su lema no puede decir que
+  // ejecuta nada; dibuja el plan y remite a ACT para aplicarlo.
+  const ChatKit = cargarChatKit();
+  const m = ChatKit.mode('plan');
+  const texto = [m.tagline, ...m.bullets].join(' · ');
+  assertMatch(texto, /ACT/, 'la cara del modo PLAN debe remitir a ACT:');
+  assertOk(!/ejec[úu]t|marcarse/i.test(texto), `PLAN no puede prometer que ejecuta: ${texto}`);
+});
+
 test('el modo por defecto es act', () => {
   const ChatKit = cargarChatKit();
   assertEqual(ChatKit.mode(null).key, 'act');

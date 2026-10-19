@@ -63,6 +63,27 @@ test('maneja entradas vacías', () => {
   assertEqual(mcpConfig.sanitizeList(undefined).length, 0);
 });
 
+console.log('mcp-config.js — mergeSecrets');
+
+test('conserva el secreto si llega vacío o enmascarado', () => {
+  assertEqual(mcpConfig.mergeSecrets({ TOKEN: 'real' }, { TOKEN: '' }).TOKEN, 'real');
+  assertEqual(mcpConfig.mergeSecrets({ TOKEN: 'real' }, { TOKEN: '••••' }).TOKEN, 'real');
+});
+
+test('un valor nuevo manda', () => {
+  assertEqual(mcpConfig.mergeSecrets({ TOKEN: 'viejo' }, { TOKEN: 'nuevo' }).TOKEN, 'nuevo');
+});
+
+test('una clave ausente del mapa nuevo se borra (no se arrastra el secreto anterior)', () => {
+  const out = mcpConfig.mergeSecrets({ Authorization: 'Bearer viejo', OTRO: 'x' }, { OTRO: 'y' });
+  assertEqual(out.Authorization, undefined, 'el Authorization del servidor anterior no sobrevive');
+  assertEqual(out.OTRO, 'y');
+});
+
+test('reemplazar un servidor sin cabeceras deja el mapa vacío', () => {
+  assertEqual(Object.keys(mcpConfig.mergeSecrets({ Authorization: 'Bearer viejo' }, {})).length, 0);
+});
+
 console.log('mcp-config.js — validateServer');
 
 test('acepta un servidor stdio válido', () => {
@@ -70,6 +91,17 @@ test('acepta un servidor stdio válido', () => {
   assertEqual(r.ok, true);
   assertEqual(r.value.id, 'mi_mcp');
   assertEqual(r.value.transport, 'stdio');
+});
+
+test('un servidor se conecta al arrancar salvo que se diga lo contrario', () => {
+  /* El arranque conectaba solo los `autoStart`, y ese campo se guardaba como `false` al
+     no venir del formulario (no hay ningún control que lo ponga): el catálogo MCP nacía
+     vacío en cada arranque y el modelo no veía ninguna herramienta MCP. Ahora el
+     interruptor por servidor es `enabled`, y `autoStart` es verdadero por defecto. */
+  const r = mcpConfig.validateServer({ id: 'mi_mcp', transport: 'stdio', command: 'node server.js' });
+  assertEqual(r.value.autoStart, true, 'sin decirlo, arranca con la app:');
+  const off = mcpConfig.validateServer({ id: 'mi_mcp', transport: 'stdio', command: 'node server.js', autoStart: false });
+  assertEqual(off.value.autoStart, false, 'y se respeta el «no» explícito:');
 });
 
 test('rechaza un servidor sin identificador', () => {

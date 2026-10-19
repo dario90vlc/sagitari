@@ -139,12 +139,17 @@ function recortarMensajes(messages = [], tools = [], cfg = {}, { objetivo = 0.75
   let quitados = 0;
   // se quita desde el principio, pero nunca el sistema (bloque 0) ni la cola reciente
   const i = 1;
+  /* El último bloque que trae una petición del usuario es el turno EN CURSO: a partir
+     de ahí no se suelta nada. Sin esta guarda, un turno largo (un solo mensaje de
+     usuario y muchos pasos con herramientas) vaciaba el envío hasta dejar SOLO el
+     prompt del sistema: el modelo recibía la conversación sin la pregunta. */
+  const ultimoTurno = bloques.reduce((acc, b, idx) => (b.some((m) => m.role === 'user') ? idx : acc), 0);
   // la comparación es solo de mensajes: las herramientas ya se descontaron del tope
-  while (medir(bloques.flat(), []).total > tope && bloques.length - i > minimo) {
+  while (medir(bloques.flat(), []).total > tope && bloques.length - i > minimo && i < ultimoTurno) {
     bloques.splice(i, 1);
     quitados++;
     // tras soltar, la conversación no puede empezar por algo que no sea del usuario
-    while (bloques[i] && bloques[i][0].role !== 'user') {
+    while (bloques[i] && bloques[i][0].role !== 'user' && i < ultimoTurno) {
       bloques.splice(i, 1);
       quitados++;
     }

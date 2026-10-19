@@ -66,8 +66,14 @@ function validateProvider(p, { requireId = true, requireModel = false } = {}) {
 
 /** Clave del proveedor guardado al que corresponde una activación (por id o por URL). */
 function claveGuardadaPara(config, { providerId, id, baseUrl } = {}) {
+  /* La URL se compara NORMALIZADA (sin espacios y sin barra final): el campo del
+     formulario guarda lo que escribe el usuario, así que «https://x/v1/» y
+     «https://x/v1» son el mismo proveedor. Sin esto, una diferencia de un carácter
+     dejaba «Detectar modelos» sin credencial aunque la clave estuviera guardada (401). */
+  const limpia = (u) => String(u || '').trim().replace(/\/+$/, '');
+  const buscada = limpia(baseUrl);
   const prov = (config.providers || []).find(
-    (p) => (providerId && p.id === providerId) || (id && p.id === id) || (baseUrl && p.baseUrl === baseUrl),
+    (p) => (providerId && p.id === providerId) || (id && p.id === id) || (buscada && limpia(p.baseUrl) === buscada),
   );
   return (prov && prov.apiKey) || '';
 }
@@ -123,7 +129,7 @@ function registerConfigIpc(ipcMain, ctx) {
     // modelos no puede fallar en 401 por una credencial que ya está guardada.
     // '••••' = la UI reenvía la máscara de config:get: también es «usar la guardada».
     const recibida = String(apiKey || '').trim();
-    const key = !recibida || recibida === SECRETO_MASK ? claveGuardadaPara(config, { baseUrl }) : recibida;
+    const key = !recibida || recibida === SECRETO_MASK ? claveGuardadaPara(config, { baseUrl, providerId }) : recibida;
     /* El protocolo con el que se sondea no se puede deducir siempre de la URL: hay
        bases Anthropic de terceros cuyo path no lo dice (y se detectarían con Bearer).
        La interfaz manda `format`/`providerId`/`model` hasta aquí para que «Detectar

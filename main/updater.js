@@ -355,7 +355,7 @@ function signatureOf(file, { spawnFn = spawn, env = process.env, timeoutMs = 200
  * Se ejecuta DESLIGADO del árbol de la app (ver `afterExitCommand`), porque es lo
  * único que le permite sobrevivir a su cierre.
  */
-function installHelperScript({ name, installer, args = '/S --updated', logPath, waitMs = 90000, graceMs = 1200, taskName = null } = {}) {
+function installHelperScript({ name, installer, args = '/S --updated', logPath, waitMs = 90000, graceMs = 1200, extraWaitMs = 5000, expected = null, taskName = null } = {}) {
   // (el guion es agnóstico del lanzador: sirve igual bajo cmd que bajo PowerShell
   //  directo, que es justo lo que permite comparar las dos formas en el arnés)
   const q = (s) => "'" + String(s == null ? '' : s).replace(/'/g, "''") + "'"; // literal de PowerShell
@@ -366,6 +366,16 @@ function installHelperScript({ name, installer, args = '/S --updated', logPath, 
     .join(',');
   const espera = Number.isFinite(waitMs) && waitMs > 0 ? Math.round(waitMs) : 90000;
   const gracia = Number.isFinite(graceMs) && graceMs >= 0 ? Math.round(graceMs) : 1200;
+  const margen = Number.isFinite(extraWaitMs) && extraWaitMs >= 0 ? Math.round(extraWaitMs) : 5000;
+  // Huella SHA-512 del instalador, en hex, para el `Get-FileHash` del guion (el
+  // formato que maneja PowerShell). Sin huella no se emite la puerta: los arneses
+  // de verificación lanzan un señuelo que no tiene firma publicada. Todo el camino
+  // real la trae — update:install y update:retry rechazan un `expected` ausente.
+  const huellaHex = (() => {
+    if (typeof expected !== 'string' || !expected) return null;
+    const bytes = Buffer.from(expected, 'base64');
+    return bytes.length === 64 ? bytes.toString('hex') : null;
+  })();
   // Ojo: dentro de los literales simples NO se interpola nada de JavaScript.
   return (
     [
@@ -390,21 +400,51 @@ function installHelperScript({ name, installer, args = '/S --updated', logPath, 
       '}',
       "Diag ('la app ya no esta en ejecucion (espera ' + $espera + ' ms)')",
       '$vivo = @(Get-Process -Name ' + q(name) + ' -ErrorAction SilentlyContinue).Count -gt 0',
+      // `$vivo` deja de ser un dato que solo se anota: si la app sigue viva cuando
+      // se agotó la espera, lanzar el instalador encima instala sobre ficheros en
+      // uso (justo lo que este ayudante existe para evitar). Se le da una última
+      // ventana corta —un proceso que ya está saliendo puede seguir en la tabla— y
+      // si sigue viva no se lanza nada.
+      'if ($vivo) {',
+      "  Diag 'la app sigue viva; ultima ventana de espera antes de decidir'",
+      '  $margen = 0',
+      '  while ($vivo -and $margen -lt ' + margen + ') { Start-Sleep -Milliseconds 400; $margen += 400; $vivo = @(Get-Process -Name ' + q(name) + ' -ErrorAction SilentlyContinue).Count -gt 0 }',
+      '}',
       "Diag ('al lanzar el instalador la app seguia en ejecucion: ' + $vivo)",
-      'Start-Sleep -Milliseconds ' + gracia,
-      'try {',
+      '$codigo = 0',
+      'if ($vivo) {',
+      "  Diag 'la app sigue en ejecucion: NO se lanza el instalador (se instalaría sobre ficheros en uso); se puede reintentar'",
+      '  $codigo = 3',
+      '}',
+      ...(huellaHex
+        ? [
+            // TOCTOU: el .exe vive en %TEMP% y el llamante solo pudo comprobarlo
+            // antes de cerrar la app. Aquí se vuelve a comprobar JUSTO antes de
+            // ejecutarlo, que es el único momento que cierra la ventana entre la
+            // verificación y el Start-Process.
+            '$huella = ""',
+            'if ($codigo -eq 0) { try { $huella = (Get-FileHash -Algorithm SHA512 -LiteralPath ' + q(installer) + ').Hash.ToLower() } catch { $huella = "" } }',
+            "if ($codigo -eq 0 -and $huella -ne '" + huellaHex + "') { Diag ('el instalador NO coincide con la huella SHA-512 publicada; no se ejecuta (real=' + $huella + ')'); $codigo = 2 }",
+          ]
+        : []),
+      'if ($codigo -eq 0) {',
+      '  Start-Sleep -Milliseconds ' + gracia,
+      '  try {',
       // -PassThru -Wait: el diario recoge TAMBIÉN el código de salida del instalador.
       // Sin él, un instalador que falla dejaba el mismo rastro que uno que no llegó a
       // arrancar, y el usuario se quedaba sin saber qué había pasado.
-      '  $p = Start-Process -FilePath ' + q(installer) + ' -ArgumentList ' + (lista || "'/S'") + ' -PassThru -ErrorAction Stop',
-      "  Diag 'instalador lanzado'", // ANTES de esperar: el rastro queda aunque el instalador tarde
-      '  if ($p) {',
-      '    $p.WaitForExit()',
-      '    Diag ("instalador termino con codigo " + $p.ExitCode)',
-      '  } else { Diag "el instalador no devolvio proceso (lo ejecuto Windows por asociacion)" }',
-      '} catch {',
-      "  Diag ('FALLO al lanzar el instalador: ' + $_.Exception.Message)",
-      '  exit 1',
+      '    $p = Start-Process -FilePath ' + q(installer) + ' -ArgumentList ' + (lista || "'/S'") + ' -PassThru -ErrorAction Stop',
+      "    Diag 'instalador lanzado'", // ANTES de esperar: el rastro queda aunque el instalador tarde
+      '    if ($p) {',
+      '      $p.WaitForExit()',
+      '      Diag ("instalador termino con codigo " + $p.ExitCode)',
+      '    } else { Diag "el instalador no devolvio proceso (lo ejecuto Windows por asociacion)" }',
+      '  } catch {',
+      "    Diag ('FALLO al lanzar el instalador: ' + $_.Exception.Message)",
+      // $codigo (y no `exit`): así la limpieza de la tarea y del guion de abajo
+      // se ejecuta también cuando el instalador no arranca.
+      '    $codigo = 1',
+      '  }',
       '}',
     ].join('\n') +
     (taskName
@@ -416,7 +456,10 @@ function installHelperScript({ name, installer, args = '/S --updated', logPath, 
           'try { schtasks /delete /tn ' + q(taskName) + ' /f | Out-Null; Diag ' + q('tarea programada eliminada') + ' } catch {}',
           "try { Remove-Item -LiteralPath $PSCommandPath -Force -ErrorAction Stop } catch { Diag ('no se pudo borrar el guion: ' + $_.Exception.Message) }",
         ].join('\n')
-      : '')
+      : '') +
+    // Código de salida del ayudante (0 instalado, 1 fallo al lanzar, 2 huella que
+    // no cuadra, 3 la app seguía viva): se devuelve DESPUÉS de la limpieza.
+    '\nexit $codigo'
   );
 }
 
@@ -525,21 +568,37 @@ function scheduleCreateArgs({ taskName = TASK_NAME, psPath, startTime } = {}) {
   return ['/create', '/tn', taskName, '/tr', taskRunLine(psPath), '/sc', 'once', '/st', startTime, '/f'];
 }
 
+/** Ejecuta un binario local y devuelve { code, stdout, stderr } (sin shell). */
+function execLocal(cmd, argv) {
+  const { spawnSync } = require('child_process');
+  const r = spawnSync(cmd, argv, { windowsHide: true, encoding: 'utf8' });
+  return { code: r.status, stdout: String(r.stdout || ''), stderr: String(r.stderr || '') };
+}
+
+/**
+ * Quita la tarea programada del ayudante. La tarea se crea con `/sc once /st
+ * <+5 min>` ADEMÁS del `/run`, así que quien la deja atrás sin borrarla le deja
+ * un disparo propio: si el ayudante no llegó a arrancar, la instalación se
+ * dispararía sola cinco minutos después, sin la app delante y sin nadie
+ * mirando su rastro. Es best-effort: si la tarea no existe, no pasa nada.
+ */
+async function desprogramarInstalacion({ taskName = TASK_NAME, execFn = null } = {}) {
+  const exec = execFn || execLocal;
+  try {
+    await exec('schtasks', ['/delete', '/tn', taskName, '/f']);
+  } catch {}
+  return { ok: true, taskName };
+}
+
 /**
  * Programa y dispara la instalación. `execFn(cmd, argv)` ejecuta y devuelve
  * { code, stdout, stderr } (por defecto, spawnSync: son llamadas locales y
  * rápidas). Lanza si schtasks falla: el llamante decide el plan B.
  */
-async function programarInstalacion({ dir, name, installer, args, logPath, waitMs, graceMs, taskName = TASK_NAME, execFn = null } = {}) {
-  const exec =
-    execFn ||
-    ((cmd, argv) => {
-      const { spawnSync } = require('child_process');
-      const r = spawnSync(cmd, argv, { windowsHide: true, encoding: 'utf8' });
-      return { code: r.status, stdout: String(r.stdout || ''), stderr: String(r.stderr || '') };
-    });
+async function programarInstalacion({ dir, name, installer, args, logPath, waitMs, graceMs, extraWaitMs, expected, taskName = TASK_NAME, execFn = null } = {}) {
+  const exec = execFn || execLocal;
   const psPath = helperPsPath(dir);
-  const { script, sha256 } = writeHelperPs(psPath, { name, installer, args, logPath, waitMs, graceMs, taskName });
+  const { script, sha256 } = writeHelperPs(psPath, { name, installer, args, logPath, waitMs, graceMs, extraWaitMs, expected, taskName });
   const creada = await exec('schtasks', scheduleCreateArgs({ taskName, psPath, startTime: taskTimePlus(5) }));
   if (creada.code !== 0) {
     throw new Error('no se pudo programar la instalación (' + String((creada.stderr || creada.stdout || '').trim()).slice(0, 160) + ')');
@@ -621,4 +680,5 @@ module.exports = {
   taskRunLine,
   scheduleCreateArgs,
   programarInstalacion,
+  desprogramarInstalacion,
 };

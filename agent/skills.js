@@ -27,8 +27,44 @@ const crypto = require('crypto');
 
 let SKILLS_DIR = path.join(require('./datadir').dataDir(), 'skills');
 
+/* La carpeta del almacén está abierta al usuario (Ajustes ▸ abrir carpeta) y en
+   Windows es corriente guardar con BOM o directamente en UTF-16 (`Out-File` de
+   PowerShell escribe UTF-16LE y `Set-Content -Encoding UTF8` escribe BOM). Antes,
+   ese SKILL.md no casaba con el front-matter y la skill desaparecía del listado
+   sin dejar rastro; estas dos funciones la recuperan antes de parsearla. */
+
+/** Decodifica los bytes de un SKILL.md según su BOM. */
+function textoDeSkillMd(buf) {
+  if (buf.length >= 2 && buf[0] === 0xff && buf[1] === 0xfe) return buf.toString('utf16le', 2);
+  if (buf.length >= 2 && buf[0] === 0xfe && buf[1] === 0xff) {
+    const par = (buf.length - 2) & ~1; // swap16 exige un número par de bytes
+    const girado = Buffer.from(buf.subarray(2, 2 + par));
+    girado.swap16();
+    return girado.toString('utf16le');
+  }
+  if (buf.length >= 3 && buf[0] === 0xef && buf[1] === 0xbb && buf[2] === 0xbf) return buf.toString('utf8', 3);
+  return buf.toString('utf8');
+}
+
+/** Normaliza un texto ya leído cuando el BOM/la codificación lo delatan. */
+function normalizarCrudo(raw) {
+  if (typeof raw !== 'string' || !raw) return raw;
+  // UTF-16LE con BOM leído como UTF-8: los dos bytes del BOM quedan como U+FFFD
+  let s = raw.replace(/^\uFFFD\uFFFD/, '');
+  let nulos = 0;
+  for (let i = 0; i < s.length; i++) if (s[i] === '\u0000') nulos++;
+  if (nulos >= 3 && nulos >= s.length / 4) {
+    // UTF-16 leído como UTF-8: cada carácter trae su \0 al lado. Sólo se colapsa
+    // cuando los nulos son la mitad del texto (un \0 suelto en el cuerpo es otra cosa).
+    let plano = '';
+    for (let i = 0; i < s.length; i += 2) plano += s[i];
+    s = plano;
+  }
+  return s.replace(/^\uFEFF/, '');
+}
+
 function parseFrontMatter(raw) {
-  const m = raw.match(/^---\r?\n([\s\S]*?)\r?\n---\r?\n?([\s\S]*)$/);
+  const m = normalizarCrudo(raw).match(/^---\r?\n([\s\S]*?)\r?\n---\r?\n?([\s\S]*)$/);
   if (!m) return null;
   const lines = m[1].split(/\r?\n/);
   const meta = {};
@@ -160,7 +196,7 @@ function leerSkillsSync(dir) {
     const file = path.join(dir, e.name, 'SKILL.md');
     let raw;
     try {
-      raw = fs.readFileSync(file, 'utf8');
+      raw = textoDeSkillMd(fs.readFileSync(file));
     } catch {
       continue;
     }
@@ -594,7 +630,17 @@ async function createSkill({ name, description, body }) {
         .replace(/^-+|-+$/g, ''),
     ) || 'skill';
   const dest = safeSkillDir(slug);
-  await fsp.mkdir(dest, { recursive: true });
+  // Un alta sobre un nombre que ya existe NO puede pisar el contenido sin avisar
+  // (la importación sí se protege y aquí el original se perdía sin copia). El mkdir
+  // sin `recursive` es la comprobación atómica: si la carpeta ya está, EEXIST.
+  try {
+    await fsp.mkdir(dest);
+  } catch (e) {
+    if (e && e.code === 'EEXIST') throw new Error(`Ya existe una skill con el id «${slug}»: elige otro nombre o bórrala antes de crearla.`);
+    // el almacén pudo desaparecer a mitad de sesión (el usuario borró la carpeta): se recrea
+    if (e && e.code === 'ENOENT') await fsp.mkdir(dest, { recursive: true });
+    else throw e;
+  }
   const md = `---\nname: ${slug}\ndescription: ${description || 'Skill personalizada'}\n---\n\n${body || ''}\n`;
   await writeFileAtomic(path.join(dest, 'SKILL.md'), md);
   invalidarIndice();

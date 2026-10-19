@@ -288,6 +288,11 @@ function registerUpdateIpc(ipcMain, ctx) {
       // justo cuando SÍ ha pasado algo)
       args: '/S --updated --force-run',
       logPath,
+      // Huella SHA-512 que la app ya comprobó al descargar: el guion la vuelve a
+      // comprobar con Get-FileHash justo antes de ejecutar el Setup. Sin esto, el
+      // .exe de %TEMP% se daba por bueno para siempre y bastaba sustituirlo entre
+      // la comprobación y el arranque del instalador (TOCTOU).
+      expected: d.expected || null,
     };
     // El diario del intento anterior confundiría la comprobación de abajo.
     try {
@@ -343,6 +348,10 @@ function registerUpdateIpc(ipcMain, ctx) {
     });
     if (!arrancado) {
       const reason = 'el asistente no llegó a arrancar (vía ' + via + ': sin PowerShell, tarea bloqueada o política del equipo)';
+      // La tarea se programó con `/sc once /st <+5 min>` ADEMÁS del `/run`: si el
+      // ayudante no llegó a arrancar, esa tarea sigue viva y se dispararía sola
+      // cinco minutos después, sin la app delante y sin nadie esperando su rastro.
+      await updater.desprogramarInstalacion();
       runlog.log({ agent: 'sagitari', event: 'update_install_failed', version: d.version, reason });
       savePending({
         version: d.version,

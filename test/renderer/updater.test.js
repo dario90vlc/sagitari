@@ -1,7 +1,8 @@
 'use strict';
 
 /* Tests para main/updater.js — versiones, assets y firma de la actualización.
-   Sin spawn: se ejecuta directo con node. */
+   Se ejecuta directo con node; el guion del ayudante se ejecuta de verdad con la
+   PowerShell de la máquina sobre ficheros temporales (nada que descargar). */
 
 const path = require('path');
 const updater = require(path.join(__dirname, '..', '..', 'main', 'updater.js'));
@@ -226,6 +227,175 @@ console.log('updater.js — constantes');
 test('REPO y API_LATEST apuntan a GitHub', () => {
   assertOk(updater.REPO.includes('/'), 'REPO debe ser owner/repo');
   assertOk(updater.API_LATEST.startsWith('https://'), 'API_LATEST debe ser https');
+});
+
+/* ---------- huella del instalador y «app viva» en el guion del ayudante ----------
+
+   Hallazgos 6 y 7 de la revisión: el ayudante calculaba si la app seguía viva y
+   no lo usaba, y el .exe de %TEMP% se comprobaba una sola vez (al descargarlo, con
+   la app aún en marcha) y después se ejecutaba sin volver a mirarlo. Estas pruebas
+   ejecutan el guion DE VERDAD con la PowerShell de la máquina sobre ficheros
+   temporales de os.tmpdir(): no descargan nada ni tocan el perfil del usuario. */
+
+console.log('updater.js — huella del instalador en el guion del ayudante');
+
+const crypto = require('crypto');
+const fs = require('fs');
+const os = require('os');
+const { spawnSync } = require('child_process');
+
+/** Ejecuta de verdad el guion que instala (cmd.exe como «instalador» de mentira). */
+function correrAyudante(dir, opts) {
+  const ps1 = path.join(dir, 'sagitari-instalar.ps1');
+  updater.writeHelperPs(ps1, opts);
+  return spawnSync('powershell.exe', ['-NoProfile', '-NonInteractive', '-ExecutionPolicy', 'Bypass', '-File', ps1], {
+    windowsHide: true,
+    timeout: 60000,
+    encoding: 'utf8',
+  });
+}
+
+/** Escenario: un instalador de verdad (cmd.exe) que deja marca si llega a correr. */
+function escenario(prefijo) {
+  const dir = fs.mkdtempSync(path.join(os.tmpdir(), prefijo));
+  const cmd = path.join(process.env.SystemRoot || 'C:\\Windows', 'System32', 'cmd.exe');
+  return {
+    dir,
+    installer: cmd,
+    marca: path.join(dir, 'marco.txt'),
+    logPath: path.join(dir, 'instalar.log'),
+    args: '/c echo ok> "' + path.join(dir, 'marco.txt') + '"',
+    huella: crypto.createHash('sha512').update(fs.readFileSync(cmd)).digest('base64'),
+  };
+}
+
+test('el guion comprueba la huella SHA-512 del instalador antes de ejecutarlo', () => {
+  const esperado = crypto.createHash('sha512').update('contenido del Setup').digest('base64');
+  const hex = crypto.createHash('sha512').update('contenido del Setup').digest('hex');
+  const s = updater.installHelperScript({
+    name: 'SAGITARI',
+    installer: 'C:/t/setup.exe',
+    logPath: 'C:/t/instalar.log',
+    expected: esperado,
+  });
+  assertOk(s.includes('Get-FileHash -Algorithm SHA512'), 'debe usar Get-FileHash SHA-512');
+  assertOk(s.includes(hex), 'la huella esperada viaja dentro del guion');
+  assertOk(s.indexOf('Get-FileHash') < s.indexOf('Start-Process -FilePath'), 'se comprueba ANTES de lanzarlo');
+  assertOk(s.includes('$codigo = 2'), 'una huella que no cuadra deja el instalador sin ejecutar');
+});
+
+test('sin huella publicada no se emite la puerta (los arneses usan un señuelo sin firma)', () => {
+  const s = updater.installHelperScript({ name: 'SAGITARI', installer: 'C:/t/setup.exe', logPath: 'C:/t/l.log' });
+  assertOk(!s.includes('Get-FileHash'), 'sin huella no hay nada que comparar');
+});
+
+test('si la app sigue viva, el guion no lanza el instalador (el cálculo se usa)', () => {
+  const s = updater.installHelperScript({ name: 'SAGITARI', installer: 'C:/t/setup.exe', logPath: 'C:/t/l.log' });
+  assertOk(s.includes('$codigo = 3'), 'la app viva deja el instalador sin lanzar');
+  assertOk(s.indexOf('$codigo = 3') < s.indexOf('Start-Process -FilePath'), 'y la decisión va antes del lanzamiento');
+});
+
+test('un instalador cuya huella NO coincide no se ejecuta', () => {
+  if (process.platform !== 'win32') return; // el guion es de Windows
+  const e = escenario('sagi-huella-');
+  // El .exe de disco sigue siendo ejecutable; lo que apunta a otro contenido es
+  // la huella publicada: es la ventana en la que alguien sustituye el Setup.
+  const r = correrAyudante(e.dir, {
+    name: 'SAGITARI-PROCESO-QUE-NO-EXISTE',
+    installer: e.installer,
+    args: e.args,
+    logPath: e.logPath,
+    expected: crypto.createHash('sha512').update('otro binario').digest('base64'),
+    waitMs: 1,
+    graceMs: 0,
+  });
+  assertOk(!fs.existsSync(e.marca), 'el binario que no cuadra con la huella no debe ejecutarse');
+  assertEqual(r.status, 2, 'el guion termina con código 2 (huella que no cuadra)');
+  assertOk(/huella SHA-512/.test(fs.readFileSync(e.logPath, 'utf8')), 'y el diario dice por qué no se ejecutó');
+});
+
+test('con la huella correcta el camino normal sigue instalando', () => {
+  if (process.platform !== 'win32') return;
+  const e = escenario('sagi-huella-ok-');
+  const r = correrAyudante(e.dir, {
+    name: 'SAGITARI-PROCESO-QUE-NO-EXISTE',
+    installer: e.installer,
+    args: e.args,
+    logPath: e.logPath,
+    expected: e.huella,
+    waitMs: 1,
+    graceMs: 0,
+  });
+  const diario = fs.readFileSync(e.logPath, 'utf8');
+  assertOk(fs.existsSync(e.marca), 'el instalador verificado sí se ejecuta');
+  assertEqual(r.status, 0, 'y el guion termina sin error');
+  assertOk(/instalador lanzado/.test(diario), 'el diario registra el lanzamiento');
+});
+
+test('con la app todavía viva el instalador no llega a ejecutarse (ni con la huella bien)', () => {
+  if (process.platform !== 'win32') return;
+  const e = escenario('sagi-viva-');
+  // «node» es este mismo proceso de pruebas: la app sigue viva cuando se agota la espera.
+  const r = correrAyudante(e.dir, {
+    name: 'node',
+    installer: e.installer,
+    args: e.args,
+    logPath: e.logPath,
+    expected: e.huella,
+    waitMs: 1,
+    graceMs: 0,
+    extraWaitMs: 0,
+  });
+  const diario = fs.readFileSync(e.logPath, 'utf8');
+  assertOk(!fs.existsSync(e.marca), 'con la app viva no se instala encima de ficheros en uso');
+  assertEqual(r.status, 3, 'el guion termina con código 3 (app todavía viva)');
+  assertOk(/seguia en ejecucion: True/.test(diario), 'y el diario deja constancia del motivo');
+});
+
+test('programarInstalacion lleva la huella esperada al .ps1 que ejecuta la tarea', () => {
+  const dir = fs.mkdtempSync(path.join(os.tmpdir(), 'sagi-huelle-ps-'));
+  const esperado = crypto.createHash('sha512').update('Setup').digest('base64');
+  const hex = crypto.createHash('sha512').update('Setup').digest('hex');
+  // El .ps1 se escribe antes del primer await, así que basta con leerlo aquí.
+  updater.programarInstalacion({
+    dir,
+    name: 'APP',
+    installer: 'C:/t/setup.exe',
+    args: '/S',
+    logPath: path.join(dir, 'instalar.log'),
+    expected: esperado,
+    taskName: 'TAREA-HUELLA',
+    execFn: async () => ({ code: 0, stdout: '', stderr: '' }),
+  });
+  const txt = fs.readFileSync(path.join(dir, 'sagitari-instalar.ps1'), 'utf8');
+  assertOk(txt.includes('Get-FileHash -Algorithm SHA512'), 'el ayudante comprueba la huella');
+  assertOk(txt.includes(hex), 'y la huella esperada llega hasta el .ps1');
+});
+
+test('desprogramarInstalacion borra la tarea del Programador (no puede dispararse sola)', () => {
+  const llamadas = [];
+  const p = updater.desprogramarInstalacion({
+    execFn: async (cmd, a) => {
+      llamadas.push(cmd + ' ' + a.join(' '));
+      return { code: 0, stdout: '', stderr: '' };
+    },
+  });
+  assertOk(p && typeof p.then === 'function', 'debe devolver una promesa');
+  assertEqual(llamadas.length, 1, 'una sola llamada a schtasks');
+  assertEqual(llamadas[0], 'schtasks /delete /tn ' + updater.TASK_NAME + ' /f', llamadas[0]);
+});
+
+test('desprogramarInstalacion no revienta si la tarea ya no existe', () => {
+  let veces = 0;
+  updater.desprogramarInstalacion({
+    taskName: 'OTRA',
+    execFn: async (cmd, a) => {
+      veces++;
+      assertEqual(a.join(' '), '/delete /tn OTRA /f', 'respeta el nombre de la tarea');
+      return { code: 1, stdout: '', stderr: 'ERROR: no existe la tarea' };
+    },
+  });
+  assertEqual(veces, 1, 'lo intenta aunque falle: es best-effort');
 });
 
 console.log(`\n${passed} pasaron, ${failed} fallaron`);

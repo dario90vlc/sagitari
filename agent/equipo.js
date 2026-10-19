@@ -250,6 +250,13 @@ function crearEquipo({ lider = null, limite = LIMITE_MIEMBROS, presupuestoUsd = 
     m.cerrado = true;
     m.pideAtencion = false;
     avisar('team_member', ficha(m));
+    /* Un mensaje que llegó DURANTE su ÚLTIMA llamada se quedó en la bandeja:
+       `despertarSiParado` lo descartó porque aún estaba corriendo. Aquí ya está parado, así
+       que se le entrega ya como subtarea nueva; sin esto, `team_send` prometía entregarlo «en
+       su siguiente paso y, si ya había terminado, despertándolo» y el mensaje no se consumía
+       nunca. Se comprueba ANTES de despertarEsperas: si se le despierta, no está «parado» y
+       una espera en vuelo no puede darlo por terminado. */
+    if (despertarSiParado(m)) return;
     despertarEsperas();
     revisar();
   }
@@ -566,6 +573,9 @@ function crearEquipo({ lider = null, limite = LIMITE_MIEMBROS, presupuestoUsd = 
     m.tarea = textoLargo(nuevo, MAX_TEXTO * 2);
     m.cerrado = false;
     m.resultado = null;
+    // el aviso que despierta tiene que decir «trabajando»: si no, la interfaz seguía
+    // enseñando el «terminado» de la vuelta anterior mientras ya estaba en marcha otra vez
+    m.estado = 'trabajando';
     avisar('team_member', ficha(m));
     arrancar(m, m.tarea, { motivo: 'buzon' });
     return true;

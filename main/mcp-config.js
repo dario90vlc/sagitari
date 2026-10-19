@@ -56,7 +56,7 @@ function validateServer(raw) {
     transport,
     timeoutMs,
     tools: { allow: sanitizeList(s.tools && s.tools.allow), deny: sanitizeList(s.tools && s.tools.deny) },
-    autoStart: s.autoStart === true,
+    autoStart: s.autoStart !== false,
   };
   if (transport === 'stdio') {
     const command = String(s.command || '').trim();
@@ -91,9 +91,15 @@ function validateServer(raw) {
 }
 
 /** Conserva un secreto ya guardado cuando el formulario llega con el campo vacío
-    o con la máscara: sin esto, volver a guardar un servidor borraba su token. */
+    o con la máscara: sin esto, volver a guardar un servidor borraba su token. Lo que
+    NO venga en el mapa queda borrado (el formulario manda el mapa completo). */
 function mergeSecrets(prev = {}, next = {}) {
-  const out = { ...prev };
+  // El mapa que llega es COMPLETO (el formulario manda todas sus líneas): lo que no
+  // venga, el usuario lo borró, así que no puede sobrevivir desde el servidor
+  // anterior. Antes `out` arrancaba con `{ ...prev }` y reemplazar un servidor con
+  // el mismo id dejaba vivo su `Authorization: Bearer <viejo>` para mandarlo al host
+  // nuevo. Dentro del mapa, un valor vacío o la máscara SÍ conservan el guardado.
+  const out = {};
   for (const [k, v] of Object.entries(next || {})) {
     const val = String(v == null ? '' : v);
     out[k] = !val || val === '••••' ? prev[k] || '' : val;
