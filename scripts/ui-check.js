@@ -1477,7 +1477,19 @@ const AFTER = {
     failed++;
     console.log('  FALLO el encargo del compañero no cerró tras conceder el permiso');
   }
-  if (fs.existsSync(path.join(WS_TEST, ARCHIVO_PERMISO))) {
+  /* El archivo llega cuando termina la vuelta del compañero y se fusiona su árbol: no
+     está en el disco en el mismo instante en que el líder escribe su cierre. Se espera
+     acotado (hasta 10 s) en vez de mirar una sola vez — en un runner cargado la fusión
+     llega después y la comprobación se caía sola. */
+  let aparece = false;
+  for (let i = 0; i < 50; i++) {
+    if (fs.existsSync(path.join(WS_TEST, ARCHIVO_PERMISO))) {
+      aparece = true;
+      break;
+    }
+    await new Promise((r) => setTimeout(r, 200));
+  }
+  if (aparece) {
     console.log('  ok   el compañero escribió el archivo de verdad (con tu permiso)');
   } else {
     failed++;
