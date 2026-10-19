@@ -4583,13 +4583,32 @@ test('equipo: un compañero cortado (PARTIAL) NO se reporta como terminado', asy
   /* Su vuelta muere sin informe final: el bucle la cierra con motivo de corte y su texto es
      un preámbulo sin bloque STATUS → parseSubagentResult lo marca PARTIAL. */
   sub._runWithSystem = async (sys, st, brief, tools, signal, cb) => {
-    cb('estaba haciendo el trabajo', { motivo: 'pasos' });
+    // el corte REAL que emite el bucle: `{ cortado: true, motivo }` (agent.js, onFinal)
+    cb('estaba haciendo el trabajo', { cortado: true, motivo: 'limite' });
   };
   const miembro = { id: 'm1', spec: subagents.SUBAGENTS.research, agent: sub, tarea: 'investiga', expect: '', cortado: false, arbol: null };
   const settings = { settings: { workspace: tmpDir('sagi-eq-corte-'), modelRouting: false } };
   const out = await a._correrMiembro(miembro, 'investiga', { settings, signal: noSignal() });
   eq(out.ok, false, 'PARTIAL no es OK: antes contaba como éxito y la interfaz lo pintaba en verde');
   ok(/SIN TERMINAR/.test(String(out.resumen)), 'y el resumen lo dice: ' + String(out.resumen).slice(0, 80));
+});
+
+test('equipo: un compañero que cierra su vuelta sin prosa NO se reporta como fallo', async () => {
+  const { Agent } = require('../agent/agent');
+  const a = new Agent({ emit: () => {} });
+  const sub = new Agent({ emit: () => {} });
+  /* Cierra su vuelta con `team_done` (llamada a herramienta) y sin texto libre: su informe
+     va en la herramienta, así que la vuelta está TERMINADA. El parseo lo llama PARTIAL
+     («terminó sin decir nada») y eso no puede ser un fallo: la vista Equipo lo pintaba en
+     rojo y su tarjeta no decía «terminado» aunque el trabajo estuviera hecho. */
+  sub._runWithSystem = async (sys, st, brief, tools, signal, cb) => {
+    cb('', null);
+  };
+  const miembro = { id: 'm1', spec: subagents.SUBAGENTS.research, agent: sub, tarea: 'investiga', expect: '', cortado: false, arbol: null };
+  const settings = { settings: { workspace: tmpDir('sagi-eq-sinprosa-'), modelRouting: false } };
+  const out = await a._correrMiembro(miembro, 'investiga', { settings, signal: noSignal() });
+  eq(out.ok, true, 'una vuelta terminada sin prosa no es un fallo: ' + JSON.stringify(out).slice(0, 140));
+  ok(!/SIN TERMINAR/.test(String(out.resumen)), 'y el resumen no dice que quedó sin terminar: ' + String(out.resumen).slice(0, 80));
 });
 
 test('equipo: el mensaje que llega en la ÚLTIMA llamada del compañero no se pierde', async () => {

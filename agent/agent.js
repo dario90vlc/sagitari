@@ -2923,11 +2923,13 @@ class Agent {
         ? `\nSIN TERMINAR: ${spec.name} no llegó a cerrar su informe (${motivoCorte}); su trabajo no está completo.`
         : '';
     return {
-      /* v5.0.1: sólo un compañero que CIERRA con OK está terminado. Un PARTIAL (no llegó a
-         cerrar su informe: lo cortó el tope de pasos o el Detener) contaba como éxito y la
-         interfaz lo pintaba «terminó su parte» en verde mientras el resumen decía «SIN
-         TERMINAR»; es el mismo criterio de la auditoría del 17-oct: sólo OK es OK. */
-      ok: parsed.status === 'OK',
+      /* Solo cuenta como terminado si CERRÓ su vuelta: el corte (tope de pasos o
+         Detener) y un FAILED explícito son fallo. Un PARTIAL **sin corte** significa que
+         la vuelta terminó sin prosa, que es lo normal cuando el compañero cierra con
+         `team_done` y su informe va en la herramienta: eso NO es un fallo, y marcarlo
+         como tal pintaba en rojo a compañeros que sí acabaron (lo cazó la puerta de la
+         vista Equipo de `ui-check`). */
+      ok: !corteMiembro && parsed.status !== 'FAILED',
       resumen: `${parsed.result}${parsed.details ? '\nDETALLES: ' + parsed.details : ''}${notaFusion}${notaCorte}`.slice(0, 4000),
       evidencia: String(parsed.evidence || '').slice(0, 2000),
     };
