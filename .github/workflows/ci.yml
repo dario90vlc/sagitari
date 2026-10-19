@@ -93,9 +93,10 @@ jobs:
         run: |
           npm run test:renderer 2>&1 | Tee-Object -FilePath renderer-output.log
           if ($LASTEXITCODE -ne 0) {
-            $lineas = Get-Content renderer-output.log -Tail 25
-            foreach ($l in $lineas) {
-              $t = $l -replace '%','%25' -replace "`r",'%0D' -replace "`n",'%0A'
+            # una anotacion por prueba fallida, con su motivo (la linea siguiente)
+            foreach ($f in (Select-String -Path renderer-output.log -Pattern '  FAIL' -Context 0,1)) {
+              $texto = ($f.Line + ' ' + ($f.Context.PostContext -join ' '))
+              $t = $texto -replace '%','%25' -replace "`r",'%0D' -replace "`n",'%0A'
               Write-Output "::error::$t"
             }
             exit $LASTEXITCODE
