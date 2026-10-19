@@ -26,7 +26,39 @@ const habits = require('./habits');
 const opencode = require('./opencode'); // identificación de sesión (OpenCode Go/Zen)
 const { recursos, paraHerramienta } = require('./recursos'); // v2.5: bloqueo por recurso (navegador, disco, terminal)
 const protocols = require('./protocols'); // multi-formato: OpenAI / Anthropic / Responses
-const { MAX_HISTORY, MAX_TRANSCRIPT, trimHistory, payloadMessages, recortarTranscripcion, newConfirmId } = require('./historial');
+const {
+  MAX_HISTORY,
+  MAX_TRANSCRIPT,
+  trimHistory,
+  payloadMessages,
+  sanitizarLlamadas,
+  recortarTranscripcion,
+  newConfirmId,
+} = require('./historial');
+
+/* Si el modelo escribe la llamada a una herramienta COMO TEXTO (`</constrain>assistant
+   to=browser_control<…`, `<tool_call>…`, `assistant to=…`) no ha llamado a nada. Si se
+   toma como respuesta final, el turno acaba con un texto inservible y el trabajo a
+   medias. Se le pide UNA vez que use la herramienta de verdad; si insiste, el turno se
+   cierra diciéndolo. Las menciones dentro de código no cuentan: ahí el modelo ENSEÑA el
+   formato, no lo usa. */
+const LLAMADA_EN_TEXTO = /<\/?(?:constrain|tool_call|function_call|function)\b|\bassistant\s+to\s*=\s*[a-z_]+/i;
+function llamadaEnTexto(...textos) {
+  return textos.some((t) => {
+    const limpio = String(t || '')
+      .replace(/```[\s\S]*?```/g, ' ')
+      .replace(/`[^`]*`/g, ' ');
+    return LLAMADA_EN_TEXTO.test(limpio);
+  });
+}
+const CORRECCION_FORMATO =
+  'Tu respuesta anterior escribió la llamada a una herramienta como TEXTO y eso no ejecuta nada. ' +
+  'Llama a la herramienta con la API de herramientas (function calling) y argumentos JSON válidos; ' +
+  'no escribas etiquetas, XML ni «assistant to=…» dentro del mensaje.';
+const AVISO_FORMATO =
+  'No he podido hacer el trabajo: el modelo está escribiendo las llamadas a herramientas como texto en vez de ' +
+  'usarlas, así que no se ha ejecutado nada. Cambia de modelo en Ajustes › Modelo (o reintenta con otro) y ' +
+  'vuelve a pedírmelo.';
 
 function systemPrompt() {
   const home = os.homedir();
@@ -1131,6 +1163,7 @@ class Agent {
     const runStart = p.runStart || Date.now();
     const onStatus = p.onStatus || null;
     let assistantSaidSomething = false;
+    let avisadoFormato = false; // ya se le pidió una vez que use la herramienta de verdad
     /* F3: las definiciones que VIAJAN al modelo. `p.toolDefs` las fija el orquestador
        (en PLAN, el subconjunto de lectura); sin él, el catálogo completo —el alcance de
        los subagentes se aplica al EJECUTAR, con `p.tools`—. */
@@ -1347,7 +1380,11 @@ class Agent {
       }
 
       if (res.toolCalls && res.toolCalls.length) {
-        const msg = { role: 'assistant', content: res.text || '', tool_calls: res.toolCalls };
+        /* Las llamadas que viajan (y se guardan) llevan `arguments` saneados: un JSON
+           roto ahí hace que el proveedor rechace la petición entera y muera el turno (y
+           el hilo, porque el mensaje queda en el historial). La ejecución usa las
+           originales, y su error le llega al modelo como resultado de la herramienta. */
+        const msg = { role: 'assistant', content: res.text || '', tool_calls: sanitizarLlamadas(res.toolCalls) };
         if (!res.text) delete msg.content;
         messages.push(msg);
         if (p.history) this.history.push(JSON.parse(JSON.stringify(msg)));
@@ -1598,6 +1635,41 @@ class Agent {
         // toda tool_call necesita su respuesta por id, aunque no se haya llegado a lanzar
         closePendingCalls('(no ejecutada: ejecución detenida o tope alcanzado)');
         continue; // next loop: model reacts to tool results
+      }
+
+      /* La llamada escrita como texto no es una respuesta: se corrige una vez y, si
+         insiste, el turno se cierra diciéndolo (sin enseñar el texto roto ni romper el
+         hilo). Ver `llamadaEnTexto`. */
+      if (llamadaEnTexto(res.text, res.reasoning)) {
+        runlog.log({ agent: 'sagitari', task: taskId, event: 'tool_call_as_text', repetido: avisadoFormato });
+        if (!avisadoFormato) {
+          avisadoFormato = true;
+          if (onStatus) onStatus('El modelo escribió la llamada como texto — pidiéndole que use la herramienta');
+          if (res.text) {
+            messages.push({ role: 'assistant', content: res.text });
+            if (p.history) this.history.push({ role: 'assistant', content: res.text });
+          }
+          messages.push({ role: 'user', content: CORRECCION_FORMATO });
+          continue;
+        }
+        try {
+          models.record(this.meta.model || (this.activeConfig(settings) || {}).model, {
+            ok: false,
+            durationMs: Date.now() - runStart,
+            error: 'escribió las llamadas a herramientas como texto',
+          });
+        } catch {}
+        this.emit({ type: 'guardrail', reason: 'El modelo no respetó el formato de herramientas (las escribió como texto)' });
+        if (p.onFinal) {
+          p.onFinal('', { cortado: true, motivo: 'formato' });
+          return;
+        }
+        if (p.account && task && !task.closed) {
+          checkpoints.interrupt(task);
+          task.closed = true;
+        }
+        this._pushAssistant({ role: 'assistant', content: AVISO_FORMATO });
+        return;
       }
 
       /* ---- v2.5: COMPROBACIÓN DEL PROYECTO antes de cerrar.
@@ -2966,7 +3038,9 @@ class Agent {
       ? ''
       : corteMiembro.motivo === 'detenido'
         ? 'lo detuviste'
-        : 'se agotó su presupuesto de pasos';
+        : corteMiembro.motivo === 'formato'
+          ? 'no respetó el formato de herramientas (las escribió como texto)'
+          : 'se agotó su presupuesto de pasos';
     const notaCorte =
       corteMiembro && parsed.status !== 'FAILED'
         ? `\nSIN TERMINAR: ${spec.name} no llegó a cerrar su informe (${motivoCorte}); su trabajo no está completo.`

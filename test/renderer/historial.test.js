@@ -4,7 +4,7 @@
    Sin spawn: se ejecuta directo con node. */
 
 const path = require('path');
-const { MAX_HISTORY, MAX_TRANSCRIPT, trimHistory, payloadMessages, recortarTranscripcion, newConfirmId } = require(
+const { MAX_HISTORY, MAX_TRANSCRIPT, trimHistory, payloadMessages, sanitizarLlamadas, recortarTranscripcion, newConfirmId } = require(
   path.join(__dirname, '..', '..', 'agent', 'historial.js'),
 );
 
@@ -58,6 +58,30 @@ test('no parte un intercambio de herramientas', () => {
 
 test('MAX_HISTORY es 40', () => {
   assertEqual(MAX_HISTORY, 40);
+});
+
+console.log('historial.js — argumentos de herramienta saneados');
+
+test('sanitizarLlamadas deja los válidos y normaliza los rotos a {}', () => {
+  const sano = sanitizarLlamadas([{ id: 'a', function: { name: 'x', arguments: '{"q":1}' } }]);
+  assertEqual(sano[0].function.arguments, '{"q":1}');
+  const roto = sanitizarLlamadas([{ id: 'b', function: { name: 'x', arguments: '{roto' } }]);
+  assertEqual(roto[0].function.arguments, '{}', 'un JSON roto no puede viajar al proveedor:');
+  const nulo = sanitizarLlamadas([{ id: 'c', function: { name: 'x', arguments: 'null' } }]);
+  assertEqual(nulo[0].function.arguments, '{}', 'un JSON válido que no es objeto tampoco:');
+  const lista = sanitizarLlamadas([{ id: 'd', function: { name: 'x', arguments: '[1,2]' } }]);
+  assertEqual(lista[0].function.arguments, '{}', 'ni una lista:');
+  const vacio = sanitizarLlamadas([{ id: 'e', function: { name: 'x' } }]);
+  assertEqual(vacio[0].function.arguments, '{}', 'sin argumentos se manda un objeto vacío:');
+});
+
+test('payloadMessages sanea los argumentos que quedaron guardados en el historial', () => {
+  const h = [
+    { role: 'assistant', content: '', tool_calls: [{ id: '1', function: { name: 'read_file', arguments: '{roto' } }] },
+    { role: 'tool', tool_call_id: '1', content: 'Error: argumentos' },
+  ];
+  const msgs = payloadMessages(h);
+  assertEqual(msgs[0].tool_calls[0].function.arguments, '{}', 'un hilo ya envenenado no puede romper el siguiente turno:');
 });
 
 console.log('historial.js — payloadMessages');

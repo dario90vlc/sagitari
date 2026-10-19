@@ -4728,3 +4728,115 @@ test('subagente: agotar el cupo de llamadas entrega la vuelta con corte, sin gir
   eq(corte && corte.cortado, true, 'la vuelta se entrega CORTADA: ' + JSON.stringify(corte));
   eq(corte && corte.motivo, 'limite', 'y con el motivo del cupo, no de Detener');
 });
+
+
+/* ---------- el turno no muere por un modelo que no respeta el protocolo ----------
+   Dos capturas del usuario: (1) una llamada con `arguments` que no eran JSON válido
+   dejaba el turno (y el hilo, porque el mensaje quedaba guardado) muertos; (2) el modelo
+   escribía la llamada COMO TEXTO («</constrain>assistant to=browser_control<…») y el
+   turno acababa con un texto inservible. */
+
+test('agent: unos argumentos de herramienta rotos no envenenan el turno ni el hilo', async () => {
+  const bodies = [];
+  const argsRot = '{ "path": "a.txt", ';
+  let n = 0;
+  const agent = new AgentCls({
+    fetchFn: async (url, opts) => {
+      bodies.push(JSON.parse(opts.body));
+      if (n++ === 0) {
+        return sseResponse([
+          evData({
+            choices: [{ delta: { tool_calls: [{ index: 0, id: 't1', type: 'function', function: { name: 'read_file', arguments: argsRot } }] } }],
+          }),
+        ]);
+      }
+      return sseTurn('listo');
+    },
+    emit: () => {},
+    screenshotFn: async () => ({}),
+  });
+  const settings = {
+    active: { name: 'x', baseUrl: 'https://api.openai.com/v1', apiKey: 'k', model: 'gpt-4o' },
+    settings: { mode: 'act', modelRouting: false, workspace: process.cwd() },
+  };
+  await agent.chat('lee el archivo', settings);
+  ok(bodies.length >= 2, 'el turno sigue tras el error (no muere): ' + bodies.length + ' peticiones');
+  const msgs = bodies[bodies.length - 1].messages;
+  const asist = msgs.find((m) => m.role === 'assistant' && m.tool_calls && m.tool_calls.length);
+  ok(asist, 'la llamada queda en el historial');
+  let validos = true;
+  for (const tc of asist.tool_calls) {
+    try {
+      JSON.parse(tc.function.arguments);
+    } catch {
+      validos = false;
+    }
+  }
+  ok(validos, 'los argumentos que viajan son JSON válido: ' + JSON.stringify(asist.tool_calls.map((t) => t.function.arguments)));
+  const toolMsg = msgs.find((m) => m.role === 'tool' && m.tool_call_id === 't1');
+  ok(/no son JSON válido/.test(String(toolMsg && toolMsg.content)), 'y al modelo se le dice que la reenvíe bien: ' + String(toolMsg && toolMsg.content).slice(0, 90));
+  ok(
+    agent.history.every((m) => {
+      if (!m.tool_calls) return true;
+      return m.tool_calls.every((tc) => {
+        try {
+          JSON.parse(tc.function.arguments);
+          return true;
+        } catch {
+          return false;
+        }
+      });
+    }),
+    'el historial guardado tampoco queda envenenado',
+  );
+});
+
+test('agent: si el modelo escribe la llamada como texto, se le corrige UNA vez y sigue', async () => {
+  const bodies = [];
+  const basura = 'No reasoning available.</constrain></constrain>assistant to=browser_control<';
+  let n = 0;
+  const agent = new AgentCls({
+    fetchFn: async (url, opts) => {
+      bodies.push(JSON.parse(opts.body));
+      return n++ === 0 ? sseTurn(basura) : sseTurn('Hecho: no hacía falta el navegador.');
+    },
+    emit: () => {},
+    screenshotFn: async () => ({}),
+  });
+  const settings = {
+    active: { name: 'x', baseUrl: 'https://api.openai.com/v1', apiKey: 'k', model: 'gpt-4o' },
+    settings: { mode: 'act', modelRouting: false, workspace: process.cwd() },
+  };
+  await agent.chat('mira la web', settings);
+  eq(bodies.length, 2, 'una corrección y la respuesta buena (sin dar vueltas)');
+  const msgs = bodies[1].messages;
+  ok(
+    msgs.some((m) => m.role === 'user' && /API de herramientas/.test(String(m.content))),
+    'se le pide que use la herramienta de verdad',
+  );
+  ok(
+    agent.history.some((m) => m.role === 'assistant' && /Hecho: no hacía falta/.test(String(m.content))),
+    'y el hilo se queda con la respuesta buena',
+  );
+});
+
+test('agent: si el modelo insiste en escribir la llamada como texto, el turno se cierra diciéndolo', async () => {
+  const bodies = [];
+  const agent = new AgentCls({
+    fetchFn: async (url, opts) => {
+      bodies.push(JSON.parse(opts.body));
+      return sseTurn('</constrain>assistant to=browser_control<');
+    },
+    emit: () => {},
+    screenshotFn: async () => ({}),
+  });
+  const settings = {
+    active: { name: 'x', baseUrl: 'https://api.openai.com/v1', apiKey: 'k', model: 'gpt-4o' },
+    settings: { mode: 'act', modelRouting: false, workspace: process.cwd() },
+  };
+  await agent.chat('mira la web', settings);
+  eq(bodies.length, 2, 'no se queda pidiendo rondas');
+  const dicho = agent.history.filter((m) => m.role === 'assistant').map((m) => String(m.content)).join('\n');
+  ok(/No he podido hacer el trabajo/.test(dicho), 'se dice por qué, en el hilo: ' + dicho.slice(0, 90));
+  ok(/Cambia de modelo/.test(dicho), 'y qué hacer (cambiar de modelo)');
+});

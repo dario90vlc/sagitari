@@ -429,6 +429,19 @@ const ChatKit = (function () {
     if (/context|token|maximum/.test(m)) {
       return { texto: 'La conversación no cabe en el modelo', pista: 'Empieza una conversación nueva o usa un modelo con más contexto.' };
     }
+    /* Los dos fallos que ve el usuario cuando el modelo no respeta el protocolo de
+       herramientas: el texto en vez de la llamada (nuestro aviso) y el rechazo del
+       proveedor por argumentos rotos. Antes caían en «El turno falló», que no dice nada
+       ni deja salida. */
+    if (/formato de herramientas|llamadas a herramientas como texto|invalid.{0,20}tool|tool.{0,20}arguments/.test(m)) {
+      return {
+        texto: 'El modelo no respetó el formato de herramientas',
+        pista: 'Cambia de modelo en Ajustes › Modelo: este está escribiendo las llamadas como texto.',
+      };
+    }
+    if (/400|bad request|invalid.{0,20}(json|request|argument)/.test(m)) {
+      return { texto: 'El proveedor rechazó la petición por su formato', pista: 'Reintenta; si se repite, cambia de modelo en Ajustes › Modelo.' };
+    }
     if (/404|not found|model/.test(m)) {
       return { texto: 'El proveedor no reconoce ese modelo', pista: 'Elige otro en Ajustes › Modelo.' };
     }

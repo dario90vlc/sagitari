@@ -20,11 +20,47 @@ function trimHistory(history, max = MAX_HISTORY) {
 }
 
 /**
+ * ¿Estos `arguments` son un objeto JSON válido? Devuelve el original o '{}'.
+ */
+function argumentosValidos(raw) {
+  if (raw === undefined || raw === null || raw === '') return '{}';
+  try {
+    const v = JSON.parse(raw);
+    if (v && typeof v === 'object' && !Array.isArray(v)) return raw;
+  } catch {}
+  return '{}';
+}
+
+/**
+ * Copia de las llamadas con `arguments` SIEMPRE válidos (objeto JSON).
+ *
+ * Un modelo escribe a veces los argumentos rotos (una coma de más, la cadena cortada,
+ * texto suelto). Ese `arguments` no puede viajar al proveedor: la petición ENTERA se
+ * rechaza («invalid JSON in tool arguments») y el turno muere — y si el mensaje quedó
+ * en el historial, todos los turnos siguientes de ese hilo también. Se normaliza a
+ * `{}` en lo que se ENVÍA; la llamada original se ejecuta igual y su error («reenvía
+ * la llamada con argumentos correctos») le llega al modelo como resultado.
+ */
+function sanitizarLlamadas(toolCalls) {
+  if (!Array.isArray(toolCalls)) return toolCalls;
+  let cambio = false;
+  const out = toolCalls.map((tc) => {
+    if (!tc || !tc.function) return tc;
+    const sano = argumentosValidos(tc.function.arguments);
+    if (sano === tc.function.arguments) return tc;
+    cambio = true;
+    return { ...tc, function: { ...tc.function, arguments: sano } };
+  });
+  return cambio ? out : toolCalls;
+}
+
+/**
  * Convierte el historial en mensajes válidos para la API. La API exige que cada
  * `tool_call` de un assistant tenga su respuesta `tool` con el mismo id; un corte
  * a mitad de un intercambio (error, Detener, recorte) dejaría el historial
  * inválido y el proveedor devolvería 400 en el siguiente turno. Aquí se
- * descartan los pares incompletos en vez de enviarlos.
+ * descartan los pares incompletos (y se sanean los argumentos) en vez de
+ * enviarlos.
  */
 function payloadMessages(history) {
   const out = [];
@@ -45,7 +81,7 @@ function payloadMessages(history) {
         if (h.content) out.push({ role: 'assistant', content: h.content });
         continue;
       }
-      const msg = { role: 'assistant', content: h.content || '', tool_calls: calls };
+      const msg = { role: 'assistant', content: h.content || '', tool_calls: sanitizarLlamadas(calls) };
       if (!msg.content) delete msg.content;
       out.push(msg);
       for (const tc of calls) pending.add(tc.id);
@@ -78,6 +114,8 @@ module.exports = {
   MAX_TRANSCRIPT,
   trimHistory,
   payloadMessages,
+  argumentosValidos,
+  sanitizarLlamadas,
   recortarTranscripcion,
   newConfirmId,
 };

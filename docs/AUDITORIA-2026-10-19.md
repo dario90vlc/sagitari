@@ -244,3 +244,20 @@ bloqueante. Todos quedaron cerrados con su prueba (ciclo rojo-verde) antes de et
 
 Con esto, la frase de las notas —«cada uno con la prueba que falla sin el arreglo»— es
 verdad también para los hallazgos 5, 43 y 47.
+
+---
+
+## 8. Después de la 5.0.2: dos formas de morir un turno
+
+Con la 5.0.2 ya publicada, el uso real enseñó dos fallos del bucle con el mismo síntoma
+(el turno se queda a medias y hay que reintentar). Los dos están cerrados con prueba:
+el ciclo rojo-verde se comprobó revirtiendo cada arreglo (3 pruebas fallan sin él).
+
+| Qué pasaba | Dónde | Arreglo |
+| --- | --- | --- |
+| Un `arguments` de herramienta que no era JSON válido se guardaba en la petición y en el historial: el proveedor rechazaba la petición ENTERA y el turno —y todos los siguientes de ese hilo, porque el mensaje quedaba guardado— morían con un error genérico | `agent/agent.js` (mensaje del assistant) y `agent/historial.js` (`payloadMessages`) | `sanitizarLlamadas`: lo que se envía y se guarda lleva argumentos válidos (`{}` si no lo eran); la llamada original se ejecuta igual y su error le llega al modelo para que la reenvíe |
+| Un modelo que escribe la llamada COMO TEXTO (`</constrain>assistant to=browser_control…`) no llamaba a nada, y su texto se daba por respuesta final | El bucle, antes de la respuesta final | Se detecta (fuera de bloques de código): una corrección y otra ronda; si insiste, el turno cierra con una explicación («cambia de modelo») y se registra en la salud del modelo |
+| Un rechazo por formato del proveedor (400/argumentos) caía en el genérico «El turno falló» | `renderer/chatkit.js` (`explainError`) | Patrones propios: qué pasó y qué hacer |
+
+Verificación tras los arreglos: `npm test` **513**, `npm run test:renderer` **842**, lint 0,
+smoke y `uicheck` en verde.
