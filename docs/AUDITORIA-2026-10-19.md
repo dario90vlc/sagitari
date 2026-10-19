@@ -90,7 +90,7 @@ arreglo). Los siete que siguen abiertos están en §5.
 | 40 | Media | Modos | Agotar el cupo de llamadas a herramientas no cortaba el turno: avisos y rondas hasta el tope de pasos |
 | 41 | Media | Arranque | `autoResume()` corre una sola vez al arrancar: una tarea interrumpida cuyo backoff vencía dentro de la sesión no se reintentaba |
 | 42 | Baja | Publicación | `npm run navcheck` daba verde (código 0) al saltarse por no haber Chrome ni Edge |
-| 43 | Baja | Publicación | `npm run lint` y `npm run format:check` no corrían en CI |
+| 43 | Baja | Publicación | `npm run lint` no corría en CI ni en la release (los dos pasos añadidos); `npm run format:check` sigue sin correr y hay 6 archivos con formato pendiente (ver §5-G) |
 | 44 | Baja | Persistencia | El arreglo del hallazgo 9 de la auditoría anterior quedó incompleto: con una sola copia real que no se podía borrar, `remove()` devolvía `ok: true` |
 | 45 | Baja | Ajustes | «Detectar modelos» del pie llamaba al sondeo sin `format`/`providerId` (401 en bases Anthropic de terceros) |
 | 46 | Baja | Proveedores | `claveGuardadaPara` comparaba la `baseUrl` byte a byte: una barra final dejaba el sondeo sin credencial |

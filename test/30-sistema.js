@@ -559,6 +559,47 @@ test('skills-starter: la siembra es de una sola vez (una skill de serie borrada 
   eq(guardados, 1, 'el segundo arranque no reescribe la configuración');
 });
 
+test('arranque: el nombre de fábrica «Darío» se retira una sola vez (y no el que escribe el usuario)', () => {
+  const vm = require('vm');
+  // La reparación vive suelta dentro de app.whenReady (no es función): se extrae el cuerpo
+  // REAL de main.js y se ejecuta con dobles de config/saveConfig/log, como la siembra de
+  // skills. Probar el default `userName: ''` no bastaba: el que tiene el nombre guardado
+  // en config.json es el que necesita esta migración.
+  const inicio = 'if (!config.migraciones || !config.migraciones.nombreFabrica) {';
+  const i = MAIN_SRC.indexOf(inicio);
+  ok(i >= 0, 'la reparación del nombre de fábrica debe existir en main.js');
+  let nivel = 0;
+  let fin = -1;
+  for (let k = MAIN_SRC.indexOf('{', i); k < MAIN_SRC.length; k++) {
+    if (MAIN_SRC[k] === '{') nivel++;
+    else if (MAIN_SRC[k] === '}' && --nivel === 0) {
+      fin = k + 1;
+      break;
+    }
+  }
+  const reparar = (config, guardados) =>
+    vm.runInNewContext('(function () {' + MAIN_SRC.slice(i, fin) + '})', {
+      config,
+      saveConfig: () => {
+        guardados.n++;
+      },
+      log: { info: () => {}, warn: () => {} },
+    });
+  // (a) perfil que guardó el nombre de fábrica: se limpia y se apunta la migración
+  const uno = { n: 0 };
+  const a = { settings: { userName: 'Darío' }, migraciones: {} };
+  reparar(a, uno)();
+  eq(a.settings.userName, '', 'el nombre de fábrica no puede seguir dirigiéndose al usuario');
+  eq(a.migraciones.nombreFabrica, true, 'queda apuntado para no repetirlo en cada arranque');
+  eq(uno.n, 1, 'y se persiste una vez');
+  // (b) a quien de verdad se llame así, la marca protege su nombre escrito a mano
+  const dos = { n: 0 };
+  const b = { settings: { userName: 'Darío' }, migraciones: { nombreFabrica: true } };
+  reparar(b, dos)();
+  eq(b.settings.userName, 'Darío', 'un «Darío» escrito después de la migración no se toca');
+  eq(dos.n, 0, 'y no se reescribe la configuración');
+});
+
 test('permisos: la tabla de riesgo es única y no tiene claves muertas', () => {
   const { RISK, toolDefs } = require('../agent/tools');
   const { DEFAULT_RISK } = require('../agent/guardrails');
@@ -639,6 +680,45 @@ test('permisos: un clic por índice se juzga con la etiqueta del inventario', ()
 test('permisos: abrir una URL pide confirmación por defecto', () => {
   const g = new Guardrails();
   eq(g.decide('open_url', { url: 'https://github.com' }).action, 'confirm');
+});
+
+test('mcp: al reencender el interruptor global se reconecta por `enabled`, no por `autoStart`', () => {
+  /* El arranque y `mcp:setGlobal` decidían por `autoStart`, un campo que ningún control
+     del formulario escribe: quedaba en `false` para siempre y el catálogo MCP nacía
+     vacío (los servidores se quedaban en 'idle'). El interruptor real es `enabled`; esta
+     prueba ejercita el criterio por el router, no el campo muerto (ver main.js:1035 y
+     main/ipc-mcp.js:99). */
+  const { registerMcpIpc } = require('../main/ipc-mcp');
+  const handlers = new Map();
+  const encendidos = [];
+  const config = {
+    mcp: {
+      enabled: false,
+      servers: [
+        { id: 'activo', enabled: true, autoStart: false, transport: 'stdio', command: 'node a.js' },
+        { id: 'apagado', enabled: false, autoStart: true, transport: 'stdio', command: 'node b.js' },
+      ],
+    },
+  };
+  registerMcpIpc(
+    { handle: (canal, fn) => handlers.set(canal, fn) },
+    {
+      config: () => config,
+      wireMcp: () => ({ ensure: (id) => (encendidos.push(id), Promise.resolve({ ok: true })) }),
+      persistConfig: () => ({ ok: true }),
+      mcpState: () => ({ servers: [] }),
+      mcpExport: () => ({}),
+      setAgentPolicy: () => {},
+      mcpConfig: require('../main/mcp-config'),
+      serverSlug: (id) => id,
+    },
+  );
+  eq(handlers.get('mcp:setGlobal')(null, true).ok, true);
+  eq(
+    encendidos.join(','),
+    'activo',
+    'se reconecta el enabled:true aunque autoStart sea false, y NO el enabled:false',
+  );
 });
 
 test('mcp: las herramientas dinamicas entran en el catalogo sin tocar la tabla nativa', () => {

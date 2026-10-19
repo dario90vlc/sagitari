@@ -112,30 +112,48 @@ test('recortarMensajes no deja el envío sin la petición del usuario (turno lar
     { role: 'system', content: 'SISTEMA' },
     { role: 'user', content: 'Petición del usuario' },
   ];
-  for (let i = 0; i < 10; i++) {
+  for (let i = 0; i < 30; i++) {
     mensajes.push({ role: 'assistant', content: grande + ' paso ' + i });
     mensajes.push({ role: 'tool', content: grande + ' resultado ' + i });
   }
-  const r = contexto.recortarMensajes(mensajes, [], { model: 'x', contextWindow: 8000, maxTokens: 4096 });
+  const r = contexto.recortarMensajes(mensajes, [], { model: 'x', contextWindow: 16000, maxTokens: 4096 });
+  assertOk(r.quitados > 0, 'un turno que no cabe TIENE que recortarse: ' + r.quitados);
   assertOk(
     r.messages.some((m) => String(m.content).includes('Petición del usuario')),
     'la petición del usuario no puede desaparecer del envío: quedaron ' + r.messages.length + ' mensaje(s)',
   );
+  assertEqual(r.messages[0].role, 'system', 'y el envío sigue empezando por el sistema:');
+  assertEqual(r.messages[1].role, 'user', 'y por la petición del usuario:');
 });
 
-test('recortarMensajes suelta turnos antiguos y conserva el turno en curso', () => {
+test('recortarMensajes suelta turnos antiguos y conserva el turno en curso (varios turnos)', () => {
+  /* El caso que se colaba: conversación de VARIOS turnos con el turno en curso largo. Al
+     soltar turnos antiguos el índice del mensaje del usuario baja, y con la guarda
+     calculada una sola vez el bucle se llevaba por delante también el turno en curso. */
   const grande = 'x'.repeat(4000);
-  const mensajes = [{ role: 'system', content: 'SISTEMA' }];
-  for (let t = 1; t <= 6; t++) {
-    mensajes.push({ role: 'user', content: 'petición ' + t }, { role: 'assistant', content: grande }, { role: 'tool', content: grande });
+  const mensajes = [
+    { role: 'system', content: 'SISTEMA' },
+    { role: 'user', content: 'PREGUNTA VIEJA 1' },
+    { role: 'assistant', content: 'respuesta vieja 1' },
+    { role: 'user', content: 'PREGUNTA VIEJA 2' },
+    { role: 'assistant', content: 'respuesta vieja 2' },
+    { role: 'user', content: 'PREGUNTA EN CURSO' },
+  ];
+  for (let i = 0; i < 10; i++) {
+    mensajes.push({ role: 'assistant', content: grande + ' paso ' + i });
+    mensajes.push({ role: 'tool', content: grande + ' resultado ' + i });
   }
-  const r = contexto.recortarMensajes(mensajes, [], { model: 'x', contextWindow: 8000, maxTokens: 4096 });
-  assertOk(r.quitados > 0, 'con ese tamaño tiene que soltar bloques: ' + JSON.stringify(r.messages.map((m) => m.role)));
+  const r = contexto.recortarMensajes(mensajes, [], { model: 'x', contextWindow: 16000, maxTokens: 4096 });
+  assertOk(r.quitados > 0, 'con ese tamaño tiene que soltar bloques: ' + r.quitados);
   assertEqual(r.messages[0].role, 'system', 'el sistema sigue primero:');
-  assertEqual(r.messages[1].role, 'user', 'el envío continúa por una petición del usuario (no por una respuesta):');
+  assertEqual(r.messages[1].role, 'user', 'y detrás va el usuario (no una respuesta suelta):');
   assertOk(
-    r.messages.some((m) => m.role === 'user' && String(m.content) === 'petición 6'),
+    r.messages.some((m) => m.role === 'user' && String(m.content) === 'PREGUNTA EN CURSO'),
     'el turno en curso viaja entero: ' + JSON.stringify(r.messages.filter((m) => m.role === 'user').map((m) => m.content)),
+  );
+  assertOk(
+    !r.messages.some((m) => String(m.content).startsWith('PREGUNTA VIEJA')),
+    'y los turnos viejos se sueltan: ' + JSON.stringify(r.messages.filter((m) => m.role === 'user').map((m) => m.content)),
   );
 });
 

@@ -72,6 +72,11 @@ jobs:
           echo "::error::No se pudo descargar el binario de Electron (4 intentos)."
           exit 1
 
+      - name: Lint (ESLint 9)
+        # Las notas de la release dicen que el lint pasa antes de publicar: este paso es
+        # el que lo hace verdad (y es inocuo: en este repo da 0 problemas).
+        run: npm run lint
+
       - name: Unit tests
         run: npm test
 

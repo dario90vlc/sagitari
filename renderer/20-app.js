@@ -1162,12 +1162,21 @@ async function despacharOrden(cmd) {
     sysline('Órdenes: ' + K.COMMANDS.map((c) => '/' + c.name + (c.args ? ' ' + c.args : '') + ' — ' + c.descripcion).join(' · '));
     return;
   }
+  /* La orden cruza el IPC y algunas tardan (un `/compact` llama al modelo: segundos).
+     Su línea es de la conversación que estaba a la vista al pedirla; si mientras se
+     esperaba el usuario abrió otra, el resultado se quedaría y no se pinta en el hilo
+     que ahora ocupa `#messages`, que es de otra conversación. */
+  const conv = hiloActual();
+  const enHilo = (texto) => {
+    if (hiloActual() !== conv) return;
+    sysline(texto);
+  };
   try {
-    const r = await window.sagitari.chatCommand(hiloActual(), cmd.name, cmd.args);
-    if (r && r.ok === false) sysline('No se pudo «' + nombre + '»: ' + (r.error || 'orden no disponible'));
-    else sysline((r && r.text) || 'Hecho.');
+    const r = await window.sagitari.chatCommand(conv, cmd.name, cmd.args);
+    if (r && r.ok === false) enHilo('No se pudo «' + nombre + '»: ' + (r.error || 'orden no disponible'));
+    else enHilo((r && r.text) || 'Hecho.');
   } catch (e) {
-    sysline('No se pudo «' + nombre + '»: ' + ((e && e.message) || e));
+    enHilo('No se pudo «' + nombre + '»: ' + ((e && e.message) || e));
   }
 }
 

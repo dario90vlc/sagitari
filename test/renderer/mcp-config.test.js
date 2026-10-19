@@ -93,15 +93,15 @@ test('acepta un servidor stdio válido', () => {
   assertEqual(r.value.transport, 'stdio');
 });
 
-test('un servidor se conecta al arrancar salvo que se diga lo contrario', () => {
-  /* El arranque conectaba solo los `autoStart`, y ese campo se guardaba como `false` al
-     no venir del formulario (no hay ningún control que lo ponga): el catálogo MCP nacía
-     vacío en cada arranque y el modelo no veía ninguna herramienta MCP. Ahora el
-     interruptor por servidor es `enabled`, y `autoStart` es verdadero por defecto. */
+test('el servidor nace encendido: la bandera del arranque es `enabled`', () => {
+  /* `autoStart` no lo lee nadie (ningún control del formulario lo escribe), así que
+     probarlo no probaba el arreglo: el criterio real del arranque (main.js) y de
+     `mcp:setGlobal` (ipc-mcp.js) es `enabled`. Ese criterio se ejercita con el router
+     en 30-sistema; aquí solo se fija el valor que lo alimenta. */
   const r = mcpConfig.validateServer({ id: 'mi_mcp', transport: 'stdio', command: 'node server.js' });
-  assertEqual(r.value.autoStart, true, 'sin decirlo, arranca con la app:');
-  const off = mcpConfig.validateServer({ id: 'mi_mcp', transport: 'stdio', command: 'node server.js', autoStart: false });
-  assertEqual(off.value.autoStart, false, 'y se respeta el «no» explícito:');
+  assertEqual(r.value.enabled, true, 'sin decirlo, queda encendido:');
+  const off = mcpConfig.validateServer({ id: 'mi_mcp', transport: 'stdio', command: 'node server.js', enabled: false });
+  assertEqual(off.value.enabled, false, 'y se respeta el «no» explícito:');
 });
 
 test('rechaza un servidor sin identificador', () => {

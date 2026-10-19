@@ -213,7 +213,12 @@ function trocear(linea) {
 function nombreEjecutable(token) {
   const partes = String(token).split(/[\\/]/);
   const base = partes[partes.length - 1] || String(token);
-  return base.replace(/\.(exe|com)$/i, '');
+  const limpio = base.replace(/\.(exe|com)$/i, '');
+  /* `%COMSPEC%` (y sus primos de PowerShell) ES cmd.exe: sin traducirlo, `%COMSPEC% /c
+     format C:` pasaba la barrera porque el «ejecutable» era un nombre de variable. */
+  const min = limpio.toLowerCase();
+  if (min === '%comspec%' || min === '$env:comspec' || min === '${env:comspec}') return 'cmd';
+  return limpio;
 }
 
 /* Palabras que se limitan a lanzar la orden que va detrás (elevar, medir el
@@ -268,6 +273,14 @@ function desnudar(tokens) {
   let seguir = true;
   while (seguir && t.length) {
     seguir = false;
+    /* 0) tokens vacíos (las comillas de `start "" /b format C:` dejan uno) y prefijos de
+       entorno (`FOO=1 format C: /q`), que son decoradores igual que `@`: si se quedan
+       delante, el «ejecutable» es un nombre de variable y la orden se esconde. */
+    while (t.length && (String(t[0]) === '' || /^[A-Za-z_][A-Za-z0-9_]*=/.test(String(t[0])))) {
+      t.shift();
+      seguir = true;
+    }
+    if (!t.length) break;
     // 1) decoradores de eco y redirecciones al principio (`@`, `>nul`, `2>nul`, `>>log`)
     while (t.length) {
       const p = String(t[0]);
@@ -293,6 +306,7 @@ function desnudar(tokens) {
     // 2) lanzadores (con sus opciones): `start`, `sudo`, `wsl`, `cmd /c`…
     while (t.length && (LANZADORES.has(String(t[0]).toLowerCase()) || LANZADORES_TEXTO.has(String(t[0]).toLowerCase()))) {
       const lanzador = String(t.shift()).toLowerCase();
+      while (t.length && String(t[0]) === '') t.shift(); // `start "" /b …`
       while (t.length && (esAccesorio(t[0]) || (lanzador === 'start' && START_CON_VALOR.has(String(t[0]).toLowerCase())))) {
         const opcion = String(t.shift()).toLowerCase();
         // opciones que se comen el valor siguiente (`start /d C:\dir …`)

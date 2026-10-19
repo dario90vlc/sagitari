@@ -177,6 +177,10 @@ for (const t of [
   'ftype x=format C: /q',
   '(format C: /q)',
   'start powershell -c "cipher /w:C:"',
+  'start "" /b format C: /q',
+  '%COMSPEC% /c format C: /q',
+  '%ComSpec% /c diskpart',
+  'FOO=1 format C: /q',
 ]) {
   test('anteponer «' + t.slice(0, 22) + '» sigue siendo prohibido', () => {
     assertEqual(comandos.clasificar(t).nivel, 'prohibido');
@@ -185,7 +189,7 @@ for (const t of [
 
 /* Y el otro lado: los prefijos NO pueden convertir en prohibido lo que solo menciona la
    orden (escribirla en un `echo`, en un mensaje de commit o en una lista). */
-for (const t of ['start notepad', 'if exist x echo hola', 'for %i in (*) do echo %i', '> salida.txt echo hola', '(echo hola)']) {
+for (const t of ['start notepad', 'if exist x echo hola', 'for %i in (*) do echo %i', '> salida.txt echo hola', '(echo hola)', 'FOO=1 npm run build', 'echo %COMSPEC% /c format C: es un ejemplo']) {
   test('pero «' + t.slice(0, 22) + '» sigue siendo normal', () => {
     assertEqual(comandos.clasificar(t).nivel, 'normal');
   });

@@ -1202,3 +1202,47 @@ test('memoria: un fallo del almacén no tumba el turno de chat', async () => {
   eq(errores.length, 1, 'el fallo se registra donde se ven todos los demás');
   eq(errores[0][0], 'memory:proponer', 'con su etiqueta propia, para poder buscarlo');
 });
+
+/* ---------- órdenes de barra: /cost no espera al turno ---------- */
+
+/* `/cost` solo LEE el gasto; `/compact` reescribe el contexto y por eso no puede correr
+   con un turno en vuelo. La guarda de «trabajando» estaba delante de las dos, así que
+   preguntar el gasto DURANTE un turno —cuando más apetece— rechazaba la orden. */
+test('chat:command: /cost responde con un turno en marcha; /compact sigue esperando', async () => {
+  const { registerChatIpc } = require('../main/ipc-chat');
+  const handlers = {};
+  const conv = { id: 'c1', title: 'Gasto', messages: [{ role: 'user', content: 'hola' }], updatedAt: 0 };
+  let compactado = 0;
+  const agente = {
+    isBusy: () => true,
+    usageResumen: () => ({ turns: 2, tokens: 12345, costUsd: 0.05 }),
+    compact: async () => {
+      compactado++;
+      return { ok: true, antes: 2, despues: 1 };
+    },
+  };
+  registerChatIpc(
+    { handle: (n, f) => (handlers[n] = f) },
+    {
+      config: () => ({ settings: {} }),
+      runtimes: { agentFor: () => agente },
+      convsApi: { convById: () => conv, currentConv: () => conv, ensureConv: () => conv, saveConvs: () => {} },
+      getSkills: () => ({ getSkill: async () => null }),
+      getGlow: () => () => {},
+      getWin: () => null,
+      configDir: () => tmpDir('sagi-cost-'),
+      onError: () => {},
+      dialog: {},
+      fsp: {},
+      fs,
+      path,
+      attach: { blocksFor: () => '' },
+    },
+  );
+  const cost = await handlers['chat:command'](null, { convId: 'c1', name: 'cost' });
+  eq(cost.ok, true, 'el gasto se puede preguntar mientras trabaja: ' + JSON.stringify(cost));
+  ok(cost.text.includes('12.345 tokens'), 'y trae la cuenta: ' + cost.text);
+  const compact = await handlers['chat:command'](null, { convId: 'c1', name: 'compact' });
+  eq(compact.ok, false, 'compactar con un turno en vuelo sigue rechazándose');
+  eq(compactado, 0, 'sin compactar nada a medias');
+});

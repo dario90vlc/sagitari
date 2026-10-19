@@ -16,7 +16,7 @@ const { montar } = require('./arnes-renderer');
 /* El puente falso descarta los `on*` (devuelve un baja-nada), así que aquí se captura el
    manejador real que registra 20-app.js para poder disparar los mismos eventos que main. */
 let handler = null;
-function montarChat() {
+function montarChat(extraApi = {}) {
   handler = null;
   return montar({
     api: {
@@ -31,6 +31,7 @@ function montarChat() {
       },
       chatCommand: async () => ({ ok: true, text: 'GASTO: 42 tokens' }),
       convNew: async () => ({ ok: true, id: 'c2' }),
+      ...extraApi,
     },
   });
 }
@@ -219,6 +220,26 @@ async function main() {
     const linea = m.$$('.sysline');
     assertEqual(linea.length, 1, 'y deja una línea de sistema en el hilo:');
     assertOk(/GASTO: 42 tokens/.test(linea[0].textContent), 'con la respuesta de la orden: ' + linea[0].textContent);
+  });
+
+  await test('la línea de una orden tardía no cae en el hilo abierto después', async () => {
+    let resolver = null;
+    const m = montarChat({ chatCommand: () => new Promise((r) => (resolver = r)) });
+    await m.listo();
+    m.w.recordarHilo('c1');
+    await m.listo();
+    m.$('#chatInput').value = '/compact';
+    m.clic('#chatSend');
+    await m.listo();
+    assertOk(resolver, 'la orden salió por el IPC:');
+    /* `/compact` llama al modelo: tarda segundos. Mientras se espera, el usuario abre
+       otra conversación; la línea es de la que la pidió y no puede aterrizar en la nueva. */
+    m.w.recordarHilo('c2');
+    await m.listo();
+    resolver({ ok: true, text: 'CONTEXTO-COMPACTADO' });
+    await m.listo();
+    assertEqual(m.$$('.sysline').length, 0, 'la línea no se pinta en el hilo que ocupa la pantalla:');
+    assertOk(!/CONTEXTO-COMPACTADO/.test(m.$('#messages').textContent), 'ni su texto:');
   });
 
   await test('/help lo contesta el renderer con la lista real (sin gastar turno ni IPC)', async () => {

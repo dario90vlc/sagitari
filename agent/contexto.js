@@ -137,22 +137,34 @@ function recortarMensajes(messages = [], tools = [], cfg = {}, { objetivo = 0.75
   const ventana = ventanaDe(cfg);
   const tope = Math.max(8000, ventana * objetivo - (Number(cfg.maxTokens) || 4096) - medir([], tools).total);
   let quitados = 0;
-  // se quita desde el principio, pero nunca el sistema (bloque 0) ni la cola reciente
   const i = 1;
-  /* El último bloque que trae una petición del usuario es el turno EN CURSO: a partir
-     de ahí no se suelta nada. Sin esta guarda, un turno largo (un solo mensaje de
-     usuario y muchos pasos con herramientas) vaciaba el envío hasta dejar SOLO el
-     prompt del sistema: el modelo recibía la conversación sin la pregunta. */
-  const ultimoTurno = bloques.reduce((acc, b, idx) => (b.some((m) => m.role === 'user') ? idx : acc), 0);
-  // la comparación es solo de mensajes: las herramientas ya se descontaron del tope
-  while (medir(bloques.flat(), []).total > tope && bloques.length - i > minimo && i < ultimoTurno) {
-    bloques.splice(i, 1);
-    quitados++;
-    // tras soltar, la conversación no puede empezar por algo que no sea del usuario
-    while (bloques[i] && bloques[i][0].role !== 'user' && i < ultimoTurno) {
+  /* Índice VIVO del bloque que trae la petición del usuario del turno EN CURSO. Se
+     recalcula en cada vuelta porque al soltar turnos antiguos todos los índices bajan:
+     con el índice calculado una sola vez al principio, una conversación de varios turnos
+     acababa enviando SOLO el prompt del sistema (el mensaje del usuario se iba con los
+     turnos viejos). */
+  const turnoEnCurso = () => bloques.reduce((acc, b, idx) => (b.some((m) => m.role === 'user') ? idx : acc), 0);
+  while (medir(bloques.flat(), []).total > tope && bloques.length - i > minimo) {
+    const enCurso = turnoEnCurso();
+    if (i < enCurso) {
+      // quedan turnos antiguos por delante: se suelta el bloque y, tras él, lo que
+      // pertenece a ese mismo turno hasta el siguiente mensaje del usuario
       bloques.splice(i, 1);
       quitados++;
+      while (bloques[i] && bloques[i][0] && bloques[i][0].role !== 'user' && i < turnoEnCurso()) {
+        bloques.splice(i, 1);
+        quitados++;
+      }
+      continue;
     }
+    /* Solo queda el turno en curso: se sueltan sus pasos YA CERRADOS (bloques de
+       assistant + sus resultados de herramienta) empezando por el más antiguo, SIN tocar
+       el mensaje del usuario y sin partir una llamada de sus resultados —los proveedores
+       exigen que cada `tool_call` vaya seguido de los suyos, y un bloque es justo eso—. */
+    const j2 = bloques.findIndex((b, idx) => idx > enCurso && !b.some((m) => m.role === 'user'));
+    if (j2 < 0) break; // ya no hay nada que soltar sin romper el envío
+    bloques.splice(j2, 1);
+    quitados++;
   }
   if (!quitados) return { messages, quitados: 0, tokensLiberados: 0 };
   return { messages: bloques.flat(), quitados, tokensLiberados: Math.max(0, antes - medir(bloques.flat(), tools).total) };

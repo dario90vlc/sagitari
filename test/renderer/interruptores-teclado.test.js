@@ -8,14 +8,18 @@
    actualizarla o al importar, así que los interruptores nuevos quedaban fuera del orden
    de tabulación y sin teclado hasta salir y volver a entrar en la vista.
 
+   Cubre también el segmento de modo, que vive en el mismo fichero: un guardado que
+   falla no puede dejar el segmento diciendo un modo que el motor no tiene.
+
    Corre sobre el markup real de index.html (ver arnes-renderer.js). Sin spawn. */
 
 const { montar } = require('./arnes-renderer');
 
 const SKILLS = [{ id: 's1', name: 'Revisar PRs', description: 'Cómo revisar un PR', enabled: true, bodyChars: 400 }];
 
-function montarVista() {
+function montarVista(extraApi = {}) {
   const toggles = [];
+  const modos = [];
   const m = montar({
     api: {
       getConfig: async () => ({ providers: [], active: null, presets: [], settings: {} }),
@@ -24,11 +28,18 @@ function montarVista() {
         toggles.push({ id, on });
         return { ok: true };
       },
+      /* El segmento de modo pide el cambio al proceso principal: por defecto lo acepta y
+         devuelve el modo, como el canal real; la prueba de guardado fallido lo cambia. */
+      setMode: async (modo) => {
+        modos.push(modo);
+        return modo;
+      },
       metaGet: async () => ({ guardrails: {} }),
       instruccionesInfo: async () => ({ fuentes: [], candidatos: [], workspace: '' }),
+      ...extraApi,
     },
   });
-  return { m, toggles };
+  return { m, toggles, modos };
 }
 
 let passed = 0;
@@ -103,6 +114,28 @@ async function main() {
     tecla(' ');
     await m.listo();
     assertEqual(toggles.length, 3, 'Espacio alterna la skill:');
+  });
+
+  await test('si el modo no se puede guardar, se avisa y no queda aplicado en el motor', async () => {
+    const error = 'EPERM: config.json en solo lectura';
+    const modos = [];
+    const { m } = montarVista({
+      setMode: async (modo) => {
+        modos.push(modo);
+        return { ok: false, error };
+      },
+    });
+    await m.listo();
+    const plan = m.$('#modeSeg button[data-m="plan"]');
+    assertOk(plan, 'el segmento de modo se pinta:');
+    plan.click();
+    await m.listo();
+    /* El router de `mode:set` aplica el modo en memoria y luego intenta guardarlo: si
+       falla, el motor seguiría corriendo con «plan». Sin aviso, el segmento y la píldora
+       se quedarían en el modo viejo y nadie sabría por qué. */
+    assertOk(/solo lectura/.test(m.$('#toastStack').textContent), 'el fallo de guardado llega al usuario: ' + m.$('#toastStack').textContent);
+    assertEqual(modos.join(','), 'plan,act', 'se devuelve el modo anterior al proceso principal:');
+    assertEqual(m.$('#modeSeg button[data-m="act"]').getAttribute('aria-pressed'), 'true', 'el segmento sigue marcando el modo que sigue activo:');
   });
 
   console.log(`\n${passed} pasaron, ${failed} fallaron`);

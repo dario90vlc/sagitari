@@ -239,7 +239,19 @@ test('migrarV1 es idempotente: migrar el resultado no vuelve a fusionar nada', (
     { id: 'c', text: 'Prefiero el café' },
     { id: 'd', text: 'Prefiero el té' },
   ];
+  /* El resultado de la PRIMERA pasada se fija aquí: sin esto, «la segunda no cambia nada»
+     se cumple también con el algoritmo viejo, que fusionaba «café» con «té» por parecido
+     y ya dejaba dos hechos en la primera pasada (la segunda no tenía nada que hacer en
+     ninguno de los dos casos, así que la prueba no discriminaba). */
   const uno = v2.migrarV1(src);
+  assertDeep(
+    uno.hechos.map((h) => h.text),
+    ['Recuerda que me llamo Dario', 'Prefiero el café', 'Prefiero el té'],
+    'la primera pasada deja un hecho por dato, sin fundir los que solo se parecen',
+  );
+  assertEqual(uno.fusiones.length, 1, 'solo las dos formas del mismo nombre se fusionan');
+  assertEqual(uno.fusiones[0].seQueda, 'b', 'y se queda el texto más reciente');
+  assertEqual(uno.fusiones[0].seFusiona, 'a', 'con el absorbido registrado aparte');
   const dos = v2.migrarV1(uno.hechos);
   assertDeep(dos.hechos.map((h) => h.text), uno.hechos.map((h) => h.text), 'la segunda pasada no cambia nada');
   assertEqual(dos.fusiones.length, 0, 'no queda nada por fusionar');

@@ -343,11 +343,23 @@ function registerChatIpc(ipcMain, ctx) {
     // El agente de ESA conversación: /cost y /compact son de su hilo, no del de la
     // pestaña que esté a la vista.
     const a = runtimes.agentFor(c.id);
-    // Compactar reescribe el contexto: con un turno en vuelo eso sería pisarse.
-    if (a.isBusy()) return { ok: false, error: 'SAGITARI está trabajando ahora mismo: espera a que termine o detén la tarea' };
     const cmd = String(name || '')
       .toLowerCase()
       .replace(/^\//, '');
+    /* /cost solo LEE el gasto: es justo cuando hay un turno en marcha cuando interesa
+       preguntarlo, así que va antes de la guarda. Esa guarda nació para /compact, que
+       reescribe el contexto y con un turno en vuelo se pisaría consigo mismo. */
+    if (cmd === 'cost') {
+      const u = typeof a.usageResumen === 'function' ? a.usageResumen() : null;
+      if (!u || !u.turns) return { ok: true, text: 'Todavía no hay consumo que contar en esta conversación.' };
+      const tokens = Number(u.tokens || 0).toLocaleString('es-ES');
+      const turnos = u.turns === 1 ? '1 turno' : u.turns + ' turnos';
+      return {
+        ok: true,
+        text: `Esta conversación: ${tokens} tokens en ${turnos}${u.costUsd ? ' · ' + Number(u.costUsd).toFixed(4) + ' USD' : ''}.`,
+      };
+    }
+    if (a.isBusy()) return { ok: false, error: 'SAGISTARI está trabajando ahora mismo: espera a que termine o detén la tarea' };
     if (cmd === 'compact') {
       let r;
       try {
@@ -359,16 +371,6 @@ function registerChatIpc(ipcMain, ctx) {
       return {
         ok: true,
         text: `Contexto compactado: ${r.antes} mensajes → ${r.despues}. El resumen queda como punto de partida.`,
-      };
-    }
-    if (cmd === 'cost') {
-      const u = typeof a.usageResumen === 'function' ? a.usageResumen() : null;
-      if (!u || !u.turns) return { ok: true, text: 'Todavía no hay consumo que contar en esta conversación.' };
-      const tokens = Number(u.tokens || 0).toLocaleString('es-ES');
-      const turnos = u.turns === 1 ? '1 turno' : u.turns + ' turnos';
-      return {
-        ok: true,
-        text: `Esta conversación: ${tokens} tokens en ${turnos}${u.costUsd ? ' · ' + Number(u.costUsd).toFixed(4) + ' USD' : ''}.`,
       };
     }
     void args;

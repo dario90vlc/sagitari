@@ -292,11 +292,22 @@ const MODE_META = Object.fromEntries(
 const MODE_ORDER = K.MODE_ORDER;
 async function setMode(m) {
   if (m === mode) return;
+  const anterior = mode;
   const r = await window.sagitari.setMode(m);
   /* El canal devuelve la cadena del modo nuevo; si el guardado en disco falló devuelve
-     `{ok:false,error}` (y el toast del proceso principal ya avisa). Asignarlo tal cual
-     dejaba la interfaz en «Act» en pantalla mientras el ajuste seguía siendo el de antes. */
-  if (r && typeof r === 'object') return;
+     `{ok:false,error}`. Ese router recibe el saveConfig crudo —solo hace console.error—,
+     así que NO hay toast del proceso principal: el aviso es de aquí. Y como el modo ya
+     se aplicó en memoria allí, se le devuelve el anterior para que el motor no corra con
+     uno distinto del que enseñan el segmento y la píldora sin que nadie se entere. */
+  if (r && typeof r === 'object') {
+    if (mode === anterior) {
+      try {
+        await window.sagitari.setMode(anterior);
+      } catch {}
+    }
+    showToast('No se pudo guardar el modo: ' + ((r && r.error) || 'no se pudo escribir la configuración'));
+    return;
+  }
   mode = r;
   updateModeUI();
   const M = K.mode(mode);
