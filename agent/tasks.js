@@ -269,6 +269,12 @@ class TaskManager {
       abandoned = 0;
     for (const t of checkpoints.list('active')) {
       if (t.status !== 'interrupted') continue;
+      /* Los turnos del CHAT también son runs: el cierre por guardarraíl o por tope de
+         llamadas los deja 'interrupted'. Recuperarlos aquí (y ahora también desde el
+         tick) los relanzaba solos en background en cuanto vencía el backoff, sin que el
+         usuario lo pidiera, justo después de decirle «dime si lo retomo». La
+         recuperación automática es solo para tareas; un turno de chat espera al usuario. */
+      if (t.origin === 'chat') continue;
       const run = checkpoints.read(t.runId);
       if (!run) continue;
       const attempts = Number(run.attempts) || 0;
@@ -321,6 +327,12 @@ class TaskManager {
   _start(runId) {
     const run = checkpoints.read(runId);
     if (!run) return;
+    /* Un run vivo no puede arrancar dos veces: `isRunBusy` es el chat que lo tiene (la
+       misma guarda que usa resume()), y `agents` cubre la ventana en que el agente
+       anterior aún no ha terminado su .finally (p. ej. interrumpido por un guardarraíl y
+       recuperado por el tick). Sin esto, el .finally del primero borraba del mapa al
+       segundo agente y quedaban dos escritores sobre el mismo runId. */
+    if (this.agents.has(runId) || this.isRunBusy(runId)) return;
     const settings = this.getSettings();
     /* El modo con el que se encoló la tarea (el «Modo» de la vista Tareas) viaja en el
        `run`, pero el agente lo lee de `settings.settings.mode`: sin esto, una tarea

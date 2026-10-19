@@ -131,6 +131,18 @@ test('la ficha lleva nombre, tamaño y tipo, y nunca el texto', () => {
   assertOk(!ficha.includes('contenido secreto'), 'pero nunca el texto del archivo');
 });
 
+test('la ficha dice que hay que volver a adjuntar el texto, no que se pueda pedir', () => {
+  // El texto no está en conversations.json y la ficha no lleva ruta: «Regenerar» reenvía
+  // solo la ficha, así que prometer «que lo pida» hace responder sobre algo que no ve.
+  for (const kind of ['text', 'binary']) {
+    const ficha = adj.cardFor({ name: 'informe.txt', kind, size: 2048 });
+    assertOk(ficha.includes('vuelve a adjuntarlo si hace falta'), `la ficha de ${kind} tiene que decirlo: ` + ficha);
+    assertOk(!ficha.includes('que lo pida'), `y no prometer que el modelo puede pedirlo: ` + ficha);
+  }
+  // la imagen sí conserva su miniatura: su ficha no cambia
+  assertOk(adj.cardFor({ name: 'foto.png', kind: 'image', size: 2048 }).includes('miniatura guardada'));
+});
+
 test('una ficha por adjunto, en el orden en que se adjuntaron', () => {
   const fichas = adj.cardsFor([
     { name: 'a.txt', kind: 'text', size: 1024 },

@@ -192,8 +192,8 @@ sagitari/
 | `npm start`             | Start the app in production          |
 | `npm run dev`           | Start the app in development mode    |
 | `npm run smoke`         | Run smoke test                       |
-| `npm test`              | Run the agent/main suite (498 tests) |
-| `npm run test:renderer` | Run the renderer suite (810 tests)   |
+| `npm test`              | Run the agent/main suite (510 tests) |
+| `npm run test:renderer` | Run the renderer suite (840 tests)   |
 | `npm run lint`          | Run ESLint                           |
 | `npm run lint:fix`      | Run ESLint with auto-fix             |
 | `npm run format`        | Format with Prettier                 |
@@ -207,8 +207,8 @@ sagitari/
 Two suites, both green before every release:
 
 ```bash
-npm test              # 498 tests: the agent core and the main process
-npm run test:renderer # 810 tests across 51 files: main-process modules and the renderer
+npm test              # 510 tests: the agent core and the main process
+npm run test:renderer # 840 tests across 51 files: main-process modules and the renderer
 ```
 
 `npm test` (`test/run.js`) covers the agent loop end to end: guardrails,

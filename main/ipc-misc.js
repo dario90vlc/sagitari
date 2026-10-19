@@ -76,11 +76,17 @@ function registerMiscIpc(ipcMain, ctx) {
     if (explicit) {
       const v = validarWorkspaceRuta(target, ctx.configDir());
       if (v.ok) {
+        const previo = cfg().settings.workspace;
         cfg().settings.workspace = v.real;
         // Igual que workspace:set: si el disco no traga la configuración hay que decirlo,
         // o la interfaz cree que la carpeta quedó fijada y al reiniciar vuelve la anterior.
         const saved = saveConfig();
-        if (!saved.ok) return { ok: false, error: saved.error };
+        if (!saved.ok) {
+          // Y la memoria vuelve al valor anterior: si se queda el nuevo, la interfaz dice
+          // «no se pudo» y sigue enseñando la carpeta vieja, pero el agente escribe en la nueva.
+          cfg().settings.workspace = previo;
+          return { ok: false, error: saved.error };
+        }
       } else {
         // La carpeta se abre igual en el Explorador; solo se rechaza fijarla como workspace.
         return { ok: true, path: target, workspace: ctx.getWorkspace(), workspaceError: v.error };

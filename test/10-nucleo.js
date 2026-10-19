@@ -385,6 +385,21 @@ test('memory: el mismo dato escrito de otra forma se consolida, no se duplica', 
   memory.__test._resetForTests(path.join(MEM_DIR, 'memory.json'));
 });
 
+test('memory: el mismo dato escrito de otra forma se consolida aunque el texto nuevo no tenga clave', () => {
+  /* «Recuerda que…» impide que `claveHecho` reconozca el dato, así que cae al recurso sin
+     clave: ahí `mismoHecho` lo empareja con el nombre ya guardado (antes solo miraba la
+     huella y quedaban dos hechos vivos). */
+  const dir = tmpDir('sagi-memclave-');
+  memory.__test._resetForTests(path.join(dir, 'memory.json'));
+  const a = memory.add({ text: 'El usuario se llama Darío' });
+  const b = memory.add({ text: 'Recuerda que me llamo Dario' });
+  eq(memory.list().length, 1, 'un solo nombre: ' + JSON.stringify(memory.list().map((m) => m.text)));
+  ok(b.fusionado, 'se informa de la fusión');
+  eq(b.antes.id, a.id, 'sobre el hecho anterior');
+  eq(memory.list()[0].text, 'Recuerda que me llamo Dario', 'gana el texto reciente');
+  memory.__test._resetForTests(path.join(MEM_DIR, 'memory.json'));
+});
+
 test('memory: dos preferencias distintas no se fusionan y no se pierde ninguna', () => {
   const dir = tmpDir('sagi-memdist-');
   memory.__test._resetForTests(path.join(dir, 'memory.json'));
@@ -1360,7 +1375,9 @@ test('TaskManager: cancel archives the task as cancelled', async () => {
 });
 
 test('TaskManager: autoResume re-enqueues interrupted tasks', async () => {
-  const run = checkpoints.newRun({ goal: 'huérfana del crash' });
+  /* Una TAREA de fondo: los turnos del CHAT interrumpidos NO se reanudan solos (esperan a
+     que el usuario lo pida, que es lo que le dice el aviso del guardarraíl). */
+  const run = checkpoints.newRun({ goal: 'huérfana del crash', origin: 'background' });
   checkpoints.interrupt(run);
   const tm = makeManager();
   const r = tm.autoResume();

@@ -28,8 +28,8 @@ bajo carga real.
 | --- | --- | --- | --- |
 | Lint (ESLint 9, config propia) | `npm run lint` | 0 errores | **0 errores** |
 | Sintaxis de todos los módulos (como la CI) | `node --check` | 0 fallos | **0 fallos** |
-| Pruebas unitarias | `npm test` | **458 en verde** | **498 en verde** |
-| Pruebas de renderer (jsdom) | `npm run test:renderer` | **744 en verde** (50 archivos) | **810 en verde** (51 archivos) |
+| Pruebas unitarias | `npm test` | **458 en verde** | **510 en verde** |
+| Pruebas de renderer (jsdom) | `npm run test:renderer` | **744 en verde** (50 archivos) | **840 en verde** (51 archivos) |
 | Contraste WCAG 2.1 AA | `npm run contraste` | 0 de 54 pares por debajo de 4,5:1 | **0 de 54** |
 | Arranque real de la app | `npm run smoke` | ventana abierta | **ventana abierta** |
 | Navegador real | `npm run navcheck` | 0 fallos | **0 fallos** |
@@ -213,3 +213,30 @@ Fuera de estos siete, no queda ningún hallazgo de esta pasada sin cerrar.
    acciones del navegador).
 4. **§5 F** (subir el toolchain de desarrollo) como cambio aparte, con la batería delante:
    no es riesgo para el usuario, pero conviene no mezclarlo con una release de correcciones.
+
+---
+
+## 7. Revisión final del diff completo (misma fecha, antes de publicar)
+
+Antes de mover el tag se revisó el diff entero `017fbae..11e72c6` con **cuatro revisiones
+independientes** (agente y modos, datos y red, interfaz y publicación, y las pruebas). No
+dieron por bueno el informe: leyeron el código. Encontraron **once defectos más**, dos de
+ellos en arreglos de esta misma auditoría que estaban **incompletos o mal**, y uno de ellos
+bloqueante. Todos quedaron cerrados con su prueba (ciclo rojo-verde) antes de etiquetar:
+
+| Sev. | Qué encontraron | Cómo se cerró |
+| --- | --- | --- |
+| **Bloqueante** | El arreglo del hallazgo 2 (`agent/contexto.js`) estaba mal en los dos sentidos: en una conversación de VARIOS turnos seguía vaciando el envío hasta dejar solo el prompt del sistema, y en un turno único no recortaba nada | El índice del turno en curso se recalcula en cada vuelta y el turno en curso también se recorta por sus pasos ya cerrados (sin partir una llamada de sus resultados) |
+| Importante | La barrera de comandos prohibidos, al re-anclarse a `^`, se evadía anteponiendo palabras: `start`, `@`, `>nul`, `if`, `for…do`, `ftype x=`, `start "" /b`, `%COMSPEC% /c`, `FOO=1` | `desnudar()` quita decoradores y construcciones antes de mirar la orden (17 formas de evasión cubiertas y 7 menciones inocentes que siguen normales) |
+| Importante | Un compañero de EQUIPO que cierra su encargo con `team_done` seguía recibiendo rondas hasta agotar su presupuesto, y la vuelta acababa cortada: la tarjeta salía en rojo aunque el trabajo estuviera hecho (lo cazó la puerta de `ui-check` al ejecutarla por primera vez) | El bucle termina cuando el compañero cierra; solo son fallo el corte y un FAILED explícito |
+| Importante | El `autoResume()` del tick resucitaba turnos del CHAT (el que acababa de decir «me he detenido») y `_start` no respetaba `isRunBusy` | La recuperación automática es solo para tareas; `_start` no arranca un run que el chat sigue ejecutando |
+| Importante | Las puertas de cierre solo veían el trabajo delegado CON árbol aislado (sin git o con aislamiento apagado, el líder acababa con 0 escrituras) | Sin árbol se cuenta lo que el delegado escribió (foto del diff antes/después) |
+| Importante | `add()` de la memoria había perdido la consolidación del MISMO dato escrito de otra forma («El usuario se llama Darío» + «Recuerda que me llamo Dario» quedaban como dos hechos) | El recurso sin clave usa `mismoHecho` (por valor), no la huella a secas: el duplicado se consolida y «pnpm»/«npm» siguen sin fusionarse |
+| Importante | `mergeUrl` reinyectaba la credencial guardada aunque cambiara el HOST del servidor MCP | La credencial solo se restaura si la URL sin credenciales coincide |
+| Menor | `mode:set` dejaba interfaz y motor discrepando en silencio cuando el guardado fallaba (y el comentario decía que había un aviso que no existía) | El renderer avisa y vuelve al modo anterior |
+| Menor | `/cost` se rechazaba con un turno en marcha y su línea podía acabar en otra conversación | La rama de `cost` va antes de la guarda de ocupado y la línea se pinta en el hilo que lanzó la orden |
+| Menor | El fallo al guardar el espacio de trabajo no revertía el valor en memoria; la ficha de un adjunto prometía algo imposible | Se revierte el valor y la ficha dice lo que de verdad se puede hacer |
+| Menor | Cuatro pruebas no probaban lo que decían (un campo muerto, la migración del nombre, la idempotencia de la migración) y una cláusula de `ui-check` era tautológica | Se reescribieron para que fallen sin el arreglo; la cláusula comprueba ahora que toda orden de la paleta se explica |
+
+Con esto, la frase de las notas —«cada uno con la prueba que falla sin el arreglo»— es
+verdad también para los hallazgos 5, 43 y 47.

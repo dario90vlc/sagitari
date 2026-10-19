@@ -84,6 +84,34 @@ test('reemplazar un servidor sin cabeceras deja el mapa vacío', () => {
   assertEqual(Object.keys(mcpConfig.mergeSecrets({ Authorization: 'Bearer viejo' }, {})).length, 0);
 });
 
+console.log('mcp-config.js — mergeUrl');
+
+test('restaura la credencial del userinfo si el destino no cambió', () => {
+  const g = 'https://usuario:token-secreto@viejo.ejemplo.com/mcp';
+  assertEqual(mcpConfig.mergeUrl(g, mcpConfig.enmascararUrl(g)), g, 'misma URL:');
+});
+
+test('restaura el parámetro de credencial si el destino no cambió', () => {
+  const g = 'https://viejo.ejemplo.com/mcp?key=SECRETO';
+  assertEqual(mcpConfig.mergeUrl(g, mcpConfig.enmascararUrl(g)), g, 'misma URL:');
+});
+
+test('no reinyecta el userinfo cuando cambia el host', () => {
+  const g = 'https://usuario:token-secreto@viejo.ejemplo.com/mcp';
+  const nueva = mcpConfig.enmascararUrl(g).replace('viejo.ejemplo.com', 'nuevo.ejemplo.com');
+  const out = mcpConfig.mergeUrl(g, nueva);
+  assertEqual(out, nueva, 'se guarda sin la credencial vieja:');
+  assertEqual(out.includes('token-secreto'), false, 'el secreto no viaja al host nuevo:');
+});
+
+test('no reinyecta el parámetro de credencial cuando cambia el host', () => {
+  const g = 'https://viejo.ejemplo.com/mcp?key=SECRETO';
+  const nueva = mcpConfig.enmascararUrl(g).replace('viejo.ejemplo.com', 'nuevo.ejemplo.com');
+  const out = mcpConfig.mergeUrl(g, nueva);
+  assertEqual(out, nueva, 'se guarda sin la credencial vieja:');
+  assertEqual(out.includes('SECRETO'), false, 'el secreto no viaja al host nuevo:');
+});
+
 console.log('mcp-config.js — validateServer');
 
 test('acepta un servidor stdio válido', () => {

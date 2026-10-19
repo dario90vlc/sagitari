@@ -4635,3 +4635,96 @@ test('equipo: el mensaje que llega en la ÚLTIMA llamada del compañero no se pi
   eq(eqE.estado(r.id), 'trabajando', 'y el compañero vuelve a estar trabajando');
   eq(eqE.bandejaDe(r.id).length, 0, 'el mensaje se consumió (no se queda en la bandeja para siempre)');
 });
+
+/* ---------- auditoría 19-oct (2ª pasada): fusión sin árbol y cupo en subagente ---------- */
+
+test('delegado SIN árbol aislado: lo que escribe cuenta para las puertas del líder', async () => {
+  /* Hallazgo: `_contarFusion` solo contaba cuando había árbol. Sin git (o con
+     `arbolesAislados: false`) el delegado escribe en el espacio del usuario con las
+     pre-imágenes del líder, pero `this._writes` se quedaba en 0 y `_needsReview`
+     cortaba antes de mirar el diff: las puertas de cierre seguían ciegas. */
+  const { Agent } = require('../agent/agent');
+  const cambios = require('../agent/cambios');
+
+  // --- subagente: _delegate
+  const ws = tmpDir('sagi-sin-arbol-del-');
+  cambios.limpiar();
+  const a = new Agent({ emit: () => {} });
+  const original = Agent.prototype._runWithSystem;
+  Agent.prototype._runWithSystem = async (sys, st) => {
+    const w = st.settings.workspace; // sin árbol: el espacio del usuario
+    const p = path.join(w, 'delegado.js');
+    cambios.recordar(w, p, undefined, a.ownerCambios()); // lo que hace executeTool antes de escribir
+    fs.writeFileSync(p, 'delegado;\n');
+  };
+  const settings = { settings: { workspace: ws, arbolesAislados: false, modelRouting: false } };
+  try {
+    await a._delegate(subagents.SUBAGENTS.coding, { task: 'escribe un archivo' }, { settings });
+  } finally {
+    Agent.prototype._runWithSystem = original;
+  }
+  eq(a._writes, 1, 'la escritura del delegado cuenta como escritura del turno (antes quedaba en 0)');
+  eq(a._needsReview(settings), true, 'y la puerta de revisión la ve (antes cortaba en `_writes < 1`)');
+
+  // --- compañero de equipo: _correrMiembro
+  cambios.limpiar();
+  const ws2 = tmpDir('sagi-sin-arbol-eq-');
+  const b = new Agent({ emit: () => {} });
+  const sub = new Agent({ emit: () => {} });
+  sub._runWithSystem = async (sys, st) => {
+    const w = st.settings.workspace;
+    const p = path.join(w, 'companero.js');
+    cambios.recordar(w, p, undefined, b.ownerCambios());
+    fs.writeFileSync(p, 'companero;\n');
+  };
+  const miembro = { id: 'm1', spec: subagents.SUBAGENTS.coding, agent: sub, tarea: 'escribe', expect: '', cortado: false, arbol: null };
+  const settings2 = { settings: { workspace: ws2, arbolesAislados: false, modelRouting: false } };
+  await b._correrMiembro(miembro, 'escribe un archivo', { settings: settings2, signal: noSignal() });
+  eq(b._writes, 1, 'el compañero sin árbol también cuenta su escritura (antes quedaba en 0)');
+  eq(b._needsReview(settings2), true, 'y su líder la ve en la puerta de revisión');
+  cambios.limpiar();
+});
+
+test('subagente: agotar el cupo de llamadas entrega la vuelta con corte, sin girar hasta maxSteps', async () => {
+  /* Hallazgo: en la rama `limit` el `break` solo salía del `for` de llamadas; después se
+     pedía otra ronda al modelo —que ya rechaza todo por cupo— hasta agotar maxSteps.
+     Un subagente tiene que entregar en esa misma vuelta, con `cortado: true`. */
+  let rondas = 0;
+  const sub = new AgentCls({
+    fetchFn: async () => {
+      rondas++;
+      return sseResponse([
+        evData({
+          choices: [
+            {
+              delta: {
+                tool_calls: [
+                  {
+                    index: 0,
+                    id: 'c' + rondas,
+                    type: 'function',
+                    function: { name: 'list_dir', arguments: JSON.stringify({ path: process.cwd() }) },
+                  },
+                ],
+              },
+            },
+          ],
+        }),
+      ]);
+    },
+    emit: () => {},
+    screenshotFn: async () => ({}),
+    guardrailsPolicy: { guardrails: { maxToolCalls: 2, maxSteps: 20 } },
+  });
+  const settings = {
+    active: { name: 'x', baseUrl: 'https://api.openai.com/v1', apiKey: 'k', model: 'gpt-4o' },
+    settings: { mode: 'act', modelRouting: false, workspace: process.cwd() },
+  };
+  let corte = null;
+  await sub._runWithSystem('sys', settings, 'insiste con herramientas', null, noSignal(), (t, c) => {
+    corte = c || null;
+  });
+  eq(rondas, 3, 'dos llamadas aceptadas y la que choca con el cupo; ni una ronda más: ' + rondas);
+  eq(corte && corte.cortado, true, 'la vuelta se entrega CORTADA: ' + JSON.stringify(corte));
+  eq(corte && corte.motivo, 'limite', 'y con el motivo del cupo, no de Detener');
+});

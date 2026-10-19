@@ -251,8 +251,9 @@ function registerChatIpc(ipcMain, ctx) {
       return { name: a.name, kind, size: a.size || 0, ...(thumb ? { dataUrl: thumb } : {}) };
     });
     // Al reabrir el hilo —y en los turnos siguientes, que el agente se hidrata de aquí— el
-    // modelo ve la frase y la ficha, no el volcado: si necesita el contenido otra vez, que
-    // lo pida (el adjunto se reenvía entero en el turno en que se adjunta y solo en él).
+    // modelo ve la frase y la ficha, no el volcado: el adjunto se reenvía entero en el turno
+    // en que se adjunta y solo en él, así que un turno posterior («regenerar») no puede
+    // contar con ese contenido y la ficha se lo dice al usuario (vuelve a adjuntarlo).
     const guardado = [frase, fichaAdj].filter(Boolean).join('\n\n');
     c.messages.push({
       role: 'user',

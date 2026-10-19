@@ -144,12 +144,18 @@ function textOf(buf, name) {
     adjuntó: `blockFor` lo mete en el mensaje en curso, pero guardarlo dejaba cada
     conversación con cientos de miles de caracteres que se releen enteros al arrancar y se
     reescriben en cada turno. La ficha conserva lo que el usuario ve en la tarjeta (nombre,
-    tipo y tamaño) y le dice al modelo que ahí hubo un archivo. */
+    tipo y tamaño) y le dice al modelo que ahí hubo un archivo, sin prometer un contenido
+    que ya no está ni una ruta que el modelo pueda leer. */
 function cardFor(att) {
   const a = att || {};
   const size = a.size ? Math.round(a.size / 1024) + ' KB' : 'n/a';
   const kind = a.kind === 'image' ? 'imagen' : a.kind === 'binary' ? 'binario' : 'texto';
-  const nota = a.kind === 'image' ? 'miniatura guardada en la conversación' : 'contenido no conservado en el historial';
+  // El texto no se guarda y la ficha no lleva ruta: decir «que lo pida» le hacía creer al
+  // modelo (y al usuario) que podía recuperarlo, pero «Regenerar» reenvía solo esta ficha.
+  const nota =
+    a.kind === 'image'
+      ? 'miniatura guardada en la conversación'
+      : 'contenido no conservado en el historial: vuelve a adjuntarlo si hace falta';
   return `--- ARCHIVO ADJUNTO: ${a.name} (${size}, ${kind}) --- (${nota})`;
 }
 

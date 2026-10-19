@@ -537,7 +537,7 @@ test('checkpoints: si el borrado del disco falla, remove() no puede decir ok', (
   ok(!fsMod.existsSync(path.join(carpeta, 'run.json')), 'y la tarea desaparece de verdad:');
 });
 
-test('tasks: una interrumpida cuyo backoff vence se reintenta sin reiniciar la app', () => {
+test('tasks: una interrumpida de una TAREA cuyo backoff vence se reintenta sin reiniciar la app', () => {
   /* `autoResume()` corría una sola vez al arrancar (`main.js`): si el reloj de espera
      (`nextAttemptAt`, 60 s · 2^n, hasta 64 min) no había vencido al abrir la app, la
      tarea se quedaba interrumpida toda la sesión. Ahora `_tick` (cada 20 s) también la
@@ -545,7 +545,7 @@ test('tasks: una interrumpida cuyo backoff vence se reintenta sin reiniciar la a
   const { TaskManager } = require('../agent/tasks');
   const dir = tmpDir('sagi-tareas-backoff-');
   checkpoints.__test._resetForTests(dir);
-  const run = checkpoints.newRun({ goal: 'seguir con lo pendiente', status: 'interrupted' });
+  const run = checkpoints.newRun({ goal: 'seguir con lo pendiente', status: 'interrupted', origin: 'background' });
   run.nextAttemptAt = new Date(Date.now() - 1000).toISOString(); // el backoff ya venció
   checkpoints.save(run);
   const tm = new TaskManager({
@@ -559,6 +559,51 @@ test('tasks: una interrumpida cuyo backoff vence se reintenta sin reiniciar la a
   const despues = checkpoints.read(run.runId);
   ok(Number(despues.attempts) >= 1, 'la tarea se reintenta sin reiniciar la app: ' + JSON.stringify({ attempts: despues.attempts, status: despues.status }));
   ok(Date.parse(despues.nextAttemptAt) > Date.now(), 'y el backoff se reprograma: ' + despues.nextAttemptAt);
+});
+
+test('tasks: un turno de CHAT interrumpido NO se reintenta solo aunque venza su backoff', () => {
+  /* El turno que dijo «me he detenido… dime si lo retomo» también es un run (origin
+     'chat') interrumpido por guardarraíl o tope de llamadas. Con `autoResume()` en el
+     tick se re-encolaba solo en background sin que el usuario lo pidiera y sin pasar
+     por `isRunBusy`; ahora espera a que el usuario decida. */
+  const { TaskManager } = require('../agent/tasks');
+  const dir = tmpDir('sagi-tareas-chat-backoff-');
+  checkpoints.__test._resetForTests(dir);
+  const run = checkpoints.newRun({ goal: 'me he detenido; dime si lo retomo', status: 'interrupted' }); // origin 'chat'
+  run.nextAttemptAt = new Date(Date.now() - 1000).toISOString();
+  checkpoints.save(run);
+  const tm = new TaskManager({
+    getSettings: () => ({ active: { baseUrl: 'https://api.x/v1', model: 'm' }, settings: {} }),
+    agentFactory: () => ({ chat: async () => {} }),
+    emit: () => {},
+    notify: () => {},
+  });
+  tm._tick();
+  tm.dispose();
+  const despues = checkpoints.read(run.runId);
+  eq(despues.status, 'interrupted', 'el turno de chat sigue interrumpido (lo decide el usuario):');
+  eq(Number(despues.attempts) || 0, 0, 'y no consume reintentos automáticos:');
+});
+
+test('tasks: _start no arranca un run que el chat sigue ejecutando (isRunBusy)', async () => {
+  /* main.js inyecta isRunBusy justo para que no haya dos agentes sobre el mismo runId,
+     pero solo lo miraba resume(); el arranque desde la cola (_pump → _start) no. */
+  const { TaskManager } = require('../agent/tasks');
+  const dir = tmpDir('sagi-tareas-ocupado-');
+  checkpoints.__test._resetForTests(dir);
+  let arrancado = false;
+  const tm = new TaskManager({
+    getSettings: () => ({ active: { baseUrl: 'https://api.x/v1', model: 'm' }, settings: {} }),
+    agentFactory: () => ({ chat: async () => { arrancado = true; } }),
+    emit: () => {},
+    notify: () => {},
+    isRunBusy: () => true,
+  });
+  const r = tm.enqueue({ goal: 'revisa lo pendiente' });
+  await new Promise((res) => setTimeout(res, 20));
+  tm.dispose();
+  eq(arrancado, false, 'no se lanza el segundo agente sobre un run vivo:');
+  eq(checkpoints.read(r.runId).status, 'pending', 'y la tarea espera en cola:');
 });
 
 /* ---------- el «Modo» de una tarea en background tiene que llegar al agente ----------
@@ -679,6 +724,44 @@ test('workspace:pick: el diálogo también propaga el fallo de guardado', async 
   eq(r.error, error);
 });
 
+test('workspace:set: tras un guardado fallido, el workspace EN MEMORIA vuelve al anterior', () => {
+  const { registerConvsIpc } = require('../main/ipc-convs');
+  const dir = tmpDir('sagi-ws-mem-');
+  const previo = tmpDir('sagi-ws-memprevio-');
+  const destino = tmpDir('sagi-ws-memdestino-');
+  // config vivo (main usa un único objeto): si el handler se queda el valor nuevo, aquí se ve.
+  const config = { settings: { workspace: previo } };
+  const handlers = new Map();
+  registerConvsIpc(
+    { handle: (c, fn) => handlers.set(c, fn) },
+    { ...ctxConv(dir, []), config: () => config, saveConfig: () => ({ ok: false, error: 'EPERM' }) },
+  );
+  const r = handlers.get('workspace:set')(null, destino);
+  eq(r.ok, false);
+  eq(config.settings.workspace, previo, 'no puede quedarse en memoria la carpeta que no se guardó');
+});
+
+test('workspace:pick: tras un guardado fallido, el workspace EN MEMORIA vuelve al anterior', async () => {
+  const { registerConvsIpc } = require('../main/ipc-convs');
+  const dir = tmpDir('sagi-pick-mem-');
+  const previo = tmpDir('sagi-pick-memprevio-');
+  const destino = tmpDir('sagi-pick-memdestino-');
+  const config = { settings: { workspace: previo } };
+  const handlers = new Map();
+  registerConvsIpc(
+    { handle: (c, fn) => handlers.set(c, fn) },
+    {
+      ...ctxConv(dir, []),
+      config: () => config,
+      saveConfig: () => ({ ok: false, error: 'EROFS' }),
+      dialog: { showOpenDialog: async () => ({ canceled: false, filePaths: [destino] }) },
+    },
+  );
+  const r = await handlers.get('workspace:pick')();
+  eq(r.ok, false);
+  eq(config.settings.workspace, previo, 'elegir carpeta con guardado fallido tampoco cambia la memoria');
+});
+
 test('mode:set: un guardado que falla se propaga; con disco sano sigue devolviendo el modo', () => {
   const { registerModoIpc } = require('../main/ipc-modo');
   const os = require('os');
@@ -742,4 +825,34 @@ test('shell:openPath: un guardado que falla devuelve ok:false en vez de dar la c
   eq(ok2.ok, true, 'con disco sano sigue abriendo y fijando la carpeta');
   eq(ok2.path, destino, 'y devuelve la misma ruta de antes');
   ok('workspace' in ok2, 'sin perder el campo workspace que ya devolvía');
+});
+
+test('shell:openPath: tras un guardado fallido, el workspace EN MEMORIA vuelve al anterior', async () => {
+  const { registerMiscIpc } = require('../main/ipc-misc');
+  const os = require('os');
+  const datos = tmpDir('sagi-open-mem-datos-');
+  const previo = tmpDir('sagi-open-mem-previo-');
+  const destino = tmpDir('sagi-open-mem-destino-');
+  const config = { settings: { workspace: previo } };
+  const handlers = new Map();
+  registerMiscIpc(
+    { handle: (c, fn) => handlers.set(c, fn), on: () => {} },
+    {
+      config: () => config,
+      saveConfig: () => ({ ok: false, error: 'ENOSPC' }),
+      getWin: () => null,
+      getWorkspace: () => config.settings.workspace || '',
+      configDir: () => datos,
+      getGlow: () => {},
+      app: { getPath: () => os.tmpdir(), quit: () => {}, minimize: () => {}, maximize: () => {} },
+      shell: { openPath: async () => '', openExternal: () => {} },
+      dialog: {},
+      fsp: fs.promises,
+      fs,
+      path,
+    },
+  );
+  const r = await handlers.get('shell:openPath')(null, destino);
+  eq(r.ok, false);
+  eq(config.settings.workspace, previo, 'abrir con guardado fallido no puede cambiar la memoria');
 });

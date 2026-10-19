@@ -343,10 +343,12 @@ function add({ text, source = 'user', origen, importance = 0.5, confidence = 0.8
         return !!otra && otra.pred === clave.pred;
       });
   }
-  /* Sin clave reconocible no hay valor con el que decidir: solo es el mismo dato si el
-     texto coincide salvo mayúsculas, acentos o espacios de más (misma huella). El parecido
-     léxico a secas fusionaba «usa siempre pnpm» con «usa siempre npm» y dejaba uno solo. */
-  if (i < 0) i = list0.findIndex((m) => !m.papelera && m.hash === v2.hashTexto(t));
+  /* Sin clave reconocible no hay valor con el que decidir, así que decide `mismoHecho`
+     por VALOR: huella igual o el dato que solo un lado declara («El usuario se llama
+     Darío» / «Recuerda que me llamo Dario»). Comparar solo la huella dejaba vivos esos
+     dos; comparar el parecido léxico fusionaba «usa siempre pnpm» con «usa siempre npm»
+     y dejaba uno solo. */
+  if (i < 0) i = list0.findIndex((m) => !m.papelera && v2.mismoHecho(m.text, t));
   const creado = () => v2.normalizarHecho({ text: t, origen, source, importance, confidence, etiquetas, origenTexto });
   if (i >= 0) {
     const antes = { ...list0[i] };

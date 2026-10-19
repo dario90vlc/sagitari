@@ -168,12 +168,18 @@ function registerConvsIpc(ipcMain, ctx) {
       const real = v.real;
       if (!fs.existsSync(real)) fs.mkdirSync(real, { recursive: true });
       if (!fs.statSync(real).isDirectory()) return { ok: false, error: 'La ruta no es una carpeta' };
+      const previo = cfg().settings.workspace;
       cfg().settings.workspace = real;
       // El disco puede fallar (datos en solo lectura, disco lleno, fichero bloqueado) y
       // saveConfig devuelve {ok:false}: hay que reenviarlo o la interfaz da por bueno un
       // cambio que se pierde al reiniciar y el agente trabaja en otra carpeta de la que dice.
       const saved = saveConfig();
-      if (!saved.ok) return { ok: false, error: saved.error };
+      if (!saved.ok) {
+        // Y la memoria vuelve al valor anterior: si se queda el nuevo, la interfaz dice
+        // «no se pudo» y sigue enseñando la carpeta vieja, pero el agente escribe en la nueva.
+        cfg().settings.workspace = previo;
+        return { ok: false, error: saved.error };
+      }
       return { ok: true, path: real };
     } catch (err) {
       return { ok: false, error: err.message };
@@ -190,12 +196,18 @@ function registerConvsIpc(ipcMain, ctx) {
       if (!v.ok) return v;
       const real = v.real;
       if (!fs.statSync(real).isDirectory()) return { ok: false, error: 'La ruta no es una carpeta' };
+      const previo = cfg().settings.workspace;
       cfg().settings.workspace = real;
       // El disco puede fallar (datos en solo lectura, disco lleno, fichero bloqueado) y
       // saveConfig devuelve {ok:false}: hay que reenviarlo o la interfaz da por bueno un
       // cambio que se pierde al reiniciar y el agente trabaja en otra carpeta de la que dice.
       const saved = saveConfig();
-      if (!saved.ok) return { ok: false, error: saved.error };
+      if (!saved.ok) {
+        // Y la memoria vuelve al valor anterior: si se queda el nuevo, la interfaz dice
+        // «no se pudo» y sigue enseñando la carpeta vieja, pero el agente escribe en la nueva.
+        cfg().settings.workspace = previo;
+        return { ok: false, error: saved.error };
+      }
       return { ok: true, path: real };
     } catch (err) {
       return { ok: false, error: err.message };

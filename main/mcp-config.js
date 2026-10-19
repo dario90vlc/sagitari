@@ -182,12 +182,26 @@ function paramsDe(s) {
     });
 }
 
+/** La URL sin credenciales (userinfo y valores de parámetros secretos), sin fragmento:
+    dos URLs que coinciden aquí apuntan al MISMO destino. */
+function destinoDe(url) {
+  const s = String(url == null ? '' : url);
+  const iHash = s.indexOf('#');
+  return (iHash < 0 ? s : s.slice(0, iHash))
+    .replace(/^([a-z][a-z0-9+.-]*:\/\/)[^/?#]*@/i, '$1')
+    .replace(/([?&])([^=&#?]+)=([^&#]*)/g, (todo, sep, nombre) => (esNombreCredencial(nombre) ? sep + nombre + '=' : todo));
+}
+
 /** Conserva las credenciales guardadas cuando el formulario reenvía la URL enmascarada
     (el usuario pidió verla, no que su token se sustituyera por la máscara). */
 function mergeUrl(guardada, nueva) {
   const n = String(nueva == null ? '' : nueva);
   if (!n || !n.includes(MASCARA_URL)) return n;
   const g = String(guardada == null ? '' : guardada);
+  /* Solo se restaura si el destino es el mismo: con el host (o la ruta) cambiado, la
+     credencial guardada viajaría a otro servidor. Sin reinjectar, la máscara se guarda
+     tal cual y el usuario tendrá que escribir la credencial nueva. */
+  if (destinoDe(n) !== destinoDe(g)) return n;
   const mg = n.match(/^([a-z][a-z0-9+.-]*:\/\/)([^/?#]*@)(.*)$/i);
   const gg = g.match(/^([a-z][a-z0-9+.-]*:\/\/)([^/?#]*@)(.*)$/i);
   let out = n;

@@ -1461,7 +1461,16 @@ class Agent {
               );
               return;
             }
-            break; // subagente: corta y entrega lo que tenga
+            if (p.onFinal) {
+              /* v5.0.2: un subagente/compañero cortado por cupo ENTREGA la vuelta aquí.
+                 Antes sólo rompía el `for` de llamadas y el `continue` pedía otra ronda
+                 al modelo —que ya rechaza todo por cupo— hasta agotar maxSteps: rondas y
+                 tokens de más para el mismo corte. */
+              const lastAssistant = [...messages].reverse().find((m) => m.role === 'assistant' && m.content);
+              p.onFinal(lastAssistant ? String(lastAssistant.content) : '', { cortado: true, motivo: 'limite' });
+              return;
+            }
+            break; // orquestador: el cupo cierra el turno (ver arriba)
           }
           if (r.action === 'loop') {
             const reason = `Bucle detectado (${r.pattern}): la misma acción se repite sin avanzar. Ejecución detenida para proteger el sistema.`;
@@ -2277,6 +2286,17 @@ class Agent {
     return n;
   }
 
+  /** v5.0.2: trabajo escrito por un delegado SIN árbol aislado. Sin árbol escribe
+      DIRECTAMENTE en el espacio del usuario y sus pre-imágenes quedan con el owner del
+      líder; `_writes` se quedaba en 0 y `_needsReview` cortaba antes de mirar el diff.
+      Se cuentan solo los archivos nuevos respecto a la foto tomada antes de su vuelta. */
+  _contarEscriturasSinArbol(ws, tocadosAntes) {
+    if (!tocadosAntes) return 0;
+    const nuevos = cambios.archivosTocados(ws, this.ownerCambios()).filter((f) => !tocadosAntes.has(f));
+    if (!nuevos.length) return 0;
+    return this._contarFusion({ ok: true, archivos: nuevos });
+  }
+
   /**
    * v1.4: delega una subtarea en un subagente especializado. El subagente es
    * otro Agent con system prompt, herramientas y presupuesto propios; corre su
@@ -2382,6 +2402,10 @@ class Agent {
        `.git/worktrees/arbol-*` y en `%TEMP%`. El `finally` de abajo lo garantiza. */
     let arbolDescartado = false;
     let fusion = null; // se usa después del finally (nota de fusión en la respuesta)
+    /* v5.0.2: sin árbol el delegado escribe en el espacio del usuario y las pre-imágenes
+       se registran con el owner del líder. Se fotografía lo que el turno ya había tocado
+       para contar después SOLO lo suyo (ver `_contarEscriturasSinArbol`). */
+    const tocadosAntesDelSub = arbol ? null : new Set(cambios.archivosTocados(ws, this.ownerCambios()));
     try {
       try {
         await sub._runWithSystem(
@@ -2482,6 +2506,9 @@ class Agent {
             type: 'status',
             text: `No pude fusionar el árbol de ${spec.name}: ${fusion.conflicto}${descarte && descarte.conservadoEn ? ` (puedes mirarlo en ${descarte.conservadoEn})` : ''}`,
           });
+      } else {
+        // sin árbol tampoco hay fusión: lo escrito ya está en el proyecto y se cuenta aquí
+        this._contarEscriturasSinArbol(ws, tocadosAntesDelSub);
       }
     } finally {
       // red de seguridad: si algo lanzó antes del desmonte, el árbol no se queda colgado
@@ -2801,6 +2828,9 @@ class Agent {
     }
     const settingsTrabajo = arbol ? { ...settings, settings: { ...(settings.settings || {}), workspace: arbol.wsDir } } : settings;
     const ws = arbol ? arbol.wsDir : wsBase;
+    /* v5.0.2: sin árbol el compañero escribe en el espacio del usuario con las
+       pre-imágenes del líder; se cuenta lo nuevo al terminar (igual que en `_delegate`). */
+    const tocadosAntesDelMiembro = arbol ? null : new Set(cambios.archivosTocados(wsBase, this.ownerCambios()));
     let skillsIndex = '';
     let suggested = [];
     try {
@@ -2908,6 +2938,9 @@ class Agent {
           miembro,
           `No pude fusionar el árbol de ${spec.name}: ${fusion.conflicto}${descarte && descarte.conservadoEn ? ` (puedes mirarlo en ${descarte.conservadoEn})` : ''}`,
         );
+    } else {
+      // sin árbol no hay fusión: su trabajo ya está en el proyecto y las puertas lo ven
+      this._contarEscriturasSinArbol(wsBase, tocadosAntesDelMiembro);
     }
     if (signal.aborted) {
       return {
