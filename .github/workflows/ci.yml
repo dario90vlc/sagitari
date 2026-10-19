@@ -85,9 +85,21 @@ jobs:
 
       - name: Unit tests (renderer, jsdom)
         # `npm test` no carga test/renderer/*: sin este paso, la suite de la interfaz
-        # (744 pruebas) no la corría ningún automatismo, aunque las notas de la release
+        # (840 pruebas) no la corría ningún automatismo, aunque las notas de la release
         # y el README publican que las dos suites están verdes.
-        run: npm run test:renderer
+        # Y si falla, que lo CUENTE: sin esto el log del runner no se puede leer desde
+        # fuera y el fallo solo dice «la suite falló». Cada línea del final va como
+        # anotación (la primera decena se ve en la pestaña Actions).
+        run: |
+          npm run test:renderer 2>&1 | Tee-Object -FilePath renderer-output.log
+          if ($LASTEXITCODE -ne 0) {
+            $lineas = Get-Content renderer-output.log -Tail 25
+            foreach ($l in $lineas) {
+              $t = $l -replace '%','%25' -replace "`r",'%0D' -replace "`n",'%0A'
+              Write-Output "::error::$t"
+            }
+            exit $LASTEXITCODE
+          }
 
       - name: Smoke test (la app arranca de verdad)
         run: npm run smoke
