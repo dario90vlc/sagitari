@@ -582,16 +582,29 @@ const AFTER = {
      esté muerto (le pasó al menú de modelos: se abría y no respondía). Eso sólo se
      detecta con un clic físico en una ventana visible: ver el comentario de
      `.side` en styles.css. */
+  /* Pulsa con el ratón de verdad. Antes calculaba el centro y disparaba a ciegas: en
+     un runner cargado el elemento podía estar tapado o fuera de la vista y el clic caía
+     en otra capa (en la lista de un .csel eso la cierra como «clic fuera» y el valor no
+     cambia — el fallo intermitente que tumbó la release). Ahora se lleva a la vista, se
+     comprueba con elementFromPoint que el punto es el elemento (o algo dentro de él) y
+     se reintenta; si sigue tapado se avisa con quién lo tapa en vez de pulsar a ciegas. */
   const pulsarConRaton = async (selector) => {
-    const pos = await evaluate(
-      `(function(){ var e = document.querySelector(${JSON.stringify(selector)}); if (!e) return null; var r = e.getBoundingClientRect(); return JSON.stringify({ x: Math.round(r.left + r.width / 2), y: Math.round(r.top + r.height / 2) }); })()`,
-    );
-    if (!pos) return false;
-    const { x, y } = JSON.parse(pos);
-    await cmd('Input.dispatchMouseEvent', { type: 'mousePressed', x, y, button: 'left', clickCount: 1 });
-    await cmd('Input.dispatchMouseEvent', { type: 'mouseReleased', x, y, button: 'left', clickCount: 1 });
-    await new Promise((r) => setTimeout(r, 450));
-    return true;
+    for (let intento = 0; intento < 3; intento++) {
+      const pos = await evaluate(
+        `(function(){ var e = document.querySelector(${JSON.stringify(selector)}); if (!e) return null; e.scrollIntoView({ block: 'center', inline: 'center' }); var r = e.getBoundingClientRect(); var x = Math.round(r.left + r.width / 2), y = Math.round(r.top + r.height / 2); var hit = document.elementFromPoint(x, y); var tapado = ''; if (hit && !(hit === e || e.contains(hit))) { tapado = hit.tagName + (hit.className ? '.' + String(hit.className).split(' ')[0] : ''); } return JSON.stringify({ x: x, y: y, hit: !!hit && (hit === e || e.contains(hit)), tapado: tapado }); })()`,
+      );
+      if (!pos) return false;
+      const { x, y, hit, tapado } = JSON.parse(pos);
+      if (hit) {
+        await cmd('Input.dispatchMouseEvent', { type: 'mousePressed', x, y, button: 'left', clickCount: 1 });
+        await cmd('Input.dispatchMouseEvent', { type: 'mouseReleased', x, y, button: 'left', clickCount: 1 });
+        await new Promise((r) => setTimeout(r, 450));
+        return true;
+      }
+      console.log('  aviso: ' + selector + ' no recibe el clic (' + (tapado ? 'lo tapa ' + tapado : 'fuera de la vista') + '), reintento ' + (intento + 1) + '/3');
+      await new Promise((r) => setTimeout(r, 150));
+    }
+    return false;
   };
   await pulsarConRaton('#sideStatusBtn');
   const menuAbierto = await evaluate('!document.querySelector("#modelMenu").hidden');
