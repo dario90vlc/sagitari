@@ -63,9 +63,9 @@ const P = {
   dots: '<circle cx="6" cy="12" r="1.4"/><circle cx="12" cy="12" r="1.4"/><circle cx="18" cy="12" r="1.4"/>',
   list: '<path d="M8.5 6h12M8.5 12h12M8.5 18h12"/><circle cx="3.6" cy="6" r="1.3"/><circle cx="3.6" cy="12" r="1.3"/><circle cx="3.6" cy="18" r="1.3"/>',
   panel: '<rect x="3" y="4" width="18" height="16" rx="2"/><path d="M9.5 4v16"/>',
-  /* documento + copia detrás: dos cuadros superpuestos era el MISMO dibujo que el
-     botón «restaurar» de la barra de título (se confundían). */
-  copy: '<path d="M9 3h7l4 4v9a2 2 0 0 1-2 2H9a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2z"/><path d="M16 3v4h4"/><path d="M7 8H5a2 2 0 0 0-2 2v8a2 2 0 0 0 2 2h8a2 2 0 0 0 2-2v-2"/>',
+  /* Hoja delante + hoja detrás (glifo estándar de copiar). Un intento anterior dibujó
+     dos documentos con el pliegue: se cruzaban y parecía roto. */
+  copy: '<rect x="9" y="9" width="12" height="12" rx="2"/><path d="M5 15V5a2 2 0 0 1 2-2h10"/>',
   refresh: '<path d="M20.5 12a8.5 8.5 0 1 1-2.6-6.1"/><path d="M20.5 4.5V11h-6.5"/>',
   arrowDown: '<path d="M12 4.5v14M6 12.5l6 6 6-6"/>',
   chevron: '<path d="m9.5 6 6 6-6 6"/>',
