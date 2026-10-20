@@ -1,4 +1,4 @@
-# SAGITARI 5.0.4
+# SAGITARI 5.1.0
 
 **De un vistazo:** Ajustes deja de ser paneles apretados dentro de un scroll y pasa a una sola columna con navegación lateral, una tarjeta por sección y descripciones legibles · el mismo lenguaje llega a Tareas, Espacio de trabajo, Agentes, Equipo, Skills, MCP, Memoria, Herramientas e Historial · las tarjetas de agente ya no aplastan su icono y la salud de los modelos se lee entera · 513 pruebas, 842 de interfaz y la comprobación de interfaz en verde. / **At a glance:** Settings stops being cramped panes inside a nested scroll and becomes one column with a side nav, one card per section and readable descriptions · the same language reaches Tasks, Workspace, Agents, Team, Skills, MCP, Memory, Tools and History · agent cards no longer crush their icon and model health reads whole · 513 tests, 842 interface tests and the interface check green.
 
