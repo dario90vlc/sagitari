@@ -6538,3 +6538,13 @@ kbd {
 .app.compact:not([data-view='chat']):not([data-view='agents']):not([data-view='equipo']) {
   grid-template-columns: 78px 1fr;
 }
+
+/* --- el menú de modelos no puede quedar bajo la vista ---
+   `.side` tiene backdrop-filter, así que crea su propio contexto de apilamiento:
+   con z-index auto se pintaba ANTES que el contenido y su popover (z-index 130
+   dentro de ese contexto) salía debajo de las vistas en compacto, que es cuando
+   el menú (236px) se sale de la barra. 80 deja la barra por encima de las vistas
+   y por debajo de toasts (90), menús de select (140) y barra de título (195). */
+.side {
+  z-index: 80;
+}
