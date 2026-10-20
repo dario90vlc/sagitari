@@ -1054,7 +1054,7 @@ body.nofocus .shell.glow-pulse .filo::after {
 /* compacto manda sobre el recorte del rail (0,3,0 por los dos :not): sin esta
    regla, en las vistas sin rail las columnas quedaban clavadas en 232px y el
    panel no se estrechaba aunque los iconos sí se centraban. */
-.app.compact:not([data-view='chat']):not([data-view='agents']) {
+.app.compact:not([data-view='chat']):not([data-view='agents']):not([data-view='equipo']) {
   grid-template-columns: 78px 1fr;
 }
 .app.compact .nav {
@@ -6529,4 +6529,12 @@ kbd {
 }
 .equipowrap .tooltray {
   margin-top: 0;
+}
+
+/* --- compacta también en las vistas sin rail ---
+   La regla `.app:not([data-view='chat']):not(...)` (0,4,0) de más arriba fijaba
+   232px y ganaba a `.app.compact` (0,2,0): la barra ocultaba las etiquetas pero no
+   se estrechaba. Esta regla (0,5,0) y al final del archivo gana en las dos cosas. */
+.app.compact:not([data-view='chat']):not([data-view='agents']):not([data-view='equipo']) {
+  grid-template-columns: 78px 1fr;
 }
