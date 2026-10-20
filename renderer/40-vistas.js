@@ -1966,9 +1966,9 @@ function applyTheme() {
   r.setProperty('--glow-a-rgb', ga.join(', '));
   r.setProperty('--glow-b-rgb', gb.join(', '));
   r.setProperty('--glow-c-rgb', gc.join(', '));
-  // Mismo defecto que el de fábrica (1) y que el que enseña el deslizador: antes el
-  // CSS arrancaba en 0.7 y la etiqueta decía «Equilibrado» con la fuerza a medias.
-  r.setProperty('--glow-str', String(Math.min(1.4, Math.max(0.4, Number(s.glowStrength) || 1))));
+  // Sin valor guardado, el glow viene SUAVE (0.7): que acaricie el marco, no que lo
+  // invada. El deslizador enseña ESTE mismo respaldo (fillSettings), no otro.
+  r.setProperty('--glow-str', String(Math.min(1.4, Math.max(0.4, Number(s.glowStrength) || 0.7))));
   r.setProperty('--glass', String(Math.min(1.3, Math.max(0.4, Number(s.glassTint) || 1))));
   // los fondos también son del tema: si no, el color cambia solo en los acentos
   for (const [token, valor] of Object.entries(rampaDeSuperficies(pal.acc))) r.setProperty(token, valor);

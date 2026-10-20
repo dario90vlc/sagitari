@@ -537,12 +537,20 @@ test('sidebar: grupos, contadores, pie y atajos coherentes con las vistas', () =
   });
   ok(!keys.includes('mcp'), 'MCP no tiene atajo: no puede estar en VIEW_HOTKEY');
   for (const v of keys) ok(html.includes('id="view-' + v + '"'), 'atajo sin sección: ' + v);
-  // compacto: debe estrechar en TODAS las vistas. La regla del recorte del rail
-  // (0,3,0 por los dos :not) ganaba a .app.compact (0,2,0) y el panel no se
-  // estrechaba aunque los iconos sí se centraban.
+  // compacto: debe estrechar en TODAS las vistas sin rail. La regla del recorte del
+  // rail (0,4,0 con sus tres :not) ganaba a .app.compact (0,2,0) y el panel no se
+  // estrechaba aunque los iconos sí se centraban. La regla compacta tiene que cubrir
+  // EXACTAMENTE el mismo conjunto de vistas que el recorte (chat, agentes y equipo
+  // conservan su rail lateral).
   const css = fs.readFileSync(path.join(__dirname, '..', 'renderer', 'styles.css'), 'utf8');
   ok(
-    /\.app\.compact:not\(\[data-view=["']chat["']\]\):not\(\[data-view=["']agents["']\]\)\s*\{\s*grid-template-columns:\s*78px 1fr/.test(
+    /\.app:not\(\[data-view=["']chat["']\]\):not\(\[data-view=["']agents["']\]\):not\(\[data-view=["']equipo["']\]\)\s*\{\s*grid-template-columns:\s*232px 1fr/.test(
+      css,
+    ),
+    'la regla del recorte del rail excluye chat, agentes y equipo',
+  );
+  ok(
+    /\.app\.compact:not\(\[data-view=["']chat["']\]\):not\(\[data-view=["']agents["']\]\):not\(\[data-view=["']equipo["']\]\)\s*\{\s*grid-template-columns:\s*78px 1fr/.test(
       css,
     ),
     'el compacto debe mandar sobre el recorte del rail en las vistas sin rail',
@@ -634,13 +642,17 @@ test('ui-check espera a que la instancia de prueba muera antes de salir', () => 
 test('apariencia: el CSS tematiza por triplets RGB y el glow escala con intensidad', () => {
   const css = fs.readFileSync(path.join(__dirname, '..', 'renderer', 'styles.css'), 'utf8');
   for (const v of ['--acc-rgb', '--acc2-rgb', '--acc3-rgb', '--glow-rgb', '--glow-str']) ok(css.includes(v + ':'), 'debe declarar ' + v);
-  /* El espectro tiene tres tonos (--glow-a/b/c-rgb) y todos escalan con la intensidad del
-     ajuste. Se comprueba ese contrato y no una regla concreta: el recorrido del filo y el
-     pulso son quienes lo consumen, y si dejara de multiplicarse, la preferencia del
-     usuario no se notaría en la luz. */
+  /* La luz escala con la intensidad del ajuste. El contrato es del FILO —el pulso ya no
+     barre la ventana, así que los tonos a/b/c quedan como paleta del vidrio—: si el nivel
+     de los filos dejara de multiplicar por --glow-str, la preferencia del usuario no se
+     notaría en la luz. Se comprueba el contrato, no una regla suelta. */
   ok(
-    /rgba\(var\(--glow-[abc]-rgb\), calc\([^)]*var\(--glow-str[^)]*\)/.test(css),
-    'las capas del espectro deben multiplicar por --glow-str',
+    /opacity: calc\(var\(--rim[^)]*\) \* var\(--glow-str/.test(css),
+    'el nivel de los filos debe multiplicar por --glow-str',
+  );
+  ok(
+    /rgba\(var\(--rim-rgb\), calc\(0\.95 \* var\(--glow-str, 1\)\)\)/.test(css),
+    'el recorrido del filo también escala con la intensidad',
   );
   ok(/--ambient/.test(css), 'la atmósfera del fondo también debe seguir al estado');
   ok(
@@ -736,10 +748,13 @@ test('apariencia: Ajustes expone color de UI, color de glow e intensidad', () =>
   );
   ok(/auroraGlow \? AURORA_GLOW\.a/.test(app), 'applyTheme vuelca el espectro aurora en el glow');
   const cssAurora = fs.readFileSync(path.join(__dirname, '..', 'renderer', 'styles.css'), 'utf8');
+  // El pulso enciende TODOS los filos a la vez con el mismo dibujo que laterales e
+  // inferior: sin veta que cruce la parte superior (el barrido se retiró a petición).
   ok(
-    /\.shell\.glow-pulse[\s\S]{0,400}?--glow-a-rgb/.test(cssAurora),
-    'el recorrido del pulso tiene que llevar el espectro (los tres tonos a la vez)',
+    /\.shell\.glow-pulse\s*\{\s*--ambient: 1;[\s\S]{0,220}?--live-rail: 1;/.test(cssAurora),
+    'el pulso enciende todos los filos a la vez',
   );
+  ok(!/\.shell\.glow-pulse[^{]*::after/.test(cssAurora), 'el pulso no barre la parte superior: la luz es el filo');
   ok(!/\.shell\.glow-aurora/.test(cssAurora), 'la capa del aura aurora ya no existe: el filo es la luz');
   // tricolor real: los 3 tonos nacen a ±42º del elegido (no vecinos), para que
   // se distingan a la vez en vez de fundirse en un solo color
@@ -765,9 +780,10 @@ test('apariencia: main guarda preferencias y emite theme:changed', () => {
 });
 
 test('apariencia: el tinte de vidrio repinta sin encender el glow', () => {
-  // El acuse del marco (glow('pulse')) solo tiene sentido cuando cambia LA LUZ.
-  // Mover el slider del vidrio tiñe los paneles (theme:changed lo repinta), pero
-  // antes destellaba el aura en cada guardado: ajustar el tinte «encendía» el glow.
+  // El acuse del marco (glow('pulse')) enciende el filo entero —el mismo de laterales e
+  // inferior— porque cambió LA LUZ. El vidrio tiñe los paneles (theme:changed lo repinta)
+  // y no debe encender el marco. La veta que cruzaba la parte superior ya no existe: el
+  // pulso es luz de filo, no barrido.
   const cfgmod = require(path.join(__dirname, '..', 'main', 'ipc-config'));
   const handlers = {};
   const fakeIpc = {
@@ -795,7 +811,7 @@ test('apariencia: el tinte de vidrio repinta sin encender el glow', () => {
   handlers['settings:set'](null, { glassTint: 1.1 });
   ok(pulsos.filter((m) => m === 'pulse').length === 0, 'ningún tinte, ninguna Excusa: el marco no cambia');
   handlers['settings:set'](null, { glowStrength: 0.7 });
-  ok(pulsos.filter((m) => m === 'pulse').length === 1, 'cambiar la intensidad de la luz sí debe acusar con un pulso');
+  ok(pulsos.filter((m) => m === 'pulse').length === 1, 'cambiar la intensidad enciende el marco (sin barrido)');
   handlers['settings:set'](null, { uiColor: 'ice' });
   ok(pulsos.filter((m) => m === 'pulse').length === 2, 'cambiar el color de interfaz también acusa');
   ok(cfgObj.settings.glassTint === 1.1, 'el tinte se guarda igual (solo cambia el acuse)');

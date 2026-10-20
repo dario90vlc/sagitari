@@ -47,7 +47,7 @@ async function fillSettings() {
       : PALETTES[CFG.settings.glowColor]
         ? CFG.settings.glowColor
         : 'match';
-  $('#glowStrength').value = String(Math.min(1.4, Math.max(0.4, Number(CFG.settings.glowStrength) || 1)));
+  $('#glowStrength').value = String(Math.min(1.4, Math.max(0.4, Number(CFG.settings.glowStrength) || 0.7)));
   $('#glassTint').value = String(Math.min(1.3, Math.max(0.4, Number(CFG.settings.glassTint) || 1)));
   pintarFill($('#glowStrength'));
   pintarFill($('#glassTint'));

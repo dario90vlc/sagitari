@@ -300,9 +300,10 @@ function registerConfigIpc(ipcMain, ctx) {
             glassTint: config.settings.glassTint,
           });
       } catch {}
-      /* El pulso es acuse de la LUZ del marco: solo si cambia algo de la luz.
-         glassTint tiñe los paneles — se repinta con theme:changed (arriba), pero
-         el marco no debe destellar en cada movimiento del slider del vidrio. */
+      /* Acuse de la LUZ: el pulso ya no barre la ventana (se retiró la veta); enciende
+         el marco entero con el mismo filo que laterales e inferior. Mover el slider
+         mantiene el marco encendido y se apaga 1,4 s después del último cambio. El
+         vidrio no acusa: tiñe paneles y el marco no tiene por qué destellar. */
       if (('uiColor' in clean || 'glowColor' in clean || 'glowStrength' in clean) && config.settings.glowEnabled && !isHidden())
         glow('pulse');
     }

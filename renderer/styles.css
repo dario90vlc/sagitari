@@ -266,7 +266,7 @@ strong {
    Ajustes, así que la paleta sigue mandando sin que ningún estado la pise. */
 .shell {
   --ambient: 0.26; /* atmósfera interior del lienzo: sombra propia del marco */
-  --live-window: 0; /* la hairline de la ventana: sólo con trabajo en marcha */
+  --live-window: 0.16; /* el filo de la ventana respira igual que el panel lateral */
   --live-side: 0.16; /* panel lateral (y con él su puerta activa) */
   --live-com: 0.22; /* compositor */
   --live-rail: 0.1; /* tarjetas del rail */
@@ -415,8 +415,7 @@ strong {
 }
 /* geometría: el reflejo corre pegado al filo que le toca a cada superficie */
 .shell.glow-work .composer > .filo::after,
-.shell .tcard.run::after,
-.shell.glow-pulse > .filo.filo-ventana::after {
+.shell .tcard.run::after {
   top: 0;
   left: 0;
   width: 100%;
@@ -485,22 +484,9 @@ strong {
 .shell .tcard.run::after {
   animation: recorre-derecha 0.38s cubic-bezier(0.33, 0, 0.2, 1) both;
 }
-/* acuse de recibo (Ctrl+Shift+G): una veta del espectro cruza la ventana entera mientras
-   todos los filos se encienden — es lo que significa «te he oído», y pasa una sola vez */
-.shell.glow-pulse > .filo.filo-ventana::after {
-  animation: recorre-derecha 0.95s cubic-bezier(0.25, 0.7, 0.3, 1) both;
-  background: linear-gradient(
-    90deg,
-    transparent 0%,
-    transparent 50%,
-    rgba(var(--glow-a-rgb), calc(0.7 * var(--glow-str, 1))) 80%,
-    rgba(var(--glow-rgb), calc(1 * var(--glow-str, 1))) 93%,
-    rgba(var(--glow-c-rgb), calc(0.6 * var(--glow-str, 1))) 98%,
-    transparent 100%
-  );
-  -webkit-mask-image: linear-gradient(to bottom, #000 0%, transparent 100%);
-  mask-image: linear-gradient(to bottom, #000 0%, transparent 100%);
-}
+/* acuse de recibo (Ctrl+Shift+G): todos los filos se encienden a la vez, con el MISMO
+   dibujo que los laterales y el inferior — es lo que significa «te he oído». Sin barrido:
+   la luz del marco es el filo, no una veta que lo cruce. */
 /* ventana en segundo plano: sin luz. No es sólo ahorro de CPU —una interfaz que sigue
    encendida cuando no la miras deja de ser una señal—: los niveles bajan a cero y con
    ellos el compositor deja de dibujar los filos. 20-app.js pone/quita .nofocus en <body>
@@ -529,12 +515,9 @@ body.nofocus .shell .rcard::after,
 body.nofocus .shell .tcard::after {
   animation: none !important;
 }
-body.nofocus .shell.glow-pulse .filo::after {
-  animation: recorre-derecha 0.95s cubic-bezier(0.25, 0.7, 0.3, 1) both !important;
-}
 /* Aurora: el tema trae su propio espectro (azul→rosa→naranja) volcado en --glow-a/b/c-rgb
    y su tono de glow en --glow-rgb, así que los filos, que leen --live-rgb, ya son suyos
-   sin una sola regla propia; el espectro asoma entero en la veta del pulso. */
+   sin una sola regla propia. */
 
 /* sin padding en el grid: cada columna llega hasta la esquina superior (fondo
    continuo) y se separa del titlebar con su PROPIO padding superior interno */
