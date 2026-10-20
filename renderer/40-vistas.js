@@ -1517,7 +1517,24 @@ function cselAbrir(sel) {
     const arr = sinVista ? top : Math.max(8, Math.min(top, vh - 12));
     if (Number.isFinite(izq)) menu.style.left = Math.round(izq) + 'px';
     if (Number.isFinite(arr)) menu.style.top = Math.round(arr) + 'px';
-    menu.dataset.anchor = JSON.stringify({ vw, vh, x: Math.round(r.left), y: Math.round(r.top), w: Math.round(r.width), l: menu.style.left, t: menu.style.top });
+    const cs = getComputedStyle(menu);
+    menu.dataset.anchor = JSON.stringify({
+      vw,
+      vh,
+      x: Math.round(r.left),
+      y: Math.round(r.top),
+      w: Math.round(r.width),
+      l: menu.style.left,
+      t: menu.style.top,
+      pos: cs.position,
+      cl: cs.left,
+      ct: cs.top,
+      anim: cs.animationName,
+      op: cs.opacity,
+      tf: cs.transform,
+      n: document.querySelectorAll('.csel[data-csel-de="' + (sel.id || '') + '"]').length,
+      inDoc: document.body.contains(menu),
+    });
     const ya = menu.querySelector('.sm-item.on');
     if (ya) ya.scrollIntoView({ block: 'nearest' });
   };
