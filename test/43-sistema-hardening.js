@@ -856,3 +856,35 @@ test('shell:openPath: tras un guardado fallido, el workspace EN MEMORIA vuelve a
   eq(r.ok, false);
   eq(config.settings.workspace, previo, 'abrir con guardado fallido no puede cambiar la memoria');
 });
+
+/* ---------- guardado atómico: bloqueos pasajeros de Windows ---------- */
+
+test('config: un EPERM pasajero al escribir se reintenta y no deja temporales', () => {
+  const cfg = require('../main/config');
+  const dir = tmpDir('sagi-config-atomic-');
+  const file = path.join(dir, 'config.json');
+  fs.writeFileSync(file, '{"a":1}');
+  const orig = fs.writeFileSync;
+  let intentos = 0;
+  fs.writeFileSync = function (destino, ...resto) {
+    if (String(destino).endsWith('.tmp') && ++intentos === 1) {
+      const e = new Error("EPERM: operation not permitted, open '" + destino + "'");
+      e.code = 'EPERM';
+      throw e;
+    }
+    return orig.call(fs, destino, ...resto);
+  };
+  try {
+    cfg.writeJsonAtomic(file, '{"b":2}');
+  } finally {
+    fs.writeFileSync = orig;
+  }
+  eq(intentos >= 2, true, 'el primer bloqueo pasajero se reintenta');
+  eq(fs.readFileSync(file, 'utf8'), '{"b":2}', 'el archivo bueno queda con el contenido nuevo');
+  eq(fs.readFileSync(file + '.bak', 'utf8'), '{"a":1}', 'el .bak conserva la versión anterior');
+  eq(
+    fs.readdirSync(dir).filter((f) => f.endsWith('.tmp')).length,
+    0,
+    'sin temporales sueltos junto a la configuración',
+  );
+});

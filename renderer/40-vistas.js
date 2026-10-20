@@ -297,7 +297,13 @@ async function setMode(m) {
         await window.sagitari.setMode(anterior);
       } catch {}
     }
-    showToast('No se pudo guardar el modo: ' + ((r && r.error) || 'no se pudo escribir la configuración'));
+    /* EPERM/EBUSY crudos no le dicen nada a nadie: el archivo está bloqueado un
+       instante (antivirus u otra instancia) y el guardado ya se reintenta solo. */
+    const crudo = String((r && r.error) || '');
+    const motivo = /EPERM|EACCES|EBUSY/.test(crudo)
+      ? 'el archivo está en uso un instante; inténtalo otra vez'
+      : crudo || 'no se pudo escribir la configuración';
+    showToast('No se pudo guardar el modo: ' + motivo);
     return;
   }
   mode = r;
