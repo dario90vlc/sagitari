@@ -1030,12 +1030,12 @@ const AFTER = {
     console.log('  FALLO no apareció el bloque de razonamiento (guion: ' + llm.guion.length + ' respuestas sin usar)');
   }
   /* v2.5: la cabecera es informativa de verdad. Plegado enseña un resumen de una línea (para
-     seguir el hilo sin abrir cada bloque) y abierto, la duración y cuántas líneas pensó. */
+     seguir el hilo sin abrir cada bloque) y abierto, cuántos pasos y la duración. */
   await judge(
     'el bloque trae el razonamiento, su resumen, su botón de copiar y queda plegado',
     '(function(){ const b = document.querySelector("#messages .msg.ai:last-child .thinkblock"); if (!b) return { bloque: false }; const cuerpo = b.querySelector(".think-body"); const meta = () => b.querySelector(".th-meta").textContent; const plegado = meta(); const head = b.querySelector(".think-head"); head.click(); const abierto = meta(); head.click(); const otraVez = meta(); const r = { marca: !!cuerpo && cuerpo.textContent.indexOf(' +
       JSON.stringify(MARCA_RAZON) +
-      ') >= 0, copiar: !!b.querySelector(".th-copy"), plegadoAlLlegar: !b.classList.contains("open"), resumen: plegado, abierto: abierto, vuelve: otraVez === plegado }; return (r.marca && r.copiar && r.plegadoAlLlegar && /[a-zA-Z]/.test(plegado) && !/^pensando/.test(plegado) && /^pensó .* · \\d+ línea/.test(abierto) && r.vuelve) ? true : r; })()',
+      ') >= 0, copiar: !!b.querySelector(".th-copy"), plegadoAlLlegar: !b.classList.contains("open"), resumen: plegado, abierto: abierto, vuelve: otraVez === plegado }; return (r.marca && r.copiar && r.plegadoAlLlegar && /[a-zA-Z]/.test(plegado) && !/^pensando/.test(plegado) && /^\\d+ paso(s)? · .+/.test(abierto) && r.vuelve) ? true : r; })()',
   );
   await judge(
     'el resumen plegado dice algo del razonamiento, no una etiqueta vacía',

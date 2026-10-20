@@ -4709,6 +4709,7 @@ depender del color de acento elegido. */
 .thinkblock .think-head b {
   font: 600 11px var(--font-ui);
   letter-spacing: 0.06em;
+  white-space: nowrap; /* «Razonamiento» nunca se parte en «Razonami/ento» */
 }
 /* la cabecera del razonamiento lleva ahora el tiempo y, plegada, un resumen de una línea:
    ocupa el hueco que sobra y se corta con puntos suspensivos si es largo */
@@ -6557,4 +6558,33 @@ select,
 [contenteditable='true'],
 [contenteditable='true'] * {
   user-select: text;
+}
+
+/* ===== razonamiento como pasos =====
+   El cuerpo del bloque deja de ser un muro de prosa: cada bloque (párrafo, lista,
+   código) es un paso con su carril a la izquierda, y el que está EN CURSO se lee más
+   fuerte. La información es la misma; se sigue la línea de pensamiento de un vistazo.
+   La marca de «pensando» late solo mientras piensa: un bloque terminado no parpadea. */
+.thinkblock .think-body {
+  font-size: 12.5px;
+  line-height: 1.62;
+}
+.thinkblock .think-body .md > * {
+  margin: 0 0 8px;
+  max-width: 68ch;
+  padding: 1px 0 1px 12px;
+  border-left: 2px solid rgba(var(--mode-rgb), 0.16);
+  transition:
+    border-color 0.2s,
+    color 0.2s;
+}
+.thinkblock .think-body .md > *:last-child {
+  margin-bottom: 0;
+}
+.thinkblock .think-body .md > .th-live {
+  color: var(--txt);
+  border-left-color: var(--mode-c);
+}
+.thinkblock.open:not(.th-vivo) .th-meta::after {
+  content: none;
 }

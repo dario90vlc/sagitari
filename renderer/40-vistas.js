@@ -297,12 +297,15 @@ async function setMode(m) {
         await window.sagitari.setMode(anterior);
       } catch {}
     }
-    /* EPERM/EBUSY crudos no le dicen nada a nadie: el archivo está bloqueado un
-       instante (antivirus u otra instancia) y el guardado ya se reintenta solo. */
+    /* El motivo CRUDO tiene que llegar al usuario (es lo que le dice si el archivo está
+       en solo lectura, sin permisos o en uso); cuando es un bloqueo pasajero de Windows
+       se le añade la causa en lenguaje llano delante, no se sustituye. */
     const crudo = String((r && r.error) || '');
-    const motivo = /EPERM|EACCES|EBUSY/.test(crudo)
-      ? 'el archivo está en uso un instante; inténtalo otra vez'
-      : crudo || 'no se pudo escribir la configuración';
+    const motivo = crudo
+      ? /EPERM|EACCES|EBUSY/.test(crudo)
+        ? 'el archivo está en uso o sin permisos — ' + crudo
+        : crudo
+      : 'no se pudo escribir la configuración';
     showToast('No se pudo guardar el modo: ' + motivo);
     return;
   }

@@ -1667,7 +1667,14 @@ test('renderer: el razonamiento va en su bloque, fuera de la respuesta', () => {
     /pintarRazonamiento\(d\)/.test(cierreRazon) && !/scheduleThinkRender\(d\)/.test(cierreRazon),
     'y el cierre se pinta sin depender de ningún frame',
   );
-  ok(/function pintarRazonamiento[\s\S]*?innerHTML = fmt\(t\._texto/.test(app), 'la pintura directa es la misma que usa el frame');
+  /* Un solo pintor para las dos rutas: la del goteo (por frame) y la del cierre
+     (síncrona). Antes el cierre decía «lo mismo que el frame» porque duplicaba el
+     `innerHTML`: ahora ambas llaman a `pintarCuerpoRazonamiento`, que es donde vive. */
+  ok(
+    /function pintarCuerpoRazonamiento[\s\S]*?innerHTML = fmt\(t\._texto/.test(app) &&
+      /function pintarRazonamiento[\s\S]*?pintarCuerpoRazonamiento\(t\)/.test(app),
+    'la pintura directa usa el mismo pintor que el frame',
+  );
   ok(/pintarRazonamiento\(pendingTurn && pendingTurn\.think\)/.test(app), 'y al cerrar el turno se asegura el texto en pantalla');
 
   const bloque = app.match(/function buildThinkBlock[\s\S]*?\n\}/)[0];

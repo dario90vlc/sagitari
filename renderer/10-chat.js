@@ -1339,9 +1339,13 @@ function metaRazonamiento(d) {
   const el = d && d.querySelector && d.querySelector('.th-meta');
   if (!el) return;
   const cerrado = d.classList.contains('closed');
+  // la luz que late es señal de «sigue pensando», no de «está abierto»: un bloque ya
+  // terminado no puede quedarse parpadeando para siempre
+  d.classList.toggle('th-vivo', !d._terminado); // no `live`: esa clase es de la barra lateral (display:flex)
+  const pasos = d._pasos || nLineas(d._texto);
   if (!d._terminado) {
     el.classList.remove('gist');
-    el.textContent = 'pensando… ' + segundosUI(Date.now() - (d._inicio || Date.now()));
+    el.textContent = 'pensando… ' + segundosUI(Date.now() - (d._inicio || Date.now())) + (pasos ? ' · ' + pasos + (pasos === 1 ? ' paso' : ' pasos') : '');
     return;
   }
   if (cerrado) {
@@ -1352,7 +1356,7 @@ function metaRazonamiento(d) {
     return;
   }
   el.classList.remove('gist');
-  el.textContent = 'pensó ' + K.fmtDuration(d._ms || 0) + ' · ' + nLineas(d._texto) + ' líneas';
+  el.textContent = pasos + (pasos === 1 ? ' paso' : ' pasos') + ' · ' + K.fmtDuration(d._ms || 0);
 }
 function relojRazonamiento(d) {
   thinkVivo = d;
@@ -1419,10 +1423,31 @@ function ensureThinkBlock() {
   return pendingTurn.think;
 }
 
+/* Pinta el cuerpo del razonamiento como PASOS, no como un muro de prosa: cada bloque
+   (párrafo, lista, código) lleva su marca y el que está en curso —el último mientras el
+   modelo piensa— se lee más fuerte; los anteriores quedan de rastro. Es la misma
+   información, pero se sigue la línea de pensamiento de un vistazo. */
+function pintarCuerpoRazonamiento(t) {
+  const body = t.querySelector('.think-body');
+  if (!body) return;
+  body.innerHTML = fmt(t._texto || '');
+  const flujo = body.querySelector('.md') || body;
+  const bloques = [...flujo.children];
+  bloques.forEach((b) => b.classList.remove('th-live'));
+  t._pasos = bloques.length;
+  if (!t._terminado && bloques.length) {
+    bloques[bloques.length - 1].classList.add('th-live');
+    // seguir el paso nuevo mientras piensa, salvo que el usuario haya subido a leer
+    const cerca = body.scrollHeight - body.scrollTop - body.clientHeight < 80;
+    if (cerca) body.scrollTop = body.scrollHeight;
+  }
+}
+
 /** Pinta el razonamiento AHORA (sin esperar a un frame). */
 function pintarRazonamiento(t) {
   if (!t || !t.isConnected) return;
-  t.querySelector('.think-body').innerHTML = fmt(t._texto || '');
+  pintarCuerpoRazonamiento(t);
+  metaRazonamiento(t);
 }
 
 /** Repinta el razonamiento en el siguiente frame (llega a trozos, como el texto).
@@ -1676,7 +1701,7 @@ function restaurarTraza(bubbleEl, trace, html) {
     d._texto = String(think.text);
     d._ms = Number(think.ms) || 0;
     d._terminado = true;
-    d.querySelector('.think-body').innerHTML = fmt(d._texto);
+    pintarCuerpoRazonamiento(d);
     d.classList.remove('open');
     d.classList.add('closed');
     d.querySelector('.think-head').setAttribute('aria-expanded', 'false');

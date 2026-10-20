@@ -1,3 +1,16 @@
+# SAGITARI 5.1.1
+
+**De un vistazo:** el guardado de la configuración resiste los bloqueos pasajeros de Windows (temporal único + reintento) y, si falla, dice el motivo · el razonamiento se lee como pasos con el paso en curso resaltado, y deja de parpadear cuando termina · 514 pruebas, 842 de interfaz y la comprobación de interfaz en verde. / **At a glance:** saving the configuration survives transient Windows locks (unique temp file + retry) and, if it fails, says why · reasoning reads as steps with the current one highlighted and stops blinking once finished · 514 tests, 842 interface tests and the interface check green.
+
+### Correcciones / Fixes
+
+- **Guardado de la configuración:** cada escritura usa un temporal **único** (antes, `<archivo>.tmp` fijo: dos instancias con perfiles distintos comparten el directorio de datos y el `open` de la segunda fallaba con `EPERM`) y los bloqueos pasajeros de Windows (antivirus examinando el archivo recién creado) se **reintentan**; un fallo definitivo no deja basura. El aviso del modo ya no escupe solo el código: explica que el archivo está en uso o sin permisos y conserva el motivo original. / **Configuration saving:** every write uses a **unique** temp file and transient Windows locks are retried; a definitive failure leaves no debris. The mode warning explains the cause and keeps the original reason.
+- **Razonamiento:** el cuerpo del bloque se pinta como **pasos** (cada párrafo, lista o código con su carril), el que está en curso se lee más fuerte y la marca de «pensando» late **solo mientras piensa** — un bloque terminado ya no parpadea. La cabecera abierta dice cuántos pasos y cuánto tardó; plegada sigue mostrando el resumen de una línea. / **Reasoning:** the block body renders as **steps**; the current one is highlighted and the “thinking” dot blinks **only while thinking**. The open header shows steps and duration; collapsed keeps the one-line summary.
+
+### Recuentos / Counts
+
+- 514 pruebas en `npm test`, 842 en `npm run test:renderer` (51 archivos) y la comprobación de interfaz en verde (0 fallos). / **Counts:** 514 tests in `npm test`, 842 in `npm run test:renderer` (51 files) and the interface check green (0 failures).
+
 # SAGITARI 5.1.0
 
 **De un vistazo:** Ajustes deja de ser paneles apretados dentro de un scroll y pasa a una sola columna con navegación lateral, una tarjeta por sección y descripciones legibles · el mismo lenguaje llega a Tareas, Espacio de trabajo, Agentes, Equipo, Skills, MCP, Memoria, Herramientas e Historial · las tarjetas de agente ya no aplastan su icono y la salud de los modelos se lee entera · 513 pruebas, 842 de interfaz y la comprobación de interfaz en verde. / **At a glance:** Settings stops being cramped panes inside a nested scroll and becomes one column with a side nav, one card per section and readable descriptions · the same language reaches Tasks, Workspace, Agents, Team, Skills, MCP, Memory, Tools and History · agent cards no longer crush their icon and model health reads whole · 513 tests, 842 interface tests and the interface check green.
