@@ -49,6 +49,9 @@ _*.ps1
 # Mesa de diseño (briefs y capturas locales, no se publican)
 .impeccable/
 
+# Mesa de exploración de dirección (muestras y capturas locales, no se publican)
+.oil/
+
 # Capturas de npm run shots (se generan, no se versionan)
 shots/
 

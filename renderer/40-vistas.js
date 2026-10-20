@@ -281,14 +281,6 @@ $('#btnCopyConv').onclick = () => {
 };
 
 // ============ mode switcher: segmented en chat + pill en inicio + Alt+M ============
-// Los tres modos comparten definición con el backend vía ChatKit (una sola
-// fuente de verdad): etiqueta, color, icono, lema y en qué se diferencian.
-const MODE_META = Object.fromEntries(
-  K.MODE_ORDER.map((k) => {
-    const m = K.MODES[k];
-    return [k, { dot: m.dot, label: m.label, desc: m.tagline, icon: m.icon, name: m.name, rgb: m.rgb }];
-  }),
-);
 const MODE_ORDER = K.MODE_ORDER;
 async function setMode(m) {
   if (m === mode) return;
@@ -343,9 +335,7 @@ function renderEmptyModes() {
   box.querySelectorAll('[data-m]').forEach((b) => (b.onclick = () => setMode(b.dataset.m)));
 }
 function updateModeUI() {
-  const m = MODE_META[mode] || MODE_META.act;
-  const M = K.mode(mode);
-  $('#modeLabel').innerHTML = `Modo <b>${m.label}</b> — ${esc(M.tagline)} <span class="hint-key">Alt+M</span>`;
+  $('#modeLabel').innerHTML = `<span class="hint-key">Alt+M</span> cambiar de modo`;
   applyModeTheme(busy ? currentRunMode : mode);
   renderModeSeg();
   renderEmptyModes();
@@ -409,14 +399,25 @@ async function renderSkills() {
   for (const s of list) {
     const it = document.createElement('div');
     it.className = 'memitem skillitem' + (s.enabled ? '' : ' off');
+    /* Una sola línea de meta (autor, herramientas, deps, repo, coste): la ficha se
+       escanea de arriba abajo y los controles quedan alineados a la derecha. */
+    const partes = [];
+    if (s.author) partes.push('por ' + s.author);
+    if (s.allowTools) partes.push('herramientas: ' + s.allowTools);
+    if (s.dependencies && s.dependencies.length) partes.push('deps: ' + s.dependencies.join(', '));
+    if (s.source) partes.push('de ' + s.source.repo);
+    partes.push('~' + Math.ceil(s.bodyChars / 4) + ' tok');
     it.innerHTML = `
       <span class="tc-mark">${ic('zap')}</span>
-      <span class="mt"><b>${esc(s.name)}</b>${s.version ? ` <span class="md">v${esc(s.version)}</span>` : ''}${s.category ? ` <span class="md">· ${esc(s.category)}</span>` : ''}<br><small class="md">${esc(s.description)}</small>${s.author ? `<br><small class="md">por ${esc(s.author)}${s.allowTools ? ' · herramientas: ' + esc(s.allowTools) : ''}${s.dependencies && s.dependencies.length ? ' · deps: ' + esc(s.dependencies.join(', ')) : ''}</small>` : s.allowTools ? `<br><small class="md">herramientas: ${esc(s.allowTools)}</small>` : ''}${s.source ? `<br><small class="md">de ${esc(s.source.repo)}</small>` : ''}</span>
-      <span class="md">~${Math.ceil(s.bodyChars / 4)} tok</span>
-      ${s.source ? `<button class="btn ghost sq" data-update title="Actualizar desde su repo">${ic('history')}</button>` : ''}
-      <button class="btn ghost sq" data-view title="Ver skill">${ic('search')}</button>
-      <label class="sw ${s.enabled ? 'on' : ''}" data-sw title="Activar/desactivar" aria-label="Activar o desactivar ${esc(s.name)}"></label>
-      <button class="btn ghost sq danger" data-del title="Eliminar">${ic('trash')}</button>`;
+      <span class="mt"><b>${esc(s.name)}</b>${s.version ? ` <span class="md">v${esc(s.version)}</span>` : ''}${s.category ? ` <span class="md">· ${esc(s.category)}</span>` : ''}
+        <small class="md sdesc">${esc(s.description)}</small>
+        <small class="md smeta">${esc(partes.join(' · '))}</small></span>
+      <span class="mrow-ctl">
+        ${s.source ? `<button class="btn ghost sq" data-update title="Actualizar desde su repo">${ic('history')}</button>` : ''}
+        <button class="btn ghost sq" data-view title="Ver skill">${ic('search')}</button>
+        <label class="sw ${s.enabled ? 'on' : ''}" data-sw title="Activar/desactivar" aria-label="Activar o desactivar ${esc(s.name)}"></label>
+        <button class="btn ghost sq danger" data-del title="Eliminar">${ic('trash')}</button>
+      </span>`;
     it.querySelector('[data-sw]').onclick = async (e) => {
       await window.sagitari.skillsToggle(s.id, !s.enabled);
       renderSkills();
@@ -553,13 +554,17 @@ function agentCard(a) {
   const meta = [];
   if (a && a.modelo) meta.push('modelo ' + String(a.modelo));
   if (a && a.maxSteps) meta.push(String(a.maxSteps) + ' pasos');
-  return `<div class="acard" id="agentCard-${esc(id)}">
+  if (tools.length) meta.push(tools.length + (tools.length === 1 ? ' herramienta' : ' herramientas'));
+  /* Los nombres de las herramientas son referencia, no la tarjeta: van en el
+     tooltip y aquí queda el recuento para que la ficha se lea de un vistazo. */
+  const metaTxt = meta.join(' · ');
+  const toolsTxt = tools.length ? 'Herramientas: ' + tools.join(', ') : '';
+  return `<div class="acard" id="agentCard-${esc(id)}" title="${esc(toolsTxt)}">
     <div class="aic ${look.cls}">${ic(look.icon)}</div>
     <div class="amain">
       <div class="ahead"><b>${esc(nombre)}</b>${ori.label ? `<span class="abadge${ori.cls ? ' ' + ori.cls : ''}">${esc(ori.label)}</span>` : ''}</div>
       ${desc ? `<small>${esc(desc)}</small>` : ''}
-      ${tools.length ? `<span class="amd">Herramientas: ${esc(tools.join(', '))}</span>` : ''}
-      ${meta.length ? `<span class="amd">${esc(meta.join(' · '))}</span>` : ''}
+      ${metaTxt ? `<span class="amd">${esc(metaTxt)}</span>` : ''}
     </div>
     <span class="adot"></span>
   </div>`;

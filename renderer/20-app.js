@@ -195,15 +195,22 @@ async function renderHealth() {
     box.innerHTML = '<div class="subnote">Sin datos todavía. Cada llamada al modelo registrará latencia, errores y tokens aquí.</div>';
     return;
   }
+  /* Una fila de datos por modelo: las cifras no se recortan y las columnas
+     quedan alineadas entre filas (celdas vacías incluidas). */
   box.innerHTML = rows
     .map((r) => {
       const health = r.errorRate >= 0.3 ? 'mag' : r.errorRate > 0 ? 'a-y' : 'ok';
-      const plain =
-        `${r.model} · ${r.calls} llamadas · ${r.avgLatencyMs || '—'} ms · ${(r.tokensIn + r.tokensOut).toLocaleString('es')} tok` +
-        `${r.errors ? ' · ' + r.errors + ' errores' : ''}${r.fallbacks ? ' · ' + r.fallbacks + (r.fallbacks === 1 ? ' relevo' : ' relevos') : ''}`;
-      return `<div class="toolchip" title="${esc(r.lastError || '')}">
+      const tok = (r.tokensIn + r.tokensOut).toLocaleString('es');
+      const errs = r.errors ? r.errors + (r.errors === 1 ? ' error' : ' errores') : '';
+      const rel = r.fallbacks ? r.fallbacks + (r.fallbacks === 1 ? ' relevo' : ' relevos') : '';
+      return `<div class="hrow" title="${esc(r.lastError || '')}">
       <span class="dot ${health}"></span>
-      <span class="tc-txt" title="${esc(plain)}"><b>${esc(r.model)}</b> · ${r.calls} llamadas · ${r.avgLatencyMs || '—'} ms · ${(r.tokensIn + r.tokensOut).toLocaleString('es')} tok${r.errors ? ' · ' + r.errors + ' errores' : ''}${r.fallbacks ? ' · ' + r.fallbacks + (r.fallbacks === 1 ? ' relevo' : ' relevos') : ''}</span>
+      <b class="hmod">${esc(r.model)}</b>
+      <span class="hstat">${r.calls} llamadas</span>
+      <span class="hstat">${r.avgLatencyMs || '—'} ms</span>
+      <span class="hstat">${tok} tok</span>
+      <span class="hstat${errs ? ' bad' : ''}">${errs}</span>
+      <span class="hstat">${rel}</span>
     </div>`;
     })
     .join('');
@@ -1071,6 +1078,10 @@ function setSendMode() {
   b.innerHTML = ic(busy ? 'stop' : 'send');
   b.classList.toggle('stop', busy);
   b.title = busy ? 'Detener' : 'Enviar';
+  // La pausa solo existe mientras hay un turno que pausar: un control que no
+  // puede hacer nada en reposo no se enseña.
+  const p = $('#chatPause');
+  if (p) p.hidden = !busy;
   // el hilo se anuncia como ocupado mientras el agente trabaja: los lectores de
   // pantalla esperan a que termine en vez de leer cada delta
   const m = $('#messages');

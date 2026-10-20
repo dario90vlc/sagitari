@@ -102,6 +102,20 @@
   --font-ui: 'Space Grotesk', 'Segoe UI Variable Text', 'Segoe UI', system-ui, sans-serif;
   --font-display: 'Sora', 'Segoe UI Variable Display', 'Segoe UI', system-ui, sans-serif;
   --font-mono: 'Cascadia Mono', Consolas, monospace;
+  /* ---- escala tipográfica: una sola lista de PAPELES, no de valores sueltos ----
+     Si un texto no encaja en un papel, se usa el más cercano; no se inventa un
+     tamaño nuevo (así convivían antes 11, 11'5, 12, 12'5, 13, 13'5, 15 y 15'5). */
+  --fs-hero: 32px; /* arranque: «¿Por dónde empezamos?» (Sora 600) */
+  --fs-title: 26px; /* título de vista (Sora 600) */
+  --fs-section: 18px; /* título de sección (Sora 600) */
+  --fs-read: 16px; /* lectura del chat (Space Grotesk 400) */
+  --fs-body: 14px; /* cuerpo de interfaz, formularios y listas */
+  --fs-small: 12px; /* texto menudo, chips y notas cortas */
+  --fs-label: 11px; /* rótulos en versalitas y meta */
+  --fs-micro: 10px; /* micro: horas de registro y contadores */
+  --fs-mono: 12.5px; /* datos de máquina (Cascadia) */
+  --lh-body: 1.55;
+  --lh-read: 1.6;
   --txt: #e8e4ff;
   --dim: #9a90c8;
   --vio: rgb(var(--acc2-rgb));
@@ -178,8 +192,16 @@ body {
 }
 body {
   font-family: var(--font-ui), 'Segoe UI', sans-serif;
-  font-size: 13px;
+  font-size: var(--fs-body);
   color: var(--txt);
+  /* Cifras alineadas: horas, contadores y tamaños no bailan al cambiar. */
+  font-variant-numeric: tabular-nums;
+}
+/* Un solo techo de peso: 600. Los <b> del navegador venían a 700 y competían con los
+   títulos, que van a 600; la énfasis se lee mejor cuando no hay dos negritas. */
+b,
+strong {
+  font-weight: 600;
 }
 .shell {
   /* GLASS: aurora del acento (tres manchas tenues que siguen la paleta) sobre
@@ -190,10 +212,16 @@ body {
   border-radius: 10px;
   overflow: hidden;
   background:
-    radial-gradient(46% 38% at 12% 0%, rgba(var(--acc2-rgb), 0.16) 0%, transparent 70%),
-    radial-gradient(40% 34% at 88% 100%, rgba(var(--acc3-rgb), 0.13) 0%, transparent 70%),
-    radial-gradient(30% 26% at 85% 8%, rgba(var(--acc-rgb), 0.1) 0%, transparent 70%), rgb(var(--bg0-rgb));
-  box-shadow: inset 0 0 170px rgba(var(--acc3-rgb), calc(0.1 * var(--ambient)));
+    /* Aurora contenida: el vidrio es transparente, así que un foco fuerte arriba se
+       colaba en el sidebar y en las tarjetas como un baño de luz. */
+    radial-gradient(52% 44% at 50% -8%, rgba(var(--acc2-rgb), 0.11) 0%, transparent 62%),
+    radial-gradient(44% 38% at 4% 4%, rgba(var(--acc-rgb), 0.05) 0%, transparent 66%),
+    radial-gradient(50% 44% at 96% 104%, rgba(var(--acc3-rgb), 0.15) 0%, transparent 66%),
+    radial-gradient(30% 26% at 85% 8%, rgba(var(--acc-rgb), 0.06) 0%, transparent 70%),
+    linear-gradient(180deg, rgb(var(--bg1-rgb)) 0%, rgb(var(--bg0-rgb)) 58%);
+  box-shadow:
+    inset 0 0 240px rgba(var(--acc3-rgb), calc(0.12 * var(--ambient))),
+    inset 0 1px 0 rgba(255, 255, 255, 0.04);
 }
 /* La ventana en reposo NO brilla: sólo una línea neutra que la separa del escritorio.
    Esa hairline no se toca —es el borde de la ventana, no una señal— y es la que se
@@ -525,17 +553,17 @@ body.nofocus .shell.glow-pulse .filo::after {
   margin: 12px 0 12px 12px;
   border-radius: 26px;
   padding-top: 20px;
-  border: 1px solid rgba(255, 255, 255, 0.08);
+  border: 1px solid rgba(255, 255, 255, 0.13);
   /* `position` explícito: su filo (.filo) se coloca dentro del panel. La capa de vidrio
      ya lo hacía relativo por su cuenta, pero la luz no debe depender de otra hoja. */
   position: relative;
-  background: rgba(var(--field-rgb), calc(0.42 * var(--glass)));
+  background: rgba(var(--field-rgb), calc(0.58 * var(--glass)));
   backdrop-filter: blur(18px) saturate(1.3);
   -webkit-backdrop-filter: blur(18px) saturate(1.3);
   box-shadow:
-    0 12px 34px rgba(0, 0, 0, 0.35),
-    inset 2px 3px 8px rgba(255, 255, 255, 0.07),
-    inset -3px -4px 10px rgba(0, 0, 0, 0.3);
+    0 14px 38px rgba(0, 0, 0, 0.4),
+    inset 2px 3px 8px rgba(255, 255, 255, 0.13),
+    inset -3px -4px 10px rgba(0, 0, 0, 0.34);
 }
 .brand {
   display: flex;
@@ -602,7 +630,8 @@ body.nofocus .shell.glow-pulse .filo::after {
    envuelva (dos líneas) en vez de recortarse. */
 .brandsub {
   font-size: 11px;
-  letter-spacing: 0.08em;
+  font-weight: 500;
+  letter-spacing: 0.1em;
   line-height: 1.3;
   color: var(--dim);
 }
@@ -691,7 +720,7 @@ body.nofocus .shell.glow-pulse .filo::after {
 }
 .navgroup + .navgroup {
   border-top: 1px solid var(--line2);
-  padding-top: 11px;
+  padding-top: 12px;
 }
 /* El rótulo de grupo iba con `opacity: 0.68`, que compone --dim con el fondo del panel
    translúcido y lo dejaba en 3,6:1 (por debajo del 4,5:1 de texto normal; 11px no es
@@ -700,9 +729,10 @@ body.nofocus .shell.glow-pulse .filo::after {
    en scripts/contraste.js. */
 .navgroup::before {
   content: attr(data-label);
-  padding: 0 7px 4px;
+  padding: 0 7px 5px;
   font-size: 11px;
-  letter-spacing: 0.08em;
+  font-weight: 500;
+  letter-spacing: 0.1em;
   text-transform: uppercase;
   color: var(--dim);
 }
@@ -955,7 +985,7 @@ body.nofocus .shell.glow-pulse .filo::after {
   border-bottom: 1px solid var(--line2);
 }
 .modelmenu .sm-item .sm-name {
-  font: 600 13px var(--font-ui);
+  font: 600 var(--fs-body) var(--font-ui);
   white-space: nowrap;
   overflow: hidden;
   text-overflow: ellipsis;
@@ -1005,7 +1035,7 @@ body.nofocus .shell.glow-pulse .filo::after {
   background: var(--panel2);
   color: var(--txt);
   font: 600 11px var(--font-ui);
-  letter-spacing: 0.6px;
+  letter-spacing: 0.06em;
   cursor: pointer;
   transition: all 0.16s;
 }
@@ -1212,12 +1242,13 @@ body.nofocus .shell.glow-pulse .filo::after {
   display: flex;
   align-items: center;
   justify-content: space-between;
-  margin-bottom: 18px;
+  margin-bottom: 22px;
 }
 .viewhead h2 {
   font-family: var(--font-display);
   font-weight: 600;
-  font-size: 18px;
+  font-size: var(--fs-title);
+  letter-spacing: -0.02em;
 }
 /* Cada vista lleva un h1 (raíz del documento) que NO se pinta: la cabecera visible
    sigue siendo el h2 y su regla de arriba no se toca. Convertir el h2 en h1
@@ -1234,7 +1265,7 @@ body.nofocus .shell.glow-pulse .filo::after {
 }
 .vh-actions {
   display: flex;
-  gap: 8px;
+  gap: 10px;
   align-items: center;
 }
 
@@ -1278,8 +1309,8 @@ body.nofocus .shell.glow-pulse .filo::after {
     0 12px 34px rgba(0, 0, 0, 0.4);
 }
 .composer.slim {
-  padding: 8px;
-  border-radius: 22px;
+  padding: 10px 12px;
+  border-radius: 24px;
 }
 /* disparador de la revisión del cambio (F2): comparte la primera línea del
    compositor con el «deshacer» del turno */
@@ -1303,7 +1334,7 @@ body.nofocus .shell.glow-pulse .filo::after {
   padding: 8px 4px;
   border-radius: 0;
   color: var(--txt);
-  font: 400 15px/1.45 var(--font-ui);
+  font: 400 var(--fs-read)/var(--lh-read) var(--font-ui);
 }
 .composer textarea::placeholder {
   color: var(--dim);
@@ -1330,6 +1361,9 @@ body.nofocus .shell.glow-pulse .filo::after {
 .compline .cbtn {
   margin-top: 0;
 }
+.cbtn[hidden] {
+  display: none;
+}
 .cbtn:hover {
   color: #fff;
   border-color: var(--line);
@@ -1355,6 +1389,8 @@ body.nofocus .shell.glow-pulse .filo::after {
   display: none;
   height: 100%;
   padding-bottom: 0;
+  /* La cabecera flota sobre el hilo (cápsula de vidrio): necesita ser su contexto. */
+  position: relative;
 }
 #view-chat.on {
   display: flex;
@@ -1365,7 +1401,7 @@ body.nofocus .shell.glow-pulse .filo::after {
   display: flex;
   flex-direction: column;
   min-height: 0;
-  max-width: 960px;
+  max-width: 780px;
   margin: 0 auto;
   width: 100%;
 }
@@ -1377,10 +1413,12 @@ body.nofocus .shell.glow-pulse .filo::after {
 .msgs {
   flex: 1;
   overflow-y: auto;
-  padding: 6px 10px 14px;
+  /* 64px: la primera entrega empieza bajo la cápsula; al desplazar, el texto pasa
+     por debajo del vidrio (ahí se ve la refracción). */
+  padding: 64px 10px 14px;
   display: flex;
   flex-direction: column;
-  gap: 10px;
+  gap: 12px;
   min-height: 0;
 }
 /* El `[hidden]` del navegador (display:none) lo gana el `display:flex` de arriba
@@ -1390,12 +1428,17 @@ body.nofocus .shell.glow-pulse .filo::after {
 }
 #messages::-webkit-scrollbar,
 .msgs::-webkit-scrollbar {
-  width: 6px;
+  width: 5px;
 }
 #messages::-webkit-scrollbar-thumb,
 .msgs::-webkit-scrollbar-thumb {
-  background: rgba(var(--acc2-rgb), 0.3);
+  /* Sin barra a la vista en reposo: aparece como un hilo al acercarse. */
+  background: transparent;
   border-radius: 3px;
+}
+#messages:hover::-webkit-scrollbar-thumb,
+.msgs:hover::-webkit-scrollbar-thumb {
+  background: rgba(var(--acc2-rgb), 0.34);
 }
 /* El hilo se marca aria-busy mientras el agente trabaja, pero ninguna regla lo
    pintaba: el estado ocupado no se veía en la superficie donde ocurre el trabajo. */
@@ -1431,7 +1474,7 @@ body.nofocus .shell.glow-pulse .filo::after {
    y los bloques anchos (tablas, código, tarjetas) siguen cabiendo dentro. */
 .msg {
   display: flex;
-  gap: 10px;
+  gap: 11px;
   max-width: min(86%, 650px);
   animation: fadein 0.22s ease;
 }
@@ -1451,15 +1494,15 @@ body.nofocus .shell.glow-pulse .filo::after {
   place-items: center;
   font-size: 12px;
   font-family: var(--font-display);
-  font-weight: 700;
+  font-weight: 600;
   background: rgba(var(--acc2-rgb), 0.1);
-  border: 1px solid var(--line2);
+  border: 1px solid rgba(var(--acc-rgb), 0.35);
 }
 .avatar .avimg {
   width: 21px;
   height: 21px;
   object-fit: contain;
-  filter: drop-shadow(0 0 6px rgba(var(--acc2-rgb), 0.6));
+  filter: drop-shadow(0 0 8px rgba(var(--acc2-rgb), 0.85));
 }
 .msg.me .avatar {
   background: rgb(var(--face2-rgb));
@@ -1467,31 +1510,46 @@ body.nofocus .shell.glow-pulse .filo::after {
   border: 1px solid var(--line);
 }
 .bubble {
-  padding: 11px 14px;
-  border-radius: 20px;
-  font-size: 15px;
-  line-height: 1.5;
+  padding: 13px 17px;
+  border-radius: 22px;
+  font-size: var(--fs-read);
+  line-height: var(--lh-read);
   white-space: pre-wrap;
   word-break: break-word;
   /* GLASS: el mensaje del agente es vidrio ligero (sin blur: flota sobre fondo
      plano y el blur no se vería; la translucidez basta y es barata con 100 turnos).
      Se separa del lienzo por relleno + filo, no por halo. */
-  background: linear-gradient(180deg, rgba(255, 255, 255, 0.06), rgba(255, 255, 255, 0.015) 50%), rgba(var(--face2-rgb), 0.62);
-  border: 1px solid rgba(255, 255, 255, 0.08);
-  box-shadow: inset 0 1px 0 rgba(255, 255, 255, 0.08);
+  background: linear-gradient(180deg, rgba(255, 255, 255, 0.09), rgba(255, 255, 255, 0.02) 50%), rgba(var(--face2-rgb), 0.8);
+  border: 1px solid rgba(255, 255, 255, 0.14);
+  box-shadow: inset 0 1px 0 rgba(255, 255, 255, 0.14);
 }
 .msg.me .bubble {
-  background: linear-gradient(180deg, rgba(255, 255, 255, 0.1), rgba(255, 255, 255, 0.02) 50%), rgba(var(--acc2-rgb), 0.3);
-  border-color: var(--line);
+  background: linear-gradient(180deg, rgba(255, 255, 255, 0.12), rgba(255, 255, 255, 0.03) 50%), rgba(var(--acc2-rgb), 0.4);
+  border-color: rgba(var(--acc-rgb), 0.36);
 }
 .msg.ai .bubble {
   box-shadow: inset 0 1px 0 rgba(255, 255, 255, 0.08);
+}
+/* Turnos seguidos del agente (plan + resultado del mismo minuto): una sola voz. La
+   segunda entrega no repite cara, nombre ni hora, y se pega a la anterior: el ojo
+   lee «esto y lo de arriba son el mismo turno», no dos tarjetas sueltas. */
+.msg.cont {
+  margin-top: -5px;
+}
+.msg.cont .msg-head {
+  display: none;
+}
+.msg.cont .avatar {
+  visibility: hidden;
+}
+.msg.cont .bubble {
+  border-top-left-radius: 12px;
 }
 /* ===== markdown renderizado (marked) ===== */
 /* el wrapper anula el pre-wrap del bubble: los bloques ya llevan su propio margen */
 .md {
   white-space: normal;
-  line-height: 1.45;
+  line-height: 1.6;
 }
 .md > :first-child {
   margin-top: 0 !important;
@@ -1526,15 +1584,15 @@ body.nofocus .shell.glow-pulse .filo::after {
   font-size: 15px;
 }
 .bubble p {
-  margin: 3px 0;
+  margin: 4px 0;
 }
 .bubble ul,
 .bubble ol {
-  margin: 4px 0;
-  padding-left: 20px;
+  margin: 6px 0;
+  padding-left: 1.6em;
 }
 .bubble li {
-  margin: 1px 0;
+  margin: 2px 0;
 }
 .bubble li::marker {
   color: var(--vio2);
@@ -1573,7 +1631,7 @@ body.nofocus .shell.glow-pulse .filo::after {
   font-family: var(--font-display);
   font-weight: 600;
   font-size: 12px;
-  letter-spacing: 0.3px;
+  letter-spacing: 0.02em;
 }
 .bubble tr:nth-child(even) td {
   background: rgba(255, 255, 255, 0.025);
@@ -1645,8 +1703,8 @@ body.nofocus .shell.glow-pulse .filo::after {
   align-items: center;
   gap: 10px;
   margin: 12px 4px 6px;
-  font: 600 10px var(--font-ui);
-  letter-spacing: 0.14em;
+  font: 500 10px var(--font-ui);
+  letter-spacing: 0.1em;
   text-transform: uppercase;
   color: var(--dim);
 }
@@ -1700,8 +1758,8 @@ body.nofocus .shell.glow-pulse .filo::after {
   border-bottom: 1px solid var(--line2);
 }
 .dp-head b {
-  font: 600 13px var(--font-display);
-  letter-spacing: 0.04em;
+  font: 600 var(--fs-body) var(--font-display);
+  letter-spacing: 0;
 }
 .dplist {
   display: flex;
@@ -1836,7 +1894,8 @@ body.nofocus .shell.glow-pulse .filo::after {
 .skillmenu .sm-head {
   padding: 9px 14px 6px;
   font-size: 11px;
-  letter-spacing: 0.08em;
+  font-weight: 500;
+  letter-spacing: 0.1em;
   color: var(--dim);
   font-family: var(--font-display);
 }
@@ -1886,10 +1945,10 @@ body.nofocus .shell.glow-pulse .filo::after {
   border: 0;
   background: transparent;
   cursor: pointer;
-  font: 700 11px var(--font-ui);
-  letter-spacing: 0.08em;
+  font: 600 12px var(--font-ui);
+  letter-spacing: 0.06em;
   color: var(--dim);
-  padding: 5px 10px;
+  padding: 6px 11px;
   border-radius: 9px;
   transition:
     color 0.15s ease,
@@ -2216,8 +2275,8 @@ body.nofocus .shell.glow-pulse .filo::after {
   gap: 7px;
   padding: 6px 2px;
   border-bottom: 1px solid var(--line2);
-  font-size: 12.5px;
-  line-height: 1.5;
+  font-size: var(--fs-body);
+  line-height: 1.55;
 }
 .eqfila:last-child {
   border-bottom: 0;
@@ -2259,7 +2318,7 @@ body.nofocus .shell.glow-pulse .filo::after {
   gap: 8px;
   padding: 7px 2px;
   border-bottom: 1px solid var(--line2);
-  font-size: 12.5px;
+  font-size: var(--fs-body);
   line-height: 1.5;
 }
 .eqitem:last-child {
@@ -2277,7 +2336,7 @@ body.nofocus .shell.glow-pulse .filo::after {
 .eqitem .eqnota {
   display: block;
   color: var(--dim);
-  font-size: 11.5px;
+  font-size: var(--fs-small);
 }
 /* cierre del encargo: resumen agregado + gasto del equipo */
 .eqresumen {
@@ -2286,7 +2345,7 @@ body.nofocus .shell.glow-pulse .filo::after {
   border: 1px solid rgba(245, 158, 66, 0.28);
   border-radius: 16px;
   background: rgba(245, 158, 66, 0.05);
-  font-size: 12.5px;
+  font-size: var(--fs-body);
   line-height: 1.55;
   white-space: pre-wrap;
 }
@@ -2338,7 +2397,8 @@ body.nofocus .shell.glow-pulse .filo::after {
 }
 .tt-head {
   font-size: 12px;
-  letter-spacing: 0.08em;
+  font-weight: 500;
+  letter-spacing: 0.1em;
   color: var(--dim);
   margin-bottom: 10px;
 }
@@ -2368,7 +2428,7 @@ select {
   border: 1px solid var(--line2);
   border-radius: 16px;
   color: var(--txt);
-  font: 500 13px var(--font-ui);
+  font: 500 var(--fs-body) var(--font-ui);
   padding: 9px 12px;
   outline: none;
   transition:
@@ -2387,7 +2447,7 @@ input[type='month'] {
   border: 1px solid var(--line2);
   border-radius: 11px;
   color: var(--txt);
-  font: 500 13px var(--font-ui);
+  font: 500 var(--fs-body) var(--font-ui);
   padding: 9px 12px;
   outline: none;
   color-scheme: dark;
@@ -2444,7 +2504,7 @@ input[type='time']:focus {
   border: 1px solid var(--line2);
   border-radius: 16px;
   color: var(--txt);
-  font: 500 15px var(--font-ui);
+  font: 500 var(--fs-body) var(--font-ui);
   padding: 10px 12px;
   cursor: pointer;
   text-align: left;
@@ -2544,8 +2604,9 @@ textarea::placeholder {
 }
 .field label {
   display: block;
-  font-size: 11px;
-  letter-spacing: 0.08em;
+  font-size: var(--fs-label);
+  font-weight: 500;
+  letter-spacing: 0.1em;
   color: var(--dim);
   margin-bottom: 5px;
   font-family: var(--font-display);
@@ -2562,7 +2623,7 @@ textarea::placeholder {
   border-radius: 16px;
   color: var(--txt);
   padding: 10px 12px;
-  font: 500 15px var(--font-ui);
+  font: 500 var(--fs-body) var(--font-ui);
   outline: none;
 }
 .field input:focus,
@@ -2584,7 +2645,7 @@ textarea::placeholder {
   cursor: pointer;
   background: rgba(var(--acc2-rgb), 0.14);
   color: var(--txt);
-  font: 600 13px var(--font-ui);
+  font: 600 var(--fs-body) var(--font-ui);
   transition: all 0.15s;
   appearance: none;
 }
@@ -2652,16 +2713,17 @@ textarea::placeholder {
 }
 .sub2 {
   font-size: 11px;
-  letter-spacing: 0.08em;
+  font-weight: 500;
+  letter-spacing: 0.1em;
   color: var(--dim);
   margin-bottom: 8px;
   font-family: var(--font-display);
 }
 .subnote {
   color: var(--dim);
-  font-size: 12px;
+  font-size: var(--fs-body);
   margin-top: 10px;
-  line-height: 1.5;
+  line-height: var(--lh-body);
   max-width: 68ch;
 }
 .provitem {
@@ -2676,7 +2738,7 @@ textarea::placeholder {
 }
 .provitem .nm {
   flex: 1;
-  font-size: 13px;
+  font-size: var(--fs-body);
 }
 .provitem .md {
   color: var(--dim);
@@ -2688,7 +2750,7 @@ textarea::placeholder {
   border-radius: 999px;
   background: rgba(52, 211, 153, 0.15);
   color: var(--ok);
-  letter-spacing: 1px;
+  letter-spacing: 0.06em;
   font-family: var(--font-display);
 }
 /* ===== v2.0: Ajustes rediseñados — tarjeta de estado, pestañas, tarjetas y búsqueda ===== */
@@ -2897,7 +2959,7 @@ textarea::placeholder {
   margin-bottom: 14px;
 }
 .sc-head b {
-  font: 600 15px var(--font-display);
+  font: 600 var(--fs-section)/1.2 var(--font-display);
   color: #fff;
 }
 .sc-hint {
@@ -2917,7 +2979,7 @@ textarea::placeholder {
   border: 1px dashed var(--line);
   border-radius: 16px;
   color: var(--dim);
-  font-size: 13px;
+  font-size: var(--fs-body);
 }
 
 .settabs {
@@ -2938,7 +3000,7 @@ textarea::placeholder {
   border: 1px solid transparent;
   background: transparent;
   color: var(--dim);
-  font: 600 13px var(--font-ui);
+  font: 600 var(--fs-body) var(--font-ui);
   cursor: pointer;
   transition: all 0.15s;
   white-space: nowrap;
@@ -3001,7 +3063,7 @@ textarea::placeholder {
 .ac-badge {
   font-family: var(--font-display);
   font-size: 11px;
-  letter-spacing: 1px;
+  letter-spacing: 0.06em;
   padding: 5px 11px;
   border-radius: 999px;
   background: rgba(52, 211, 153, 0.15);
@@ -3211,8 +3273,8 @@ textarea::placeholder {
 }
 .toolsgroup {
   grid-column: 1 / -1;
-  font: 600 11px var(--font-display);
-  letter-spacing: 0.08em;
+  font: 500 11px var(--font-display);
+  letter-spacing: 0.1em;
   text-transform: uppercase;
   color: var(--dim);
   margin-top: 8px;
@@ -3272,7 +3334,7 @@ textarea::placeholder {
   display: flex;
   align-items: center;
   gap: 8px;
-  font-size: 13px;
+  font-size: var(--fs-body);
 }
 .mcpdot {
   width: 8px;
@@ -3340,7 +3402,7 @@ textarea::placeholder {
 .rail {
   display: flex;
   flex-direction: column;
-  gap: 14px;
+  gap: 12px;
   padding: 50px 18px 18px 4px;
   overflow-y: auto;
   position: relative;
@@ -3349,21 +3411,69 @@ textarea::placeholder {
 .rail::-webkit-scrollbar {
   width: 0;
 }
+/* La actividad es una línea de tiempo con su espina de luz, no una pila de píldoras:
+   el registro se lee como un diario y las horas quedan alineadas a la derecha. */
+#activityFeed {
+  position: relative;
+  margin-top: 12px;
+  padding-left: 19px;
+}
+#activityFeed::before {
+  content: '';
+  position: absolute;
+  left: 5px;
+  top: 4px;
+  bottom: 4px;
+  width: 1px;
+  background: linear-gradient(180deg, rgba(var(--acc-rgb), 0.5), rgba(var(--acc-rgb), 0.16) 50%, rgba(var(--acc-rgb), 0) 96%);
+}
+#activityFeed .fitem {
+  position: relative;
+  display: flex;
+  align-items: baseline;
+  gap: 8px;
+  padding: 7px 0;
+  font-size: var(--fs-small);
+  color: var(--dim);
+  background: none;
+  border: 0;
+  border-radius: 0;
+  /* liquid-glass.css pone a .fitem el filo superior de 1 px de las tarjetas y su sombra.
+     En una fila de línea de tiempo sin fondo, ese filo queda flotando como un corte. */
+  box-shadow: none;
+  animation: fadein 0.25s ease;
+}
+#activityFeed .fitem .dot {
+  position: absolute;
+  left: -17px;
+  top: 10px;
+  margin: 0;
+  flex-shrink: 0;
+}
+#activityFeed .fitem .ft {
+  margin-left: auto;
+  color: var(--dim);
+  font-size: var(--fs-micro);
+  opacity: 0.85;
+}
 /* GLASS: las tarjetas del monitor flotan — vidrio a medio camino entre el sidebar
    y el compositor, con filo de luz. */
 .rcard {
-  border: 1px solid rgba(255, 255, 255, 0.09);
+  border: 1px solid rgba(255, 255, 255, 0.14);
   border-radius: 22px;
-  padding: 15px 16px;
+  padding: 14px 15px;
   /* `relative` para que su filo (.rcard::before) se coloque dentro de la tarjeta: sin él
      el anillo caería sobre el rail entero. Sin z-index no crea contexto de apilamiento. */
   position: relative;
   background:
-    linear-gradient(180deg, rgba(255, 255, 255, 0.07), rgba(255, 255, 255, 0.015) 40%), rgba(var(--face-rgb), calc(0.5 * var(--glass)));
+    linear-gradient(180deg, rgba(255, 255, 255, 0.085), rgba(255, 255, 255, 0.02) 40%), rgba(var(--face-rgb), calc(0.66 * var(--glass)));
+  /* Sin sombra EXTERIOR: el rail es un contenedor con scroll y recorta en horizontal,
+     así que la sombra de la tarjeta se cortaba en seco contra el borde de la columna y
+     dibujaba una línea vertical (el «corte»). La profundidad la dan el relleno, el filo
+     interior y el borde; nada que recortar. */
   box-shadow:
-    inset 2px 3px 8px rgba(255, 255, 255, 0.09),
-    inset -3px -4px 10px rgba(0, 0, 0, 0.3),
-    0 10px 30px rgba(0, 0, 0, 0.35);
+    inset 2px 3px 8px rgba(255, 255, 255, 0.13),
+    inset -3px -4px 10px rgba(0, 0, 0, 0.32);
   backdrop-filter: blur(16px) saturate(1.25);
   -webkit-backdrop-filter: blur(16px) saturate(1.25);
 }
@@ -3373,7 +3483,7 @@ textarea::placeholder {
   justify-content: space-between;
 }
 .live {
-  font-size: 12px;
+  font-size: var(--fs-small);
   color: var(--ok);
   display: flex;
   align-items: center;
@@ -3383,8 +3493,8 @@ textarea::placeholder {
   margin: 0;
 }
 .live2 {
-  font-size: 12px;
-  letter-spacing: 1px;
+  font-size: var(--fs-small);
+  letter-spacing: 0.06em;
   color: var(--dim);
 }
 .bigring {
@@ -3405,7 +3515,7 @@ textarea::placeholder {
   opacity: 0.3;
 }
 .rc-title {
-  font-size: 13px;
+  font-size: var(--fs-small);
   color: var(--dim);
   margin-top: 6px;
 }
@@ -3418,7 +3528,7 @@ textarea::placeholder {
 .rc-count span:first-child {
   font-family: var(--font-display);
   font-size: 24px;
-  font-weight: 700;
+  font-weight: 600;
 }
 .mini-dots {
   display: inline-flex;
@@ -3452,7 +3562,7 @@ textarea::placeholder {
 }
 .ragent b {
   display: block;
-  font-size: 13px;
+  font-size: var(--fs-body);
 }
 .ragent small {
   color: var(--dim);
@@ -3467,7 +3577,6 @@ textarea::placeholder {
   flex-direction: column;
   gap: 9px;
   margin-top: 10px;
-  min-height: 120px;
 }
 /* HIG: nada de vidrio sobre vidrio — dentro de la tarjeta de vidrio, las filas
    son fills opacos, no otro vidrio. */
@@ -3500,8 +3609,8 @@ textarea::placeholder {
 }
 /* Reloj del monitor: hora local tabular junto a «Actividad en vivo». */
 .board-clock {
-  font: 700 12px var(--font-ui);
-  letter-spacing: 0.08em;
+  font: 600 var(--fs-small) var(--font-ui);
+  letter-spacing: 0.02em;
   color: var(--txt);
   opacity: 0.85;
   font-variant-numeric: tabular-nums;
@@ -3756,7 +3865,7 @@ i[data-i] {
   border: 1px solid rgba(255, 255, 255, 0.1);
   border-radius: 999px;
   padding: 10px 18px;
-  font-size: 13px;
+  font-size: var(--fs-body);
   color: var(--txt);
   box-shadow:
     0 10px 40px rgba(0, 0, 0, 0.55),
@@ -3822,7 +3931,8 @@ depender del color de acento elegido. */
   display: flex;
   align-items: center;
   gap: 12px;
-  margin: 0 18px 8px;
+  /* Con la cabecera fuera del flujo, la barra empieza bajo la cápsula. */
+  margin: 58px 18px 8px;
   padding: 10px 14px;
   background: linear-gradient(135deg, rgba(255, 180, 60, 0.12), rgba(255, 120, 80, 0.1));
   border: 1px solid rgba(255, 180, 60, 0.38);
@@ -3883,7 +3993,7 @@ depender del color de acento elegido. */
   color: var(--dim);
   padding: 2px 18px 6px;
   text-align: center;
-  letter-spacing: 0.2px;
+  letter-spacing: 0;
 }
 
 /* contenedor de chips de herramientas: columna ordenada, cada pill en su línea */
@@ -3988,18 +4098,54 @@ depender del color de acento elegido. */
 
 /* ---- cabecera: título + estado en vivo ---- */
 .chathead {
-  align-items: flex-start;
+  /* Cápsula flotante: el hilo se desliza POR DEBAJO y el vidrio lo refracta. Es la
+     superficie donde la refracción de verdad se ve (hay texto detrás). */
+  position: absolute;
+  top: 40px;
+  left: 0;
+  right: 0;
+  z-index: 6;
+  /* Centrado vertical: el título quedaba arriba y dejaba un hueco bajo él. */
+  align-items: center;
   gap: 12px;
+  max-width: 780px;
+  width: calc(100% - 20px);
+  margin-inline: auto;
+  padding: 10px 12px;
+  border-radius: 24px;
+  border: 1px solid rgba(255, 255, 255, 0.24);
+  background: rgba(var(--lg-tint, 36, 26, 72), calc(0.1 * var(--glass, 1)));
+  backdrop-filter: blur(2.5px) saturate(1.5);
+  -webkit-backdrop-filter: blur(2.5px) saturate(1.5);
+  box-shadow:
+    inset 1px 0 rgba(255, 86, 116, 0.18),
+    inset -1px 0 rgba(54, 226, 255, 0.16),
+    inset 0 1px 0 rgba(255, 255, 255, 0.3),
+    0 10px 30px rgba(0, 0, 0, 0.4);
+}
+@supports (backdrop-filter: url("#lg-refract")) or (-webkit-backdrop-filter: url("#lg-refract")) {
+  .chathead {
+    backdrop-filter: url(#lg-refract) blur(2.5px) saturate(1.5);
+    -webkit-backdrop-filter: url(#lg-refract) blur(2.5px) saturate(1.5);
+  }
 }
 .ch-left {
   display: flex;
   flex-direction: column;
+  align-items: center;
   gap: 5px;
   min-width: 0;
   flex: 1 1 auto;
+  text-align: center;
 }
 /* el título es la primera frase del usuario: una sola línea, nunca siete */
 #chatTitle {
+  /* Título de barra: la cápsula no es una portada; 22 equilibra con los botones.
+     Centrado en el espacio que dejan las acciones, no pegado al borde. */
+  font-size: 22px;
+  letter-spacing: -0.01em;
+  text-align: center;
+  width: 100%;
   white-space: nowrap;
   overflow: hidden;
   text-overflow: ellipsis;
@@ -4008,11 +4154,21 @@ depender del color de acento elegido. */
 .chathead .vh-actions {
   flex-shrink: 0;
 }
+/* En la cabecera del chat la acción es «Nueva conversación»: el resto de controles
+   (copiar, Historial) son apoyo y no compiten con ella. Su borde vuelve al pasar el
+   ratón, así que el control sigue viéndose al acercarse. */
+.chathead .vh-actions .btn.ghost {
+  border-color: transparent;
+  background: transparent;
+}
+.chathead .vh-actions .btn.ghost:hover {
+  border-color: rgba(var(--acc-rgb), 0.6);
+}
 .ch-status {
   display: inline-flex;
   align-items: center;
   gap: 7px;
-  align-self: flex-start;
+  align-self: center;
   padding: 3px 10px;
   border-radius: 999px;
   max-width: 100%;
@@ -4031,8 +4187,8 @@ depender del color de acento elegido. */
   animation: none;
 }
 .ch-mode {
-  font: 700 11px var(--font-ui);
-  letter-spacing: 0.08em;
+  font: 600 11px var(--font-ui);
+  letter-spacing: 0.06em;
   color: var(--mode-c);
 }
 .ch-txt {
@@ -4070,6 +4226,9 @@ depender del color de acento elegido. */
 .ctabs::-webkit-scrollbar-thumb {
   background: rgba(var(--acc2-rgb), 0.3);
   border-radius: 2px;
+}
+.ctabs[hidden] {
+  display: none;
 }
 .ctab {
   display: inline-flex;
@@ -4147,7 +4306,7 @@ depender del color de acento elegido. */
   display: inline-block;
   padding: 1px 7px;
   border-radius: 999px;
-  font: 700 10px var(--font-ui);
+  font: 600 10px var(--font-ui);
   letter-spacing: 0.06em;
   color: var(--mode-c);
   background: rgba(var(--mode-rgb), 0.12);
@@ -4201,6 +4360,7 @@ depender del color de acento elegido. */
   min-height: 0;
   display: flex;
 }
+/* (La cápsula flotante sustituye al velo: ya separa y desenfoca el borde.) */
 .chat-empty {
   position: absolute;
   inset: 0;
@@ -4215,49 +4375,52 @@ depender del color de acento elegido. */
   /* v4.4: 760px y no 620 — el estado vacío enseña los CUATRO modos en una fila (la rejilla
      pide 180px por tarjeta + los huecos) y a 620 el cuarto caía a una segunda línea. El
      resto del héroe (título, idea y sugerencias) va centrado, así que no cambia de sitio. */
-  max-width: 760px;
+  max-width: 780px;
   text-align: center;
   position: relative;
   z-index: 1;
 }
 .ce-mark {
-  width: 52px;
-  height: 52px;
-  margin: 0 auto 12px;
-  border-radius: 20px;
+  width: 64px;
+  height: 64px;
+  margin: 0 auto 18px;
+  border-radius: 24px;
   display: grid;
   place-items: center;
-  background: linear-gradient(140deg, rgba(34, 211, 238, 0.18), rgba(var(--acc2-rgb), 0.24));
-  border: 1px solid var(--line);
+  background: linear-gradient(140deg, rgba(34, 211, 238, 0.2), rgba(var(--acc2-rgb), 0.3));
+  border: 1px solid rgba(var(--acc-rgb), 0.4);
   color: var(--vio2);
-  box-shadow: 0 0 26px rgba(var(--acc2-rgb), 0.28);
+  box-shadow: 0 0 34px rgba(var(--acc2-rgb), 0.36);
 }
 .ce-mark .ic {
-  width: 24px;
-  height: 24px;
+  width: 27px;
+  height: 27px;
 }
 .ce-title {
   font-family: var(--font-display);
-  font-size: 18px;
+  font-size: var(--fs-hero);
+  font-weight: 600;
+  letter-spacing: -0.02em;
+  line-height: 1.15;
   display: block;
 }
 .ce-sub {
   color: var(--dim);
-  font-size: 12px;
-  margin: 6px 0 14px;
-  line-height: 1.5;
+  font-size: var(--fs-body);
+  margin: 10px 0 21px;
+  line-height: 1.55;
 }
 .ce-hints {
   display: flex;
   flex-wrap: wrap;
-  gap: 8px;
+  gap: 10px;
   justify-content: center;
 }
 .ce-hint {
   appearance: none;
   cursor: pointer;
-  font: 500 12px var(--font-ui);
-  padding: 8px 13px;
+  font: 500 var(--fs-body) var(--font-ui);
+  padding: 10px 16px;
   border-radius: 999px;
   color: var(--txt);
   background: rgba(var(--acc2-rgb), 0.1);
@@ -4280,16 +4443,16 @@ depender del color de acento elegido. */
      en la ventana mínima (1000px): a 180 el cuarto caía a una segunda línea y el héroe
      crecía de más. En la ventana normal las tarjetas siguen saliendo a ~182px. */
   grid-template-columns: repeat(auto-fit, minmax(150px, 1fr));
-  gap: 10px;
-  margin-top: 22px;
+  gap: 12px;
+  margin-top: 30px;
 }
 .ce-mode {
   text-align: left;
   cursor: pointer;
-  padding: 12px 13px;
+  padding: 13px 15px;
   border-radius: 18px;
-  background: linear-gradient(165deg, rgba(var(--face-rgb), 0.5), rgba(var(--panel-rgb), 0.6));
-  border: 1px solid var(--line2);
+  background: linear-gradient(165deg, rgba(var(--face-rgb), 0.58), rgba(var(--panel-rgb), 0.68));
+  border: 1px solid rgba(255, 255, 255, 0.08);
   transition: all 0.18s;
 }
 .ce-mode:hover {
@@ -4317,12 +4480,12 @@ depender del color de acento elegido. */
   color: rgb(var(--mr));
 }
 .ce-mode .cm-top b {
-  font: 700 12px var(--font-ui);
-  letter-spacing: 0.08em;
+  font: 600 12px var(--font-ui);
+  letter-spacing: 0.06em;
   color: rgb(var(--mr));
 }
 .ce-mode .cm-tag {
-  font-size: 11px;
+  font-size: var(--fs-small);
   color: var(--dim);
   line-height: 1.45;
   display: block;
@@ -4333,7 +4496,7 @@ depender del color de acento elegido. */
   padding: 0;
 }
 .ce-mode .cm-bullets li {
-  font-size: 11px;
+  font-size: var(--fs-small);
   color: var(--dim);
   padding-left: 11px;
   position: relative;
@@ -4344,7 +4507,7 @@ depender del color de acento elegido. */
   position: absolute;
   left: 2px;
   color: rgb(var(--mr));
-  font-weight: 700;
+  font-weight: 400;
 }
 
 /* ---- turno: quién habla, con qué modo, cuándo y con qué acciones ---- */
@@ -4384,7 +4547,7 @@ depender del color de acento elegido. */
 }
 .listempty p {
   color: var(--dim);
-  font-size: 12.5px;
+  font-size: var(--fs-body);
   line-height: 1.55;
   margin: 7px auto 14px;
   max-width: 460px;
@@ -4402,13 +4565,13 @@ depender del color de acento elegido. */
   max-width: 100%;
 }
 .msg-who {
-  font: 600 11px var(--font-ui);
-  letter-spacing: 0.8px;
+  font: 600 var(--fs-small) var(--font-ui);
+  letter-spacing: 0;
   color: var(--dim);
 }
 .hint-key {
   font: 600 11px var(--font-ui);
-  letter-spacing: 0.6px;
+  letter-spacing: 0.06em;
   padding: 1px 6px;
   margin-left: 4px;
   border: 1px solid var(--line2);
@@ -4424,24 +4587,8 @@ depender del color de acento elegido. */
 .msg.me .msg-head {
   justify-content: flex-end;
 }
-.msg-mode {
-  display: inline-flex;
-  align-items: center;
-  gap: 4px;
-  font: 700 11px var(--font-ui);
-  letter-spacing: 0.08em;
-  padding: 2px 7px;
-  border-radius: 999px;
-  background: rgba(var(--mr), 0.13);
-  border: 1px solid rgba(var(--mr), 0.34);
-  color: rgb(var(--mr));
-}
-.msg-mode .ic {
-  width: 10px;
-  height: 10px;
-}
 .msg-ts {
-  font-size: 11px;
+  font-size: var(--fs-label);
   color: var(--dim);
 }
 .msg-body {
@@ -4702,8 +4849,8 @@ depender del color de acento elegido. */
 }
 /* Cierre de una delegación: el estado del subagente en una píldora (OK · PARCIAL · FALLÓ) */
 .dcard-status {
-  font: 700 10px var(--font-display);
-  letter-spacing: 1px;
+  font: 600 10px var(--font-display);
+  letter-spacing: 0.06em;
   padding: 2px 8px;
   border-radius: 999px;
   flex-shrink: 0;
@@ -4774,7 +4921,7 @@ depender del color de acento elegido. */
 }
 .tcard-sub {
   font: 600 11px var(--font-ui);
-  letter-spacing: 0.8px;
+  letter-spacing: 0;
   color: var(--vio2);
   padding: 1px 6px;
   border-radius: 999px;
@@ -4821,8 +4968,8 @@ depender del color de acento elegido. */
   display: block;
 }
 .tcard-body .tb-label {
-  font: 700 11px var(--font-ui);
-  letter-spacing: 0.08em;
+  font: 500 11px var(--font-ui);
+  letter-spacing: 0.1em;
   color: var(--dim);
   display: flex;
   align-items: center;
@@ -4908,8 +5055,8 @@ depender del color de acento elegido. */
 }
 /* fallo dentro del grupo: la cabecera lo enseña aunque el grupo esté plegado */
 .tgroup-head .tg-fails {
-  font: 700 11px var(--font-ui);
-  letter-spacing: 0.04em;
+  font: 600 11px var(--font-ui);
+  letter-spacing: 0;
   color: var(--danger);
   padding: 1px 7px;
   border-radius: 999px;
@@ -4968,8 +5115,8 @@ depender del color de acento elegido. */
   color: var(--mode-c);
 }
 .plancard-head b {
-  font: 700 11px var(--font-ui);
-  letter-spacing: 0.08em;
+  font: 600 11px var(--font-ui);
+  letter-spacing: 0.06em;
   color: var(--mode-c);
 }
 .plancard-head .pl-count {
@@ -4998,7 +5145,7 @@ depender del color de acento elegido. */
   border-radius: 50%;
   display: grid;
   place-items: center;
-  font: 700 11px var(--font-ui);
+  font: 600 11px var(--font-ui);
   color: var(--mode-c);
   background: rgba(var(--acc2-rgb), 0.16);
   border: 1px solid rgba(var(--acc-rgb), 0.35);
@@ -5234,7 +5381,7 @@ input.glowslider.compact::-webkit-slider-thumb {
   gap: 8px;
   width: 200px;
   font: 500 11px var(--font-ui);
-  letter-spacing: 0.6px;
+  letter-spacing: 0.06em;
   color: var(--dim);
   margin-top: 5px;
 }
@@ -5606,14 +5753,14 @@ kbd {
 }
 .memsec-lead {
   color: var(--dim);
-  font-size: 12.5px;
+  font-size: var(--fs-body);
   line-height: 1.55;
   margin: 0 0 12px;
   max-width: 620px;
 }
 .memsec-nota {
   color: var(--dim);
-  font-size: 12.5px;
+  font-size: var(--fs-body);
   line-height: 1.55;
   margin: 0 0 12px;
   max-width: 620px;
@@ -5700,7 +5847,7 @@ kbd {
   border: 1px solid var(--line);
   border-radius: 14px;
   background: rgba(var(--acc2-rgb), 0.14);
-  font-size: 13px;
+  font-size: var(--fs-body);
 }
 /* hábitos: un grupo por categoría, con su «olvidar» */
 .hgrupo {
@@ -5716,7 +5863,7 @@ kbd {
   gap: 6px;
   min-width: 116px;
   color: var(--txt);
-  font-size: 13px;
+  font-size: var(--fs-body);
 }
 .hgr-t .ic {
   width: 14px;
@@ -5798,10 +5945,588 @@ kbd {
   max-width: 620px;
 }
 .memwipe p {
-  font-size: 12.5px;
+  font-size: var(--fs-body);
   line-height: 1.55;
   margin: 0 0 10px;
 }
 .memwipe input {
   margin-right: 8px;
+}
+
+/* Tipografía: los datos de máquina (direcciones, claves) se leen en mono —la voz
+   de Cascadia—, no con la fuente de la interfaz. */
+#pUrl,
+#pKey {
+  font-family: var(--font-mono);
+  font-size: var(--fs-mono);
+  letter-spacing: 0;
+}
+/* …pero el placeholder de la clave es una frase, no una clave. */
+#pKey::placeholder {
+  font-family: var(--font-ui);
+  font-size: var(--fs-body);
+}
+
+/* En las skills, la descripción es el contenido de la fila; el resto de la línea
+   (versión, autor, origen) sigue siendo meta. */
+.skillitem .mt small.md:first-of-type {
+  font-size: var(--fs-body);
+  line-height: 1.5;
+}
+
+/* ===================== AJUSTES v2 =====================
+   Dos columnas: navegación de secciones + contenido. Las filas de ajuste siguen
+   el patrón texto-izquierda / control-derecha, pero con una rejilla real (antes
+   el select de permisos se comía el ancho y comprimía la descripción a 180px). */
+#view-settings.on {
+  display: grid;
+  grid-template-columns: 236px minmax(0, 1fr);
+  grid-template-areas:
+    'head head'
+    'hero hero'
+    'wizard wizard'
+    'nav content';
+  column-gap: 30px;
+  row-gap: 16px;
+  align-items: start;
+}
+#view-settings > .viewhead {
+  grid-area: head;
+  margin-bottom: 0;
+}
+#view-settings > #activeCard {
+  grid-area: hero;
+  max-width: none;
+}
+#view-settings > #wizardSetup {
+  grid-area: wizard;
+}
+#view-settings > #setTabs {
+  grid-area: nav;
+}
+#view-settings > #setWrap {
+  grid-area: content;
+  max-width: none;
+}
+/* Con la búsqueda activa se ven todos los paneles: la navegación deja de mandar. */
+#view-settings:has(.setwrap.searching) #setTabs {
+  opacity: 0.5;
+}
+
+/* --- navegación de secciones --- */
+#setTabs {
+  display: flex;
+  flex-direction: column;
+  gap: 3px;
+  margin: 0;
+  padding: 6px;
+  border: 1px solid rgba(255, 255, 255, 0.06);
+  border-radius: 16px;
+  background: rgba(var(--panel-rgb), 0.35);
+  position: sticky;
+  top: 8px;
+  max-width: none;
+}
+.settab {
+  display: grid;
+  grid-template-columns: 20px minmax(0, 1fr);
+  grid-template-rows: auto auto;
+  align-items: center;
+  column-gap: 11px;
+  padding: 9px 10px;
+  border-radius: 12px;
+  border: 1px solid transparent;
+  background: transparent;
+  color: var(--dim);
+  text-align: left;
+  white-space: normal;
+  font: 600 13.5px var(--font-ui);
+  cursor: pointer;
+  transition:
+    background 0.15s,
+    color 0.15s,
+    border-color 0.15s;
+}
+.settab i {
+  grid-row: 1 / 3;
+  display: grid;
+  place-items: center;
+  width: 20px;
+  height: 20px;
+}
+.settab i .ic {
+  width: 16px;
+  height: 16px;
+}
+.settab small {
+  display: block;
+  font-size: 11.5px;
+  font-weight: 400;
+  line-height: 1.35;
+  color: var(--dim);
+  margin-top: 1px;
+}
+.settab:hover:not(.on) {
+  color: var(--txt);
+  background: rgba(var(--acc2-rgb), 0.06);
+}
+.settab.on {
+  color: #fff;
+  background:
+    linear-gradient(180deg, rgba(255, 255, 255, 0.1), rgba(255, 255, 255, 0.02)), rgba(var(--acc2-rgb), 0.26);
+  border-color: rgba(var(--acc-rgb), 0.34);
+  box-shadow: inset 0 1px 0 rgba(255, 255, 255, 0.18);
+}
+.settab.on small {
+  color: rgba(255, 255, 255, 0.7);
+}
+
+/* --- héroe del modelo --- */
+#activeCard {
+  padding: 14px 18px;
+  border-radius: 18px;
+}
+.ac-ic {
+  width: 42px;
+  height: 42px;
+  border-radius: 14px;
+}
+#activeModelName {
+  font: 600 16px var(--font-display);
+  letter-spacing: -0.01em;
+}
+#activeModelMeta {
+  font-size: 13px;
+}
+.ac-badge {
+  font-size: 10.5px;
+  letter-spacing: 0.04em;
+}
+#btnChangeModel {
+  margin-left: 4px;
+}
+
+/* --- tarjetas y cabeceras --- */
+#view-settings .setcard {
+  padding: 18px 20px;
+  border-radius: 18px;
+  border-color: rgba(255, 255, 255, 0.055);
+  background: rgba(var(--panel-rgb), 0.42);
+}
+#view-settings .sc-head {
+  margin-bottom: 4px;
+  padding-bottom: 12px;
+  border-bottom: 1px solid rgba(255, 255, 255, 0.055);
+}
+#view-settings .sc-head b {
+  font-size: 18px;
+}
+#view-settings .sc-hint {
+  font-size: 13px;
+}
+#view-settings .setpanel {
+  gap: 18px;
+}
+
+/* --- filas de ajuste --- */
+#view-settings .swrow,
+#view-settings .themerow {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) auto;
+  gap: 18px;
+  align-items: center;
+  padding: 13px 0;
+  border-bottom: 1px solid rgba(255, 255, 255, 0.055);
+}
+#view-settings .swrow:last-child,
+#view-settings .themerow:last-child {
+  border-bottom: 0;
+  padding-bottom: 2px;
+}
+#view-settings .swrow .st b,
+#view-settings .themerow .st b {
+  font-size: 14.5px;
+  font-weight: 600;
+}
+#view-settings .swrow .st small,
+#view-settings .themerow .st small {
+  font-size: 13px;
+  line-height: 1.5;
+  max-width: 62ch;
+}
+#view-settings .themerow.block {
+  grid-template-columns: minmax(0, 1fr);
+  align-items: start;
+}
+#view-settings .themerow.block .colordot,
+#view-settings .themerow.block .csel {
+  display: none;
+}
+
+/* muestras de color */
+.pals {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px;
+  margin-top: 12px;
+}
+.pal {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  padding: 6px 12px 6px 7px;
+  border-radius: 999px;
+  border: 1px solid rgba(255, 255, 255, 0.07);
+  background: rgba(255, 255, 255, 0.03);
+  color: var(--dim);
+  font: 500 12.5px var(--font-ui);
+  cursor: pointer;
+  transition: all 0.15s;
+}
+.pal b {
+  font-weight: 500;
+}
+.pal-dot {
+  width: 18px;
+  height: 18px;
+  border-radius: 50%;
+  background: rgb(var(--pc));
+  box-shadow:
+    inset 0 0 0 1px rgba(255, 255, 255, 0.25),
+    0 0 10px rgba(var(--pc), 0.45);
+  flex-shrink: 0;
+}
+.pal-dot.mix {
+  background: linear-gradient(135deg, rgb(128, 110, 214), rgb(96, 186, 200));
+  box-shadow:
+    inset 0 0 0 1px rgba(255, 255, 255, 0.25),
+    0 0 10px rgba(128, 110, 214, 0.4);
+}
+.pal:hover {
+  color: var(--txt);
+  border-color: rgba(255, 255, 255, 0.15);
+}
+.pal.on {
+  color: #fff;
+  border-color: rgba(var(--acc-rgb), 0.45);
+  background: rgba(var(--acc2-rgb), 0.16);
+}
+.pal.on .pal-dot {
+  box-shadow:
+    inset 0 0 0 1px rgba(255, 255, 255, 0.5),
+    0 0 14px rgba(var(--pc), 0.8);
+}
+
+/* --- permisos por herramienta --- */
+#view-settings .permrow {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) 230px;
+  gap: 18px;
+  align-items: center;
+  padding: 11px 0;
+  margin: 0;
+  border: 0;
+  border-bottom: 1px solid rgba(255, 255, 255, 0.05);
+  border-radius: 0;
+  background: none;
+}
+#view-settings .permrow:last-child {
+  border-bottom: 0;
+}
+#view-settings .permrow .mt b {
+  font-size: 14px;
+  font-weight: 600;
+}
+#view-settings .permrow .mt .md {
+  font-size: 13px;
+  line-height: 1.5;
+  color: var(--dim);
+}
+#view-settings .permrow .mt .pd {
+  display: inline-block;
+  margin-top: 5px;
+  padding: 1px 8px 2px;
+  border-radius: 999px;
+  background: rgba(var(--acc2-rgb), 0.12);
+  color: var(--dim);
+  font-size: 10.5px;
+  letter-spacing: 0.02em;
+}
+#view-settings .permrow .csel {
+  width: 230px;
+}
+#view-settings .permrow .csel-btn {
+  padding: 8px 11px;
+  font-size: 13px;
+  border-radius: 10px;
+}
+.permgroup {
+  font-size: 11px;
+  font-weight: 600;
+  letter-spacing: 0.1em;
+  text-transform: uppercase;
+  color: var(--dim);
+  margin: 16px 0 2px;
+}
+
+/* --- interruptor --- */
+#view-settings .sw {
+  width: 42px;
+  height: 23px;
+  border-radius: 999px;
+}
+#view-settings .sw::after {
+  width: 17px;
+  height: 17px;
+  top: 2px;
+  left: 2px;
+  background: #b9b4d6;
+}
+#view-settings .sw.on {
+  background: rgba(var(--acc2-rgb), 0.45);
+  border-color: rgba(var(--acc-rgb), 0.7);
+}
+#view-settings .sw.on::after {
+  left: 21px;
+  background: #fff;
+  box-shadow: 0 0 10px rgba(var(--glow-rgb), 0.8);
+}
+
+/* --- Acerca de: portada --- */
+.aboutcard {
+  padding: 20px 22px;
+}
+.about-hero {
+  display: flex;
+  align-items: center;
+  gap: 14px;
+}
+.about-mark {
+  width: 42px;
+  height: 42px;
+  object-fit: contain;
+  filter: drop-shadow(0 0 12px rgba(var(--acc2-rgb), 0.55));
+}
+.ah-main b {
+  display: block;
+  font: 600 20px var(--font-display);
+  letter-spacing: 0.1em;
+}
+.ah-main small {
+  font-size: 13px;
+  color: var(--dim);
+}
+.about-hero .kbd {
+  margin-left: auto;
+}
+
+/* --- Datos: ruta de máquina --- */
+#wsPathLabel {
+  font-family: var(--font-mono);
+  font-size: 12px;
+  color: var(--txt);
+}
+
+/* ============================================================================
+   VISTAS · lenguaje común (misma piel que Ajustes)
+   Tareas, Espacio de trabajo, Agentes, Equipo, Skills, MCP, Memoria,
+   Herramientas e Historial. Las tarjetas derivan de --panel-rgb y --line2, las
+   descripciones van a 13/1.55 y las listas comparten ritmo. El chat no se toca.
+   ============================================================================ */
+
+/* --- tarjeta de datos: antes `.tooltray` era un contorno suelto --- */
+.tooltray {
+  margin-top: 16px;
+  padding: 14px 16px;
+  border: 1px solid var(--line2);
+  border-radius: 16px;
+  background: linear-gradient(160deg, rgba(var(--panel-rgb), 0.42), rgba(var(--panel-rgb), 0.26));
+}
+.tt-head {
+  display: flex;
+  align-items: baseline;
+  gap: 10px;
+  flex-wrap: wrap;
+  margin: 0 0 11px;
+  font: 650 11.5px/1.4 var(--font-ui);
+  letter-spacing: 0.12em;
+  color: var(--dim);
+}
+
+/* --- tarjetas de agente/miembro: el icono no se aplasta dentro del flex --- */
+.acard {
+  align-items: flex-start;
+}
+.acard .aic {
+  flex: 0 0 40px;
+  width: 40px;
+  height: 40px;
+}
+/* la meta larga se limita a dos líneas; el detalle va en el title */
+.acard .amd {
+  display: -webkit-box;
+  -webkit-line-clamp: 2;
+  -webkit-box-orient: vertical;
+  overflow: hidden;
+}
+
+/* --- salud de los modelos: fila de datos, no píldora recortada --- */
+#healthList {
+  display: block;
+}
+.hrow {
+  display: grid;
+  grid-template-columns: 8px minmax(0, 1fr) 88px 66px 104px 74px 66px;
+  align-items: center;
+  column-gap: 14px;
+  padding: 7px 10px;
+  border-radius: 10px;
+  font-size: 12.5px;
+  color: var(--dim);
+}
+.hrow + .hrow {
+  box-shadow: inset 0 1px 0 rgba(255, 255, 255, 0.04);
+}
+.hrow .hmod {
+  color: var(--txt);
+  font-weight: 600;
+  font-size: 13px;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+.hrow .hstat {
+  text-align: right;
+  white-space: nowrap;
+  font-variant-numeric: tabular-nums;
+}
+.hrow .hstat.bad {
+  color: var(--danger);
+}
+
+/* --- filas de memoria y skills: los controles arriba, la meta en una línea --- */
+.memitem {
+  align-items: flex-start;
+}
+.memitem .mt {
+  line-height: 1.45;
+}
+.mrow-ctl {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  flex-shrink: 0;
+  margin-left: auto;
+}
+.skillitem .sdesc {
+  display: block;
+  margin-top: 3px;
+  color: var(--dim);
+  font-size: 12.5px;
+  line-height: 1.5;
+}
+.skillitem .smeta {
+  display: block;
+  margin-top: 5px;
+  font-size: 11.5px;
+  color: var(--dim);
+}
+
+/* --- memoria: los títulos de sección hablan como el resto de tarjetas --- */
+.memsec-t {
+  font: 600 14px var(--font-ui);
+  letter-spacing: 0;
+  text-transform: none;
+  color: var(--txt);
+  margin: 0 0 6px;
+}
+.memsec-note {
+  font: 500 12px var(--font-ui);
+  color: var(--dim);
+}
+
+/* --- estado vacío: mismo peso visual que una tarjeta --- */
+.listempty {
+  border-radius: 20px;
+  padding: 34px 26px;
+}
+
+/* --- tareas: la nueva tarea es una tarjeta, no un contorno --- */
+.tasknew {
+  max-width: 860px;
+}
+.tasknew-row {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  flex-wrap: wrap;
+}
+.tasknew-row + .tasknew-row {
+  margin-top: 10px;
+}
+#taskGoal {
+  flex: 1 1 260px;
+  min-width: 220px;
+}
+#taskWhen {
+  width: 190px;
+}
+/* el desplegable del modo es el .csel que envuelve al select (el select nativo va oculto) */
+.tasknew-row .csel {
+  flex: 0 0 110px;
+  width: 110px;
+}
+.tn-hint {
+  margin-top: 10px;
+}
+.tasks-note {
+  max-width: 860px;
+  margin: 0 0 14px;
+}
+
+/* --- espacio de trabajo: una tarjeta con su cabecera, no un formulario suelto --- */
+.projwrap {
+  max-width: 720px;
+  padding: 16px 18px;
+  border: 1px solid var(--line2);
+  border-radius: 18px;
+  background: linear-gradient(160deg, rgba(var(--panel-rgb), 0.42), rgba(var(--panel-rgb), 0.26));
+}
+.projwrap #projPath {
+  width: 100%;
+}
+.projwrap .subnote {
+  margin-top: 12px;
+}
+
+/* --- skills: las bandejas comparten ancho con la lista --- */
+.skills-tray {
+  max-width: 860px;
+}
+
+/* --- memoria: el vacío vive dentro de una sección con su propia explicación;
+   se alinea a la izquierda y pierde el aire de página completa --- */
+.memsec .listempty {
+  max-width: none;
+  margin: 14px 0 0;
+  padding: 20px 22px;
+  text-align: left;
+}
+.memsec .listempty .le-mark {
+  width: 38px;
+  height: 38px;
+  margin: 0 0 10px;
+  border-radius: 14px;
+}
+.memsec .listempty p {
+  margin: 5px 0 0;
+  max-width: 62ch;
+}
+
+/* --- equipo: la nota y las tarjetas del wrap respiran juntas --- */
+#equipoNota {
+  max-width: 860px;
+}
+.equipowrap .tooltray {
+  margin-top: 0;
 }

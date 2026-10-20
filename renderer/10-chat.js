@@ -259,11 +259,15 @@ function pintarPestana(rt) {
 /** Pinta el strip. Se pone al día EN SU SITIO (no se rehace el innerHTML) para no perder
     el foco al cambiar de pestaña con las flechas. */
 function pintarPestanas() {
-  if (!$('#convTabs')) return;
+  const strip = $('#convTabs');
+  if (!strip) return;
   for (const rt of runtimes.values()) {
     if (!rt.tab) crearPestana(rt);
     pintarPestana(rt);
   }
+  /* Con una sola conversación abierta la tira repetía el título de la cabecera: se
+     enseña en cuanto hay algo entre lo que cambiar y se retira cuando no. */
+  strip.hidden = runtimes.size <= 1;
 }
 
 /** Pone a la vista la conversación `id`, creando su pestaña si es la primera vez. NO
@@ -600,6 +604,14 @@ function syncChatBadge() {
   const onChat = $('#view-chat').classList.contains('on');
   setBadge('#nbChat', busy && !onChat, { dot: true });
 }
+/* Meta de cada modo para la píldora del sidebar (define 40-vistas.js con una sola
+   fuente de verdad, ChatKit). Vive aquí porque quien la pinta es setSideActive. */
+const MODE_META = Object.fromEntries(
+  K.MODE_ORDER.map((k) => {
+    const m = K.MODES[k];
+    return [k, { dot: m.dot, label: m.label, desc: m.tagline, icon: m.icon, name: m.name, rgb: m.rgb }];
+  }),
+);
 function setSideActive() {
   const sm = $('#sideModeBtn');
   if (!sm) return;
@@ -909,12 +921,6 @@ function showEmpty() {
   cerrarDiffPanel();
 }
 
-/** Chip con el modo que produjo un turno: ACT / PLAN / THINK. */
-function modeBadge(m) {
-  const M = K.mode(m);
-  return `<span class="msg-mode" style="--mr:${M.rgb}" title="${esc(M.name)} — ${esc(M.tagline)}">${ic(M.icon)}${esc(M.label)}</span>`;
-}
-
 /** Aplica el color del modo a toda la vista del chat (--mode-c). */
 function applyModeTheme(m) {
   const M = K.mode(m);
@@ -994,6 +1000,13 @@ function bubble(role, opts) {
   hideEmpty();
   const m = document.createElement('div');
   m.className = 'msg ' + (role === 'user' ? 'me' : 'ai');
+  const ts = nowClock(o.ts);
+  /* Dos entregas del agente en el mismo minuto (plan y resultado) son el mismo turno
+     a la vista: la segunda no repite cara, nombre ni hora (ver .msg.cont). */
+  const prev = msgs.lastElementChild;
+  const prevTs =
+    prev && prev.classList.contains('msg') && prev.classList.contains('ai') && prev.querySelector('.msg-ts');
+  if (role !== 'user' && prevTs && prevTs.textContent === ts) m.classList.add('cont');
   const av = document.createElement('div');
   av.className = 'avatar';
   if (role === 'user') {
@@ -1013,8 +1026,7 @@ function bubble(role, opts) {
   head.className = 'msg-head';
   head.innerHTML =
     `<span class="msg-who">${esc(role === 'user' ? CFG.settings.userName || 'Tú' : 'Sagitari')}</span>` +
-    (o.mode && role === 'user' ? modeBadge(o.mode) : '') +
-    `<span class="msg-ts">${nowClock(o.ts)}</span>`;
+    `<span class="msg-ts">${ts}</span>`;
   const body = document.createElement('div');
   body.className = 'msg-body';
   const b = document.createElement('div');

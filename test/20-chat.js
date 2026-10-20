@@ -225,7 +225,7 @@ test('chat: el CSS da color propio a cada modo y estiliza las tarjetas', () => {
   for (const k of ChatKit.MODE_ORDER) {
     ok(new RegExp('#view-chat\\[data-mode=["\']' + k + '["\']').test(css), 'el modo ' + k + ' necesita su tema en el chat');
   }
-  for (const cls of ['tcard', 'tgroup', 'plancard', 'codeblock', 'msg-actions', 'msg-mode', 'chat-empty', 'jumpdown', 'stream']) {
+  for (const cls of ['tcard', 'tgroup', 'plancard', 'codeblock', 'msg-actions', 'chat-empty', 'jumpdown', 'stream']) {
     ok(css.includes('.' + cls), 'falta el estilo .' + cls);
   }
   // el título del chat es la primera frase del usuario: una sola línea

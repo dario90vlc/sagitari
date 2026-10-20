@@ -130,9 +130,9 @@
                    (10-chat.js): aquí sólo vive el contenedor con el rol de tablist. -->
               <div class="ctabs" id="convTabs" role="tablist" aria-label="Conversaciones abiertas"></div>
               <div class="vh-actions">
-                <button class="btn ghost sq" id="btnCopyConv" title="Copiar toda la conversación"><i data-i="copy"></i></button>
-                <button class="btn" id="btnClear">Nueva conversación</button>
+                <button class="btn" id="btnClear" title="Nueva conversación">Nueva</button>
                 <button class="btn ghost" id="btnGoHistory">Historial</button>
+                <button class="btn ghost sq" id="btnCopyConv" title="Copiar toda la conversación"><i data-i="copy"></i></button>
               </div>
             </div>
             <div id="confirmBar" class="confirmbar" aria-labelledby="confirmTitle" aria-describedby="confirmDetail" hidden>
@@ -205,7 +205,7 @@
                       id="chatInput"
                       aria-label="Mensaje para Sagitari"
                       rows="1"
-                      placeholder="Escribe a Sagitari… (/ para órdenes y skills)"
+                      placeholder="Escribe a Sagitari…"
                     ></textarea>
                     <button
                       class="cbtn"
@@ -215,7 +215,7 @@
                     >
                       <i data-i="clip"></i>
                     </button>
-                    <button class="cbtn" id="chatPause" title="Pausar la tarea (guarda el punto de control)" aria-label="Pausar tarea">
+                    <button class="cbtn" id="chatPause" title="Pausar la tarea (guarda el punto de control)" aria-label="Pausar tarea" hidden>
                       <i data-i="pause"></i>
                     </button>
                     <button class="cbtn send" id="chatSend" title="Enviar" aria-label="Enviar"><i data-i="send"></i></button>
@@ -265,11 +265,11 @@
               <div class="tt-head">ACTIVIDAD DE HERRAMIENTAS · SESIÓN ACTUAL</div>
               <div id="toolTrayList" class="tt-list"></div>
             </div>
-            <div class="tooltray" style="margin-top: 18px">
+            <div class="tooltray">
               <div class="tt-head">SALUD DE LOS MODELOS</div>
               <div id="healthList" class="tt-list"></div>
             </div>
-            <div class="tooltray" style="margin-top: 18px; margin-bottom: 24px">
+            <div class="tooltray">
               <div class="tt-head">HÁBITOS OBSERVADOS · v2.0 APRENDIZAJE</div>
               <div id="habitsList" class="tt-list"></div>
             </div>
@@ -307,17 +307,16 @@
               <h2>Tareas</h2>
               <div class="vh-actions"><button class="btn ghost" id="tasksRefresh">Actualizar</button></div>
             </div>
-            <div class="tooltray" style="max-width: 860px; margin-bottom: 14px">
+            <div class="tooltray tasknew">
               <div class="tt-head">NUEVA TAREA EN SEGUNDO PLANO</div>
-              <div class="btnrow">
+              <div class="tasknew-row">
                 <input
                   type="text"
                   id="taskGoal"
                   aria-label="Objetivo de la tarea"
                   placeholder="Objetivo: busca esto y compara precios…"
-                  style="flex: 3; min-width: 220px"
                 />
-                <select id="taskMode" aria-label="Modo de la tarea" style="width: 110px">
+                <select id="taskMode" aria-label="Modo de la tarea">
                   <option value="act">Act</option>
                   <option value="plan">Plan</option>
                   <option value="think">Think</option>
@@ -326,19 +325,19 @@
                   <span class="bi"><i data-i="zap"></i></span> Lanzar
                 </button>
               </div>
-              <div class="btnrow" style="margin-top: 8px">
-                <input type="datetime-local" id="taskWhen" aria-label="Fecha y hora de la tarea" style="width: 210px" />
+              <div class="tasknew-row">
+                <input type="datetime-local" id="taskWhen" aria-label="Fecha y hora de la tarea" />
                 <button class="btn ghost" id="taskSchedule">
                   <span class="bi"><i data-i="history"></i></span> Programar
                 </button>
                 <span class="saving" id="taskMsg"></span>
               </div>
-              <div class="subnote">
+              <div class="subnote tn-hint">
                 Las tareas en segundo plano usan su propio agente: puedes seguir chateando mientras trabajan. Se te notificará al terminar.
                 Máx. simultáneas configurable en Ajustes.
               </div>
             </div>
-            <p class="subnote" style="margin-top: 0; margin-bottom: 14px">
+            <p class="subnote tasks-note">
               Cada tarea larga guarda un punto de control con su último paso completado. Puedes pausar, reanudar donde se quedó (también
               tras cerrar la app) y ver qué paso falló y por qué.
             </p>
@@ -350,19 +349,22 @@
             <h1 class="sr-only">Espacio de trabajo</h1>
             <div class="viewhead"><h2>Espacio de trabajo</h2></div>
             <div class="projwrap">
+              <div class="sc-head">
+                <b>Carpeta de trabajo</b
+                ><span class="sc-hint">Donde Sagitari crea y modifica archivos. Pídele «crea un script» sin rutas: aterriza aquí.</span>
+              </div>
               <div class="field">
                 <label for="projPath">Espacio de trabajo activo</label>
                 <input type="text" id="projPath" placeholder="C:\Users\tu-usuario\Desktop\mi-proyecto" />
               </div>
-              <button class="btn" id="projOpen">
-                <span class="bi"><i data-i="external"></i></span> Abrir y trabajar aquí
-              </button>
-              <button class="btn ghost" id="projPick">Elegir carpeta…</button>
-              <div class="saving" id="projMsg"></div>
-              <div class="subnote">
-                La carpeta donde Sagitari crea y modifica archivos. Pídele «crea un script» sin rutas: aterrizan aquí. Elegir o abrir una
-                carpeta la convierte en el espacio activo.
+              <div class="btnrow">
+                <button class="btn" id="projOpen">
+                  <span class="bi"><i data-i="external"></i></span> Abrir y trabajar aquí
+                </button>
+                <button class="btn ghost" id="projPick">Elegir carpeta…</button>
+                <span class="saving" id="projMsg"></span>
               </div>
+              <div class="subnote">Elegir o abrir una carpeta la convierte en el espacio activo.</div>
             </div>
           </section>
 
@@ -372,7 +374,7 @@
             <div class="viewhead"><h2>Servidores MCP</h2></div>
             <div class="setcard">
               <div class="sc-head">
-                <b>Servidores MCP</b
+                <b>Servidores</b
                 ><span class="sc-hint"
                   >Conecta herramientas externas (GitHub, Notion, tu propio servidor…) y el agente las usará como las de casa.</span
                 >
@@ -654,7 +656,7 @@
               tokens hasta que aplican. Importa packs desde GitHub (owner/repo), crea las tuyas o edita la carpeta directamente.
             </p>
             <div id="skillsList" class="memlist"></div>
-            <div class="tooltray" style="margin-top: 18px; max-width: 860px">
+            <div class="tooltray skills-tray">
               <div class="tt-head">CATÁLOGO DE PACKS · LISTOS PARA INSTALAR</div>
               <div class="btnrow">
                 <input
@@ -674,7 +676,7 @@
               <div id="marketList" class="memlist" style="margin-top: 10px"></div>
               <span class="saving" id="marketMsg"></span>
             </div>
-            <div class="tooltray" style="margin-top: 18px; max-width: 860px">
+            <div class="tooltray skills-tray">
               <div class="tt-head">CREAR SKILL</div>
               <div class="btnrow">
                 <input
@@ -725,6 +727,7 @@
                 <small id="activeModelMeta">Elige un proveedor y activa un modelo para empezar.</small>
               </div>
               <span class="ac-badge off" id="activeModelBadge">sin activar</span>
+              <button class="btn ghost" id="btnChangeModel" title="Ir a proveedor y modelo">Cambiar</button>
             </div>
 
             <!-- wizard de primer uso: aparece sólo si no hay modelo activo y no se ha saltado -->
@@ -753,7 +756,7 @@
                 aria-selected="true"
                 tabindex="0"
               >
-                <i data-i="spark"></i> Modelo
+                <i data-i="spark"></i><span class="sl">Modelo</span><small>Proveedor y conexión</small>
               </button>
               <button
                 class="settab"
@@ -764,7 +767,7 @@
                 aria-selected="false"
                 tabindex="-1"
               >
-                <i data-i="eye"></i> Apariencia
+                <i data-i="eye"></i><span class="sl">Apariencia</span><small>Color, vidrio y luz</small>
               </button>
               <button
                 class="settab"
@@ -775,7 +778,7 @@
                 aria-selected="false"
                 tabindex="-1"
               >
-                <i data-i="key"></i> Seguridad
+                <i data-i="key"></i><span class="sl">Seguridad</span><small>Permisos y límites</small>
               </button>
               <button
                 class="settab"
@@ -786,7 +789,7 @@
                 aria-selected="false"
                 tabindex="-1"
               >
-                <i data-i="agents"></i> Agente
+                <i data-i="agents"></i><span class="sl">Agente</span><small>Memoria y tareas</small>
               </button>
               <button
                 class="settab"
@@ -797,7 +800,7 @@
                 aria-selected="false"
                 tabindex="-1"
               >
-                <i data-i="history"></i> Datos
+                <i data-i="history"></i><span class="sl">Datos</span><small>Espacio, atajos, hábitos</small>
               </button>
               <button
                 class="settab"
@@ -808,7 +811,7 @@
                 aria-selected="false"
                 tabindex="-1"
               >
-                <i data-i="spark"></i> Acerca de
+                <i data-i="spark"></i><span class="sl">Acerca de</span><small>Versión y actualizaciones</small>
               </button>
             </div>
 
@@ -834,11 +837,13 @@
                         <option value="anthropic">Anthropic — /messages</option>
                         <option value="responses">OpenAI Responses — /responses</option>
                       </select>
-                      <div class="subnote">
-                        Cómo habla Sagitari con este servidor. «Automático» lo deduce por proveedor y modelo (en OpenCode Go, los Qwen y
-                        MiniMax usan /messages y Grok o GPT-Luna usan /responses); fíjalo a mano si tu servidor habla Anthropic sin decirlo
-                        en la dirección. Se guarda al cambiarlo y también lo usa «Detectar modelos».
-                      </div>
+                    </div>
+                  </div>
+                  <div class="srow" data-keys="formato api protocolo endpoint anthropic responses openai">
+                    <div class="subnote">
+                      Cómo habla Sagitari con este servidor. «Automático» lo deduce por proveedor y modelo (en OpenCode Go, los Qwen y
+                      MiniMax usan /messages y Grok o GPT-Luna usan /responses); fíjalo a mano si tu servidor habla Anthropic sin decirlo
+                      en la dirección. Se guarda al cambiarlo y también lo usa «Detectar modelos».
                     </div>
                   </div>
                   <div class="field srow" data-keys="base url endpoint servidor direccion">
@@ -919,10 +924,13 @@
                     >
                     <div class="sw on" id="swGlow" aria-label="Glow ambiental en los bordes"></div>
                   </div>
-                  <div class="themerow" data-keys="color tema apariencia acento interfaz">
-                    <span class="st"><b>Color de la interfaz</b><small>Teñe bordes, menús, botones y detalles de toda la app.</small></span>
+                  <div class="themerow block" data-keys="color tema apariencia acento interfaz">
+                    <span class="st"><b>Color de la interfaz</b><small>Tiñe bordes, menús, botones y detalles de toda la app.</small></span>
+                    <div class="pals" id="uiColorTiles" role="group" aria-label="Color de la interfaz">
+                      <button type="button" class="pal" data-pal="violet"><span class="pal-dot" style="--pc: 128, 110, 214"></span><b>Violeta</b></button><button type="button" class="pal" data-pal="magenta"><span class="pal-dot" style="--pc: 184, 92, 196"></span><b>Magenta</b></button><button type="button" class="pal" data-pal="cyan"><span class="pal-dot" style="--pc: 40, 146, 170"></span><b>Cian</b></button><button type="button" class="pal" data-pal="emerald"><span class="pal-dot" style="--pc: 44, 156, 116"></span><b>Esmeralda</b></button><button type="button" class="pal" data-pal="amber"><span class="pal-dot" style="--pc: 196, 128, 40"></span><b>Ámbar</b></button><button type="button" class="pal" data-pal="ice"><span class="pal-dot" style="--pc: 84, 134, 214"></span><b>Hielo</b></button><button type="button" class="pal" data-pal="aurora"><span class="pal-dot" style="--pc: 106, 128, 184"></span><b>Aurora</b></button>
+                    </div>
                     <span class="colordot" id="dotUiColor"></span>
-                    <select id="uiColor" aria-label="Color de la interfaz" style="width: 150px">
+                    <select id="uiColor" aria-label="Color de la interfaz" hidden>
                       <option value="violet">Violeta</option>
                       <option value="magenta">Magenta</option>
                       <option value="cyan">Cian</option>
@@ -932,10 +940,13 @@
                       <option value="aurora">Aurora</option>
                     </select>
                   </div>
-                  <div class="themerow" data-keys="color glow resplandor luz">
+                  <div class="themerow block" data-keys="color glow resplandor luz">
                     <span class="st"><b>Color del glow</b><small>El tono de la luz del marco, puede diferir del tema.</small></span>
+                    <div class="pals" id="glowColorTiles" role="group" aria-label="Color del glow">
+                      <button type="button" class="pal" data-pal="match"><span class="pal-dot mix"></span><b>Como la interfaz</b></button><button type="button" class="pal" data-pal="violet"><span class="pal-dot" style="--pc: 128, 110, 214"></span><b>Violeta</b></button><button type="button" class="pal" data-pal="magenta"><span class="pal-dot" style="--pc: 184, 92, 196"></span><b>Magenta</b></button><button type="button" class="pal" data-pal="cyan"><span class="pal-dot" style="--pc: 40, 146, 170"></span><b>Cian</b></button><button type="button" class="pal" data-pal="emerald"><span class="pal-dot" style="--pc: 44, 156, 116"></span><b>Esmeralda</b></button><button type="button" class="pal" data-pal="amber"><span class="pal-dot" style="--pc: 196, 128, 40"></span><b>Ámbar</b></button><button type="button" class="pal" data-pal="ice"><span class="pal-dot" style="--pc: 84, 134, 214"></span><b>Hielo</b></button><button type="button" class="pal" data-pal="aurora"><span class="pal-dot" style="--pc: 106, 128, 184"></span><b>Aurora</b></button>
+                    </div>
                     <span class="colordot glow" id="dotGlowColor"></span>
-                    <select id="glowColor" aria-label="Color del glow" style="width: 150px">
+                    <select id="glowColor" aria-label="Color del glow" hidden>
                       <option value="match">Igual que la interfaz</option>
                       <option value="violet">Violeta</option>
                       <option value="magenta">Magenta</option>
@@ -1478,13 +1489,13 @@
                   <div class="saving" id="updMsg"></div>
                 </div>
 
-                <div class="setcard">
-                  <div class="sc-head"><b>Aplicación</b><span class="sc-hint">Sagitari, tu asistente agéntico</span></div>
-                  <div class="swrow srow" data-keys="aplicacion about acerca sagitari version actual repositorio releases">
-                    <span class="st"><b>SAGITARI</b><small>Asistente agéntico de escritorio para tu equipo.</small></span>
+                <div class="setcard aboutcard">
+                  <div class="about-hero" data-keys="aplicacion about acerca sagitari version actual repositorio releases">
+                    <img class="about-mark" src="assets/sagitari-mark.png" alt="" />
+                    <div class="ah-main"><b>SAGITARI</b><small>Asistente agéntico de escritorio para tu equipo.</small></div>
                     <span class="kbd" id="aboutVersion">—</span>
                   </div>
-                  <div class="btnrow" style="margin: 12px 0 0">
+                  <div class="btnrow" style="margin: 16px 0 0">
                     <button class="btn ghost" id="aboutRepoBtn" aria-label="Abrir el repositorio de Sagitari en GitHub">
                       <span class="bi"><i data-i="code"></i></span> Repositorio
                     </button>
@@ -1525,6 +1536,15 @@
       </div>
     </div>
     <script src="icons.js"></script>
+    <!-- Liquid Glass: refracción real del fondo. `feTurbulence` genera el mapa y
+         `feDisplacementMap` desplaza lo que hay DETRÁS de las superficies de vidrio
+         (backdrop-filter). Estático a propósito: el diseño no anima el fondo. -->
+    <svg width="0" height="0" aria-hidden="true" focusable="false" style="position: absolute">
+      <filter id="lg-refract" x="-15%" y="-15%" width="130%" height="130%" color-interpolation-filters="sRGB">
+        <feTurbulence type="fractalNoise" baseFrequency="0.007" numOctaves="1" seed="7" result="noise" />
+        <feDisplacementMap in="SourceGraphic" in2="noise" scale="9" xChannelSelector="R" yChannelSelector="G" />
+      </filter>
+    </svg>
     <script src="marked.min.js"></script>
     <script src="chatkit.js"></script>
     <script src="10-chat.js"></script>

@@ -8,6 +8,57 @@
    a menús ni botones — el posicionamiento del JS de desplegables es sensible
    a nuevos contextos de apilamiento. La lente vive solo en .side y .composer. */
 
+/* --- Liquid Glass (iOS 26/27): refracción + aros cromáticos ---
+   Receta portada de `dpawlikowski/liquid-glass` (MIT): `feDisplacementMap` dentro
+   de `backdrop-filter` desplaza lo que hay DETRÁS de la superficie — no una copia
+   estática del fondo. Se añade el material: tinte, sheen diagonal, aro con
+   reflejo superior y franjas cromáticas de 1px en los cantos.
+   Sin animación: el diseño no anima el fondo (la turbulencia va estática).
+   Refracción solo en las superficies funcionales; burbujas y tarjetas son
+   decenas y el filtro por capa no es gratis: llevan el material, no el filtro. */
+:root {
+  --lg-tint: 36, 26, 72;
+  --lg-blur: 2px;
+  --lg-sat: 1.7;
+  --lg-rim:
+    inset 1px 0 rgba(255, 86, 116, 0.18), inset -1px 0 rgba(54, 226, 255, 0.16),
+    inset 0 1px 0 rgba(255, 255, 255, 0.26), inset 0 14px 28px rgba(255, 255, 255, 0.025),
+    inset 0 -18px 32px rgba(255, 255, 255, 0.035);
+  --lg-rim-sm:
+    inset 1px 0 rgba(255, 86, 116, 0.14), inset -1px 0 rgba(54, 226, 255, 0.12),
+    inset 0 1px 0 rgba(255, 255, 255, 0.2);
+}
+
+.side,
+.rcard,
+.composer {
+  background: rgba(var(--lg-tint), calc(0.12 * var(--glass)));
+  backdrop-filter: blur(var(--lg-blur)) saturate(var(--lg-sat));
+  -webkit-backdrop-filter: blur(var(--lg-blur)) saturate(var(--lg-sat));
+}
+.rcard {
+  border-color: rgba(255, 255, 255, 0.28);
+}
+/* Refracción real donde el motor acepta un filtro SVG dentro de backdrop-filter. */
+@supports (backdrop-filter: url("#lg-refract")) or (-webkit-backdrop-filter: url("#lg-refract")) {
+  .side,
+  .rcard,
+  .composer {
+    backdrop-filter: url(#lg-refract) blur(var(--lg-blur)) saturate(var(--lg-sat));
+    -webkit-backdrop-filter: url(#lg-refract) blur(var(--lg-blur)) saturate(var(--lg-sat));
+  }
+  /* Los paneles que flotan SOBRE contenido (menús, paleta, revisión de cambios) son
+     donde la refracción se ve: el texto que queda debajo se dobla de verdad. Poco
+     desenfoque a propósito: es vidrio claro, no escarcha. */
+  .modelmenu,
+  .skillmenu,
+  .csel-menu,
+  .diffpanel {
+    backdrop-filter: url(#lg-refract) blur(3px) saturate(1.4);
+    -webkit-backdrop-filter: url(#lg-refract) blur(3px) saturate(1.4);
+  }
+}
+
 /* --- luz ambiente global: la ventana respira un poco más ---
    (no-drag: este velo cubre toda la ventana y no debe robar ni un clic) */
 .shell::before {
@@ -32,6 +83,28 @@
 .composer {
   position: relative;
 }
+.side {
+  /* Sin especular interior en la esquina: era el baño de luz arriba-izquierda.
+     La luz del vidrio va en el filo de 1px (--lg-rim). */
+  box-shadow: 0 14px 38px rgba(0, 0, 0, 0.4), var(--lg-rim);
+}
+.rcard {
+  box-shadow: var(--lg-rim);
+}
+.composer {
+  box-shadow:
+    inset 0 0 24px rgba(var(--acc2-rgb), 0.14),
+    0 12px 34px rgba(0, 0, 0, 0.4),
+    var(--lg-rim);
+}
+.composer:focus-within {
+  box-shadow:
+    inset 0 0 30px rgba(var(--acc2-rgb), 0.2),
+    0 12px 34px rgba(0, 0, 0, 0.4),
+    0 0 0 1px rgba(var(--acc-rgb), 0.3),
+    0 6px 28px rgba(var(--acc2-rgb), calc(0.22 * var(--glow-str))),
+    var(--lg-rim);
+}
 .side::after,
 .composer::after {
   content: '';
@@ -40,11 +113,10 @@
   border-radius: inherit;
   pointer-events: none;
   -webkit-app-region: no-drag;
-  /* especular: la luz entra por arriba-izquierda y cae en diagonal */
-  background: linear-gradient(165deg, rgba(255, 255, 255, 0.055) 0%, rgba(255, 255, 255, 0.015) 22%, transparent 42%);
-  /* borde-luz: filo claro arriba, sombra abajo (lente convexa) */
+  /* Sin baño diagonal: el vidrio queda parejo y la luz va solo en el filo. */
+  background: none;
   box-shadow:
-    inset 0 1px 0 rgba(255, 255, 255, 0.09),
+    inset 0 1px 0 rgba(255, 255, 255, 0.045),
     inset 0 -1px 0 rgba(0, 0, 0, 0.18);
 }
 
@@ -111,15 +183,11 @@
     0 6px 28px rgba(var(--acc2-rgb), calc(0.22 * var(--glow-str)));
 }
 
-/* --- burbujas y tarjetas: contenido opaco con filo de luz superior ---
-   (siguen opacas por HIG: el vidrio vive en la capa funcional) */
+/* --- burbujas y tarjetas: aro líquido y reflejo superior, sin refracción --- */
 .bubble,
 .tcard,
-.fitem,
 .ragent {
-  box-shadow:
-    inset 0 1px 0 rgba(255, 255, 255, 0.07),
-    0 8px 24px rgba(0, 0, 0, 0.3);
+  box-shadow: var(--lg-rim-sm), 0 8px 24px rgba(0, 0, 0, 0.3);
 }
 
 /* --- iconos: relieve luminoso --- */

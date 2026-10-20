@@ -328,7 +328,36 @@ function refreshColorDots() {
   document.getElementById('dotUiColor').style.boxShadow = `0 0 12px rgba(${ui.join(',')},0.55), inset 0 0 0 1px rgba(255,255,255,0.18)`;
   document.getElementById('dotGlowColor').style.background = `rgb(${gl.join(',')})`;
   document.getElementById('dotGlowColor').style.boxShadow = `0 0 12px rgba(${gl.join(',')},0.55), inset 0 0 0 1px rgba(255,255,255,0.18)`;
+  paintTiles();
 }
+
+/* ---- paletas visuales: las muestras escriben en el select oculto, que sigue
+   siendo la fuente de verdad del ajuste (y lo que guarda la app). ---- */
+function paintTiles() {
+  const ui = document.getElementById('uiColor');
+  const gl = document.getElementById('glowColor');
+  if (ui)
+    document.querySelectorAll('#uiColorTiles .pal').forEach((b) => b.classList.toggle('on', b.dataset.pal === ui.value));
+  if (gl)
+    document.querySelectorAll('#glowColorTiles .pal').forEach((b) => b.classList.toggle('on', b.dataset.pal === gl.value));
+}
+document.querySelectorAll('.pals .pal').forEach((b) => {
+  b.addEventListener('click', () => {
+    const row = b.closest('.themerow');
+    const sel = row && row.querySelector('select');
+    if (!sel) return;
+    sel.value = b.dataset.pal;
+    sel.dispatchEvent(new Event('change', { bubbles: true }));
+    paintTiles();
+  });
+});
+const btnChangeModel = document.getElementById('btnChangeModel');
+if (btnChangeModel)
+  btnChangeModel.addEventListener('click', () => {
+    const t = document.getElementById('tab-model');
+    if (t) t.click();
+  });
+
 $('#uiColor').onchange = async (e) => {
   CFG.settings.uiColor = e.target.value;
   applyTheme();
@@ -494,8 +523,7 @@ async function _renderSecurity() {
   for (const g of grupos) {
     if (!g.keys.length) continue;
     const h = document.createElement('div');
-    h.className = 'subnote';
-    h.style.cssText = 'margin: 12px 0 4px; font-weight: 600; letter-spacing: 0.06em; text-transform: uppercase';
+    h.className = 'permgroup';
     h.textContent = g.titulo;
     permBox.appendChild(h);
     for (const n of g.keys) {
@@ -507,7 +535,7 @@ async function _renderSecurity() {
       row.className = 'permrow';
       row.innerHTML = `<span class="mt"><b>${esc(nombre)}</b><br><small class="md">${esc(desc)}</small><br><small class="pd">recomendado: ${rec}</small></span>
       <select data-tool="${esc(n)}" aria-label="Permiso para ${esc(nombre)}">
-        <option value="default"${lvl === 'default' ? ' selected' : ''}>Por defecto (${rec})</option>
+        <option value="default"${lvl === 'default' ? ' selected' : ''}>Por defecto</option>
         <option value="safe"${lvl === 'safe' ? ' selected' : ''}>Permitir siempre</option>
         <option value="confirm"${lvl === 'confirm' ? ' selected' : ''}>Preguntar antes</option>
         <option value="restricted"${lvl === 'restricted' ? ' selected' : ''}>Bloqueado</option>
@@ -531,8 +559,7 @@ async function _renderSecurity() {
      que va en su propio grupo y no entre las nativas (donde se leería como una más). */
   if ((mcp.servers || []).length) {
     const hMcp = document.createElement('div');
-    hMcp.className = 'subnote';
-    hMcp.style.cssText = 'margin: 12px 0 4px; font-weight: 600; letter-spacing: 0.06em; text-transform: uppercase';
+    hMcp.className = 'permgroup';
     hMcp.textContent = 'Servidores MCP';
     permBox.appendChild(hMcp);
   }
@@ -544,7 +571,7 @@ async function _renderSecurity() {
     row.className = 'permrow';
     row.innerHTML = `<span class="mt"><b>${esc(s.name)}</b> <small class="md">MCP</small><br><small class="md">${n} herramienta${n === 1 ? '' : 's'} del servidor</small><br><small class="pd">todas sus herramientas piden permiso salvo que las permitas aquí</small></span>
       <select data-tool="${esc(wildcard)}" aria-label="Permiso para el servidor MCP ${esc(s.name)}">
-        <option value="default"${lvl === 'default' ? ' selected' : ''}>Por defecto (preguntar antes)</option>
+        <option value="default"${lvl === 'default' ? ' selected' : ''}>Por defecto</option>
         <option value="safe"${lvl === 'safe' ? ' selected' : ''}>Permitir siempre</option>
         <option value="confirm"${lvl === 'confirm' ? ' selected' : ''}>Preguntar antes</option>
         <option value="restricted"${lvl === 'restricted' ? ' selected' : ''}>Bloqueado</option>
