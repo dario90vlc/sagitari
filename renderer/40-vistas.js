@@ -1496,20 +1496,33 @@ function cselAbrir(sel) {
   // Coordenadas propias: el menú es position:fixed, así que escapa del overflow del
   // contenedor (antes .main lo recortaba). Se mide con la lista ya pintada, se ancla
   // al botón, se voltea hacia arriba si abajo no cabe y se mantiene dentro de la vista.
-  const r = caja.getBoundingClientRect();
-  menu.style.width = Math.round(r.width) + 'px';
+  const colocar = () => {
+    const r = caja.getBoundingClientRect();
+    const vw = document.documentElement.clientWidth || 0;
+    const vh = document.documentElement.clientHeight || 0;
+    menu.style.width = Math.round(r.width || 160) + 'px';
+    const alto = Math.min(300, menu.scrollHeight || 300);
+    const cabeAbajo = vh - r.bottom - 8 >= Math.min(alto, 200);
+    const arriba = !cabeAbajo && r.top > alto;
+    const top = arriba ? r.top - alto - 6 : r.bottom + 6;
+    /* Vista sin tamaño (ventana oculta en los arranques de la comprobación de
+       interfaz): sin viewport no hay contra qué recortar y el recorte dejaba el
+       menú en (8,8), encima del logo. Se ancla al botón y se recoloca al primer
+       frame con vista de verdad. */
+    const sinVista = vw < 200 || vh < 200;
+    menu.style.left = Math.round(sinVista ? r.left - 2 : Math.max(8, Math.min(r.left - 2, vw - r.width - 6))) + 'px';
+    menu.style.top = Math.round(sinVista ? top : Math.max(8, Math.min(top, vh - 12))) + 'px';
+    const ya = menu.querySelector('.sm-item.on');
+    if (ya) ya.scrollIntoView({ block: 'nearest' });
+  };
   // el menú nace [hidden] (display:none) y sin caja scrollHeight mide siempre 0:
   // se le da caja un instante para medirlo de verdad. Todo ocurre en el mismo tick,
   // así que no llega a pintarse en una posición provisional.
   menu.hidden = false;
-  const alto = Math.min(300, menu.scrollHeight || 300);
-  const cabeAbajo = window.innerHeight - r.bottom - 8 >= Math.min(alto, 200);
-  const arriba = !cabeAbajo && r.top > alto;
-  const top = arriba ? r.top - alto - 6 : r.bottom + 6;
-  menu.style.left = Math.round(Math.max(8, Math.min(r.left - 2, window.innerWidth - r.width - 6))) + 'px';
-  menu.style.top = Math.round(Math.max(8, Math.min(top, window.innerHeight - 12))) + 'px';
-  const ya = menu.querySelector('.sm-item.on');
-  if (ya) ya.scrollIntoView({ block: 'nearest' });
+  colocar();
+  requestAnimationFrame(() => {
+    if (cselAbierto && cselAbierto.menu === menu && !menu.hidden) colocar();
+  });
   caja.querySelector('.csel-btn').setAttribute('aria-expanded', 'true');
   cselAbierto = { sel, menu };
 }

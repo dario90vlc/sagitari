@@ -702,6 +702,16 @@ const AFTER = {
     blur: document.querySelector('.csel[data-csel-de="taskMode"] .csel-menu') ? String(getComputedStyle(document.querySelector('.csel[data-csel-de="taskMode"] .csel-menu')).backdropFilter || 'none') : 'none'
   })`),
     ) || {};
+  /* Geometría del anclaje: si el menú aterriza fuera de su botón (vista sin tamaño en
+     un arranque oculto, un overlay encima), el fallo lo dice con números en vez de
+     dejar que el clic caiga en otra capa. */
+  const geo = jsonDe(
+    await evaluate(`JSON.stringify({
+    vw: innerWidth, vh: innerHeight,
+    menu: (function(){ var m = document.querySelector('.csel[data-csel-de="taskMode"] .csel-menu'); if (!m) return null; var r = m.getBoundingClientRect(); return { x: Math.round(r.x), y: Math.round(r.y), w: Math.round(r.width), h: Math.round(r.height) }; })(),
+    btn: (function(){ var b = document.querySelector('.csel[data-csel-de="taskMode"] .csel-btn'); if (!b) return null; var r = b.getBoundingClientRect(); return { x: Math.round(r.x), y: Math.round(r.y) }; })()
+  })`),
+  ) || {};
   await pulsarConRaton('.csel[data-csel-de="taskMode"] .sm-item:nth-child(2)');
   const elegido =
     jsonDe(
@@ -730,7 +740,7 @@ const AFTER = {
   if (selectsOk) console.log('  ok   los desplegables son de la app (lista propia, elegir propaga change, fecha en oscuro)');
   else {
     failed++;
-    console.log('  FALLO los desplegables nativos siguen a la vista  ->  ' + JSON.stringify({ selects, listaModo, elegido, fechaOscura }));
+    console.log('  FALLO los desplegables nativos siguen a la vista  ->  ' + JSON.stringify({ selects, listaModo, elegido, fechaOscura, geo }));
   }
   // Tamaño mínimo real de la ventana (main.js: minWidth 1000 x minHeight 620):
   // el compositor quedaba 60px fuera de pantalla porque el grid se dimensionaba
