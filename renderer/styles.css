@@ -6588,3 +6588,30 @@ select,
 .thinkblock.open:not(.th-vivo) .th-meta::after {
   content: none;
 }
+
+/* ===== barra lateral a poca altura (620–760 px) =====
+   La navegación (10 destinos) no cabe entera y hacía scroll sin avisar: en el mínimo
+   de la ventana, Herramientas/Historial/Ajustes quedaban fuera de la vista. Se aprieta
+   el ritmo para que quepan más y se funde el borde inferior del carril: ese degradado
+   es la señal de «sigue abajo». El relleno inferior deja que, al llegar al final, el
+   degradado caiga sobre hueco y no sobre el último icono. */
+@media (max-height: 760px) {
+  .nav {
+    gap: 8px;
+    padding-bottom: 10px;
+    /* el carril se desplaza (no cabe todo): su PROPIA barra es la señal; la máscara
+       la ocultaba y el corte parecía un fallo */
+    scrollbar-gutter: stable;
+    padding-right: 4px;
+  }
+  .navitem {
+    padding-top: 8px;
+    padding-bottom: 8px;
+  }
+  .navgroup + .navgroup {
+    padding-top: 8px;
+  }
+  .app.compact .navitem {
+    padding: 8px 0;
+  }
+}
