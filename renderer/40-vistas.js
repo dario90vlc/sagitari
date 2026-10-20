@@ -1966,11 +1966,17 @@ function applyTheme() {
   r.setProperty('--glow-a-rgb', ga.join(', '));
   r.setProperty('--glow-b-rgb', gb.join(', '));
   r.setProperty('--glow-c-rgb', gc.join(', '));
-  // Por defecto el glow viene SUAVE (0.7): que acaricie el marco, no que lo invada.
-  r.setProperty('--glow-str', String(Math.min(1.4, Math.max(0.4, Number(s.glowStrength) || 0.7))));
+  // Mismo defecto que el de fábrica (1) y que el que enseña el deslizador: antes el
+  // CSS arrancaba en 0.7 y la etiqueta decía «Equilibrado» con la fuerza a medias.
+  r.setProperty('--glow-str', String(Math.min(1.4, Math.max(0.4, Number(s.glowStrength) || 1))));
   r.setProperty('--glass', String(Math.min(1.3, Math.max(0.4, Number(s.glassTint) || 1))));
   // los fondos también son del tema: si no, el color cambia solo en los acentos
   for (const [token, valor] of Object.entries(rampaDeSuperficies(pal.acc))) r.setProperty(token, valor);
+  /* Apagar el glow tiene que apagarlo AQUÍ: main deja de mandar estados, pero el filo
+     de reposo y la atmósfera del marco los pinta el CSS con --glow-str. Con 0, todos
+     los filos (y el recorrido) quedan a cero; la hairline neutra de la ventana se
+     conserva: es el borde de la ventana, no una señal. */
+  document.getElementById('shell')?.classList.toggle('glow-off', !s.glowEnabled);
   /* Los tres tonos ya no giran por el marco: se conservan porque los leen el filo vivo
      (--live-rgb sale de --glow-rgb) y la veta del pulso, que los lleva enteros. */
   // refresca las muestras de color de Ajustes si están pintadas

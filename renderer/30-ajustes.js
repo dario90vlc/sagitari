@@ -280,6 +280,10 @@ if ($('#pUrl')) $('#pUrl').addEventListener('input', hintStoredKey);
 $('#swGlow').onclick = async (e) => {
   const on = !e.currentTarget.classList.contains('on');
   e.currentTarget.classList.toggle('on', on);
+  CFG.settings.glowEnabled = on;
+  /* el CSS es quien dibuja el glow de reposo y la atmósfera: sin este repintado el
+     interruptor sólo callaba los estados de main y el marco seguía encendido */
+  applyTheme();
   await window.sagitari.setSettings({ glowEnabled: on });
 };
 // espacio de trabajo: Ajustes ya NO tiene un segundo campo de ruta (duplicaba el
