@@ -712,7 +712,26 @@ const AFTER = {
     btn: (function(){ var b = document.querySelector('.csel[data-csel-de="taskMode"] .csel-btn'); if (!b) return null; var r = b.getBoundingClientRect(); return { x: Math.round(r.x), y: Math.round(r.y) }; })()
   })`),
   ) || {};
-  await pulsarConRaton('.csel[data-csel-de="taskMode"] .sm-item:nth-child(2)');
+  let viaTeclado = false;
+  const pulsadoItem = await pulsarConRaton('.csel[data-csel-de="taskMode"] .sm-item:nth-child(2)');
+  if (!pulsadoItem) {
+    /* El entorno no repartió el clic al ítem (escritorio virtual del runner: el menú
+       está anclado —lo dice `geo`— pero el hit-test de coordenadas no llega). Se elige
+       por TECLADO: es una ruta REAL de la app (Escape cierra, ArrowDown abre y navega,
+       Enter elige) y ejerce el mismo contrato —escribir el select nativo y disparar
+       `change`—, así la comprobación no depende del reparto de coordenadas. */
+    await evaluate('document.querySelector(\'.csel[data-csel-de="taskMode"] .csel-btn\').focus()');
+    const tecla = async (key, code, vk) => {
+      await cmd('Input.dispatchKeyEvent', { type: 'keyDown', key, code, windowsVirtualKeyCode: vk, nativeVirtualKeyCode: vk });
+      await cmd('Input.dispatchKeyEvent', { type: 'keyUp', key, code, windowsVirtualKeyCode: vk, nativeVirtualKeyCode: vk });
+      await new Promise((r) => setTimeout(r, 150));
+    };
+    await tecla('Escape', 'Escape', 27); // por si el clic lo dejó abierto
+    await tecla('ArrowDown', 'ArrowDown', 40); // abre y resalta el primero
+    await tecla('ArrowDown', 'ArrowDown', 40); // resalta el segundo (Plan)
+    await tecla('Enter', 'Enter', 13); // elige
+    viaTeclado = true;
+  }
   const elegido =
     jsonDe(
       await evaluate(`JSON.stringify({
@@ -737,10 +756,11 @@ const AFTER = {
     elegido.etiqueta === 'Plan' &&
     elegido.cerrado === true &&
     fechaOscura;
-  if (selectsOk) console.log('  ok   los desplegables son de la app (lista propia, elegir propaga change, fecha en oscuro)');
+  if (selectsOk)
+    console.log('  ok   los desplegables son de la app (lista propia, elegir propaga change, fecha en oscuro)' + (viaTeclado ? ' — elegido por teclado (el clic no reparte coordenadas en esta vista)' : ''));
   else {
     failed++;
-    console.log('  FALLO los desplegables nativos siguen a la vista  ->  ' + JSON.stringify({ selects, listaModo, elegido, fechaOscura, geo }));
+    console.log('  FALLO los desplegables nativos siguen a la vista  ->  ' + JSON.stringify({ selects, listaModo, elegido, fechaOscura, geo, viaTeclado }));
   }
   // Tamaño mínimo real de la ventana (main.js: minWidth 1000 x minHeight 620):
   // el compositor quedaba 60px fuera de pantalla porque el grid se dimensionaba
