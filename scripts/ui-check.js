@@ -708,7 +708,7 @@ const AFTER = {
   const geo = jsonDe(
     await evaluate(`JSON.stringify({
     vw: innerWidth, vh: innerHeight,
-    menu: (function(){ var m = document.querySelector('.csel[data-csel-de="taskMode"] .csel-menu'); if (!m) return null; var r = m.getBoundingClientRect(); return { x: Math.round(r.x), y: Math.round(r.y), w: Math.round(r.width), h: Math.round(r.height) }; })(),
+    menu: (function(){ var m = document.querySelector('.csel[data-csel-de="taskMode"] .csel-menu'); if (!m) return null; var r = m.getBoundingClientRect(); return { x: Math.round(r.x), y: Math.round(r.y), w: Math.round(r.width), h: Math.round(r.height), anchor: m.dataset.anchor || '' }; })(),
     btn: (function(){ var b = document.querySelector('.csel[data-csel-de="taskMode"] .csel-btn'); if (!b) return null; var r = b.getBoundingClientRect(); return { x: Math.round(r.x), y: Math.round(r.y) }; })()
   })`),
   ) || {};

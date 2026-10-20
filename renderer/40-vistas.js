@@ -1509,9 +1509,15 @@ function cselAbrir(sel) {
        interfaz): sin viewport no hay contra qué recortar y el recorte dejaba el
        menú en (8,8), encima del logo. Se ancla al botón y se recoloca al primer
        frame con vista de verdad. */
-    const sinVista = vw < 200 || vh < 200;
-    menu.style.left = Math.round(sinVista ? r.left - 2 : Math.max(8, Math.min(r.left - 2, vw - r.width - 6))) + 'px';
-    menu.style.top = Math.round(sinVista ? top : Math.max(8, Math.min(top, vh - 12))) + 'px';
+    const sinVista = !(vw >= 200) || !(vh >= 200);
+    /* Contra NaN/Infinito (vista sin medir en un arranque oculto): un cálculo no finito
+       deja la declaración inválida y el menú se queda en el (0,0) del CSS, encima del
+       logo. Si no hay números fiables, se ancla al botón sin recortar. */
+    const izq = sinVista ? r.left - 2 : Math.max(8, Math.min(r.left - 2, vw - r.width - 6));
+    const arr = sinVista ? top : Math.max(8, Math.min(top, vh - 12));
+    if (Number.isFinite(izq)) menu.style.left = Math.round(izq) + 'px';
+    if (Number.isFinite(arr)) menu.style.top = Math.round(arr) + 'px';
+    menu.dataset.anchor = JSON.stringify({ vw, vh, x: Math.round(r.left), y: Math.round(r.top), w: Math.round(r.width), l: menu.style.left, t: menu.style.top });
     const ya = menu.querySelector('.sm-item.on');
     if (ya) ya.scrollIntoView({ block: 'nearest' });
   };
