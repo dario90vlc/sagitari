@@ -6538,3 +6538,23 @@ kbd {
 .side {
   z-index: 80;
 }
+
+/* ===== selección de texto: sólo la conversación =====
+   La app es una app, no un documento: arrastrar por Ajustes o la barra lateral no
+   debe dejar texto en azul. Se permite en el hilo del chat (respuestas, código y
+   tarjetas), en la revisión de cambios y en todo campo editable (sin esto último,
+   un input o un textarea dejarían de poder seleccionarse). */
+body {
+  user-select: none;
+}
+.msgs-area,
+.msgs-area *,
+.diffpanel,
+.diffpanel *,
+input,
+textarea,
+select,
+[contenteditable='true'],
+[contenteditable='true'] * {
+  user-select: text;
+}
