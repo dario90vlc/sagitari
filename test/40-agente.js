@@ -368,6 +368,29 @@ test('skills-starter: las skills incluidas son válidas y declaran sus agentes',
   ok(de('verificacion').includes('verification'), 'verificacion es del verificador');
 });
 
+test('skills-starter: oil-ui llega con sus referencias y sus scripts', () => {
+  const dir = path.join(__dirname, '..', 'skills-starter', 'oil-ui');
+  const fm = skills.__test.parseFrontMatter(fs.readFileSync(path.join(dir, 'SKILL.md'), 'utf8'));
+  eq(fm.meta.name, 'oil-ui');
+  ok(String(fm.meta.description).length > 60, 'la descripción dice cuándo usarla');
+  ok(fm.meta.agents.includes('orchestrator') && fm.meta.agents.includes('coding'), 'se ofrece al orquestador y al agente de código');
+  ok(fm.meta.agents.includes('vision'), 'y al de visión, que es quien mira las capturas');
+  ok(fm.meta.triggers.includes('página comparativa'), 'las frases que la activan están declaradas');
+  for (const f of [
+    'references/tools.md',
+    'references/design-direction.md',
+    'scripts/shoot.mjs',
+    'scripts/build_explorer.py',
+    'assets/style-explorer.html',
+    'assets/logo.png',
+    'assets/vendor/alpine.min.js',
+    'LICENSE',
+  ]) {
+    ok(fs.existsSync(path.join(dir, f)), 'oil-ui necesita ' + f);
+  }
+  ok(!/check_update|recommend_once/.test(fm.body), 'sin scripts de auto-actualización ni aviso de otra edición');
+});
+
 test('subagents: cada agente tiene skills, método y entrega propios', () => {
   for (const k of subagents.SUBAGENT_KEYS) {
     const spec = subagents.SUBAGENTS[k];
@@ -852,6 +875,11 @@ test('agent: la misma skill no se carga dos veces en el turno', async () => {
   const primera = await a._runToolCall(toolCall('use_skill', { name: 'blender-pro' }), ctx);
   eq(primera.action, 'ok');
   ok(/Instrucciones de blender/.test(primera.text), 'la primera vez llega el cuerpo completo');
+  ok(/DIRECTORIO DE LA SKILL/.test(primera.text), 'y la carpeta desde la que se resuelven sus rutas relativas');
+  ok(
+    primera.text.includes(path.join(SKILLS_TMP, 'test-skill')),
+    'la carpeta es la de verdad, no un nombre suelto: ' + primera.text.slice(0, 160),
+  );
   const segunda = await a._runToolCall(toolCall('use_skill', { name: 'blender-pro' }), ctx);
   ok(/ya está cargada/.test(segunda.text), 'la segunda solo recuerda que ya está: ' + segunda.text.slice(0, 80));
   ok(!/Instrucciones de blender/.test(segunda.text), 'sin repetir el cuerpo entero (son miles de tokens)');

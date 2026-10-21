@@ -1607,6 +1607,7 @@ test('skills: metadata (category, deps, triggers) is exposed', async () => {
   eq(s.category, '3D');
   eq(s.dependencies.length, 1);
   eq(s.triggers[0], 'blender');
+  eq(s.dir, path.join(SKILLS_TMP, 'test-skill'), 'cada skill sabe en qué carpeta vive (references/, scripts/)');
 });
 
 test('marketplace catalog marks installed repos', async () => {

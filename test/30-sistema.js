@@ -519,6 +519,10 @@ test('skills-starter: la siembra es de una sola vez (una skill de serie borrada 
     fs.mkdirSync(path.join(origen, n), { recursive: true });
     fs.writeFileSync(path.join(origen, n, 'SKILL.md'), `---\nname: ${n}\ndescription: de serie\n---\ncuerpo`);
   }
+  // una skill de serie puede traer piezas propias (referencias, scripts): la siembra
+  // tiene que llevarse la carpeta entera, no solo el SKILL.md
+  fs.mkdirSync(path.join(origen, 'skill-a', 'references'), { recursive: true });
+  fs.writeFileSync(path.join(origen, 'skill-a', 'references', 'guia.md'), 'la guía');
   // seedStarterSkills vive en main.js y no está exportado: se extrae el cuerpo REAL
   // del fichero y se ejecuta con fs/path/config de mentira para probar su comportamiento.
   const i = MAIN_SRC.indexOf('function seedStarterSkills(');
@@ -550,6 +554,11 @@ test('skills-starter: la siembra es de una sola vez (una skill de serie borrada 
     fs.existsSync(path.join(perfil, 'skill-a', 'SKILL.md')) && fs.existsSync(path.join(perfil, 'skill-b', 'SKILL.md')),
     'el primer arranque copia las skills incluidas',
   );
+  eq(
+    fs.readFileSync(path.join(perfil, 'skill-a', 'references', 'guia.md'), 'utf8'),
+    'la guía',
+    'y sus referencias viajan con ella (sin ellas el cuerpo no se puede seguir)',
+  );
   eq(config.migraciones.skillsStarter, true, 'la siembra queda apuntada en la configuración');
   eq(guardados, 1, 'y se persiste una vez');
   fs.rmSync(path.join(perfil, 'skill-b'), { recursive: true, force: true }); // el usuario la borra desde Ajustes
@@ -557,6 +566,57 @@ test('skills-starter: la siembra es de una sola vez (una skill de serie borrada 
   ok(!fs.existsSync(path.join(perfil, 'skill-b', 'SKILL.md')), 'la skill borrada no puede reaparecer al reiniciar');
   ok(fs.existsSync(path.join(perfil, 'skill-a', 'SKILL.md')), 'las demás siguen intactas');
   eq(guardados, 1, 'el segundo arranque no reescribe la configuración');
+});
+
+test('skills-starter: una skill de serie nueva llega una vez y, si se borra, no vuelve', () => {
+  /* oil-ui no existía cuando se sembraron los perfiles actuales: si la siembra fuera
+     solo la de la primera instalación, la skill no llegaría nunca a quien ya tiene la
+     app. Se ofrece una vez y queda apuntada: el diálogo de borrado sigue diciendo la
+     verdad, «no se puede deshacer». */
+  const vm = require('vm');
+  const base = tmpDir('sagi-seed-nueva-');
+  const origen = path.join(base, 'skills-starter');
+  const perfil = path.join(base, 'perfil', 'skills');
+  fs.mkdirSync(path.join(origen, 'oil-ui', 'references'), { recursive: true });
+  fs.writeFileSync(path.join(origen, 'oil-ui', 'SKILL.md'), '---\nname: oil-ui\ndescription: direcciones de diseño\n---\ncuerpo');
+  fs.writeFileSync(path.join(origen, 'oil-ui', 'references', 'tools.md'), 'herramientas');
+
+  const i = MAIN_SRC.indexOf('function seedStarterSkills(');
+  ok(i >= 0, 'seedStarterSkills debe existir en main.js');
+  let nivel = 0;
+  let fin = -1;
+  for (let k = MAIN_SRC.indexOf('{', i); k < MAIN_SRC.length; k++) {
+    if (MAIN_SRC[k] === '{') nivel++;
+    else if (MAIN_SRC[k] === '}' && --nivel === 0) {
+      fin = k + 1;
+      break;
+    }
+  }
+  // perfil que YA pasó por la siembra inicial
+  const config = { migraciones: { skillsStarter: true } };
+  let guardados = 0;
+  const fn = vm.runInNewContext('(' + MAIN_SRC.slice(i, fin) + ')', {
+    fs,
+    path,
+    console,
+    __dirname: path.join(base, 'main'),
+    skills: { skillsDir: () => perfil },
+    config,
+    saveConfig: () => {
+      guardados++;
+    },
+  });
+
+  fn();
+  ok(fs.existsSync(path.join(perfil, 'oil-ui', 'SKILL.md')), 'la skill nueva se instala en el perfil existente');
+  eq(fs.readFileSync(path.join(perfil, 'oil-ui', 'references', 'tools.md'), 'utf8'), 'herramientas', 'con sus referencias');
+  eq(config.migraciones.skillsStarterNuevas.join(','), 'oil-ui', 'y queda apuntada como ofrecida');
+  eq(guardados, 1, 'se persiste una vez');
+
+  fs.rmSync(path.join(perfil, 'oil-ui'), { recursive: true, force: true });
+  fn();
+  ok(!fs.existsSync(path.join(perfil, 'oil-ui', 'SKILL.md')), 'borrada, no reaparece al reiniciar');
+  eq(guardados, 1, 'y no se reescribe la configuración');
 });
 
 test('arranque: el nombre de fábrica «Darío» se retira una sola vez (y no el que escribe el usuario)', () => {

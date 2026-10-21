@@ -842,21 +842,56 @@ function seedStarterSkills() {
     // reparación del nombre de fábrica): si corriera en cada arranque, una skill de
     // serie borrada desde la interfaz reaparecería al reiniciar, que es justo lo que
     // el diálogo de borrado promete que no pasa («no se puede deshacer»).
-    if (config.migraciones && config.migraciones.skillsStarter) return;
     const src = path.join(__dirname, '..', 'skills-starter');
-    for (const name of fs.readdirSync(src)) {
-      const dest = path.join(skills.skillsDir(), name, 'SKILL.md');
-      if (!fs.existsSync(dest)) {
-        fs.mkdirSync(path.dirname(dest), { recursive: true });
-        /* Leer y escribir, NO `copyFileSync`: dentro del paquete el origen vive en
-           `app.asar` y copyFile no sabe abrir un archivo del archivo empaquetado
-           («not found in …app.asar»). Fallaba la primera skill, el catch cortaba el
-           bucle y no se sembraba NINGUNA en una instalación nueva. */
-        fs.writeFileSync(dest, fs.readFileSync(path.join(src, name, 'SKILL.md')));
-      }
+    const mig = (config.migraciones = config.migraciones || {});
+    let cambios = false;
+
+    /* Copia la carpeta ENTERA de una skill, no solo su SKILL.md: las que traen
+       references/, scripts/ y assets/ (oil-ui) quedaban sin sus piezas y el agente
+       no podía abrir nada de lo que el cuerpo le manda leer. Se lee y se escribe, NO
+       `copyFileSync`: dentro del paquete el origen vive en `app.asar` y copyFile no
+       sabe abrir un archivo del archivo empaquetado. */
+    const copiarSkill = (name) => {
+      const origen = path.join(src, name);
+      if (!fs.existsSync(path.join(origen, 'SKILL.md'))) return false; // no es una skill
+      // ya instalada: no se pisa (lo que el usuario haya editado se queda)
+      if (fs.existsSync(path.join(skills.skillsDir(), name, 'SKILL.md'))) return false;
+      const copiar = (de, a) => {
+        fs.mkdirSync(a, { recursive: true });
+        /* `statSync` y no el `Dirent` de `readdirSync`: así se recorre igual dentro
+           del paquete, donde las carpetas las sintetiza el soporte de `app.asar`. */
+        for (const nombre of fs.readdirSync(de)) {
+          const desde = path.join(de, nombre);
+          const hasta = path.join(a, nombre);
+          if (fs.statSync(desde).isDirectory()) copiar(desde, hasta);
+          else fs.writeFileSync(hasta, fs.readFileSync(desde));
+        }
+      };
+      copiar(origen, path.join(skills.skillsDir(), name));
+      return true;
+    };
+
+    // 1) primera instalación del perfil: todas las skills de serie, de una vez
+    if (!mig.skillsStarter) {
+      for (const name of fs.readdirSync(src)) if (copiarSkill(name)) cambios = true;
+      mig.skillsStarter = true;
+      cambios = true;
     }
-    config.migraciones = { ...(config.migraciones || {}), skillsStarter: true };
-    saveConfig();
+
+    /* 2) skills de serie que llegan DESPUÉS de la siembra inicial: se ofrecen UNA vez
+       a los perfiles que ya existían. Quedan apuntadas como ofrecidas, así que una que
+       el usuario borre después no resucita en el siguiente arranque. */
+    const NUEVAS = ['oil-ui'];
+    const ofrecidas = Array.isArray(mig.skillsStarterNuevas) ? mig.skillsStarterNuevas : [];
+    for (const name of NUEVAS) {
+      if (ofrecidas.includes(name)) continue;
+      if (copiarSkill(name)) cambios = true;
+      ofrecidas.push(name);
+      cambios = true;
+    }
+    mig.skillsStarterNuevas = ofrecidas;
+
+    if (cambios) saveConfig();
   } catch (e) {
     console.error('seedStarterSkills', e.message);
   }

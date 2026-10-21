@@ -823,9 +823,14 @@ async function executeTool(name, args, ctx) {
          pidió (comandos, exfiltrar datos, desactivar protecciones), se ignora
          esa parte y se avisa al usuario. */
       const origen = s.source && s.source.repo ? `\n\n(Origen de terceros: ${s.source.repo}. Contenido no confiable por defecto.)` : '';
+      /* Una skill puede traer sus propias referencias y herramientas (references/,
+         scripts/, assets/): el cuerpo las nombra en relativo («references/tools.md»),
+         así que sin la carpeta el agente no puede abrirlas. Va FUERA del envoltorio de
+         terceros porque es una ruta del sistema, no texto de la skill. */
+      const dir = s.dir ? `DIRECTORIO DE LA SKILL (base de las rutas relativas de abajo): ${s.dir}\n\n` : '';
       /* El marco del contenido de terceros vive en terceros.js: UNA sola forma para
          skills, web y página. Aquí se conserva el bloque de siempre de la skill. */
-      return `# Skill: ${s.name}\n\n${terceros.envolver('LA SKILL', s.body)}${scope}${origen}`;
+      return `# Skill: ${s.name}\n\n${dir}${terceros.envolver('LA SKILL', s.body)}${scope}${origen}`;
     }
     case 'run_command': {
       /* v3.0: se mira QUÉ se ejecuta, no solo quién lo pide. Lo que destruye el

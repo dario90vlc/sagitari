@@ -9,6 +9,12 @@ docs/
 anuncio/
 *.min.js
 package-lock.json
+# Contenido vendorizado de la skill oil-ui (de su autor): sus referencias y scripts no
+# siguen el formato del proyecto y no se tocan aquí; su SKILL.md sí es nuestro
+skills-starter/oil-ui/references/
+skills-starter/oil-ui/scripts/
+skills-starter/oil-ui/assets/
+skills-starter/oil-ui/LICENSE
 # Espacios de trabajo temporales del arnés de interfaz (ui-check los crea y los borra;
 # si una ejecución se corta, no deben romper el formateo ni el lint)
 sagi-ui-ws-*/

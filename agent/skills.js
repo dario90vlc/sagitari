@@ -212,6 +212,9 @@ function leerSkillsSync(dir) {
     } catch {}
     out.push({
       id: e.name,
+      // Carpeta real de la skill: el cuerpo de las que traen references/scripts la
+      // necesita para resolver sus rutas relativas (use_skill la entrega al agente).
+      dir: path.join(dir, e.name),
       name: fm.meta.name,
       description: fm.meta.description || '',
       version: fm.meta.version || '',
