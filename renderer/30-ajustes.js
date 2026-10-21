@@ -4,7 +4,7 @@
 /* global glowStrengthLabel, glassTintLabel, smsg, hiloActual */
 /* glowStrengthLabel y glassTintLabel están definidas en 40-vistas.js y hiloActual en
    10-chat.js (scope compartido); smsg está definida en ajustes-util.js */
-/* exported fillSettings, wizardMostrar, initAboutPanel */
+/* exported fillSettings, wizardMostrar, initAboutPanel, mostrarAvisoConDeshacer, permitirTodoPermisos, restablecerPermisos, renderSecurity */
 // ============ settings ============
 async function fillSettings() {
   CFG = await window.sagitari.getConfig();
@@ -1627,6 +1627,58 @@ async function aplicarNivelAPermisos(claves, nivel) {
   for (const t of claves) await window.sagitari.secSetToolPerm(t, nivel);
 }
 
+/* ---- deshacer del último cambio masivo ----
+   «Permitir todo» toca ~40 permisos de golpe y la única vuelta era «Restablecer
+   permisos recomendados», que NO es lo mismo: eso pone todo en el nivel de fábrica
+   y se lleva por delante los niveles que tuvieras puestos a mano. Aquí se guarda el
+   mapa anterior y se ofrece deshacer en el propio aviso. */
+let ultimoCambioPermisos = null;
+
+/** Los niveles guardados AHORA (sólo las claves con override; el resto está en
+    «default», que es lo mismo que no tener nada). */
+async function mapaPermisosActual() {
+  try {
+    const m = await window.sagitari.metaGet(hiloActual());
+    return { ...((m && m.permissions) || {}) };
+  } catch {
+    return {};
+  }
+}
+
+/** Devuelve cada clave al nivel que tenía. Las que no estaban en el mapa anterior
+    vuelven a «default» (el recomendado), que es de donde salieron. */
+async function restaurarMapaPermisos(previo, claves) {
+  const porNivel = new Map();
+  for (const k of claves) {
+    const nivel = (previo && previo[k]) || 'default';
+    if (!porNivel.has(nivel)) porNivel.set(nivel, []);
+    porNivel.get(nivel).push(k);
+  }
+  for (const [nivel, ks] of porNivel) await aplicarNivelAPermisos(ks, nivel);
+}
+
+/** Avisa del cambio y, si hay algo que deshacer, ofrece el botón. */
+function mostrarAvisoConDeshacer(texto) {
+  const cambio = ultimoCambioPermisos;
+  if (!cambio) {
+    showToast(texto);
+    return;
+  }
+  showToast(texto, {
+    etiqueta: 'Deshacer',
+    fn: async () => {
+      try {
+        await restaurarMapaPermisos(cambio.previo, cambio.claves);
+        ultimoCambioPermisos = null;
+        await renderSecurity();
+        showToast('Permisos de antes restaurados');
+      } catch (e) {
+        showToast('No se pudo deshacer: ' + ((e && e.message) || 'error'));
+      }
+    },
+  });
+}
+
 /** Pone TODAS las herramientas en «permitir siempre». Es la acción más peligrosa
     de la app —el agente deja de pedir permiso para todo—, así que siempre pasa por
     askConfirm y dice cuántos permisos va a tocar. Devuelve true si se aplicó. */
@@ -1642,35 +1694,42 @@ async function permitirTodoPermisos(anchor) {
     'El agente podrá ejecutar comandos, escribir y borrar archivos, abrir programas y navegar sin pedirte permiso. Se deshace con «Volver a lo recomendado».',
   );
   if (!ok) return false;
+  const previo = await mapaPermisosActual();
   try {
     await aplicarNivelAPermisos(claves, 'safe');
   } catch (e) {
     showToast('No se pudieron guardar los permisos: ' + ((e && e.message) || 'error'));
     return false;
   }
+  ultimoCambioPermisos = { previo, claves };
   return true;
 }
 
 /** Devuelve todas las claves al nivel recomendado («por defecto»). */
 async function restablecerPermisos() {
+  const claves = await clavesDePermisos();
+  const previo = await mapaPermisosActual();
   try {
-    await aplicarNivelAPermisos(await clavesDePermisos(), 'default');
+    await aplicarNivelAPermisos(claves, 'default');
   } catch (e) {
     showToast('No se pudieron restablecer: ' + ((e && e.message) || 'error'));
+    return false;
   }
+  ultimoCambioPermisos = { previo, claves };
+  return true;
 }
 
 if ($('#secResetPerms'))
   $('#secResetPerms').onclick = async () => {
-    await restablecerPermisos();
+    if (!(await restablecerPermisos())) return;
     await renderSecurity();
-    showToast('Permisos restablecidos a los recomendados');
+    mostrarAvisoConDeshacer('Permisos restablecidos a los recomendados');
   };
 if ($('#secAllowAll'))
   $('#secAllowAll').onclick = async () => {
     if (!(await permitirTodoPermisos($('#secAllowAll')))) return;
     await renderSecurity();
-    showToast('Todas las herramientas permitidas sin preguntar');
+    mostrarAvisoConDeshacer('Todas las herramientas permitidas sin preguntar');
   };
 
 // datos: hábitos aprendidos + carpeta de datos

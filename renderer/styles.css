@@ -3939,6 +3939,31 @@ i[data-i] {
 }
 .toast .dot {
   margin: 0;
+}/* Acción dentro del aviso («Deshacer» de los permisos masivos): misma píldora, con
+   el acento de la app. El aviso con acción se ensancha con tope y envuelve el texto. */
+.toast.con-accion {
+  max-width: min(560px, 90vw);
+  padding-right: 10px;
+}
+.toast-act {
+  flex: none;
+  padding: 3px 11px;
+  border-radius: 999px;
+  border: 1px solid rgba(var(--acc2-rgb), 0.5);
+  background: rgba(var(--acc2-rgb), 0.14);
+  color: var(--txt);
+  font: inherit;
+  font-size: var(--fs-label);
+  cursor: pointer;
+  transition: background 0.15s ease, border-color 0.15s ease;
+}
+.toast-act:hover {
+  background: rgba(var(--acc2-rgb), 0.26);
+  border-color: rgba(var(--acc2-rgb), 0.85);
+}
+.toast-act:focus-visible {
+  outline: 2px solid var(--vio2);
+  outline-offset: 2px;
 }
 
 /* HIG: fÃ­sica de muelle al nacer un sheet/menÃº/aviso â€” escala con rebote corto.

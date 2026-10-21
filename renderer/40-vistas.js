@@ -13,7 +13,7 @@
 /* global fillSettings, wizardMostrar, polishSwitches, pintarRailEquipo, refrescarEquipoChat */
 /* Los atajos de permiso viven en 30-ajustes.js (junto a la tabla de Seguridad que
    gobiernan): esta vista los llama desde su cabecera. */
-/* global permitirTodoPermisos, restablecerPermisos */
+/* global permitirTodoPermisos, restablecerPermisos, mostrarAvisoConDeshacer */
 /* La etiqueta humana de cada nivel recomendado vive en 30-ajustes.js y se reusa aquí
    para no escribir dos veces la misma traducción «confirm → preguntar antes». */
 /* global RISK_LABEL */
@@ -1088,14 +1088,14 @@ async function renderTools() {
     allowAll.onclick = async () => {
       if (!(await permitirTodoPermisos(allowAll))) return; // pide confirmación
       await renderTools();
-      showToast('Todas las herramientas permitidas sin preguntar');
+      mostrarAvisoConDeshacer('Todas las herramientas permitidas sin preguntar');
     };
   const resetAll = $('#toolsResetPerms');
   if (resetAll)
     resetAll.onclick = async () => {
-      await restablecerPermisos();
+      if (!(await restablecerPermisos())) return;
       await renderTools();
-      showToast('Permisos restablecidos a los recomendados');
+      mostrarAvisoConDeshacer('Permisos restablecidos a los recomendados');
     };
   let rec = {};
   let perm = {};
@@ -1456,7 +1456,7 @@ $('#projPick').onclick = async () => {
 
 // ============ misc ============
 
-function showToast(text) {
+function showToast(text, accion) {
   // los avisos se apilan: uno nuevo NO debe borrar el anterior antes de que se lea.
   // Se conservan 3 como máximo y el más viejo cae primero (ya tiene su temporizador).
   // El contenedor los coloca en columna: sin él los tres se pintaban en el MISMO punto
@@ -1475,8 +1475,24 @@ function showToast(text) {
   t.setAttribute('role', 'status');
   t.setAttribute('aria-live', 'polite');
   t.innerHTML = `<span class="dot pur"></span>${esc(text)}`;
+  /* Acción opcional dentro del aviso: la usa «Deshacer» de los cambios masivos de
+     permisos, donde la única vuelta era rehacerlo a mano. Un aviso con acción vive
+     más (9 s en vez de 3,2) porque hay que poder leerlo y decidir. */
+  const conAccion = !!(accion && accion.etiqueta && typeof accion.fn === 'function');
+  if (conAccion) {
+    const b = document.createElement('button');
+    b.type = 'button';
+    b.className = 'toast-act';
+    b.textContent = accion.etiqueta;
+    b.onclick = () => {
+      t.remove();
+      accion.fn();
+    };
+    t.appendChild(b);
+    t.classList.add('con-accion');
+  }
   pila.appendChild(t);
-  setTimeout(() => t.remove(), 3200);
+  setTimeout(() => t.remove(), conAccion ? 9000 : 3200);
 }
 /** Texto del pie: qué modelo está en uso y de qué proveedor. Sin estados: la
     píldora enseña la selección y abre la lista para cambiarla. */
