@@ -28,6 +28,10 @@ module.exports = [
       // dentro del repositorio y los borran al terminar; una ejecución cortada deja ahí
       // una copia entera del proyecto que NO es código del proyecto
       '.tmp-arboles/**',
+      // herramientas vendorizadas de las skills de serie (oil-ui): scripts de su autor
+      // que no siguen las reglas del proyecto y no se editan aquí
+      'skills-starter/oil-ui/scripts/**',
+      'skills-starter/oil-ui/assets/**',
     ],
   },
   js.configs.recommended,
@@ -43,6 +47,7 @@ module.exports = [
         exports: 'readonly',
         __dirname: 'readonly',
         __filename: 'readonly',
+        global: 'readonly', // objeto global de Node (axe-core en jsdom necesita window/document ahí)
         process: 'readonly',
         console: 'readonly',
         Buffer: 'readonly',

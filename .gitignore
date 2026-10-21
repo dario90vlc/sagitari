@@ -64,3 +64,5 @@ renderer/assets/logo-full.png
 
 # Perfiles de datos que crean las pruebas (scripts/lanzar.js, scripts/shot-cdp.js)
 .perfil-*/
+# Cobertura (npm run cobertura)
+coverage/

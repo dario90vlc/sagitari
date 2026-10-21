@@ -63,11 +63,19 @@ jobs:
           set -o pipefail
           npm test 2>&1 | tee test-output.log
 
-      - name: npm audit (alta y crítica, sin fix automático)
-        # Solo informa: un fallo aquí no bloquea la release, pero queda el rastro
-        # en el log para decidir si actualizar dependencias.
+      - name: npm audit (crítica bloquea, alta informa)
+        # Una vulnerabilidad CRÍTICA en el árbol de dependencias no puede viajar en
+        # una release: esto ya no se lo salta un `|| true`. Hoy son 0.
+        #
+        # El umbral ALTO se queda en aviso a propósito: las 3 altas que hay vienen de
+        # electron-builder y de su árbol de desarrollo, no del paquete que se instala
+        # (`build.files` solo mete main/, agent/, renderer/, skills-starter/ y
+        # package.json). Poner el listón donde el proyecto no puede llegar hace que en
+        # dos semanas alguien añada `|| true` otra vez y nadie lo note.
         shell: bash
-        run: npm audit --audit-level=high || true
+        run: |
+          npm audit --audit-level=critical
+          npm audit --audit-level=high || true
 
       - name: Unit tests (shell por defecto, como el release)
         # El release ejecuta los tests sin `shell:` —en Windows, pwsh— y aquí con
@@ -101,6 +109,30 @@ jobs:
             }
             exit $LASTEXITCODE
           }
+
+      - name: Cobertura (línea base, no bloquea)
+        # Todavía sin umbral: primero hay que saber dónde está el suelo. Se publica el
+        # resumen como artefacto para poder comparar versiones.
+        # Medido el 21/10/2026: 81,6 % de líneas, 80,0 % de funciones, 69,4 % de ramas.
+        # Los huecos que señaló: scripts/png-ops.js (23 %), agent/git.js (38 %),
+        # main/ipc-mcp.js (45 %), agent/browser.js (50 %) y main/config.js (56 %).
+        # Cuando haya dos o tres versiones de histórico se pone el umbral justo por
+        # debajo del suelo y se vuelve bloqueante: un umbral inventado hoy solo enseña a
+        # ignorar el paso.
+        shell: pwsh
+        run: |
+          npm run cobertura 2>&1 | Tee-Object -FilePath cobertura-output.log
+          if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
+
+      - name: Subir la cobertura
+        if: always()
+        uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4.6.2
+        with:
+          name: cobertura
+          path: |
+            coverage/coverage-summary.json
+            cobertura-output.log
+          if-no-files-found: ignore
 
       - name: Smoke test (la app arranca de verdad)
         run: npm run smoke

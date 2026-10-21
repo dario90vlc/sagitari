@@ -367,7 +367,7 @@
               </div>
               <div class="swrow srow" data-keys="mcp servidores activar conectar herramientas externas apagar">
                 <span class="st"><b>Activar servidores MCP</b><small>Apagado, el agente no ve ninguna herramienta MCP.</small></span>
-                <div class="sw on" id="mcpGlobal" role="switch" tabindex="0" aria-label="Activar servidores MCP"></div>
+                <div class="sw on" id="mcpGlobal" role="switch" tabindex="0" aria-checked="true" aria-label="Activar servidores MCP"></div>
               </div>
               <div id="mcpList" class="mcplist"></div>
               <div class="srow" data-keys="mcp anadir servidor pegar json exportar mcpServers">
@@ -918,7 +918,7 @@
                       ><b>Glow ambiental en los bordes</b
                       ><small>El marco se ilumina cuando el agente piensa, trabaja o te habla.</small></span
                     >
-                    <div class="sw on" id="swGlow" aria-label="Glow ambiental en los bordes"></div>
+                    <div class="sw on" id="swGlow" role="switch" tabindex="0" aria-checked="true" aria-label="Glow ambiental en los bordes"></div>
                   </div>
                   <div class="themerow block" data-keys="color tema apariencia acento interfaz">
                     <span class="st"><b>Color de la interfaz</b><small>Tiñe bordes, menús, botones y detalles de toda la app.</small></span>
@@ -1035,7 +1035,7 @@
                         antes» (escribir un archivo, editarlo y aplicar parches).</small
                       ></span
                     >
-                    <div class="sw" id="swAutoEdits" aria-label="Aceptar las ediciones de archivos sin preguntar"></div>
+                    <div class="sw" id="swAutoEdits" role="switch" tabindex="0" aria-checked="false" aria-label="Aceptar las ediciones de archivos sin preguntar"></div>
                   </div>
                 </div>
 
@@ -1165,7 +1165,7 @@
                       ><b>Recuperar tareas interrumpidas al arrancar</b
                       ><small>Si cierras la app con tareas a medias, se reanudan solas.</small></span
                     >
-                    <div class="sw on" id="swAutoResume" aria-label="Recuperar tareas interrumpidas al arrancar"></div>
+                    <div class="sw on" id="swAutoResume" role="switch" tabindex="0" aria-checked="true" aria-label="Recuperar tareas interrumpidas al arrancar"></div>
                   </div>
                 </div>
 
@@ -1181,7 +1181,7 @@
                         el que verifica y el chat siguen con el que elegiste.</small
                       ></span
                     >
-                    <div class="sw" id="swAgenteModelo" aria-label="Modelo por agente"></div>
+                    <div class="sw" id="swAgenteModelo" role="switch" tabindex="0" aria-checked="false" aria-label="Modelo por agente"></div>
                   </div>
                   <div class="swrow srow" data-keys="verificar comprobar resultado cierre calidad subagentes evidencia">
                     <span class="st"
@@ -1191,7 +1191,7 @@
                         de dártela por hecha. Apágalo si prefieres respuestas más rápidas.</small
                       ></span
                     >
-                    <div class="sw" id="swVerificar" aria-label="Verificación antes de cerrar"></div>
+                    <div class="sw" id="swVerificar" role="switch" tabindex="0" aria-checked="false" aria-label="Verificación antes de cerrar"></div>
                   </div>
                   <div class="swrow srow" data-keys="revisar revision codigo diff cambio revisor calidad">
                     <span class="st"
@@ -1202,7 +1202,7 @@
                         en el mismo turno. Apágalo si prefieres respuestas más rápidas.</small
                       ></span
                     >
-                    <div class="sw" id="swRevisar" aria-label="Revisar el cambio antes de cerrar"></div>
+                    <div class="sw" id="swRevisar" role="switch" tabindex="0" aria-checked="false" aria-label="Revisar el cambio antes de cerrar"></div>
                   </div>
                   <div class="swrow srow" data-keys="diagnosticos escribir comprobar lint errores proyecto tipos eslint ruff mypy">
                     <span class="st"
@@ -1213,7 +1213,7 @@
                         cuenta como suyo. Apágalo si prefieres que escribir no ejecute nada.</small
                       ></span
                     >
-                    <div class="sw" id="swDiagnosticos" aria-label="Comprobar el proyecto al escribir"></div>
+                    <div class="sw" id="swDiagnosticos" role="switch" tabindex="0" aria-checked="false" aria-label="Comprobar el proyecto al escribir"></div>
                   </div>
                   <div class="swrow srow" data-keys="pruebas test cierre ejecutar verificar npm test compilacion">
                     <span class="st"
@@ -1224,7 +1224,7 @@
                         con algo roto.</small
                       ></span
                     >
-                    <div class="sw" id="swCierre" aria-label="Ejecutar las pruebas al cerrar"></div>
+                    <div class="sw" id="swCierre" role="switch" tabindex="0" aria-checked="false" aria-label="Ejecutar las pruebas al cerrar"></div>
                   </div>
                   <div class="swrow srow" data-keys="aislamiento arboles subagentes paralelo git worktree conflicto fusion">
                     <span class="st"
@@ -1236,7 +1236,7 @@
                         directamente sobre tus archivos.</small
                       ></span
                     >
-                    <div class="sw" id="swArboles" aria-label="Aislar a los subagentes que escriben"></div>
+                    <div class="sw" id="swArboles" role="switch" tabindex="0" aria-checked="false" aria-label="Aislar a los subagentes que escriben"></div>
                   </div>
                   <div class="swrow srow" data-keys="cache prompt contexto ahorro coste rapido tokens proveedor">
                     <span class="st"
@@ -1247,7 +1247,7 @@
                         entienda el campo y te rechace las peticiones.</small
                       ></span
                     >
-                    <div class="sw" id="swCache" aria-label="Aprovechar el caché de prompt"></div>
+                    <div class="sw" id="swCache" role="switch" tabindex="0" aria-checked="false" aria-label="Aprovechar el caché de prompt"></div>
                   </div>
                   <!-- avanzado: paralelismo y reintentos, plegados por defecto -->
                   <div class="setcard advcard" id="advAgentCard">
@@ -1358,7 +1358,7 @@
                         proveedores.</small
                       ></span
                     >
-                    <div class="sw" id="swThinking" aria-label="Mostrar el razonamiento del modelo"></div>
+                    <div class="sw" id="swThinking" role="switch" tabindex="0" aria-checked="false" aria-label="Mostrar el razonamiento del modelo"></div>
                   </div>
                 </div>
 
@@ -1368,7 +1368,7 @@
                     <span class="st"
                       ><b>Modo desarrollador</b><small>Muestra métricas en vivo (tokens, latencia, coste) bajo el chat.</small></span
                     >
-                    <div class="sw" id="devModeSw" aria-label="Modo desarrollador"></div>
+                    <div class="sw" id="devModeSw" role="switch" tabindex="0" aria-checked="false" aria-label="Modo desarrollador"></div>
                   </div>
                 </div>
               </div>

@@ -23,7 +23,9 @@
     "dist": "node scripts/dist.js",
     "dist:installer": "node scripts/dist.js --installer",
     "dist:portable": "node scripts/dist.js --portable",
-    "release": "node scripts/release.js"
+    "release": "node scripts/release.js",
+    "limpia": "node scripts/limpia.js",
+    "cobertura": "c8 --reporter=text-summary --reporter=json-summary node test/run.js && c8 --reporter=text-summary --reporter=json-summary --clean=false node test/renderer/run.js"
   },
   "author": "Dario",
   "license": "SEE LICENSE IN LICENSE",
@@ -35,11 +37,15 @@
     "ws": "^8.18.0"
   },
   "devDependencies": {
+    "axe-core": "^4.14.0",
+    "c8": "^10.1.3",
     "electron": "^44.2.0",
     "electron-builder": "^26.15.3",
     "eslint": "^9.39.5",
     "eslint-config-prettier": "^10.1.8",
     "jsdom": "^26.1.0",
+    "pixelmatch": "^5.3.0",
+    "pngjs": "^7.0.0",
     "prettier": "^3.9.9"
   },
   "build": {

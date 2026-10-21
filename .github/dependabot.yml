@@ -1,0 +1,50 @@
+version: 2
+
+# Solo hay dos dependencias de ejecución (undici, ws), pero electron y
+# electron-builder se quedaban quietos para siempre: nada los miraba. Un PR
+# semanal con el cambio y sus notas es más barato que descubrir en octubre que el
+# runtime lleva ocho meses atrás.
+#
+# Los MAJOR de electron no se abren solos: entre versiones mayores cambian
+# safeStorage, webContents y el propio empaquetado, y eso se sube a mano junto con
+# una release (y con el binario probado). Un PR automático ahí solo genera ruido.
+updates:
+  - package-ecosystem: npm
+    directory: '/'
+    schedule:
+      interval: weekly
+      day: monday
+      time: '06:00'
+    open-pull-requests-limit: 5
+    commit-message:
+      prefix: 'chore(deps)'
+    groups:
+      electron-builder:
+        patterns:
+          - electron-builder
+          - app-builder-lib
+          - builder-util
+          - builder-util-runtime
+          - dmg-builder
+      herramientas:
+        patterns:
+          - eslint
+          - eslint-config-prettier
+          - '@eslint/js'
+          - prettier
+          - jsdom
+          - c8
+          - axe-core
+          - pixelmatch
+          - pngjs
+    ignore:
+      - dependency-name: electron
+        update-types:
+          - version-update:semver-major
+
+  - package-ecosystem: github-actions
+    directory: '/'
+    schedule:
+      interval: monthly
+    commit-message:
+      prefix: 'chore(ci)'
