@@ -147,6 +147,77 @@ jobs:
           node scripts/latest-yml.js dist --check
           exit ${missing}
 
+      - name: Instalación real del paquete (instala el .exe y lo abre)
+        # El smoke del CI arranca desde el ÁRBOL DE FUENTES: nunca abre el binario que
+        # se publica. Por eso el fallo de `copyFileSync` contra app.asar (una
+        # instalación nueva se quedaba sin NINGUNA skill de serie) llegó hasta la
+        # release con las dos suites y el arnés de interfaz en verde. Esto instala en
+        # silencio y comprueba, en un perfil recién creado, que siembra las skills
+        # incluidas. Si falta una, la release no sale.
+        shell: pwsh
+        run: |
+          $ErrorActionPreference = 'Stop'
+          $setup = Get-ChildItem dist\SAGITARI-Setup-*.exe | Select-Object -First 1
+          if (-not $setup) { Write-Output '::error::No hay instalador en dist\'; exit 1 }
+          Write-Output ('Instalando ' + $setup.Name + ' (' + [math]::Round($setup.Length / 1MB, 1) + ' MB)')
+
+          $inst = Start-Process -FilePath $setup.FullName -ArgumentList '/S' -Wait -PassThru
+          if ($inst.ExitCode -ne 0) { Write-Output ('::error::El instalador salió con ' + $inst.ExitCode); exit 1 }
+
+          # El instalador puede devolver el control antes de soltar el fichero: se
+          # espera al binario en vez de darlo por hecho al primer intento.
+          $exe = $null
+          for ($i = 0; $i -lt 30 -and -not $exe; $i++) {
+            $exe = Get-ChildItem (Join-Path $env:LOCALAPPDATA 'Programs') -Recurse -Filter 'SAGITARI.exe' -ErrorAction SilentlyContinue |
+              Select-Object -First 1
+            if (-not $exe) { Start-Sleep -Seconds 1 }
+          }
+          if (-not $exe) { Write-Output '::error::El instalador no dejó SAGITARI.exe en %LOCALAPPDATA%\Programs'; exit 1 }
+          Write-Output ('Instalado en ' + $exe.DirectoryName)
+
+          # Perfil NUEVO: el arranque de prueba escribe ahí, no en el %APPDATA% del runner.
+          $perfil = Join-Path $env:RUNNER_TEMP ('perfil-instalado-' + [guid]::NewGuid().ToString('N'))
+          New-Item -ItemType Directory -Force -Path $perfil | Out-Null
+          $salida = Join-Path $env:RUNNER_TEMP 'instalado.out.txt'
+          $errores = Join-Path $env:RUNNER_TEMP 'instalado.err.txt'
+
+          $env:SAGITARI_TEST_PROFILE = $perfil
+          $app = Start-Process -FilePath $exe.FullName -ArgumentList '--smoke', '--no-sandbox', '--disable-gpu' -Wait -PassThru `
+            -RedirectStandardOutput $salida -RedirectStandardError $errores
+          Remove-Item Env:\SAGITARI_TEST_PROFILE
+
+          $texto = @()
+          foreach ($f in @($salida, $errores)) { if (Test-Path $f) { $texto += Get-Content $f -Raw } }
+          $texto = $texto -join "`n"
+          Write-Output $texto
+
+          # El veredicto es el MISMO que el del smoke —ventana abierta y código 0— y
+          # además lo que el smoke no puede ver por arrancar desde el código: que el
+          # paquete empaquetado siembra las skills de serie.
+          $fallo = $null
+          if ($app.ExitCode -ne 0) {
+            $fallo = 'el binario instalado salió con ' + $app.ExitCode
+          } elseif ($texto -notmatch 'SMOKE::\{"window":true') {
+            $fallo = 'el binario instalado no abrió ventana (no apareció SMOKE::{"window":true})'
+          } else {
+            $sembradas = @()
+            $dirSkills = Join-Path $perfil 'skills'
+            if (Test-Path $dirSkills) { $sembradas = @(Get-ChildItem $dirSkills -Directory) }
+            $esperadas = @(Get-ChildItem skills-starter -Directory)
+            if ($sembradas.Count -ne $esperadas.Count) {
+              $fallo = 'sembró ' + $sembradas.Count + ' skills de ' + $esperadas.Count + ' (una instalación nueva tiene que traerlas todas)'
+            } else {
+              Write-Output ('Skills sembradas: ' + (($sembradas | ForEach-Object Name) -join ', '))
+            }
+          }
+
+          if ($fallo) {
+            Write-Output ('::error::Paquete instalado: ' + $fallo)
+            Get-Content (Join-Path $perfil 'logs\sagitari.log') -Tail 40 -ErrorAction SilentlyContinue | Write-Output
+            exit 1
+          }
+          Write-Output 'OK: el instalador deja un binario que arranca y siembra las skills.'
+
       - name: Build release body (notes + SHA-256)
         shell: bash
         run: |

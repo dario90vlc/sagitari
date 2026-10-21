@@ -20,9 +20,10 @@
     "banco": "node scripts/banco.js",
     "test": "node test/run.js",
     "test:renderer": "node test/renderer/run.js",
-    "dist": "electron-builder --win nsis portable",
-    "dist:installer": "electron-builder --win nsis",
-    "dist:portable": "electron-builder --win portable"
+    "dist": "node scripts/dist.js",
+    "dist:installer": "node scripts/dist.js --installer",
+    "dist:portable": "node scripts/dist.js --portable",
+    "release": "node scripts/release.js"
   },
   "author": "Dario",
   "license": "SEE LICENSE IN LICENSE",

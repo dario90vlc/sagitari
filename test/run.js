@@ -15,5 +15,6 @@
   require('./42-guardarrailes');
   require('./43-sistema-hardening');
   require('./45-todos');
+  require('./46-publicacion');
   await runAll();
 })();
