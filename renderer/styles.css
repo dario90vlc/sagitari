@@ -1564,31 +1564,43 @@ body.nofocus .shell .tcard::after {
   font-family: var(--font-display);
   font-weight: 600;
   color: #fff;
-  margin: 10px 0 3px;
+  margin: 18px 0 6px;
   line-height: 1.3;
 }
 .bubble h1 {
-  font-size: 18px;
+  font-size: 20px;
 }
+/* Un `##` abre un apartado de verdad: filete fino por encima, que es lo que separa
+   dos secciones de un vistazo sin meter cajas. El primero no lo lleva. */
 .bubble h2 {
-  font-size: 15px;
+  font-size: 17px;
+  letter-spacing: -0.01em;
+  margin-top: 22px;
+  padding-top: 12px;
+  border-top: 1px solid var(--line2);
+}
+.bubble h2:first-child {
+  margin-top: 0;
+  padding-top: 0;
+  border-top: 0;
 }
 .bubble h3 {
-  font-size: 15px;
+  font-size: 15.5px;
 }
 .bubble h4 {
   font-size: 15px;
+  color: var(--dim);
 }
 .bubble p {
-  margin: 4px 0;
+  margin: 8px 0;
 }
 .bubble ul,
 .bubble ol {
-  margin: 6px 0;
+  margin: 8px 0;
   padding-left: 1.6em;
 }
 .bubble li {
-  margin: 2px 0;
+  margin: 4px 0;
 }
 .bubble li::marker {
   color: var(--vio2);
@@ -6762,5 +6774,26 @@ select,
   }
   .app.compact .navitem {
     padding: 8px 0;
+  }
+}
+
+/* ============ Ventanas muy anchas: repartir, no estirar ============
+   Medido a 1786px: el hilo se quedaba en 780 dentro de una columna de 1254, o sea
+   237px muertos a cada lado del texto, y el rail con 300 de ancho para una tarjeta
+   de 278 que casi nunca lo llena. La medida de lectura NO se toca por gusto (650px
+   � 75ch, ver `.msg`): lo que se hace es darle al rail el ancho donde s� hay algo
+   que ense�ar y subir la medida un escal�n, de 650 a 730 (~84ch), que sigue dentro
+   de lo legible. Por debajo de 1500px no cambia nada: ah� el hilo ya ocupa lo que
+   hay y el hueco no existe. */
+@media (min-width: 1500px) {
+  .app {
+    grid-template-columns: 232px minmax(0, 1fr) 360px;
+  }
+  #chatWrap {
+    max-width: 860px;
+  }
+  .msg,
+  .sysline {
+    max-width: min(88%, 730px);
   }
 }
