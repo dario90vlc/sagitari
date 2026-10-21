@@ -106,6 +106,41 @@ function writeJsonAtomic(file, data) {
   }
 }
 
+/* Config de la app ANTERIOR tal y como se puede dejar en disco SIN credenciales.
+   Se usa al migrar: copiar la config a SAGITARI —donde las claves ya se cifran— no
+   sirve de nada si el fichero viejo se queda con la clave en claro al lado. Mismo
+   fichero, mismas claves, mismos valores: solo desaparecen los secretos. */
+function sinSecretos(raw) {
+  const limpio = { ...(raw && typeof raw === 'object' ? raw : {}) };
+  const vaciar = (p) => (p && typeof p === 'object' ? { ...p, apiKey: '' } : p);
+  if (limpio.active) limpio.active = vaciar(limpio.active);
+  if (Array.isArray(limpio.providers)) limpio.providers = limpio.providers.map(vaciar);
+  if (limpio.mcp && Array.isArray(limpio.mcp.servers)) {
+    limpio.mcp = {
+      ...limpio.mcp,
+      servers: limpio.mcp.servers.map((s) => ({ ...s, env: {}, headers: {}, url: sinCredenciales(s && s.url) })),
+    };
+  }
+  return limpio;
+}
+
+/** URL sin usuario/contraseña ni `?key=…` (mismo criterio que `urlLlevaCredenciales`,
+    que vive en el módulo puro de MCP: aquí no se importa para no crear un ciclo). */
+function sinCredenciales(u) {
+  if (typeof u !== 'string' || !u) return u;
+  try {
+    const x = new URL(u);
+    if (x.username || x.password) {
+      x.username = '';
+      x.password = '';
+    }
+    for (const k of ['key', 'api_key', 'apikey', 'token', 'access_token']) x.searchParams.delete(k);
+    return x.toString();
+  } catch {
+    return u; // no es una URL absoluta: se deja tal cual
+  }
+}
+
 module.exports = {
   KEY_PREFIX,
   encryptionAvailable,
@@ -113,5 +148,6 @@ module.exports = {
   revealKey,
   protectServerSecrets,
   revealServerSecrets,
+  sinSecretos,
   writeJsonAtomic,
 };

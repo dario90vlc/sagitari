@@ -27,9 +27,16 @@ Module.prototype.require = function (id) {
   return originalRequire.apply(this, arguments);
 };
 
-const { KEY_PREFIX, encryptionAvailable, protectKey, revealKey, protectServerSecrets, revealServerSecrets, writeJsonAtomic } = require(
-  path.join(__dirname, '..', '..', 'main', 'config.js'),
-);
+const {
+  KEY_PREFIX,
+  encryptionAvailable,
+  protectKey,
+  revealKey,
+  protectServerSecrets,
+  revealServerSecrets,
+  sinSecretos,
+  writeJsonAtomic,
+} = require(path.join(__dirname, '..', '..', 'main', 'config.js'));
 
 // Restaurar require original
 Module.prototype.require = originalRequire;
@@ -143,6 +150,53 @@ test('crea directorios si no existen', () => {
   assertOk(fs.existsSync(tmp), 'el archivo debe existir');
   fs.unlinkSync(tmp);
   fs.rmdirSync(path.join(__dirname, 'test-config-subdir'));
+});
+
+console.log('config.js — sinSecretos (migración desde la app anterior)');
+
+test('vacía la apiKey de active y de todos los proveedores', () => {
+  const raw = {
+    active: { providerId: 'p1', apiKey: 'sk-activa', model: 'm' },
+    providers: [
+      { id: 'p1', apiKey: 'sk-uno' },
+      { id: 'p2', apiKey: 'sk-dos' },
+    ],
+  };
+  const limpio = sinSecretos(raw);
+  assertEqual(limpio.active.apiKey, '');
+  assertEqual(limpio.providers[0].apiKey, '');
+  assertEqual(limpio.providers[1].apiKey, '');
+  // lo que NO es secreto se conserva: el fichero sigue sirviendo para volver atrás
+  assertEqual(limpio.active.providerId, 'p1');
+  assertEqual(limpio.providers[1].id, 'p2');
+  assertEqual(raw.providers[0].apiKey, 'sk-uno', 'no debe mutar la entrada');
+});
+
+test('vacía env y headers de los servidores MCP y quita credenciales de la URL', () => {
+  const limpio = sinSecretos({
+    mcp: {
+      enabled: true,
+      servers: [
+        { id: 'a', url: 'https://usuario:token@mcp.ejemplo.com/sse', env: { TOKEN: 'abc' }, headers: { Authorization: 'Bearer x' } },
+        { id: 'b', url: 'https://mcp.ejemplo.com/sse?key=SECRETO', env: {} },
+        { id: 'c', url: 'https://mcp.ejemplo.com/sse', env: { NADA: 'visible' } },
+      ],
+    },
+  });
+  assertEqual(Object.keys(limpio.mcp.servers[0].env).length, 0);
+  assertEqual(Object.keys(limpio.mcp.servers[0].headers).length, 0);
+  assertOk(!limpio.mcp.servers[0].url.includes('token'), 'el userinfo no puede quedarse');
+  assertOk(!limpio.mcp.servers[0].url.includes('usuario'), 'el usuario tampoco');
+  assertOk(!limpio.mcp.servers[1].url.includes('SECRETO'), 'el ?key= se borra');
+  assertOk(limpio.mcp.servers[1].url.includes('mcp.ejemplo.com'), 'la URL sigue siendo la misma');
+  assertEqual(limpio.mcp.servers[2].url, 'https://mcp.ejemplo.com/sse', 'una URL normal no se toca');
+  assertEqual(limpio.mcp.enabled, true);
+});
+
+test('tolera configs vacías o corruptas sin lanzar', () => {
+  assertEqual(Object.keys(sinSecretos(null)).length, 0);
+  assertEqual(Object.keys(sinSecretos({})).length, 0);
+  assertEqual(Object.keys(sinSecretos({ providers: 'no-es-lista' })).length, 1);
 });
 
 console.log(`\n${passed} pasaron, ${failed} fallaron`);

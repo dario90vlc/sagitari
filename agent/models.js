@@ -172,6 +172,17 @@ function _save(data) {
   } catch {}
 }
 
+/* Redacción de secretos con la MISMA tabla que el log (`redactText`, exportada por
+   runlog para no duplicar patrones). Se carga de forma perezosa: runlog resuelve la
+   carpeta de datos al cargarse y models.js puede requerirse antes de fijarla. */
+function _redactar(s) {
+  try {
+    return require('./runlog').redactText(s);
+  } catch {
+    return String(s);
+  }
+}
+
 /** Registra una llamada a un modelo. ok=false con error cuenta como fallo. */
 function record(model, { ok, durationMs, tokens, error, fallbackFrom, costUsd }) {
   const data = _load();
@@ -197,7 +208,10 @@ function record(model, { ok, durationMs, tokens, error, fallbackFrom, costUsd })
   if (costUsd) m.costUsd = (Number(m.costUsd) || 0) + Number(costUsd);
   if (!ok) {
     m.errors++;
-    m.lastError = String(error || 'error').slice(0, 300);
+    /* El texto del error acaba en `model-health.json`, que vive EN CLARO al lado del
+       config (que sí está cifrado). Un proveedor que devuelve «invalid key sk-…» en un
+       401 dejaba la credencial escrita ahí. Misma redacción que el log. */
+    m.lastError = _redactar(String(error || 'error')).slice(0, 300);
     if (fallbackFrom) m.fallbacks++;
   }
   // El resultado de la ÚLTIMA llamada, aparte de los totales: la píldora del

@@ -332,6 +332,30 @@ test('mcp: una URL con credenciales se detecta, se enmascara y se recupera al gu
   eq(mcpConfig.mergeUrl('https://a/sse', 'https://b/sse'), 'https://b/sse', 'sin máscara manda lo que escribió el usuario');
 });
 
+test('migración desde la app anterior: el fichero viejo no se queda con las claves en claro', () => {
+  const j = MAIN_SRC.indexOf('function limpiarSecretosLegado()');
+  ok(j > -1, 'main tiene que tener la limpieza del config anterior');
+  const fn = MAIN_SRC.slice(j, MAIN_SRC.indexOf('function loadConfig', j));
+  ok(/sinSecretos\(raw\)/.test(fn), 'usa la tabla de config.js, no una copia local');
+  ok(/writeJsonAtomic\(LEGACY_CONFIG/.test(fn), 'reescribe el original en vez de dejarlo intacto');
+  const i = MAIN_SRC.indexOf('function loadConfig()');
+  const bloque = MAIN_SRC.slice(i, MAIN_SRC.indexOf('function saveConfig', i));
+  const posSave = bloque.indexOf('saveConfig()');
+  const posLimpia = bloque.indexOf('limpiarSecretosLegado()');
+  ok(posSave > -1 && posLimpia > posSave, 'tras migrar y guardar cifrado hay que limpiar el original');
+  ok(/!HEADLESS/.test(bloque), 'y nunca en los modos de prueba, que no tocan la config real');
+});
+
+test('model-health no guarda la clave que el proveedor devuelva en el error', () => {
+  const src = fs.readFileSync(path.join(__dirname, '..', 'agent', 'models.js'), 'utf8');
+  const i = src.indexOf('lastError =');
+  ok(i > -1, 'models.js tiene que guardar el último error');
+  const linea = src.slice(i, src.indexOf('\n', i));
+  ok(/_redactar\(/.test(linea), 'el texto del error se redacta antes de persistirlo');
+  ok(/function _redactar\(/.test(src), 'y la redacción usa la tabla del log (redactText)');
+  ok(/require\('\.\/runlog'\)\.redactText/.test(src), 'sin duplicar los patrones de secreto');
+});
+
 test('mcp: la URL con credenciales se cifra en disco y se enmascara hacia la vista', () => {
   const i = MAIN_SRC.indexOf('function configParaDisco()');
   ok(i > -1, 'main tiene que tener la copia para disco');

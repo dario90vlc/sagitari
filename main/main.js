@@ -40,6 +40,7 @@ const {
   revealKey,
   protectServerSecrets,
   revealServerSecrets,
+  sinSecretos,
   writeJsonAtomic,
 } = require('./config');
 const { crearVentana } = require('./ventana');
@@ -367,6 +368,24 @@ function applyConfig(raw) {
   }
   config.mcp = { enabled: raw.mcp ? raw.mcp.enabled !== false : true, servers };
 }
+/* La app anterior (JarvisAI) guardaba las claves EN CLARO en su config. Al migrar se
+   copian a SAGITARI —donde `configParaDisco` las cifra—, pero el fichero viejo seguía
+   ahí con la credencial a la vista: el cifrado no protegía nada mientras existiera esa
+   copia. Se CONSERVA el fichero (por si el usuario vuelve a la versión anterior) pero
+   sin secretos; el resto de la configuración se queda como estaba. */
+function limpiarSecretosLegado() {
+  try {
+    const raw = JSON.parse(fs.readFileSync(LEGACY_CONFIG, 'utf8'));
+    const limpio = sinSecretos(raw);
+    const yaLimpio = JSON.stringify(limpio) === JSON.stringify(raw);
+    if (yaLimpio) return; // nada que borrar (ya migrado antes)
+    writeJsonAtomic(LEGACY_CONFIG, JSON.stringify(limpio, null, 2));
+    log.info('[SAGITARI] config de la versión anterior migrada: sus claves ya solo están cifradas en SAGITARI');
+  } catch (e) {
+    // no es fatal: la app ya arrancó con la configuración migrada
+    log.warn('[SAGITARI] no se pudieron borrar las claves del config anterior: ' + ((e && e.message) || e));
+  }
+}
 function loadConfig() {
   try {
     applyConfig(JSON.parse(fs.readFileSync(CONFIG_FILE, 'utf8')));
@@ -386,6 +405,8 @@ function loadConfig() {
         applyConfig(JSON.parse(fs.readFileSync(LEGACY_CONFIG, 'utf8')));
         config.security = { permissions: {}, guardrails: { ...securityDefaults.guardrails } };
         saveConfig();
+        // el original ya no puede quedarse con la clave en claro
+        limpiarSecretosLegado();
         return;
       } catch {}
     }
