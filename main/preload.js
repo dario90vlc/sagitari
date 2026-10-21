@@ -106,6 +106,9 @@ contextBridge.exposeInMainWorld('sagitari', {
   agentsCustomRecargar: () => ipcRenderer.invoke('agents:reload'),
   secResolve: (convId, id, approved, runId) => ipcRenderer.invoke('sec:resolve', { convId, id, approved, runId }),
   secSetToolPerm: (tool, level) => ipcRenderer.invoke('sec:setToolPerm', { tool, level }),
+  /* Atajo «permitir todo» / «volver a lo recomendado»: una sola escritura para
+     todas las claves, en vez de N llamadas que reescribían el config N veces. */
+  secSetToolPermMany: (tools, level) => ipcRenderer.invoke('sec:setToolPermMany', { tools, level }),
   secSetGuardrail: (patch) => ipcRenderer.invoke('sec:setGuardrail', patch),
   metaGet: (convId) => ipcRenderer.invoke('meta:get', convId),
   logsRecent: (n) => ipcRenderer.invoke('logs:recent', n),

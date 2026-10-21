@@ -96,22 +96,29 @@ const CARD_AGENT = Object.values(AGENT_MAP).reduce((acc, a) => {
 function updateAgentCount() {
   const cards = [...document.querySelectorAll('.acard.on')];
   const n = cards.length;
-  $('#agentCount').textContent = n;
-  $('#bigRing').parentElement.parentElement.classList.toggle('idle', n === 0);
-  // Sin nada en marcha, el «0» a 24px y el anillo vacío son decoración ocupando el
-  // sitio de la información: se dice en una línea y desaparece el resto.
-  const caja = $('#agentCount') && $('#agentCount').closest('.rc-count');
+  const cuenta = $('#agentCount');
+  if (cuenta) cuenta.textContent = n;
+  // Sin nada en marcha, el «0» a 24px y los mini-puntos son decoración ocupando el
+  // sitio de la información: el contador desaparece y lo dice la etiqueta de estado.
+  const caja = cuenta && cuenta.closest('.rc-count');
   if (caja) caja.hidden = n === 0;
-  if ($('#bigRing')) $('#bigRing').hidden = n === 0;
-  const titulo = document.querySelector('.rc-title');
-  if (titulo) titulo.textContent = n === 0 ? 'Sin agentes en marcha' : 'Agentes activos';
+  /* El estado REAL, no una etiqueta fija. Antes la tarjeta decía «Sin agentes en
+     marcha» mientras el agente principal respondía en el hilo: dos verdades
+     contradictorias en la misma pantalla. `busy` es el turno de la conversación a
+     la vista (lo mantiene 20-app.js al vuelo de cada evento). */
+  const estado = $('#railState');
+  if (estado) {
+    estado.textContent = n ? (n === 1 ? '1 agente activo' : n + ' agentes activos') : busy ? 'Sagitari trabajando' : 'En reposo';
+  }
+  const live = $('#railLive');
+  if (live) live.classList.toggle('busy', !n && !!busy);
   // el rail lista SOLO agentes vivos: antes acumulaba entradas de herramientas ya
   // terminadas mientras el contador marcaba 0 (lista y número se contradecían)
   const rail = $('#railAgents');
   if (!rail) return;
-  const live = new Set(cards.map((c) => CARD_AGENT[c.id] && CARD_AGENT[c.id].name).filter(Boolean));
+  const liveSet = new Set(cards.map((c) => CARD_AGENT[c.id] && CARD_AGENT[c.id].name).filter(Boolean));
   rail.querySelectorAll('.ragent').forEach((d) => {
-    if (!live.has(d.dataset.agent)) d.remove();
+    if (!liveSet.has(d.dataset.agent)) d.remove();
   });
 }
 updateAgentCount();
@@ -752,6 +759,8 @@ window.sagitari.onAgentEvent((ev) => {
       busy = ev.busy;
       setSendMode();
       syncChatBadge();
+      // el rail cuenta el estado real del turno, no sólo los agentes de herramienta
+      updateAgentCount();
       if (busy) {
         currentRunMode = K.mode(ev.mode || mode).key;
         applyModeTheme(currentRunMode);
@@ -873,9 +882,20 @@ function paintConfirm() {
   const who = ev.runId ? ' (tarea en segundo plano)' : '';
   // con varias esperando se dice cuál se está viendo: «1 de 3»
   const prog = confirmQueue.length > 1 ? ' · 1 de ' + confirmQueue.length : '';
+  /* El LITERAL manda: el comando, la ruta o la URL exactos. Antes sólo aparecía
+     en un `small` de 12 px recortado a 240 caracteres y 3 líneas, mientras lo que
+     el ojo leía primero era la descripción genérica («Ejecutar comando en la
+     terminal»), que nunca dice QUÉ va a pasar en tu equipo. */
+  const literal = ev.summary ? String(ev.summary) : '';
+  const cmd = $('#confirmCmd');
+  if (cmd) {
+    cmd.textContent = literal;
+    cmd.title = literal; // el literal completo, aunque la caja tenga tope de alto
+  }
   $('#confirmTitle').textContent =
     (quienPidePermiso(ev) ? quienPidePermiso(ev) + ' quiere: ' : 'El agente quiere: ') + (ev.description || ev.tool) + who + prog;
-  $('#confirmDetail').textContent = ev.summary ? String(ev.summary).slice(0, 240) : 'Herramienta: ' + ev.tool;
+  // el detalle dice con qué herramienta se hace: nunca queda vacío
+  $('#confirmDetail').textContent = ev.tool ? 'Herramienta: ' + ev.tool : '';
   bar.hidden = false;
   // al mostrarse es un diálogo modal de aviso: el lector de pantalla lo anuncia
   bar.setAttribute('role', 'alertdialog');
@@ -886,7 +906,7 @@ function paintConfirm() {
   // acto deliberado, y el error por defecto es no ejecutar.
   if (bar.tabIndex < 0) bar.tabIndex = -1;
   bar.focus();
-  feed('Esperando tu confirmación: ' + ev.tool, 'blu');
+  feed('Esperando tu confirmación: ' + (literal || ev.tool), 'blu');
 }
 
 /* Quién pide el permiso, dicho para la barra: el compañero del equipo por su nombre, y el

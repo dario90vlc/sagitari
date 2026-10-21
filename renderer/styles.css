@@ -95,6 +95,12 @@
   --panel2: rgba(var(--panel2-rgb), 0.45);
   --line: rgba(var(--acc-rgb), 0.22);
   --line2: rgba(var(--acc-rgb), 0.12);
+  /* Ancho útil de las vistas de CONTENIDO (Ajustes, Tareas, Herramientas, Memoria,
+     Historial, Espacio de trabajo). Estaba repartido en 760/860/900 sueltos: en una
+     ventana de 1440 esas columnas dejaban ~315 px muertos a la derecha mientras la
+     lista seguía pidiendo scroll. El hilo del chat NO lo usa: su medida de lectura
+     (45–75 caracteres) es una decisión aparte y está en #chatWrap. */
+  --content-max: 1080px;
   /* Pilas con reserva NO clásica. Sin genérico detrás, un fichero que no carga hace
      que el navegador use la fuente por defecto del sistema —Times New Roman en
      Windows— y la interfaz entera cambia a una serif clásica: pasó en el menú. La
@@ -1715,7 +1721,11 @@ body.nofocus .shell .tcard::after {
 /* v4.3: panel de revisión del cambio (F2). NO es un diálogo modal: se abre sobre
    el compositor, como la paleta de skills, y no bloquea el chat — el usuario
    sigue pudiendo escribir y mirar la conversación mientras revisa. Por eso no
-   lleva aria-modal ni trampa de foco, y su cierre es un botón normal. */
+   lleva aria-modal ni trampa de foco, y su cierre es un botón normal.
+   SUPERFICIE DE LECTURA: va opaca. Con el vidrio translúcido de antes
+   (`0.86 * --glass`, y 0.34 con el tinte ultra claro) el texto del chat se leía
+   a través de la cabecera y sobre las líneas del diff: aquí se revisa código, y
+   ahí la legibilidad manda sobre el material. */
 .diffpanel {
   position: absolute;
   left: 10px;
@@ -1725,15 +1735,14 @@ body.nofocus .shell .tcard::after {
   max-height: min(60vh, 520px);
   display: flex;
   flex-direction: column;
-  background: rgba(var(--deep-rgb), calc(0.86 * var(--glass)));
+  background: rgb(var(--deep-rgb));
   border: 1px solid rgba(255, 255, 255, 0.1);
   border-radius: 20px;
   box-shadow:
     0 14px 44px rgba(0, 0, 0, 0.55),
     inset 0 1px 0 rgba(255, 255, 255, 0.1);
-  backdrop-filter: blur(24px) saturate(1.5);
-  -webkit-backdrop-filter: blur(24px) saturate(1.5);
   overflow: hidden;
+  isolation: isolate; /* nada de lo que hay debajo se mezcla con el diff */
   z-index: 120;
 }
 .diffpanel[hidden] {
@@ -2121,7 +2130,7 @@ body.nofocus .shell .tcard::after {
   vertical-align: 1px;
   padding: 2px 8px;
   border-radius: 999px;
-  font-size: 10px;
+  font-size: var(--fs-label);
   letter-spacing: 0.06em;
   background: rgba(var(--acc2-rgb), 0.14);
   color: var(--dim);
@@ -2384,6 +2393,9 @@ body.nofocus .shell .tcard::after {
   border: 1px solid var(--line2);
   border-radius: 20px;
   padding: 14px 16px;
+  /* el mismo ancho que las listas de al lado: antes la tarjeta se estiraba a todo
+     el lienzo y la lista de tareas se quedaba en 860, así que no casaba el borde. */
+  max-width: var(--content-max);
 }
 .tt-head {
   font-size: 12px;
@@ -2403,7 +2415,7 @@ body.nofocus .shell .tcard::after {
 
 /* projects / tools / memory */
 .projwrap {
-  max-width: 860px;
+  max-width: var(--content-max);
 }
 /* todos los controles de formulario al tema oscuro — nada de estilos nativos del SO */
 input[type='text'],
@@ -2746,7 +2758,7 @@ textarea::placeholder {
 /* ===== v2.0: Ajustes rediseñados — tarjeta de estado, pestañas, tarjetas y búsqueda ===== */
 .setwrap {
   display: block;
-  max-width: 900px;
+  max-width: var(--content-max);
 }
 .setpanel {
   display: none;
@@ -2812,7 +2824,7 @@ textarea::placeholder {
 /* wizard de primer uso: 3 pasos con barra de progreso, dentro de la vista Ajustes */
 .wizard {
   display: none;
-  max-width: 900px;
+  max-width: var(--content-max);
   margin-bottom: 18px;
   border: 1px solid var(--line);
   border-radius: 22px;
@@ -2821,7 +2833,7 @@ textarea::placeholder {
 }
 .wizard.on {
   display: block;
-  animation: pop-in 0.3s cubic-bezier(0.34, 1.4, 0.64, 1);
+  animation: pop-in 0.3s cubic-bezier(0.16, 1, 0.3, 1);
 }
 .wz-head {
   display: flex;
@@ -2936,7 +2948,7 @@ textarea::placeholder {
 }
 /* MCP vive en su propia vista, sin el `.setpanel` que separaba las tarjetas (gap 16px) */
 #view-mcp {
-  max-width: 900px;
+  max-width: var(--content-max);
 }
 #view-mcp .setcard + .setcard {
   margin-top: 16px;
@@ -2963,7 +2975,7 @@ textarea::placeholder {
   margin-bottom: 0;
 }
 .setempty {
-  max-width: 900px;
+  max-width: var(--content-max);
   padding: 26px 4px;
   text-align: center;
   border: 1px dashed var(--line);
@@ -2979,7 +2991,7 @@ textarea::placeholder {
   margin: 16px 0 18px;
   padding-bottom: 12px;
   border-bottom: 1px solid var(--line2);
-  max-width: 900px;
+  max-width: var(--content-max);
 }
 .settab {
   display: inline-flex;
@@ -3016,7 +3028,7 @@ textarea::placeholder {
   align-items: center;
   gap: 14px;
   padding: 14px 16px;
-  max-width: 900px;
+  max-width: var(--content-max);
   border: 1px solid var(--line);
   border-radius: 22px;
   background: linear-gradient(135deg, rgba(34, 211, 238, 0.09), rgba(var(--acc2-rgb), 0.14));
@@ -3212,7 +3224,7 @@ textarea::placeholder {
   display: flex;
   flex-direction: column;
   gap: 8px;
-  max-width: 760px;
+  max-width: var(--content-max);
 }
 .skillitem .mt b {
   font-size: 15px;
@@ -3257,9 +3269,10 @@ textarea::placeholder {
 }
 .toolsgrid {
   display: grid;
-  grid-template-columns: repeat(2, 1fr);
+  /* auto-fill: a 1080 dan 3 columnas; en ventanas estrechas baja a 2 y a 1 sola. */
+  grid-template-columns: repeat(auto-fill, minmax(320px, 1fr));
   gap: 12px;
-  max-width: 860px;
+  max-width: var(--content-max);
 }
 .toolsgroup {
   grid-column: 1 / -1;
@@ -3270,13 +3283,29 @@ textarea::placeholder {
   margin-top: 8px;
 }
 .toolcard {
+  /* Tarjeta en dos pisos: identidad arriba y el NIVEL editable abajo, a lo ancho.
+     Así el desplegable no compite con el nombre en la misma línea (y en la rejilla
+     de 3 columnas entra sin apretar el texto). */
   display: flex;
-  gap: 12px;
-  align-items: center;
+  flex-direction: column;
+  gap: 10px;
+  align-items: stretch;
   padding: 13px 15px;
   border: 1px solid var(--line2);
   border-radius: 18px;
   background: rgba(var(--panel-rgb), 0.5);
+}
+.tctop {
+  display: flex;
+  gap: 12px;
+  align-items: center;
+  min-width: 0;
+}
+.tc-body {
+  min-width: 0;
+}
+.toolcard .toolperm {
+  width: 100%;
 }
 .toolcard .tic {
   width: 34px;
@@ -3401,12 +3430,45 @@ textarea::placeholder {
 .rail::-webkit-scrollbar {
   width: 0;
 }
+/* Una sola tarjeta que ocupa el rail entero: estado arriba, agentes en medio y la
+   actividad debajo con su propio scroll. Antes eran dos recuadros sueltos que
+   dejaban medio rail vacío y decían cosas contradictorias. */
+.rail > .rcard {
+  /* Se ajusta al contenido y sólo se recorta si no cabe: una tarjeta estirada a
+     toda la altura con dos líneas dentro se lee como un panel vacío. */
+  flex: 0 1 auto;
+  min-height: 0;
+  max-height: 100%;
+  display: flex;
+  flex-direction: column;
+}
+.rail-sub {
+  margin: 14px 0 0;
+  padding-top: 12px;
+  border-top: 1px solid var(--line2);
+  font: 500 11px var(--font-display);
+  letter-spacing: 0.1em;
+  text-transform: uppercase;
+  color: var(--dim);
+}
+/* Trabajando: el punto del rail toma el acento y late, como el resto de señales
+   vivas. En reposo se queda verde y quieto. */
+.live.busy .dot {
+  background: rgb(var(--acc-rgb));
+  box-shadow: 0 0 8px rgba(var(--acc2-rgb), 0.9);
+  animation: blink 1.5s infinite;
+}
 /* La actividad es una línea de tiempo con su espina de luz, no una pila de píldoras:
    el registro se lee como un diario y las horas quedan alineadas a la derecha. */
 #activityFeed {
   position: relative;
-  margin-top: 12px;
+  margin-top: 10px;
   padding-left: 19px;
+  /* La actividad es lo que se desplaza: la tarjeta del rail ya no scrollea entera,
+     así el estado y el reloj no se van con el dedo. */
+  flex: 1;
+  min-height: 0;
+  overflow-y: auto;
 }
 #activityFeed::before {
   content: '';
@@ -3611,7 +3673,7 @@ textarea::placeholder {
   display: flex;
   flex-direction: column;
   gap: 8px;
-  max-width: 860px;
+  max-width: var(--content-max);
 }
 .hitem {
   display: flex;
@@ -3879,7 +3941,7 @@ i[data-i] {
 .csel-menu,
 .skillmenu,
 .toast {
-  animation: pop-in 0.28s cubic-bezier(0.34, 1.4, 0.64, 1);
+  animation: pop-in 0.28s cubic-bezier(0.16, 1, 0.3, 1);
 }
 /* El anillo de foco es un indicador de estado: la norma pide 3:1 contra el fondo
    contiguo y el anterior (alfa 0,55) medía 1,99:1. Con 0,95 pasa de 4:1 sin
@@ -3917,17 +3979,33 @@ depender del color de acento elegido. */
   background: rgba(var(--mode-rgb), 0.4);
 }
 /* ===== v1.1: confirmation bar, dev metrics, security panel ===== */
+/* La puerta de consentimiento es GLOBAL: overlay fijo, visible desde cualquier
+   vista. Se ancla bajo el titlebar (96px) porque ahí termina la cápsula del chat
+   y también la cabecera de las demás vistas, así que no tapa ni el título de la
+   conversación ni el de la vista que estés mirando. */
 .confirmbar {
+  position: fixed;
+  top: 96px;
+  left: 50%;
+  transform: translateX(-50%);
+  z-index: 210;
+  width: min(720px, calc(100% - 80px));
   display: flex;
   align-items: center;
   gap: 12px;
-  /* Con la cabecera fuera del flujo, la barra empieza bajo la cápsula. */
-  margin: 58px 18px 8px;
-  padding: 10px 14px;
-  background: linear-gradient(135deg, rgba(255, 180, 60, 0.12), rgba(255, 120, 80, 0.1));
-  border: 1px solid rgba(255, 180, 60, 0.38);
+  padding: 12px 14px;
+  background:
+    linear-gradient(135deg, rgba(255, 180, 60, 0.16), rgba(255, 120, 80, 0.13)),
+    rgb(var(--deep-rgb));
+  border: 1px solid rgba(255, 180, 60, 0.45);
   border-radius: 18px;
+  box-shadow:
+    0 18px 48px rgba(0, 0, 0, 0.55),
+    inset 0 1px 0 rgba(255, 220, 170, 0.16);
   animation: cbIn 0.25s ease;
+}
+.confirmbar[hidden] {
+  display: none;
 }
 .confirmbar .cb-dot {
   width: 9px;
@@ -3942,29 +4020,52 @@ depender del color de acento elegido. */
   flex: 1;
   min-width: 0;
 }
+/* el literal manda: comando o ruta exactos, monoespaciado y seleccionable */
+.confirmbar .cb-cmd {
+  display: block;
+  margin-bottom: 6px;
+  padding: 6px 9px;
+  border-radius: 10px;
+  border: 1px solid rgba(255, 180, 60, 0.22);
+  background: rgba(0, 0, 0, 0.28);
+  font-family: var(--font-mono);
+  font-size: 13px;
+  line-height: 1.45;
+  color: #ffe6c2;
+  white-space: pre-wrap;
+  overflow-wrap: anywhere;
+  /* Sin recorte silencioso: si el literal es larguísimo, se lee con scroll. */
+  max-height: 5.8em;
+  overflow-y: auto;
+  user-select: text;
+}
+.confirmbar .cb-cmd:empty {
+  display: none;
+}
 .confirmbar .cb-txt b {
   display: block;
-  font-size: 15px;
+  font-size: 13px;
+  font-weight: 500;
+  line-height: 1.4;
   color: #ffd9a0;
 }
 .confirmbar .cb-txt small {
-  display: -webkit-box;
-  -webkit-line-clamp: 3;
-  -webkit-box-orient: vertical;
+  display: block;
+  margin-top: 2px;
   color: var(--dim);
   font-size: 12px;
-  overflow: hidden;
-  white-space: normal;
-  max-width: 520px;
+  overflow-wrap: anywhere;
 }
 @keyframes cbIn {
+  /* La barra está centrada con translateX: la animación tiene que conservarlo.
+     (Antes terminaba en `transform: none` y eso la descolocaba a la izquierda.) */
   from {
     opacity: 0;
-    transform: translateY(-6px);
+    transform: translate(-50%, -6px);
   }
   to {
     opacity: 1;
-    transform: none;
+    transform: translate(-50%, 0);
   }
 }
 @keyframes cbPulse {
@@ -4304,6 +4405,43 @@ depender del color de acento elegido. */
   vertical-align: 1px;
 }
 
+/* ---- cabecera del chat en ventanas estrechas ----
+   La cápsula es una sola fila con tres cosas compitiendo: el título, la tira de
+   conversaciones abiertas y las acciones. En el ancho mínimo de la ventana
+   (1000 px) el título se quedaba en «Nuev…» y las pestañas se dibujaban encima
+   del botón «Nueva conversación»: el usuario no sabía en qué hilo estaba.
+   Aquí las pestañas bajan a su propia fila y el título recupera el ancho; el
+   hilo gana el hueco que ocupa la cápsula para que no tape el primer mensaje. */
+@media (max-width: 1200px) {
+  .chathead {
+    flex-wrap: wrap;
+    row-gap: 8px;
+  }
+  .ch-left {
+    order: 1;
+    align-items: flex-start;
+    text-align: left;
+  }
+  .vh-actions {
+    order: 2;
+  }
+  .ctabs {
+    order: 3;
+    flex: 1 0 100%;
+    max-width: 100%;
+    justify-content: flex-start;
+  }
+  #chatTitle {
+    font-size: 19px;
+    text-align: left;
+  }
+  /* Sólo cuando la tira existe de verdad hay dos filas que despejar. */
+  #view-chat:has(.ctabs:not([hidden])) .msgs {
+    padding-top: 104px;
+  }
+}
+
+
 /* ---- compositor teñido por el modo (siempre visible, sin ocupar espacio) ---- */
 #view-chat .composer {
   /* el borde toma el color del modo, y es lo que identifica el compositor contra el
@@ -4434,12 +4572,12 @@ depender del color de acento elegido. */
      crecía de más. En la ventana normal las tarjetas siguen saliendo a ~182px. */
   grid-template-columns: repeat(auto-fit, minmax(150px, 1fr));
   gap: 12px;
-  margin-top: 30px;
+  margin-top: 20px;
 }
 .ce-mode {
   text-align: left;
   cursor: pointer;
-  padding: 13px 15px;
+  padding: 11px 13px;
   border-radius: 18px;
   background: linear-gradient(165deg, rgba(var(--face-rgb), 0.58), rgba(var(--panel-rgb), 0.68));
   border: 1px solid rgba(255, 255, 255, 0.08);
@@ -4472,6 +4610,9 @@ depender del color de acento elegido. */
 .ce-mode .cm-top b {
   font: 600 12px var(--font-ui);
   letter-spacing: 0.06em;
+  /* la versalita es presentación, no contenido: escrita en el HTML, algunos
+     lectores de pantalla deletrean los nombres cortos. */
+  text-transform: uppercase;
   color: rgb(var(--mr));
 }
 .ce-mode .cm-tag {
@@ -4480,25 +4621,6 @@ depender del color de acento elegido. */
   line-height: 1.45;
   display: block;
 }
-.ce-mode .cm-bullets {
-  list-style: none;
-  margin: 7px 0 0;
-  padding: 0;
-}
-.ce-mode .cm-bullets li {
-  font-size: var(--fs-small);
-  color: var(--dim);
-  padding-left: 11px;
-  position: relative;
-  line-height: 1.6;
-}
-.ce-mode .cm-bullets li::before {
-  content: '·';
-  position: absolute;
-  left: 2px;
-  color: rgb(var(--mr));
-  font-weight: 400;
-}
 
 /* ---- turno: quién habla, con qué modo, cuándo y con qué acciones ---- */
 /* v4.2: estado vacío ilustrado para las listas (historial, memoria, skills,
@@ -4506,7 +4628,7 @@ depender del color de acento elegido. */
    halo + título + subtítulo + chip de acción) para que todas las vistas
    respiren igual y ningún panel se quede en un subnote solitario. */
 .listempty {
-  max-width: 900px;
+  max-width: var(--content-max);
   margin: 26px auto 10px;
   padding: 40px 26px;
   text-align: center;
@@ -5724,7 +5846,7 @@ kbd {
    píldoras de etiqueta, el aviso de deshacer y la confirmación escrita del borrado. */
 .memsec {
   margin: 0 0 22px;
-  max-width: 860px;
+  max-width: var(--content-max);
 }
 .memsec-t {
   display: flex;
@@ -5797,7 +5919,7 @@ kbd {
 }
 .memfiltro .memtag small {
   color: var(--dim);
-  font-size: 10px;
+  font-size: var(--fs-label);
 }
 .memfiltro .memtag.on {
   border-color: var(--vio2);
@@ -5890,7 +6012,7 @@ kbd {
 .mempie {
   border-top: 1px solid var(--line2);
   padding-top: 16px;
-  max-width: 860px;
+  max-width: var(--content-max);
 }
 .mempie .srow {
   display: flex;
@@ -6090,7 +6212,7 @@ kbd {
   font-size: 13px;
 }
 .ac-badge {
-  font-size: 10.5px;
+  font-size: var(--fs-label);
   letter-spacing: 0.04em;
 }
 #btnChangeModel {
@@ -6207,6 +6329,33 @@ kbd {
     inset 0 0 0 1px rgba(255, 255, 255, 0.5),
     0 0 14px rgba(var(--pc), 0.8);
 }
+/* --- fila del glow: una decisión, no quince ---
+   Por defecto el glow sigue al color de la interfaz, así que los 7 chips de la
+   segunda fila repetían los mismos 7 nombres a 40 px de los de arriba: quince
+   decisiones visibles y el riesgo real de teñir la fila equivocada. Ahora sólo
+   se ven «Como la interfaz» y «Otro color…»; los 7 colores aparecen cuando el
+   usuario pide uno distinto (`#glowColorTiles.open`, lo pone syncGlowTiles). */
+#glowColorTiles:not(.open) .pal[data-pal]:not([data-pal='match']) {
+  display: none;
+}
+#glowColorTiles.open #glowOtherBtn {
+  display: none;
+}
+.pal-dot.plus {
+  background: transparent;
+  border: 1px dashed rgba(255, 255, 255, 0.45);
+  box-shadow: none;
+}
+.pal-dot.plus::after {
+  content: '+';
+  display: grid;
+  place-items: center;
+  width: 100%;
+  height: 100%;
+  font: 600 12px var(--font-ui);
+  color: var(--dim);
+  line-height: 1;
+}
 
 /* --- permisos por herramienta --- */
 #view-settings .permrow {
@@ -6240,7 +6389,7 @@ kbd {
   border-radius: 999px;
   background: rgba(var(--acc2-rgb), 0.12);
   color: var(--dim);
-  font-size: 10.5px;
+  font-size: var(--fs-label);
   letter-spacing: 0.02em;
 }
 #view-settings .permrow .csel {
@@ -6444,7 +6593,7 @@ kbd {
 
 /* --- tareas: la nueva tarea es una tarjeta, no un contorno --- */
 .tasknew {
-  max-width: 860px;
+  max-width: var(--content-max);
 }
 .tasknew-row {
   display: flex;
@@ -6471,7 +6620,7 @@ kbd {
   margin-top: 10px;
 }
 .tasks-note {
-  max-width: 860px;
+  max-width: var(--content-max);
   margin: 0 0 14px;
 }
 
@@ -6492,7 +6641,7 @@ kbd {
 
 /* --- skills: las bandejas comparten ancho con la lista --- */
 .skills-tray {
-  max-width: 860px;
+  max-width: var(--content-max);
 }
 
 /* --- memoria: el vacío vive dentro de una sección con su propia explicación;
@@ -6516,7 +6665,7 @@ kbd {
 
 /* --- equipo: la nota y las tarjetas del wrap respiran juntas --- */
 #equipoNota {
-  max-width: 860px;
+  max-width: var(--content-max);
 }
 .equipowrap .tooltray {
   margin-top: 0;

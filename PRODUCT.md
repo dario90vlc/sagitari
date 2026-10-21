@@ -185,6 +185,7 @@ justificación (ver _Brand Commitments_).
 visible, uso completo por teclado y nombres accesibles en los controles.
 
 > Elegido por el asistente a petición del usuario («lo que recomiendes»), no impuesto
-> por él. El trabajo pendiente conocido está en el contraste del texto tenue (`--dim`)
-> y en el foco de algunos controles; una auditoría con la app en marcha dará la lista
-> medible.
+> por él. Las auditorías con la app en marcha dan la lista medible. El texto tenue
+> (`--dim`) **no** es deuda: medido sobre la superficie base da 6,55:1, por encima del
+> 4,5:1 de AA. Lo pendiente es de otra clase: versalitas usadas como texto corrido,
+> cuerpos por debajo de 12 px, foco en algunos controles y separaciones apretadas.

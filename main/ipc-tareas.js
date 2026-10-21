@@ -127,6 +127,26 @@ function registerTareasIpc(ipcMain, ctx) {
     for (const a of runtimes.allAgents()) a.setPolicy(cfg().security);
     return { ...persistConfig(), permissions: cfg().security.permissions };
   });
+  /* Mismo control que arriba, pero para el atajo «permitir todo» / «volver a lo
+     recomendado»: se VALIDAN todas las claves antes de tocar nada y se persiste una
+     sola vez. Con N llamadas sueltas el config se reescribía N veces y un cierre a
+     mitad dejaba media tabla aplicada. */
+  ipcMain.handle('sec:setToolPermMany', (e, { tools, level } = {}) => {
+    const lista = Array.isArray(tools) ? [...new Set(tools.map((t) => String(t || '')))] : [];
+    if (!lista.length) return { ok: false, error: 'sin herramientas' };
+    if (level !== 'default' && !NIVELES_PERMISO.includes(level)) return { ok: false, error: 'nivel no válido: ' + level };
+    for (const t of lista) {
+      if (!CLAVES_HERRAMIENTA.has(t) && !COMODIN_MCP_RX.test(t)) return { ok: false, error: 'herramienta desconocida: ' + t };
+    }
+    if (!cfg().security) cfg().security = { permissions: {}, guardrails: securityDefaults.guardrails };
+    for (const t of lista) {
+      if (level === 'default') delete cfg().security.permissions[t];
+      else cfg().security.permissions[t] = level;
+    }
+    // la política es GLOBAL: la llevan todas las conversaciones vivas, no solo una
+    for (const a of runtimes.allAgents()) a.setPolicy(cfg().security);
+    return { ...persistConfig(), permissions: cfg().security.permissions };
+  });
   ipcMain.handle('sec:setGuardrail', (e, patch) => {
     if (!cfg().security) cfg().security = { permissions: {}, guardrails: securityDefaults.guardrails };
     const g = cfg().security.guardrails;

@@ -47,13 +47,15 @@
     backdrop-filter: url(#lg-refract) blur(var(--lg-blur)) saturate(var(--lg-sat));
     -webkit-backdrop-filter: url(#lg-refract) blur(var(--lg-blur)) saturate(var(--lg-sat));
   }
-  /* Los paneles que flotan SOBRE contenido (menús, paleta, revisión de cambios) son
-     donde la refracción se ve: el texto que queda debajo se dobla de verdad. Poco
-     desenfoque a propósito: es vidrio claro, no escarcha. */
+  /* Los paneles que flotan SOBRE contenido (menús, paleta) son donde la refracción
+     se ve: el texto que queda debajo se dobla de verdad. Poco desenfoque a
+     propósito: es vidrio claro, no escarcha.
+     El panel de revisión NO va aquí: es superficie de LECTURA (código con
+     números de línea) y va opaco — con refracción y vidrio claro el texto del
+     chat se transparentaba sobre el diff. Su material vive en styles.css. */
   .modelmenu,
   .skillmenu,
-  .csel-menu,
-  .diffpanel {
+  .csel-menu {
     backdrop-filter: url(#lg-refract) blur(3px) saturate(1.4);
     -webkit-backdrop-filter: url(#lg-refract) blur(3px) saturate(1.4);
   }

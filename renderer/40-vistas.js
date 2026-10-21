@@ -11,6 +11,12 @@
    equipoEvento, renderEquipo, cargarLimiteEquipo, equipoDe, equipoFicha, equipoPermiso, nombreEquipo,
    estadoEquipo, badgeEquipoPermisos, pintarBadgeEquipo, resumenEquipo, equipoCierraPorTurno */
 /* global fillSettings, wizardMostrar, polishSwitches, pintarRailEquipo, refrescarEquipoChat */
+/* Los atajos de permiso viven en 30-ajustes.js (junto a la tabla de Seguridad que
+   gobiernan): esta vista los llama desde su cabecera. */
+/* global permitirTodoPermisos, restablecerPermisos */
+/* La etiqueta humana de cada nivel recomendado vive en 30-ajustes.js y se reusa aquí
+   para no escribir dos veces la misma traducción «confirm → preguntar antes». */
+/* global RISK_LABEL */
 /* Las de arriba están definidas en 30-ajustes.js (scope compartido) salvo `pintarRailEquipo`,
    que vive en 20-app.js (el rail es suyo) y `refrescarEquipoChat`, que vive en 10-chat.js
    (la tarjeta del turno es suya): las llama el repintado del equipo de aquí. */
@@ -326,19 +332,18 @@ function renderModeSeg() {
   }
 }
 
-/** Tarjetas de modo del estado vacío: explican y permiten cambiar con un clic. */
+/** Tarjetas de modo del estado vacío: explican y permiten cambiar con un clic.
+    Sin viñetas: la etiqueta + la frase corta ya distinguen los cuatro modos, y la
+    tarjeta de tres líneas (con el compositor justo debajo) pedía siete decisiones
+    antes de escribir la primera palabra. */
 function renderEmptyModes() {
   const box = $('#ceModes');
   if (!box) return;
   box.innerHTML = MODE_ORDER.map((k) => {
     const M = K.MODES[k];
     return `<button class="ce-mode${k === mode ? ' on' : ''}" style="--mr:${M.rgb}" data-m="${k}" aria-pressed="${k === mode}">
-      <span class="cm-top">${ic(M.icon)}<b>${M.name.toUpperCase()}</b></span>
+      <span class="cm-top">${ic(M.icon)}<b>${esc(M.name)}</b></span>
       <span class="cm-tag">${esc(M.label)} · ${esc(M.tagline)}</span>
-      <ul class="cm-bullets">${M.bullets
-        .slice(0, 1)
-        .map((b) => `<li>${esc(b)}</li>`)
-        .join('')}</ul>
     </button>`;
   }).join('');
   box.querySelectorAll('[data-m]').forEach((b) => (b.onclick = () => setMode(b.dataset.m)));
@@ -1076,20 +1081,52 @@ const TOOL_GROUPS = [
 async function renderTools() {
   const g = $('#toolsGrid');
   if (!g) return;
+  /* Los dos atajos de la cabecera. Se atan al entrar en la vista: los botones son
+     estáticos, pero así el repintado de la rejilla nunca deja un handler viejo. */
+  const allowAll = $('#toolsAllowAll');
+  if (allowAll)
+    allowAll.onclick = async () => {
+      if (!(await permitirTodoPermisos(allowAll))) return; // pide confirmación
+      await renderTools();
+      showToast('Todas las herramientas permitidas sin preguntar');
+    };
+  const resetAll = $('#toolsResetPerms');
+  if (resetAll)
+    resetAll.onclick = async () => {
+      await restablecerPermisos();
+      await renderTools();
+      showToast('Permisos restablecidos a los recomendados');
+    };
   let rec = {};
+  let perm = {};
   try {
     const m = await window.sagitari.metaGet(hiloActual());
     rec = (m && m.riskDefaults) || {};
+    // la POLÍTICA guardada (override del usuario), no sólo la recomendación
+    perm = (m && m.permissions) || {};
   } catch {}
   // se vacía ANTES de construir la cabecera: si se limpia después, la borra
   g.innerHTML = '';
-  // v4.2: cabecera de contexto: qué es esta vista y cómo llegar a los permisos
+  /* Nivel EFECTIVO: lo que el usuario ha fijado o, si no ha fijado nada, lo que
+     recomienda la herramienta. La tarjeta cae en el grupo que de verdad gobierna
+     hoy, no en el que «debería» — antes el grupo era la recomendación y el nivel
+     real vivía en otra vista, así que la tarjeta podía mentir. */
+  const nivelDe = (n) => (perm[n] && perm[n] !== 'default' ? perm[n] : rec[n] || 'confirm');
+  const grupoDe = (n) => {
+    const v = nivelDe(n);
+    return v === 'restricted' ? 'restricted' : v === 'safe' ? 'safe' : 'confirmar';
+  };
   const head = document.createElement('div');
   head.style.cssText = 'grid-column:1/-1;margin-bottom:6px';
   head.innerHTML =
-    '<div class="subnote" style="margin:0">Lo que Sagitari puede hacer por ti, agrupado por su nivel de permiso. Cambia el nivel de cada una en <b>Ajustes → Seguridad</b>.</div>';
+    '<div class="subnote" style="margin:0">Lo que Sagitari puede hacer por ti, agrupado por el nivel que <b>gobierna ahora</b>. El nivel se cambia aquí mismo (la misma tabla está en Ajustes → Seguridad). En los servidores MCP el nivel es <b>del servidor</b>: sus herramientas lo comparten.</div>';
   g.appendChild(head);
-  const grupoDe = (n) => (rec[n] === 'restricted' || rec[n] === 'safe' ? rec[n] : 'confirmar');
+  const NIVELES = [
+    ['default', 'Por defecto'],
+    ['safe', 'Permitir siempre'],
+    ['confirm', 'Preguntar antes'],
+    ['restricted', 'Bloqueado'],
+  ];
   for (const gr of TOOL_GROUPS) {
     const items = TOOL_INFO.filter(([n]) => grupoDe(n) === gr.key);
     if (!items.length) continue;
@@ -1098,9 +1135,26 @@ async function renderTools() {
     h.textContent = gr.titulo + ' · ' + items.length;
     g.appendChild(h);
     for (const [n, i, d] of items) {
+      /* El desplegable enseña lo GUARDADO («Por defecto» si no hay override), igual
+         que la tabla de Seguridad. Antes enseñaba el nivel efectivo y tras «Volver a
+         lo recomendado» las tarjetas seguían diciendo «Preguntar antes»: parecía
+         que el reset no había hecho nada. El grupo sí va por el efectivo, y la línea
+         «recomendado: …» explica por qué la tarjeta cae donde cae. */
+      const lvl = perm[n] && perm[n] !== 'default' ? perm[n] : 'default';
+      const nombre = K.tool(n).label;
+      const recTxt = RISK_LABEL[rec[n] || 'confirm'] || 'confirmar';
       const c = document.createElement('div');
       c.className = 'toolcard';
-      c.innerHTML = `<div class="tic">${ic(i)}</div><div><b>${esc(K.tool(n).label)}</b> <small class="md">${esc(n)}</small><br><small>${d}</small></div>`;
+      c.innerHTML = `<div class="tctop"><div class="tic">${ic(i)}</div><div class="tc-body"><b>${esc(nombre)}</b> <small class="md">${esc(n)}</small><br><small>${d}</small><br><small class="md">recomendado: ${esc(recTxt)}</small></div></div>
+        <select class="toolperm" data-tool="${esc(n)}" aria-label="Permiso de ${esc(nombre)}">
+          ${NIVELES.map(([v, t]) => `<option value="${v}"${lvl === v ? ' selected' : ''}>${t}</option>`).join('')}
+        </select>`;
+      // cambiar el nivel aquí es el permiso real: la misma llamada que Ajustes ▸ Seguridad
+      c.querySelector('select').onchange = async (e) => {
+        await window.sagitari.secSetToolPerm(n, e.target.value);
+        showToast(`${nombre}: ${e.target.selectedOptions[0].textContent.toLowerCase()}`);
+        renderTools(); // cambia de grupo: se repinta para que la tarjeta caiga donde toca
+      };
       g.appendChild(c);
     }
   }
@@ -1119,14 +1173,30 @@ async function renderTools() {
     h.textContent = 'Servidores MCP · ' + total;
     g.appendChild(h);
     for (const s of conHerramientas) {
+      /* El permiso de MCP se guarda por SERVIDOR (comodín), no por herramienta: las
+         tarjetas de un mismo servidor comparten selector a propósito, y así el nivel
+         se puede cambiar también desde aquí en vez de sólo en Ajustes. */
+      const wildcard = s.permKey || 'mcp__' + s.id + '__*';
+      const lvlMcp = perm[wildcard] && perm[wildcard] !== 'default' ? perm[wildcard] : 'default';
       for (const t of s.discovered) {
         const c = document.createElement('div');
         c.className = 'toolcard';
-        c.innerHTML = `<div class="tic">${ic('bolt')}</div><div><b>${esc(t.tool)}</b> <small class="md">${esc(s.name)}</small><br><small>${esc(t.description || '')}</small></div>`;
+        c.innerHTML = `<div class="tctop"><div class="tic">${ic('bolt')}</div><div class="tc-body"><b>${esc(t.tool)}</b> <small class="md">${esc(s.name)}</small><br><small>${esc(t.description || '')}</small></div></div>
+          <select class="toolperm" data-tool="${esc(wildcard)}" aria-label="Permiso del servidor MCP ${esc(s.name)}">
+            ${NIVELES.map(([v, tx]) => `<option value="${v}"${lvlMcp === v ? ' selected' : ''}>${tx}</option>`).join('')}
+          </select>`;
+        c.querySelector('select').onchange = async (e) => {
+          await window.sagitari.secSetToolPerm(wildcard, e.target.value);
+          showToast(`MCP ${s.name}: ${e.target.selectedOptions[0].textContent.toLowerCase()} (todo el servidor)`);
+          renderTools();
+        };
         g.appendChild(c);
       }
     }
   }
+  // los desplegables de permiso nacen aquí: se mejoran al pintarse (mismo control
+  // propio que el resto de la app, con teclado y sin el popup nativo del sistema)
+  mejoraSelects(g);
 }
 
 // ============ v1.2: tasks view (puntos de control, pausa, reanudación) ============

@@ -135,20 +135,6 @@
                 <button class="btn ghost sq" id="btnCopyConv" title="Copiar toda la conversación"><i data-i="copy"></i></button>
               </div>
             </div>
-            <div id="confirmBar" class="confirmbar" aria-labelledby="confirmTitle" aria-describedby="confirmDetail" hidden>
-              <span class="cb-dot"></span>
-              <div class="cb-txt">
-                <b id="confirmTitle">Confirmación requerida</b>
-                <small id="confirmDetail"></small>
-              </div>
-              <div class="btnrow" style="margin: 0">
-                <!-- El permiso NO se concede por defecto: el botón con peso es el
-                 que deniega y el foco no entra en la barra. Ejecutar en tu PC
-                 exige un clic deliberado, no un Enter al vuelo. -->
-                <button class="btn ghost" id="confirmOk">Permitir</button>
-                <button class="btn primary" id="confirmNo">Denegar</button>
-              </div>
-            </div>
             <div id="chatWrap">
               <!-- el estado vacío va FUERA de #messages: esa capa se vacía con
                innerHTML en cada conversación nueva y se lo llevaría por delante -->
@@ -481,7 +467,17 @@
           <!-- TOOLS -->
           <section class="view" id="view-tools">
             <h1 class="sr-only">Herramientas</h1>
-            <div class="viewhead"><h2>Herramientas</h2></div>
+            <div class="viewhead">
+              <h2>Herramientas</h2>
+              <div class="vh-actions">
+                <button class="btn ghost" id="toolsResetPerms" title="Vuelve a los niveles que recomienda cada herramienta">
+                  <span class="bi"><i data-i="history"></i></span> Volver a lo recomendado
+                </button>
+                <button class="btn danger" id="toolsAllowAll" title="Permite todas las herramientas sin preguntar">
+                  <span class="bi"><i data-i="key"></i></span> Permitir todo
+                </button>
+              </div>
+            </div>
             <div class="toolsgrid" id="toolsGrid"></div>
           </section>
 
@@ -941,9 +937,9 @@
                     </select>
                   </div>
                   <div class="themerow block" data-keys="color glow resplandor luz">
-                    <span class="st"><b>Color del glow</b><small>El tono de la luz del marco, puede diferir del tema.</small></span>
+                    <span class="st"><b>Color del glow</b><small id="glowColorHint">Sigue el color de la interfaz.</small></span>
                     <div class="pals" id="glowColorTiles" role="group" aria-label="Color del glow">
-                      <button type="button" class="pal" data-pal="match"><span class="pal-dot mix"></span><b>Como la interfaz</b></button><button type="button" class="pal" data-pal="violet"><span class="pal-dot" style="--pc: 128, 110, 214"></span><b>Violeta</b></button><button type="button" class="pal" data-pal="magenta"><span class="pal-dot" style="--pc: 184, 92, 196"></span><b>Magenta</b></button><button type="button" class="pal" data-pal="cyan"><span class="pal-dot" style="--pc: 40, 146, 170"></span><b>Cian</b></button><button type="button" class="pal" data-pal="emerald"><span class="pal-dot" style="--pc: 44, 156, 116"></span><b>Esmeralda</b></button><button type="button" class="pal" data-pal="amber"><span class="pal-dot" style="--pc: 196, 128, 40"></span><b>Ámbar</b></button><button type="button" class="pal" data-pal="ice"><span class="pal-dot" style="--pc: 84, 134, 214"></span><b>Hielo</b></button><button type="button" class="pal" data-pal="aurora"><span class="pal-dot" style="--pc: 106, 128, 184"></span><b>Aurora</b></button>
+                      <button type="button" class="pal" data-pal="match"><span class="pal-dot mix"></span><b>Como la interfaz</b></button><button type="button" class="pal" id="glowOtherBtn"><span class="pal-dot plus" aria-hidden="true"></span><b>Otro color…</b></button><button type="button" class="pal" data-pal="violet"><span class="pal-dot" style="--pc: 128, 110, 214"></span><b>Violeta</b></button><button type="button" class="pal" data-pal="magenta"><span class="pal-dot" style="--pc: 184, 92, 196"></span><b>Magenta</b></button><button type="button" class="pal" data-pal="cyan"><span class="pal-dot" style="--pc: 40, 146, 170"></span><b>Cian</b></button><button type="button" class="pal" data-pal="emerald"><span class="pal-dot" style="--pc: 44, 156, 116"></span><b>Esmeralda</b></button><button type="button" class="pal" data-pal="amber"><span class="pal-dot" style="--pc: 196, 128, 40"></span><b>Ámbar</b></button><button type="button" class="pal" data-pal="ice"><span class="pal-dot" style="--pc: 84, 134, 214"></span><b>Hielo</b></button><button type="button" class="pal" data-pal="aurora"><span class="pal-dot" style="--pc: 106, 128, 184"></span><b>Aurora</b></button>
                     </div>
                     <span class="colordot glow" id="dotGlowColor"></span>
                     <select id="glowColor" aria-label="Color del glow" hidden>
@@ -1012,10 +1008,15 @@
                       <button class="btn ghost" id="secResetPerms">
                         <span class="bi"><i data-i="history"></i></span> Restablecer permisos recomendados
                       </button>
+                      <button class="btn danger" id="secAllowAll" title="Pone todas las herramientas en «permitir siempre»">
+                        <span class="bi"><i data-i="key"></i></span> Permitir todo
+                      </button>
                     </div>
                     <div class="subnote">
                       «Por defecto» usa el nivel recomendado de cada herramienta (aparece indicado en cada fila). «Permitir siempre» se
                       ejecuta sin preguntar · «Preguntar antes» pide permiso en cada uso · «Bloqueado» la impide por completo.
+                      <b>Permitir todo</b> deja todas en «Permitir siempre» de una vez: te lo confirma antes y se deshace con el botón de
+                      al lado.
                     </div>
                   </div>
                 </div>
@@ -1511,28 +1512,51 @@
           </section>
         </main>
 
-        <!-- ===== Right rail ===== -->
+        <!-- ===== Right rail =====
+             UNA tarjeta, no dos: «En vivo» y «Actividad en vivo» decían lo mismo en
+             dos recuadros y el primero se quedaba en «Sin agentes en marcha» mientras
+             el agente principal respondía en el hilo. El estado real va en la propia
+             etiqueta (#railState) y la actividad cuelga debajo, en el mismo panel. -->
         <aside class="rail">
           <div class="rcard">
             <div class="rc-top">
-              <span class="live"><span class="dot ok"></span> En vivo</span>
-              <div class="bigring" id="bigRing"></div>
+              <span class="live" id="railLive"
+                ><span class="dot ok"></span><span id="railState">En reposo</span></span
+              >
+              <span class="board-clock" id="boardClock" title="Hora local">--:--:--</span>
             </div>
-            <div class="rc-title">Agentes activos</div>
             <div class="rc-count">
               <span id="agentCount">0</span
               ><span class="mini-dots"><span class="dot ok"></span><span class="dot pur"></span><span class="dot blu"></span></span>
             </div>
             <div id="railAgents" class="rail-agents"></div>
-          </div>
-
-          <div class="rcard">
-            <div class="rc-top">
-              <span class="live2">Actividad en vivo</span><span class="board-clock" id="boardClock" title="Hora local">--:--:--</span>
-            </div>
+            <div class="rail-sub">Actividad</div>
             <div id="activityFeed" class="feed"></div>
           </div>
         </aside>
+      </div>
+
+      <!-- ===== Puerta de consentimiento (global) =====
+           Vive FUERA de las vistas y fuera del flujo, como overlay: una petición
+           de permiso puede llegar mientras el usuario está en Tareas, Herramientas
+           o Ajustes, y dentro de #view-chat no se vería — el turno se quedaba
+           esperando a que adivinara dónde mirar. Aquí se ve desde cualquier vista.
+           El literal (el comando o la ruta exacta) va ARRIBA y en monoespaciado:
+           es el dato que decide, no la descripción genérica. -->
+      <div id="confirmBar" class="confirmbar" aria-labelledby="confirmTitle" aria-describedby="confirmCmd confirmDetail" hidden>
+        <span class="cb-dot" aria-hidden="true"></span>
+        <div class="cb-txt">
+          <code id="confirmCmd" class="cb-cmd"></code>
+          <b id="confirmTitle">Confirmación requerida</b>
+          <small id="confirmDetail"></small>
+        </div>
+        <div class="btnrow" style="margin: 0">
+          <!-- El permiso NO se concede por defecto: el botón con peso es el
+           que deniega y el foco no entra en la barra. Ejecutar en tu PC
+           exige un clic deliberado, no un Enter al vuelo. -->
+          <button class="btn ghost" id="confirmOk">Permitir</button>
+          <button class="btn primary" id="confirmNo">Denegar</button>
+        </div>
       </div>
     </div>
     <script src="icons.js"></script>

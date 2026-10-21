@@ -836,6 +836,27 @@ const AFTER = {
     'la vista Herramientas muestra el grupo con las herramientas MCP',
     '(function(){ var g = document.querySelector("#toolsGrid"); return !!g && /Servidores MCP/.test(g.textContent) && /echo/.test(g.textContent); })()',
   );
+  /* «Permitir todo»: el atajo que evita ir herramienta por herramienta. Es la acción
+     más peligrosa de la app, así que se comprueba entera: que pide confirmación, que
+     aplicar deja TODAS en «permitir siempre» y que el botón de al lado lo deshace. */
+  await judge(
+    'Herramientas ofrece «Permitir todo» y pregunta antes de aplicarlo',
+    '(async function(){ var b = document.querySelector("#toolsAllowAll"); if (!b) return false; b.click(); await new Promise(function(r){ setTimeout(r, 500); }); var bar = document.querySelector("#view-tools .confirmbar"); if (!bar) return false; var no = bar.querySelector("[data-no]"); if (no) no.click(); await new Promise(function(r){ setTimeout(r, 250); }); return true; })()',
+  );
+  await judge(
+    '«Permitir todo» deja todas en permitir siempre y «Volver a lo recomendado» lo deshace',
+    '(async function(){ var b = document.querySelector("#toolsAllowAll"); if (!b) return false; b.click(); await new Promise(function(r){ setTimeout(r, 500); }); var ok = document.querySelector("#view-tools .confirmbar [data-ok]"); if (!ok) return false; ok.click(); await new Promise(function(r){ setTimeout(r, 1500); }); var s1 = [].slice.call(document.querySelectorAll("#toolsGrid select.toolperm")); var todos = s1.length > 0 && s1.every(function(s){ return s.value === "safe"; }); document.querySelector("#toolsResetPerms").click(); await new Promise(function(r){ setTimeout(r, 1500); }); var s2 = [].slice.call(document.querySelectorAll("#toolsGrid select.toolperm")); var vuelta = s2.length > 0 && s2.every(function(s){ return s.value === "default"; }); return todos && vuelta; })()',
+  );
+  /* El nivel de permiso se edita EN LA PROPIA TARJETA: el dato que gobierna lo que
+     puede hacer el agente vive donde se lee, no en otra pantalla. */
+  await judge(
+    'cada tarjeta de Herramientas lleva su selector de nivel',
+    '(function(){ var c = [].slice.call(document.querySelectorAll("#toolsGrid .toolcard")); if (!c.length) return false; return c.every(function(x){ var s = x.querySelector("select.toolperm"); return !!s && s.options.length === 4; }); })()',
+  );
+  await judge(
+    'cambiar el nivel ahí se guarda y recoloca la tarjeta',
+    '(async function(){ var q = function(){ return document.querySelector("#toolsGrid select.toolperm[data-tool=read_file]"); }; var s = q(); if (!s) return false; var otro = s.value === "restricted" ? "safe" : "restricted"; s.value = otro; s.dispatchEvent(new Event("change")); await new Promise(function(r){ setTimeout(r, 900); }); /* salir y volver: si no se guardó, al repintar desde el backend vuelve al nivel viejo */ document.querySelector("[data-view=chat]").click(); document.querySelector("[data-view=tools]").click(); await new Promise(function(r){ setTimeout(r, 900); }); var t = q(); var ok = !!t && t.value === otro; await window.sagitari.secSetToolPerm("read_file", "default"); document.querySelector("[data-view=chat]").click(); document.querySelector("[data-view=tools]").click(); return ok; })()',
+  );
   await evaluate(
     'document.querySelector(\'[data-view="settings"]\').click(); document.querySelector(\'#setTabs .settab[data-set="security"]\').click()',
   );
@@ -854,6 +875,10 @@ const AFTER = {
   await judge(
     'con un id con guion, la fila de permiso usa el slug del nombre expuesto',
     '(async function(){ const l = await window.sagitari.mcpList(); const s = (l.servers || []).find(x => x.id === "my-server"); if (!s || s.permKey !== "mcp__my_server__*") return false; const q = (k) => !!document.querySelector("#permList select[data-tool=\\"" + k + "\\"]"); return q(s.permKey) && !q("mcp__my-server__*"); })()',
+  );
+  await judge(
+    'Seguridad ofrece «Permitir todo» junto al restablecer',
+    '(function(){ var b = document.querySelector("#secAllowAll"); var r = document.querySelector("#secResetPerms"); return !!b && !!r && b.parentNode === r.parentNode && /Permitir todo/.test(b.textContent); })()',
   );
   // ---- el interruptor global apaga y enciende el catálogo (de punta a punta) ----
   await evaluate('document.querySelector(\'.navitem[data-view="mcp"]\').click()');

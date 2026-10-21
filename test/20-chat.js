@@ -1262,3 +1262,43 @@ test('chat:command: /cost responde con un turno en marcha; /compact sigue espera
   eq(compact.ok, false, 'compactar con un turno en vuelo sigue rechazándose');
   eq(compactado, 0, 'sin compactar nada a medias');
 });
+
+/* ---------- consentimiento: la puerta de permisos se ve desde CUALQUIER vista ----------
+   El agente pide permiso mientras el usuario puede estar en Tareas, Herramientas o
+   Ajustes. La barra vivía dentro de #view-chat: fuera de esa vista no se veía y el
+   turno se quedaba esperando a que el usuario adivinara dónde mirar. */
+test('consentimiento: la barra de permiso es global y enseña el literal', () => {
+  const html = fs.readFileSync(path.join(__dirname, '..', 'renderer', 'index.html'), 'utf8');
+  const css = fs.readFileSync(path.join(__dirname, '..', 'renderer', 'styles.css'), 'utf8');
+  const app = readRenderer();
+
+  const chat = html.slice(html.indexOf('id="view-chat"'), html.indexOf('</main>'));
+  ok(!/id="confirmBar"/.test(chat), 'la barra de permiso NO puede vivir dentro de la vista Chat');
+  ok(/id="confirmBar"/.test(html), 'y tiene que existir en el shell');
+  ok(/id="confirmCmd"/.test(html), 'el literal necesita su propio sitio (#confirmCmd)');
+  ok(/\.confirmbar\s*\{[\s\S]{0,420}?position:\s*fixed/.test(css), 'la barra es un overlay fijo: se ve desde cualquier vista');
+  ok(!/\.confirmbar \.cb-txt small\s*\{[^}]*-webkit-line-clamp/.test(css), 'el detalle no puede recortarse a 3 líneas');
+  ok(/\.cb-cmd\s*\{[\s\S]{0,420}?font-family:\s*var\(--font-mono\)/.test(css), 'el literal va en monoespaciado');
+  ok(/const literal = ev\.summary/.test(app), 'paintConfirm pinta el literal del permiso');
+  ok(!/slice\(0, 240\)/.test(app), 'el literal no se corta a 240 caracteres');
+  /* La animación de entrada no puede descolocar el centrado (translateX). */
+  ok(/@keyframes cbIn\s*\{[\s\S]{0,200}?transform:\s*translate\(-50%/.test(css), 'cbIn conserva el translateX del centrado');
+});
+
+/* La fila del glow repetía los 7 nombres del tema justo debajo: 15 chips seguidos
+   con el riesgo de teñir la fila equivocada. Por defecto sólo hay 7 + 2. */
+test('apariencia: la fila del glow no repite los 7 nombres del tema', () => {
+  const html = fs.readFileSync(path.join(__dirname, '..', 'renderer', 'index.html'), 'utf8');
+  const css = fs.readFileSync(path.join(__dirname, '..', 'renderer', 'styles.css'), 'utf8');
+  const app = readRenderer();
+  ok(/id="glowOtherBtn"/.test(html), 'la fila del glow ofrece «Otro color…»');
+  ok(
+    /#glowColorTiles:not\(\.open\) \.pal\[data-pal\]:not\(\[data-pal='match'\]\)\s*\{[^}]*display:\s*none/.test(css),
+    'los 7 colores se esconden mientras el glow sigue al tema',
+  );
+  ok(/function syncGlowTiles/.test(app) && /box\.classList\.toggle\('open'/.test(app), 'syncGlowTiles abre y cierra la fila');
+  /* «Otro color…» no lleva data-pal: el manejador genérico de .pal no debe
+     escribir un valor vacío en el select del ajuste. */
+  ok(/if \(!b\.dataset\.pal\) return;/.test(app), 'el chip «Otro color…» no escribe en el select');
+});
+

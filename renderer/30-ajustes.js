@@ -333,6 +333,23 @@ function refreshColorDots() {
   document.getElementById('dotGlowColor').style.background = `rgb(${gl.join(',')})`;
   document.getElementById('dotGlowColor').style.boxShadow = `0 0 12px rgba(${gl.join(',')},0.55), inset 0 0 0 1px rgba(255,255,255,0.18)`;
   paintTiles();
+  syncGlowTiles();
+}
+
+/* ---- fila del glow: una decisión, no quince ----
+   Mientras el glow sigue al color de la interfaz (el valor por defecto), los 7
+   colores de la segunda fila repetían los mismos 7 nombres de arriba: quince
+   chips seguidos y el riesgo de teñir la fila equivocada. Se enseñan sólo
+   cuando el usuario ha pedido un color distinto; «Otro color…» abre la fila sin
+   cambiar el ajuste todavía. */
+function syncGlowTiles() {
+  const sel = document.getElementById('glowColor');
+  const box = document.getElementById('glowColorTiles');
+  if (!sel || !box) return;
+  const propio = sel.value !== 'match';
+  box.classList.toggle('open', propio);
+  const hint = document.getElementById('glowColorHint');
+  if (hint) hint.textContent = propio ? 'Un color distinto para la luz del marco.' : 'Sigue el color de la interfaz.';
 }
 
 /* ---- paletas visuales: las muestras escriben en el select oculto, que sigue
@@ -347,6 +364,8 @@ function paintTiles() {
 }
 document.querySelectorAll('.pals .pal').forEach((b) => {
   b.addEventListener('click', () => {
+    // «Otro color…» no lleva data-pal: sólo abre la fila (ver syncGlowTiles).
+    if (!b.dataset.pal) return;
     const row = b.closest('.themerow');
     const sel = row && row.querySelector('select');
     if (!sel) return;
@@ -355,6 +374,14 @@ document.querySelectorAll('.pals .pal').forEach((b) => {
     paintTiles();
   });
 });
+const glowOtherBtn = document.getElementById('glowOtherBtn');
+if (glowOtherBtn)
+  glowOtherBtn.addEventListener('click', () => {
+    const box = document.getElementById('glowColorTiles');
+    if (box) box.classList.add('open');
+    const hint = document.getElementById('glowColorHint');
+    if (hint) hint.textContent = 'Elige el color de la luz del marco.';
+  });
 const btnChangeModel = document.getElementById('btnChangeModel');
 if (btnChangeModel)
   btnChangeModel.addEventListener('click', () => {
@@ -1570,14 +1597,80 @@ if ($('#secResetGuardrails'))
       showToast('No se pudieron restablecer: ' + ((e && e.message) || 'error'));
     }
   };
+/* ---- atajos de permiso: «Permitir todo» y la vuelta a lo recomendado ----
+   La lista de claves sale de la MISMA fuente que pinta la tabla (meta:get) más el
+   comodín de cada servidor MCP. No se escribe a mano aquí: si el agente añade una
+   herramienta, entra sola en los dos botones. */
+async function clavesDePermisos() {
+  const claves = new Set(PERM_KEYS);
+  try {
+    const m = await window.sagitari.metaGet(hiloActual());
+    Object.keys((m && m.riskDefaults) || {}).forEach((k) => claves.add(k));
+  } catch {}
+  claves.add('browser_eval'); // sub-permisión de browser_control: no está en la tabla
+  try {
+    const l = await window.sagitari.mcpList();
+    (l.servers || []).forEach((s) => claves.add(s.permKey || 'mcp__' + s.id + '__*'));
+  } catch {}
+  return [...claves].filter(Boolean);
+}
+
+/** Aplica un nivel a TODAS las claves de una vez: main valida la lista entera y
+    persiste una sola vez (`sec:setToolPermMany`). Si esa puerta no existiera, se
+    recorre a mano — misma validación, N escrituras. */
+async function aplicarNivelAPermisos(claves, nivel) {
+  if (window.sagitari.secSetToolPermMany) {
+    const r = await window.sagitari.secSetToolPermMany(claves, nivel);
+    if (r && r.ok === false) throw new Error(r.error || 'no se pudieron guardar los permisos');
+    return;
+  }
+  for (const t of claves) await window.sagitari.secSetToolPerm(t, nivel);
+}
+
+/** Pone TODAS las herramientas en «permitir siempre». Es la acción más peligrosa
+    de la app —el agente deja de pedir permiso para todo—, así que siempre pasa por
+    askConfirm y dice cuántos permisos va a tocar. Devuelve true si se aplicó. */
+async function permitirTodoPermisos(anchor) {
+  const claves = await clavesDePermisos();
+  if (!claves.length) {
+    showToast('No hay permisos que cambiar');
+    return false;
+  }
+  const ok = await askConfirm(
+    anchor || null,
+    '¿Permitir las ' + claves.length + ' herramientas sin preguntar?',
+    'El agente podrá ejecutar comandos, escribir y borrar archivos, abrir programas y navegar sin pedirte permiso. Se deshace con «Volver a lo recomendado».',
+  );
+  if (!ok) return false;
+  try {
+    await aplicarNivelAPermisos(claves, 'safe');
+  } catch (e) {
+    showToast('No se pudieron guardar los permisos: ' + ((e && e.message) || 'error'));
+    return false;
+  }
+  return true;
+}
+
+/** Devuelve todas las claves al nivel recomendado («por defecto»). */
+async function restablecerPermisos() {
+  try {
+    await aplicarNivelAPermisos(await clavesDePermisos(), 'default');
+  } catch (e) {
+    showToast('No se pudieron restablecer: ' + ((e && e.message) || 'error'));
+  }
+}
+
 if ($('#secResetPerms'))
   $('#secResetPerms').onclick = async () => {
-    // Si meta:get no llegó a pintar la tabla, se usa la lista de grupos: es la misma
-    // tabla del agente escrita aquí solo como respaldo, nunca como fuente.
-    const claves = PERM_KEYS.length ? PERM_KEYS : [...PERM_GROUPS.flatMap((g) => g.keys), 'browser_eval'];
-    for (const t of claves) await window.sagitari.secSetToolPerm(t, 'default');
+    await restablecerPermisos();
     await renderSecurity();
     showToast('Permisos restablecidos a los recomendados');
+  };
+if ($('#secAllowAll'))
+  $('#secAllowAll').onclick = async () => {
+    if (!(await permitirTodoPermisos($('#secAllowAll')))) return;
+    await renderSecurity();
+    showToast('Todas las herramientas permitidas sin preguntar');
   };
 
 // datos: hábitos aprendidos + carpeta de datos
