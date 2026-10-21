@@ -848,7 +848,11 @@ function seedStarterSkills() {
       const dest = path.join(skills.skillsDir(), name, 'SKILL.md');
       if (!fs.existsSync(dest)) {
         fs.mkdirSync(path.dirname(dest), { recursive: true });
-        fs.copyFileSync(path.join(src, name, 'SKILL.md'), dest);
+        /* Leer y escribir, NO `copyFileSync`: dentro del paquete el origen vive en
+           `app.asar` y copyFile no sabe abrir un archivo del archivo empaquetado
+           («not found in …app.asar»). Fallaba la primera skill, el catch cortaba el
+           bucle y no se sembraba NINGUNA en una instalación nueva. */
+        fs.writeFileSync(dest, fs.readFileSync(path.join(src, name, 'SKILL.md')));
       }
     }
     config.migraciones = { ...(config.migraciones || {}), skillsStarter: true };

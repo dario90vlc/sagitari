@@ -332,6 +332,14 @@ test('mcp: una URL con credenciales se detecta, se enmascara y se recupera al gu
   eq(mcpConfig.mergeUrl('https://a/sse', 'https://b/sse'), 'https://b/sse', 'sin máscara manda lo que escribió el usuario');
 });
 
+test('las skills de serie se copian del asar leyendo, no con copyFileSync', () => {
+  const i = MAIN_SRC.indexOf('function seedStarterSkills()');
+  ok(i > -1, 'main tiene que sembrar las skills incluidas');
+  const bloque = MAIN_SRC.slice(i, MAIN_SRC.indexOf('function ', i + 10));
+  ok(/readFileSync/.test(bloque) && /writeFileSync/.test(bloque), 'leer y escribir el contenido');
+  ok(!/fs\.copyFileSync\(/.test(bloque), 'copyFile no puede abrir un origen dentro de app.asar');
+});
+
 test('migración desde la app anterior: el fichero viejo no se queda con las claves en claro', () => {
   const j = MAIN_SRC.indexOf('function limpiarSecretosLegado()');
   ok(j > -1, 'main tiene que tener la limpieza del config anterior');
