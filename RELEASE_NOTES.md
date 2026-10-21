@@ -1,3 +1,33 @@
+# SAGITARI 5.2.0
+
+**De un vistazo:** los permisos dejan de recorrerse uno por uno: **Permitir todo** en Herramientas y en Ajustes ▸ Seguridad, con confirmación y botón para volver a lo recomendado, y cada tarjeta de Herramientas edita su nivel ahí mismo · las vistas de contenido dejan de nadar en una columna estrecha (token `--content-max`, rejilla de tres columnas en Herramientas) · el rail del chat es **una** tarjeta con el estado real, el estado vacío pierde las viñetas y la barra de permiso es global · las claves que quedaban en claro del config anterior se borran al migrar y los errores de proveedor se redactan antes de guardarse · 518 pruebas, 845 de interfaz y la comprobación de interfaz en verde. / **At a glance:** permissions stop being changed one by one: **Allow all** in Tools and Settings ▸ Security, with confirmation and a revert button, and each Tools card edits its own level in place · content views stop swimming in a narrow column (`--content-max` token, three-column grid in Tools) · the chat rail is **one** card with the real state, the empty state drops its bullet lists and the permission bar is global · plaintext keys left by the previous config are wiped on migration and provider errors are redacted before being stored · 518 tests, 845 interface tests and the interface check green.
+
+### Nuevo / New
+
+- **Permitir todo:** un botón en Herramientas (cabecera) y en Ajustes ▸ Seguridad (bajo la tabla) pone todas las herramientas en «Permitir siempre» de una vez, incluidas las de servidores MCP (con su comodín por servidor). Pide **confirmación** diciendo cuántos permisos toca y avisa de lo que implica; al lado está **Volver a lo recomendado**, que los devuelve al nivel recomendado. Se aplica en **una sola escritura** (`sec:setToolPermMany`): antes cada clave era una llamada y un guardado en disco, y un cierre a mitad dejaba media tabla aplicada. / **Allow all:** one button in Tools (header) and Settings ▸ Security applies *Always allow* to every tool at once, MCP servers included. It **asks for confirmation** with the exact count and warns what it means; next to it, **Back to recommended** reverts them. Applied in a **single write**.
+- **El nivel se edita donde se lee:** cada tarjeta de Herramientas lleva su selector (Por defecto · Permitir siempre · Preguntar antes · Bloqueado) con la llamada real al motor de permisos, y muestra `recomendado: …`. Las tarjetas se agrupan por el nivel que **gobierna ahora** y se recolocan al cambiar. / **Level edited where it is read:** every Tools card carries its selector and shows the recommended level; cards group by the level that actually governs and move when changed.
+
+### Interfaz / Interface
+
+- **Ancho útil:** token `--content-max: 1080px` en lugar de 16 topes sueltos de 760/860/900. Ajustes, Memoria, Skills, MCP, Historial, Tareas y las listas vacías usan el ancho de la ventana. Herramientas pasa a **tres columnas**. La tarjeta de nueva tarea casa con su lista. Espacio de trabajo se queda en 720 a propósito: es un formulario. / **Usable width:** `--content-max` token; Tools becomes a **three-column** grid.
+- **Rail del chat:** dos tarjetas se funden en **una** —estado real (`En reposo` · `Sagitari trabajando` · `N agentes activos`), reloj y actividad con su propio scroll—. Ya no dice «Sin agentes en marcha» mientras el agente principal responde. / **Chat rail:** two cards become **one** with the real state.
+- **Estado vacío:** las cuatro tarjetas de modo pierden las viñetas y ganan aire; la versalita pasa a `text-transform` (los lectores de pantalla ya no deletrean los nombres). / **Empty state:** mode cards lose their bullets and the small caps move to `text-transform`.
+- **Barra de permiso global:** vive en el shell, así que también se ve desde Tareas, Herramientas, Memoria y Ajustes; el comando o la ruta literales se pintan primero y completos. / **Global permission bar.**
+- **Panel de cambios opaco**, fuera del grupo de refracción (el texto del chat ya no se transparenta) y **cabecera del chat en dos filas** por debajo de 1200 px, con el título completo. / **Opaque changes panel** and **two-row chat header** under 1200 px.
+- **Apariencia:** la fila del glow baja de 15 chips duplicados a «Como la interfaz» + «Otro color…». / **Appearance:** glow row collapses to two chips.
+- Accesibilidad: cuatro textos por debajo de 11 px suben a `--fs-label` y las dos curvas con rebote pasan a la curva estándar. / **A11y:** four sub-11 px texts raised and two bounce easings replaced.
+
+### Correcciones / Fixes
+
+- **Claves al migrar:** la app anterior guardaba las claves en claro y la migración copiaba la configuración pero dejaba el fichero viejo intacto, así que el cifrado no protegía nada mientras existiera esa copia. Ahora, tras migrar y guardar cifrado, se reescribe **sin secretos** (`apiKey`, `env`/`headers` de MCP y usuario/`?key=` de las URLs); el resto de la configuración se conserva. / **Keys on migration:** the old file is rewritten **without secrets** after a successful migration.
+- **`model-health.json`:** guardaba el texto del error del proveedor sin redactar, en claro, al lado del config. Ahora pasa por la misma tabla de patrones que el log. / **`model-health.json`:** provider error text is now redacted with the log's own pattern table.
+- `PRODUCT.md`: el contraste de `--dim` no es deuda (medido: 6,55:1).
+
+### Recuentos / Counts
+
+- 518 pruebas en `npm test`, 845 en `npm run test:renderer` (51 archivos) y la comprobación de interfaz en verde (0 fallos). Nuevos: el fichero viejo tras migrar queda sin secretos, `model-health` no persiste claves, y tres jueces de interfaz sobre **Permitir todo** (que pregunta, que aplica y que se deshace). / **Counts:** 518 tests, 845 interface tests, interface check green.
+
+
 # SAGITARI 5.1.1
 
 **De un vistazo:** el guardado de la configuración resiste los bloqueos pasajeros de Windows (temporal único + reintento) y, si falla, dice el motivo · el razonamiento se lee como pasos con el paso en curso resaltado, y deja de parpadear cuando termina · 514 pruebas, 842 de interfaz y la comprobación de interfaz en verde. / **At a glance:** saving the configuration survives transient Windows locks (unique temp file + retry) and, if it fails, says why · reasoning reads as steps with the current one highlighted and stops blinking once finished · 514 tests, 842 interface tests and the interface check green.
