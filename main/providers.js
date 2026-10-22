@@ -191,6 +191,45 @@ function isVisionModel(modelId) {
     reventar la memoria con un JSON gigante (resp.json() lo buferiza entero). */
 const MAX_MODELS_BYTES = 2 * 1024 * 1024;
 
+/* Un error de proveedor, en castellano y sin volcar el JSON crudo.
+   Antes se lanzaba `HTTP 401: {"error":{"type":"server_error","message":"Invalid
+   credential"}}` tal cual: un volcado que no dice qué hacer y que además puede
+   arrastrar la clave si el proveedor la refleja en su mensaje. */
+function limpiarDetalle(t) {
+  return String(t || '')
+    .replace(/\b(sk|pk|rk|key)-[A-Za-z0-9_-]{8,}/gi, '[clave]')
+    .replace(/Bearer\s+[A-Za-z0-9._-]{8,}/gi, 'Bearer [clave]')
+    .replace(/\s+/g, ' ')
+    .trim()
+    .slice(0, 160);
+}
+
+/** Saca el mensaje del cuerpo (JSON de error o texto) y lo deja legible. */
+function detalleDeError(cuerpo) {
+  const t = String(cuerpo || '');
+  try {
+    const j = JSON.parse(t);
+    const m = (j && ((j.error && (j.error.message || j.error)) || j.message || j.detail)) || '';
+    return limpiarDetalle(typeof m === 'string' ? m : '');
+  } catch {
+    return limpiarDetalle(t);
+  }
+}
+
+/** @param {number} status @param {string} cuerpo @param {string} [quien] */
+function errorDeProveedor(status, cuerpo, quien) {
+  const conocido = {
+    400: 'la petición no es válida',
+    401: 'la clave no es válida o ha caducado',
+    403: 'el proveedor rechaza esta clave para ese modelo',
+    404: 'ese modelo o esa ruta no existen en el proveedor',
+    429: 'demasiadas peticiones: espera un momento',
+  }[status];
+  const base = conocido || (status >= 500 ? 'el proveedor está fallando' : 'el proveedor devolvió un error');
+  const detalle = detalleDeError(cuerpo);
+  return new Error((quien ? quien + ': ' : '') + base + ' (HTTP ' + status + ')' + (detalle ? ' — «' + detalle + '»' : ''));
+}
+
 /** Lee el cuerpo con tope, abortando al pasarse (ver agent/skills.js:readCapped). */
 async function readCappedText(resp, max) {
   const declared = Number((resp.headers && resp.headers.get('content-length')) || 0);
@@ -239,17 +278,25 @@ async function listModels(baseUrl, apiKey, fetchFn = fetch, opts = {}) {
     format: opts.format,
   });
   const url = base + '/models';
+  /* Una clave que no se pudo descifrar NO se manda. Ir al proveedor con el criptograma
+     devolvía un 401 crudo («Invalid credential») que parece un problema de la API cuando
+     el problema está aquí: el config llegó de otro perfil o de otro equipo. */
+  if (/^enc:v1:/.test(String(apiKey || ''))) {
+    throw new Error(
+      'la clave guardada no se puede descifrar en este equipo (el config llegó de otro perfil o de otro equipo): vuelve a escribirla en Ajustes ▸ Proveedores',
+    );
+  }
   const resp = await fetchFn(url, {
     headers: protocols.authHeaders({ baseUrl: base, apiKey }, format),
     signal: AbortSignal.timeout(15000),
   });
   if (!resp.ok) {
     const t = await readCappedText(resp, 64 * 1024).catch(() => '');
-    throw new Error(`HTTP ${resp.status}: ${t.slice(0, 200)}`);
+    throw errorDeProveedor(resp.status, t, (opts && opts.nombre) || 'el proveedor');
   }
   const data = JSON.parse(await readCappedText(resp, MAX_MODELS_BYTES));
   const models = (data.data || data.models || []).map((m) => m.id || m.name).filter(Boolean);
   return [...new Set(models)].sort();
 }
 
-module.exports = { PRESETS, listModels, isVisionModel, MAX_MODELS_BYTES };
+module.exports = { PRESETS, listModels, isVisionModel, MAX_MODELS_BYTES, errorDeProveedor, detalleDeError };

@@ -151,5 +151,40 @@ test('MAX_MODELS_BYTES es un número positivo', () => {
   assertOk(typeof providers.MAX_MODELS_BYTES === 'number' && providers.MAX_MODELS_BYTES > 0, 'MAX_MODELS_BYTES');
 });
 
+/* ---- errores de proveedor: se explican, no se vuelcan ----
+   El usuario veía `Error HTTP 401: {"error":{"type":"server_error","message":"Invalid
+   credential"}}` en la interfaz: un volcado que no dice qué hacer. Y con una clave que
+   no se pudo descifrar, el 401 parecía culpa de la API. */
+test('un 401 del proveedor se explica en castellano', () => {
+  const e = providers.errorDeProveedor(401, '{"error":{"type":"server_error","message":"Invalid credential"}}');
+  assertOk(/la clave no es válida o ha caducado/.test(e.message), 'dice qué pasa: ' + e.message);
+  assertOk(/Invalid credential/.test(e.message), 'conserva lo que dijo el proveedor: ' + e.message);
+  assertOk(e.message.indexOf('{"error"') === -1, 'no vuelca el JSON crudo: ' + e.message);
+});
+
+test('un 429 y un 5xx también se explican', () => {
+  assertOk(/demasiadas peticiones/.test(providers.errorDeProveedor(429, '').message), '429');
+  const caido = providers.errorDeProveedor(503, 'upstream down').message;
+  assertOk(/el proveedor está fallando \(HTTP 503\)/.test(caido), caido);
+});
+
+test('el detalle no arrastra la clave si el proveedor la refleja', () => {
+  const e = providers.errorDeProveedor(401, '{"message":"bad key sk-abc123456789xyz"}');
+  assertOk(e.message.indexOf('sk-abc123456789xyz') === -1, 'la clave no se ve: ' + e.message);
+  assertOk(/\[clave\]/.test(e.message), 'se sustituye por [clave]: ' + e.message);
+});
+
+test('una clave que no se pudo descifrar no viaja al proveedor', () => {
+  const protocols = require(path.join(__dirname, '..', '..', 'agent', 'protocols.js'));
+  let lanzado = null;
+  try {
+    protocols.authHeaders({ baseUrl: 'https://x', apiKey: 'enc:v1:AAAA' }, 'openai');
+  } catch (err) {
+    lanzado = err;
+  }
+  assertOk(lanzado, 'authHeaders lanza en vez de mandar el criptograma');
+  assertOk(/no se puede descifrar/.test(lanzado.message), lanzado.message);
+});
+
 console.log(`\n${passed} pasaron, ${failed} fallaron`);
 process.exit(failed ? 1 : 0);

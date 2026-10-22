@@ -150,6 +150,14 @@ function httpError(resp, cfg, text) {
 /** Cabeceras de autenticación según el protocolo (Bearer vs x-api-key). */
 function authHeaders(cfg, format) {
   const h = { 'Content-Type': 'application/json', 'User-Agent': opencode.userAgent() };
+  /* Una clave que no se pudo descifrar (config venido de otro perfil u otro equipo) no
+     se manda: el proveedor contestaría un 401 que parece «API key inválida» cuando lo
+     que pasa es que este equipo no puede leerla. Mejor decirlo aquí y una sola vez. */
+  if (/^enc:v1:/.test(String((cfg && cfg.apiKey) || ''))) {
+    throw new Error(
+      'la clave de API guardada no se puede descifrar en este equipo: vuelve a escribirla en Ajustes ▸ Proveedores',
+    );
+  }
   if (format === 'anthropic') {
     h['anthropic-version'] = '2023-06-01';
     if (cfg.apiKey) h['x-api-key'] = cfg.apiKey;
