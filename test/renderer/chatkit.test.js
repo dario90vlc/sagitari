@@ -130,5 +130,21 @@ test('subagent resuelve etiquetas conocidas', () => {
   assertEqual(ChatKit.subagent('verification').label, 'Verificador');
 });
 
+/* Un 402 de OpenCode Go llega con «Endpoint is unavailable»: el modelo se ha caído
+   arriba. Antes caía en «El turno falló — revisa Ajustes», que manda a mirar la clave
+   cuando no hay nada que arreglar aquí. Medido con longcat-2.5-preview-free. */
+test('un 402 del proveedor se explica como modelo no disponible', () => {
+  const ChatKit = cargarChatKit();
+  const r = ChatKit.explainError('HTTP 402 de OpenCode Go: {"error":{"message":"Upstream request failed: Endpoint is unavailable."}}');
+  assertEqual(r.texto, 'Ese modelo no está disponible ahora mismo', 'texto:');
+  assertMatch(r.pista, /del proveedor, no de tu clave/, 'la pista quita la culpa al usuario:');
+});
+
+test('un 401 sigue hablando de la credencial', () => {
+  const ChatKit = cargarChatKit();
+  const r = ChatKit.explainError('HTTP 401 de OpenCode Go: {"error":{"message":"Invalid credential"}}');
+  assertEqual(r.texto, 'El proveedor rechazó la credencial', 'texto:');
+});
+
 console.log(`\n${passed} pasaron, ${failed} fallaron`);
 process.exit(failed ? 1 : 0);

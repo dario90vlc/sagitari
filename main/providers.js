@@ -222,6 +222,7 @@ function errorDeProveedor(status, cuerpo, quien) {
     400: 'la petición no es válida',
     401: 'la clave no es válida o ha caducado',
     403: 'el proveedor rechaza esta clave para ese modelo',
+    402: 'ese modelo no está disponible en el proveedor ahora mismo',
     404: 'ese modelo o esa ruta no existen en el proveedor',
     429: 'demasiadas peticiones: espera un momento',
   }[status];

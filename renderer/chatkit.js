@@ -423,6 +423,16 @@ const ChatKit = (function () {
     if (/429|rate limit|too many requests/.test(m)) {
       return { texto: 'El proveedor está limitando las peticiones', pista: 'Espera un momento o cambia de modelo en Ajustes.' };
     }
+    /* 402 en OpenCode Go no significa «paga»: llega con «Endpoint is unavailable» cuando
+       el modelo se ha caído arriba. Caía en «El turno falló — revisa Ajustes», que manda
+       a mirar la clave cuando no hay nada que arreglar aquí: solo cambiar de modelo o
+       esperar. Medido con longcat-2.5-preview-free: 4 llamadas, 4 fallos, todos 402. */
+    if (/402|endpoint is unavailable/.test(m)) {
+      return {
+        texto: 'Ese modelo no está disponible ahora mismo',
+        pista: 'Es del proveedor, no de tu clave: prueba otro modelo o espera a que vuelva.',
+      };
+    }
     if (/timeout|timed out|aborted|tardó demasiado/.test(m)) {
       return { texto: 'El proveedor dejó de responder', pista: 'Reintenta; si se repite, prueba otro modelo.' };
     }

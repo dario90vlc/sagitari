@@ -162,7 +162,9 @@ test('un 401 del proveedor se explica en castellano', () => {
   assertOk(e.message.indexOf('{"error"') === -1, 'no vuelca el JSON crudo: ' + e.message);
 });
 
-test('un 429 y un 5xx también se explican', () => {
+test('un 402 y un 429 y un 5xx también se explican', () => {
+  const noDisp = providers.errorDeProveedor(402, '{"error":{"message":"Endpoint is unavailable."}}').message;
+  assertOk(/no está disponible en el proveedor/.test(noDisp), noDisp);
   assertOk(/demasiadas peticiones/.test(providers.errorDeProveedor(429, '').message), '429');
   const caido = providers.errorDeProveedor(503, 'upstream down').message;
   assertOk(/el proveedor está fallando \(HTTP 503\)/.test(caido), caido);
