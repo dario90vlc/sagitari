@@ -18,10 +18,12 @@ async function fillSettings() {
     }
     sel.onchange = () => {
       const p = CFG.presets.find((x) => x.id === sel.value);
-      $('#pName').value = p.name.replace(' (local)', '').replace('Personalizado (OpenAI-compatible)', 'Mi API');
+      $('#pName').value = p.name
+        .replace(' (local)', '')
+        .replace('Personalizado (OpenAI-compatible)', I18N.t('ajustes.proveedor.miApi'));
       $('#pUrl').value = p.baseUrl;
       $('#pKey').value = '';
-      $('#modelSel').innerHTML = '<option value="">— detecta modelos primero —</option>';
+      $('#modelSel').innerHTML = '<option value="">' + esc(I18N.t('ajustes.modelo.primero')) + '</option>';
       if ($('#apiFormat')) $('#apiFormat').value = p.format || 'auto'; // protocolo sugerido por el preset
       hintStoredKey(); // si esa misma URL ya tiene clave guardada, se dice en el campo
       pintarPresetHint(p); // y qué es y para qué sirve este proveedor, que lo dice su `hint`
@@ -65,8 +67,8 @@ async function fillSettings() {
 
 $('#btnDetect').onclick = async () => {
   const url = $('#pUrl').value.trim();
-  if (!url) return smsg('Escribe una Base URL.');
-  smsg('Detectando modelos…');
+  if (!url) return smsg(I18N.t('ajustes.modelo.url.falta'));
+  smsg(I18N.t('ajustes.modelo.detectando'));
   /* El protocolo elegido viaja con la petición: sin él, una base Anthropic de terceros
      (sin «/anthropic» en la ruta) se sondeaba con Bearer en vez de x-api-key y la
      detección fallaba justo cuando el usuario acababa de decir cómo habla ese servidor. */
@@ -75,7 +77,7 @@ $('#btnDetect').onclick = async () => {
     format: apiFormatValue(),
     providerId: pre.baseUrl && pre.baseUrl === url ? pre.id : undefined,
   });
-  if (!r.ok) return smsg('Error: ' + r.error);
+  if (!r.ok) return smsg(I18N.t('ajustes.error', { motivo: r.error }));
   const sel = $('#modelSel');
   sel.innerHTML = '';
   for (const m of r.models) {
@@ -84,7 +86,7 @@ $('#btnDetect').onclick = async () => {
     o.textContent = m;
     sel.appendChild(o);
   }
-  smsg(r.models.length + ' modelos detectados.');
+  smsg(I18N.t('ajustes.modelo.detectados', { n: r.models.length }));
 };
 // 'auto' = que el agente deduzca el protocolo; si no, se fuerza el elegido
 const apiFormatValue = () => ($('#apiFormat') ? $('#apiFormat').value : 'auto') || 'auto'; // 'auto' = detectar
@@ -112,7 +114,8 @@ if ($('#apiFormat'))
       // Se guarda sobre el proveedor que ya tiene esa URL (la clave va enmascarada: main
       // conserva la guardada). Así la fila «Usar» reenvía el protocolo correcto.
       const r = await window.sagitari.saveProvider({ ...guardado, format });
-      if (r && r.ok === false) return smsg('Error: ' + (r.error || 'no se pudo guardar el protocolo'));
+      if (r && r.ok === false)
+        return smsg(I18N.t('ajustes.error', { motivo: r.error || I18N.t('ajustes.protocolo.error.guardar') }));
       CFG = await window.sagitari.getConfig();
       renderProviderList();
     }
@@ -129,35 +132,40 @@ if ($('#apiFormat'))
         vision: CFG.active.vision,
         format,
       });
-      if (r && r.ok === false) return smsg('Error: ' + (r.error || 'no se pudo aplicar el protocolo'));
+      if (r && r.ok === false)
+        return smsg(I18N.t('ajustes.error', { motivo: r.error || I18N.t('ajustes.protocolo.error.aplicar') }));
       CFG = await window.sagitari.getConfig();
       renderProviderList();
       updateStatusLabels();
     }
-    smsg(guardado || activo ? 'Protocolo aplicado: ' + texto : 'Protocolo elegido: ' + texto + '. Se guardará con el proveedor.');
+    smsg(
+      guardado || activo
+        ? I18N.t('ajustes.protocolo.aplicado', { protocolo: texto })
+        : I18N.t('ajustes.protocolo.elegido', { protocolo: texto }),
+    );
   };
 
 $('#btnSaveProv').onclick = async () => {
   const btn = $('#btnSaveProv');
   if (btn.disabled) return;
-  if (!$('#pUrl').value.trim()) return smsg('Falta la Base URL.');
+  if (!$('#pUrl').value.trim()) return smsg(I18N.t('ajustes.modelo.url.faltaProveedor'));
   btn.disabled = true;
   try {
     const r = await window.sagitari.saveProvider({
       id: 'prov_' + Date.now().toString(36),
-      name: $('#pName').value.trim() || 'Proveedor',
+      name: $('#pName').value.trim() || I18N.t('ajustes.proveedor.nombre'),
       baseUrl: $('#pUrl').value.trim(),
       apiKey: $('#pKey').value.trim(),
       format: apiFormatValue(),
       models: [...$('#modelSel').options].map((o) => o.value).filter(Boolean),
     });
     // main valida la URL y puede rechazar: la UI no puede decir «guardado» sin comprobarlo
-    if (r && r.ok === false) return smsg('Error: ' + (r.error || 'no se pudo guardar'));
+    if (r && r.ok === false) return smsg(I18N.t('ajustes.error', { motivo: r.error || I18N.t('ajustes.error.guardar') }));
     CFG = await window.sagitari.getConfig();
     renderProviderList();
-    smsg('Proveedor guardado.');
+    smsg(I18N.t('ajustes.proveedor.guardado'));
   } catch (e) {
-    smsg('Error: ' + ((e && e.message) || e));
+    smsg(I18N.t('ajustes.error', { motivo: (e && e.message) || e }));
   } finally {
     btn.disabled = false;
   }
@@ -167,12 +175,12 @@ $('#btnActivate').onclick = async () => {
   if (btn.disabled) return;
   const baseUrl = $('#pUrl').value.trim(),
     model = $('#modelSel').value;
-  if (!baseUrl || !model) return smsg('Detecta modelos y elige uno.');
+  if (!baseUrl || !model) return smsg(I18N.t('ajustes.modelo.elegirPrimero'));
   const vision = looksVision(model);
   btn.disabled = true;
   try {
     const r = await window.sagitari.activateProvider({
-      name: $('#pName').value.trim() || 'Proveedor',
+      name: $('#pName').value.trim() || I18N.t('ajustes.proveedor.nombre'),
       baseUrl,
       apiKey: $('#pKey').value.trim(),
       model,
@@ -180,13 +188,13 @@ $('#btnActivate').onclick = async () => {
       format: apiFormatValue(),
     });
     // activar también valida: si falla, NO se pinta «activo»/«Conectado»
-    if (r && r.ok === false) return smsg('Error: ' + (r.error || 'no se pudo activar'));
+    if (r && r.ok === false) return smsg(I18N.t('ajustes.error', { motivo: r.error || I18N.t('ajustes.error.activar') }));
     CFG = await window.sagitari.getConfig();
     renderProviderList();
-    smsg('Activado: ' + model);
+    smsg(I18N.t('ajustes.modelo.activado', { modelo: model }));
     updateStatusLabels();
   } catch (e) {
-    smsg('Error: ' + ((e && e.message) || e));
+    smsg(I18N.t('ajustes.error', { motivo: (e && e.message) || e }));
   } finally {
     btn.disabled = false;
   }
@@ -197,7 +205,7 @@ function renderProviderList() {
   box.innerHTML = '';
   hintStoredKey(); // la lista cambió (guardar/borrar/activar): el aviso del campo se recalcula
   if (!CFG.providers.length) {
-    box.innerHTML = '<div class="subnote">Aún no hay proveedores guardados.</div>';
+    box.innerHTML = '<div class="subnote">' + esc(I18N.t('ajustes.proveedor.vacio')) + '</div>';
     return;
   }
   /* Una clave guardada que este equipo no puede descifrar (config traída de otro
@@ -211,21 +219,24 @@ function renderProviderList() {
     const av = document.createElement('div');
     av.className = 'subnote';
     av.id = 'provKeyUnreadable';
+    /* El diccionario no lleva marcado: la negrita se pone aquí y cada trozo es una clave
+       (mismo patrón que las leyes de «Espacio de trabajo»). */
     av.innerHTML =
-      `<b>Hay una clave guardada que este equipo no puede descifrar</b> (pasa si el ` +
-      `config llegó de otro perfil o de otro equipo): ${esc(nombres.join(', '))}. ` +
-      `Vuelve a escribirla abajo y guárdala; hasta entonces ese proveedor no puede llamar al modelo.`;
+      '<b>' +
+      esc(I18N.t('ajustes.clave.ilegible.titulo')) +
+      '</b> ' +
+      esc(I18N.t('ajustes.clave.ilegible.texto', { nombres: nombres.join(', ') }));
     box.appendChild(av);
   }
   for (const p of CFG.providers) {
     const item = document.createElement('div');
     item.className = 'provitem';
     const inUse = CFG.active && (CFG.active.providerId === p.id || CFG.active.baseUrl === p.baseUrl);
-    item.innerHTML = `<span class="nm">${esc(p.name)} <span class="md">· ${(p.models || []).length} modelos</span></span>${inUse ? '<span class="badge">EN USO</span>' : ''}
-      <button class="btn ghost sq" data-act="use" title="Usar">${ic('play')}</button><button class="btn ghost sq danger" data-act="del" title="Eliminar">${ic('trash')}</button>`;
+    item.innerHTML = `<span class="nm">${esc(p.name)} <span class="md">· ${esc(I18N.t('ajustes.proveedor.modelos', { n: (p.models || []).length }))}</span></span>${inUse ? `<span class="badge">${esc(I18N.t('ajustes.proveedor.enUso'))}</span>` : ''}
+      <button class="btn ghost sq" data-act="use" title="${esc(I18N.t('ajustes.proveedor.usar'))}">${ic('play')}</button><button class="btn ghost sq danger" data-act="del" title="${esc(I18N.t('ajustes.proveedor.eliminar'))}">${ic('trash')}</button>`;
     item.querySelector('[data-act=use]').onclick = async () => {
       const model = (p.models || [])[0];
-      if (!model) return smsg('Este proveedor no tiene modelos: detecta primero.');
+      if (!model) return smsg(I18N.t('ajustes.proveedor.sinModelos'));
       // providerId: es lo que permite desactivarlo al borrarlo (main lo resuelve)
       const r = await window.sagitari.activateProvider({
         providerId: p.id,
@@ -236,19 +247,19 @@ function renderProviderList() {
         vision: looksVision(model),
         format: p.format,
       });
-      if (r && r.ok === false) return smsg('Error: ' + (r.error || 'no se pudo activar'));
+      if (r && r.ok === false) return smsg(I18N.t('ajustes.error', { motivo: r.error || I18N.t('ajustes.error.activar') }));
       CFG = await window.sagitari.getConfig();
       renderProviderList();
       updateStatusLabels();
-      smsg('Usando ' + p.name);
+      smsg(I18N.t('ajustes.proveedor.usando', { nombre: p.name }));
     };
     item.querySelector('[data-act=del]').onclick = async () => {
-      if (!(await askConfirm(item, '¿Eliminar el proveedor «' + p.name + '»?'))) return;
+      if (!(await askConfirm(item, I18N.t('ajustes.proveedor.borrar.confirmar', { nombre: p.name })))) return;
       await window.sagitari.deleteProvider(p.id);
       CFG = await window.sagitari.getConfig();
       renderProviderList();
       updateStatusLabels(); // si era el activo, main lo desactiva: que se vea
-      showToast('Proveedor eliminado');
+      showToast(I18N.t('ajustes.proveedor.borrado'));
     };
     box.appendChild(item);
   }
@@ -270,12 +281,12 @@ function hintStoredKey() {
   /* Una clave ilegible NO se puede «seguir usando»: decir «déjala vacía para seguir
      usándola» mandaba al usuario a un proveedor que no puede llamar al modelo. */
   if (guardado && guardado.keyUnreadable) {
-    el.placeholder = 'la clave guardada en «' + guardado.name + '» no se pudo descifrar: escríbela otra vez';
+    el.placeholder = I18N.t('ajustes.clave.ph.ilegible', { nombre: guardado.name });
     return;
   }
   el.placeholder = guardado
-    ? 'guardada en «' + guardado.name + '» — déjalo vacío para seguir usándola'
-    : 'sk-… (vacío para Ollama o LM Studio)';
+    ? I18N.t('ajustes.clave.ph.guardada', { nombre: guardado.name })
+    : I18N.t('ajustes.apikey.ph');
 }
 if ($('#pUrl')) $('#pUrl').addEventListener('input', hintStoredKey);
 
@@ -303,7 +314,7 @@ $('#wsPick').onclick = async () => {
   const r = await window.sagitari.workspacePick();
   if (r && r.ok) {
     pintarEspacioTrabajo(r.path);
-    showToast('Espacio de trabajo: ' + r.path);
+    showToast(I18N.t('ajustes.datos.espacio.cambiado', { ruta: r.path }));
   }
 };
 /* Relleno real del slider: --fill marca hasta dónde llega el valor y el CSS
@@ -351,7 +362,8 @@ function syncGlowTiles() {
   const propio = sel.value !== 'match';
   box.classList.toggle('open', propio);
   const hint = document.getElementById('glowColorHint');
-  if (hint) hint.textContent = propio ? 'Un color distinto para la luz del marco.' : 'Sigue el color de la interfaz.';
+  if (hint)
+    hint.textContent = propio ? I18N.t('ajustes.glow.hint.propio') : I18N.t('ajustes.glow.hint.igual');
 }
 
 /* ---- paletas visuales: las muestras escriben en el select oculto, que sigue
@@ -385,7 +397,7 @@ if (glowOtherBtn)
     const box = document.getElementById('glowColorTiles');
     if (box) box.classList.add('open');
     const hint = document.getElementById('glowColorHint');
-    if (hint) hint.textContent = 'Elige el color de la luz del marco.';
+    if (hint) hint.textContent = I18N.t('ajustes.glow.hint.elegir');
   });
 const btnChangeModel = document.getElementById('btnChangeModel');
 if (btnChangeModel)
@@ -455,7 +467,7 @@ $('#setUserName').onchange = async (e) => {
   try {
     await window.sagitari.setSettings({ userName: e.target.value });
   } catch (err) {
-    showToast('No se pudo guardar tu nombre');
+    showToast(I18N.t('ajustes.personal.nombre.error'));
   }
 };
 
@@ -466,12 +478,12 @@ $('#setUserName').onchange = async (e) => {
    añadió después (apply_patch, open_url, web_fetch, los git…) no se podía permitir ni
    bloquear desde Ajustes. Se pinta la tabla ENTERA, agrupada por familia para que se
    lea, y una clave que no esté en ningún grupo no se esconde: cae en «Otras».
-   Lo único que se escribe a mano aquí es cómo se llama cada cosa en castellano
+   Lo único que se escribe a mano aquí es qué clave del diccionario nombra cada cosa
    (`PERM_INFO`); si falta, se usa el nombre humanizado que da el catálogo (K.tool). */
 const PERM_GROUPS = [
   {
     id: 'archivos',
-    titulo: 'Archivos y proyecto',
+    titulo: 'ajustes.perm.grupo.archivos',
     keys: [
       'read_file',
       'write_file',
@@ -485,60 +497,75 @@ const PERM_GROUPS = [
       'view_image',
     ],
   },
-  { id: 'terminal', titulo: 'Terminal', keys: ['run_command'] },
+  { id: 'terminal', titulo: 'ajustes.perm.grupo.terminal', keys: ['run_command'] },
   {
     id: 'escritorio',
-    titulo: 'Escritorio y sistema',
+    titulo: 'ajustes.perm.grupo.escritorio',
     keys: ['open_app', 'open_url', 'clipboard', 'notify', 'media_control', 'window_manage', 'screenshot', 'system_info'],
   },
-  { id: 'navegador', titulo: 'Navegador', keys: ['browser_control', 'browser_eval'] },
-  { id: 'git', titulo: 'Git', keys: ['git_status', 'git_diff', 'git_log', 'git_branch', 'git_commit'] },
-  { id: 'web', titulo: 'Web', keys: ['web_fetch'] },
-  { id: 'agente', titulo: 'El propio agente', keys: ['remember', 'use_skill', 'todo_write', 'delegate'] },
+  { id: 'navegador', titulo: 'ajustes.perm.grupo.navegador', keys: ['browser_control', 'browser_eval'] },
+  { id: 'git', titulo: 'ajustes.perm.grupo.git', keys: ['git_status', 'git_diff', 'git_log', 'git_branch', 'git_commit'] },
+  { id: 'web', titulo: 'ajustes.perm.grupo.web', keys: ['web_fetch'] },
+  { id: 'agente', titulo: 'ajustes.perm.grupo.agente', keys: ['remember', 'use_skill', 'todo_write', 'delegate'] },
 ];
+/* Los `titulo` y las descripciones son CLAVES del diccionario, no frases: el nombre de
+   cada fila y qué hace se pintan con `I18N.t(...)` (antes vivían aquí en castellano). */
 const PERM_INFO = {
-  read_file: 'Leer archivos de texto del proyecto',
-  write_file: 'Crear o sobrescribir archivos',
-  edit_file: 'Editar archivos existentes',
-  apply_patch: 'Aplicar un parche que toca varios archivos a la vez',
-  list_dir: 'Listar el contenido de una carpeta',
-  search_files: 'Buscar texto dentro de los archivos',
-  search_code: 'Buscar en el código del proyecto',
-  find_symbol: 'Buscar dónde se define una función o clase',
-  repo_map: 'Leer el índice del proyecto (nombres y rutas)',
-  view_image: 'Mirar una imagen que le señalas',
-  run_command: 'Ejecutar comandos en la terminal de Windows',
-  open_app: 'Abrir aplicaciones instaladas',
-  open_url: 'Abrir cualquier dirección en el navegador del sistema',
-  clipboard: 'Leer y escribir el portapapeles',
-  notify: 'Mostrar notificaciones de Windows',
-  media_control: 'Controlar la música y el volumen',
-  window_manage: 'Minimizar, enfocar y ordenar ventanas',
-  screenshot: 'Capturar la pantalla',
-  system_info: 'Consultar CPU, memoria, red y tiempo encendido',
-  browser_control: 'Manejar Chrome o Edge: clic, escribir, leer, capturar',
-  browser_eval: 'Ejecutar JavaScript dentro de la página (acción «eval»)',
-  git_status: 'Ver qué ha cambiado en el repositorio',
-  git_diff: 'Ver el detalle de los cambios',
-  git_log: 'Leer el historial de commits',
-  git_branch: 'Listar, crear y cambiar de rama',
-  git_commit: 'Crear un commit',
-  web_fetch: 'Descargar y leer una página pública',
-  remember: 'Guardar algo en su memoria',
-  use_skill: 'Aplicar una skill instalada',
-  todo_write: 'Llevar su lista de tareas del turno',
-  delegate: 'Repartir trabajo a subagentes',
+  read_file: 'ajustes.perm.info.read_file',
+  write_file: 'ajustes.perm.info.write_file',
+  edit_file: 'ajustes.perm.info.edit_file',
+  apply_patch: 'ajustes.perm.info.apply_patch',
+  list_dir: 'ajustes.perm.info.list_dir',
+  search_files: 'ajustes.perm.info.search_files',
+  search_code: 'ajustes.perm.info.search_code',
+  find_symbol: 'ajustes.perm.info.find_symbol',
+  repo_map: 'ajustes.perm.info.repo_map',
+  view_image: 'ajustes.perm.info.view_image',
+  run_command: 'ajustes.perm.info.run_command',
+  open_app: 'ajustes.perm.info.open_app',
+  open_url: 'ajustes.perm.info.open_url',
+  clipboard: 'ajustes.perm.info.clipboard',
+  notify: 'ajustes.perm.info.notify',
+  media_control: 'ajustes.perm.info.media_control',
+  window_manage: 'ajustes.perm.info.window_manage',
+  screenshot: 'ajustes.perm.info.screenshot',
+  system_info: 'ajustes.perm.info.system_info',
+  browser_control: 'ajustes.perm.info.browser_control',
+  browser_eval: 'ajustes.perm.info.browser_eval',
+  git_status: 'ajustes.perm.info.git_status',
+  git_diff: 'ajustes.perm.info.git_diff',
+  git_log: 'ajustes.perm.info.git_log',
+  git_branch: 'ajustes.perm.info.git_branch',
+  git_commit: 'ajustes.perm.info.git_commit',
+  web_fetch: 'ajustes.perm.info.web_fetch',
+  remember: 'ajustes.perm.info.remember',
+  use_skill: 'ajustes.perm.info.use_skill',
+  todo_write: 'ajustes.perm.info.todo_write',
+  delegate: 'ajustes.perm.info.delegate',
 };
-const PERM_OTRAS = 'Otras herramientas';
+const PERM_OTRAS = 'ajustes.perm.grupo.otras';
 /* El nivel 'safe' se llamaba «Seguro», que se lee como «más protección» cuando en
-   realidad significa «se ejecuta SIN preguntar». El nombre dice ahora su efecto. */
-const RISK_LABEL = { safe: 'permitir siempre', confirm: 'confirmar', restricted: 'bloqueado' };
+   realidad significa «se ejecuta SIN preguntar». El nombre dice ahora su efecto.
+   Se resuelve al LEERLO (getter) porque la tabla de 40-vistas indexa este mapa tal cual
+   y el idioma se decide al cargar: con valores fijos, esa tabla se quedaría en un solo
+   idioma. */
+const RISK_LABEL = {
+  get safe() {
+    return I18N.t('nivel.safe');
+  },
+  get confirm() {
+    return I18N.t('nivel.confirm');
+  },
+  get restricted() {
+    return I18N.t('nivel.restricted');
+  },
+};
 /* Claves reales de la tabla del agente, rellenadas al pintar Seguridad (ver
    _renderSecurity): las usa «Restablecer permisos recomendados».
    `PERM_LABEL`: nombres bonitos que no están en el catálogo del chat (browser_eval no
    es una herramienta suelta, es la acción «eval» de browser_control). */
 let PERM_KEYS = [];
-const PERM_LABEL = { browser_eval: 'Ejecutar JavaScript' };
+const PERM_LABEL = { browser_eval: 'ajustes.perm.label.browser_eval' };
 
 /* Seguridad se pinta al arrancar (initSecurity) Y al entrar en su pestaña, así que dos
    pasadas pueden solaparse (al arrancar con «Seguridad» recordada como última pestaña, por
@@ -586,21 +613,23 @@ async function _renderSecurity() {
     if (!g.keys.length) continue;
     const h = document.createElement('div');
     h.className = 'permgroup';
-    h.textContent = g.titulo;
+    h.textContent = I18N.t(g.titulo);
     permBox.appendChild(h);
     for (const n of g.keys) {
       const lvl = (cfg.permissions && cfg.permissions[n]) || 'default';
-      const rec = RISK_LABEL[cfg.riskDefaults[n]] || 'confirmar';
-      const nombre = PERM_LABEL[n] || K.tool(n).label; // nunca la clave interna
-      const desc = PERM_INFO[n] || g.titulo;
+      const rec = RISK_LABEL[cfg.riskDefaults[n]] || I18N.t('nivel.confirm');
+      /* `PERM_LABEL` y el catálogo del chat guardan la etiqueta de otra forma: el primero
+         es una clave de este diccionario y el segundo ya viene traducido por chatkit. */
+      const nombre = PERM_LABEL[n] ? I18N.t(PERM_LABEL[n]) : K.tool(n).label; // nunca la clave interna
+      const desc = I18N.t(PERM_INFO[n] || g.titulo);
       const row = document.createElement('div');
       row.className = 'permrow';
-      row.innerHTML = `<span class="mt"><b>${esc(nombre)}</b><br><small class="md">${esc(desc)}</small><br><small class="pd">recomendado: ${rec}</small></span>
-      <select data-tool="${esc(n)}" aria-label="Permiso para ${esc(nombre)}">
-        <option value="default"${lvl === 'default' ? ' selected' : ''}>Por defecto</option>
-        <option value="safe"${lvl === 'safe' ? ' selected' : ''}>Permitir siempre</option>
-        <option value="confirm"${lvl === 'confirm' ? ' selected' : ''}>Preguntar antes</option>
-        <option value="restricted"${lvl === 'restricted' ? ' selected' : ''}>Bloqueado</option>
+      row.innerHTML = `<span class="mt"><b>${esc(nombre)}</b><br><small class="md">${esc(desc)}</small><br><small class="pd">${esc(I18N.t('ajustes.perm.recomendado', { nivel: rec }))}</small></span>
+      <select data-tool="${esc(n)}" aria-label="${esc(I18N.t('ajustes.perm.aria', { nombre }))}">
+        <option value="default"${lvl === 'default' ? ' selected' : ''}>${esc(I18N.t('ajustes.perm.defecto'))}</option>
+        <option value="safe"${lvl === 'safe' ? ' selected' : ''}>${esc(I18N.t('ajustes.perm.siempre'))}</option>
+        <option value="confirm"${lvl === 'confirm' ? ' selected' : ''}>${esc(I18N.t('ajustes.perm.preguntar'))}</option>
+        <option value="restricted"${lvl === 'restricted' ? ' selected' : ''}>${esc(I18N.t('ajustes.perm.bloqueado'))}</option>
       </select>`;
       const previo = lvl;
       row.querySelector('select').onchange = async (e) => {
@@ -610,10 +639,18 @@ async function _renderSecurity() {
         if (r && r.ok === false) {
           e.target.value = previo;
           if (typeof cselPintar === 'function') cselPintar(e.target);
-          showToast('No se pudo guardar el permiso de ' + nombre + ': ' + (r.error || 'error desconocido'));
+          showToast(
+            I18N.t('ajustes.perm.error', {
+              nombre,
+              motivo: r.error || I18N.t('ajustes.error.desconocido'),
+            }),
+          );
           return;
         }
-        showToast(`${nombre}: ${e.target.selectedOptions[0].textContent.toLowerCase()}`);
+        /* El nivel se dice por clave (`nivel.*`), no leyendo el texto del desplegable:
+           con el idioma en inglés, `toLowerCase()` de una etiqueta traducida no es una
+           frase que quepa en el aviso. */
+        showToast(I18N.t('ajustes.perm.guardado', { nombre, nivel: I18N.t('nivel.' + e.target.value) }));
       };
       permBox.appendChild(row);
     }
@@ -631,7 +668,7 @@ async function _renderSecurity() {
   if ((mcp.servers || []).length) {
     const hMcp = document.createElement('div');
     hMcp.className = 'permgroup';
-    hMcp.textContent = 'Servidores MCP';
+    hMcp.textContent = I18N.t('ajustes.perm.grupo.mcp');
     permBox.appendChild(hMcp);
   }
   for (const s of mcp.servers || []) {
@@ -640,12 +677,13 @@ async function _renderSecurity() {
     const n = (s.discovered || []).length;
     const row = document.createElement('div');
     row.className = 'permrow';
-    row.innerHTML = `<span class="mt"><b>${esc(s.name)}</b> <small class="md">MCP</small><br><small class="md">${n} herramienta${n === 1 ? '' : 's'} del servidor</small><br><small class="pd">todas sus herramientas piden permiso salvo que las permitas aquí</small></span>
-      <select data-tool="${esc(wildcard)}" aria-label="Permiso para el servidor MCP ${esc(s.name)}">
-        <option value="default"${lvl === 'default' ? ' selected' : ''}>Por defecto</option>
-        <option value="safe"${lvl === 'safe' ? ' selected' : ''}>Permitir siempre</option>
-        <option value="confirm"${lvl === 'confirm' ? ' selected' : ''}>Preguntar antes</option>
-        <option value="restricted"${lvl === 'restricted' ? ' selected' : ''}>Bloqueado</option>
+    const cuantas = I18N.t(n === 1 ? 'ajustes.perm.mcp.herramientas.uno' : 'ajustes.perm.mcp.herramientas.varios', { n });
+    row.innerHTML = `<span class="mt"><b>${esc(s.name)}</b> <small class="md">MCP</small><br><small class="md">${esc(cuantas)}</small><br><small class="pd">${esc(I18N.t('ajustes.perm.mcp.nota'))}</small></span>
+      <select data-tool="${esc(wildcard)}" aria-label="${esc(I18N.t('ajustes.perm.mcp.aria', { nombre: s.name }))}">
+        <option value="default"${lvl === 'default' ? ' selected' : ''}>${esc(I18N.t('ajustes.perm.defecto'))}</option>
+        <option value="safe"${lvl === 'safe' ? ' selected' : ''}>${esc(I18N.t('ajustes.perm.siempre'))}</option>
+        <option value="confirm"${lvl === 'confirm' ? ' selected' : ''}>${esc(I18N.t('ajustes.perm.preguntar'))}</option>
+        <option value="restricted"${lvl === 'restricted' ? ' selected' : ''}>${esc(I18N.t('ajustes.perm.bloqueado'))}</option>
       </select>`;
     const previo = lvl;
     row.querySelector('select').onchange = async (e) => {
@@ -653,10 +691,15 @@ async function _renderSecurity() {
       if (r && r.ok === false) {
         e.target.value = previo;
         if (typeof cselPintar === 'function') cselPintar(e.target);
-        showToast('No se pudo guardar el permiso del servidor MCP ' + s.name + ': ' + (r.error || 'error desconocido'));
+        showToast(
+          I18N.t('ajustes.perm.mcp.error', {
+            nombre: s.name,
+            motivo: r.error || I18N.t('ajustes.error.desconocido'),
+          }),
+        );
         return;
       }
-      showToast('MCP ' + s.name + ': ' + e.target.selectedOptions[0].textContent.toLowerCase());
+      showToast(I18N.t('ajustes.perm.mcp.guardado', { nombre: s.name, nivel: I18N.t('nivel.' + e.target.value) }));
     };
     permBox.appendChild(row);
   }
@@ -736,7 +779,7 @@ function clampGuardrail(el, fallback) {
 function guardarGuardrail(patch) {
   return window.sagitari.secSetGuardrail(patch).then(async (r) => {
     if (r && r.ok === false) {
-      showToast('No se pudo guardar el límite: ' + (r.error || 'error desconocido'));
+      showToast(I18N.t('ajustes.limite.error', { motivo: r.error || I18N.t('ajustes.error.desconocido') }));
       try {
         await initSecurity();
       } catch {}
@@ -764,7 +807,9 @@ if ($('#eqPresupuesto'))
     const guardado = Number((r && r.equipoPresupuestoUsd) || 0);
     e.target.value = guardado;
     showToast(
-      guardado ? 'Presupuesto del equipo: ' + guardado.toFixed(2) + ' $ por encargo' : 'El equipo trabajará sin tope de gasto propio',
+      guardado
+        ? I18N.t('ajustes.equipo.presupuesto', { n: guardado.toFixed(2) })
+        : I18N.t('ajustes.equipo.sinTope'),
     );
   };
 if ($('#parTools'))
@@ -772,20 +817,20 @@ if ($('#parTools'))
     const v = clampGuardrail(e.target, 3); // 1 = en orden, como antes
     CFG.settings.parallelTools = v;
     await window.sagitari.setSettings({ parallelTools: v });
-    showToast(v === 1 ? 'Las herramientas irán una detrás de otra' : 'Hasta ' + v + ' herramientas a la vez (con cola por recurso)');
+    showToast(v === 1 ? I18N.t('ajustes.paralelo.uno') : I18N.t('ajustes.paralelo.varios', { n: v }));
   };
 if ($('#grLlmTimeout'))
   $('#grLlmTimeout').onchange = async (e) => {
     const v = clampGuardrail(e.target, 120);
     await window.sagitari.setSettings({ llmTimeoutMs: v * 1000 });
-    showToast(v ? 'Sin respuesta del modelo: ' + v + ' s' : 'Sin límite de espera del modelo');
+    showToast(v ? I18N.t('ajustes.espera.limite', { n: v }) : I18N.t('ajustes.espera.sinLimite'));
   };
 if ($('#setMaxTasks'))
   $('#setMaxTasks').onchange = async (e) => {
     const v = Math.max(1, Math.min(4, Number(e.target.value) || 1));
     e.target.value = v;
     await window.sagitari.setSettings({ maxConcurrentTasks: v });
-    showToast('Tareas simultáneas: ' + v);
+    showToast(I18N.t('ajustes.tareas.vez.aviso', { n: v }));
   };
 if ($('#swAutoResume'))
   $('#swAutoResume').onclick = async (e) => {
@@ -813,7 +858,7 @@ if ($('#swRevisar'))
     e.currentTarget.classList.toggle('on', on);
     CFG.settings.reviewGate = on;
     await window.sagitari.setSettings({ reviewGate: on });
-    showToast(on ? 'Cada cambio se revisará antes de cerrar' : 'Revisión del cambio desactivada');
+    showToast(on ? I18N.t('ajustes.revisar.on') : I18N.t('ajustes.revisar.off'));
   };
 if ($('#swCache'))
   $('#swCache').onclick = async (e) => {
@@ -821,7 +866,7 @@ if ($('#swCache'))
     e.currentTarget.classList.toggle('on', on);
     CFG.settings.promptCache = on;
     await window.sagitari.setSettings({ promptCache: on });
-    showToast(on ? 'Se reutilizará el prompt cacheado del proveedor' : 'Caché de prompt desactivado (cada paso se paga entero)');
+    showToast(on ? I18N.t('ajustes.cache.on') : I18N.t('ajustes.cache.off'));
   };
 if ($('#swDiagnosticos'))
   $('#swDiagnosticos').onclick = async (e) => {
@@ -829,7 +874,7 @@ if ($('#swDiagnosticos'))
     e.currentTarget.classList.toggle('on', on);
     CFG.settings.diagnosticosEscritura = on;
     await window.sagitari.setSettings({ diagnosticosEscritura: on });
-    showToast(on ? 'Al escribir se comprobará el proyecto (los fallos vuelven al instante)' : 'Comprobación al escribir desactivada');
+    showToast(on ? I18N.t('ajustes.comprobar.on') : I18N.t('ajustes.comprobar.off'));
   };
 if ($('#swCierre'))
   $('#swCierre').onclick = async (e) => {
@@ -837,7 +882,7 @@ if ($('#swCierre'))
     e.currentTarget.classList.toggle('on', on);
     CFG.settings.verificacionCierre = on;
     await window.sagitari.setSettings({ verificacionCierre: on });
-    showToast(on ? 'Antes de cerrar se ejecutarán las pruebas del proyecto' : 'Pruebas de cierre desactivadas');
+    showToast(on ? I18N.t('ajustes.pruebas.on') : I18N.t('ajustes.pruebas.off'));
   };
 if ($('#swArboles'))
   $('#swArboles').onclick = async (e) => {
@@ -845,9 +890,7 @@ if ($('#swArboles'))
     e.currentTarget.classList.toggle('on', on);
     CFG.settings.arbolesAislados = on;
     await window.sagitari.setSettings({ arbolesAislados: on });
-    showToast(
-      on ? 'Los subagentes que escriben trabajarán en un árbol de git aislado' : 'Los subagentes escribirán directamente sobre el proyecto',
-    );
+    showToast(on ? I18N.t('ajustes.arboles.on') : I18N.t('ajustes.arboles.off'));
   };
 if ($('#swAutoEdits'))
   $('#swAutoEdits').onclick = async (e) => {
@@ -855,11 +898,7 @@ if ($('#swAutoEdits'))
     e.currentTarget.classList.toggle('on', on);
     CFG.settings.autoEdits = on;
     await window.sagitari.setSettings({ autoEdits: on });
-    showToast(
-      on
-        ? 'Los cambios en archivos se aceptarán sin preguntar (los comandos y lo que borra siguen pidiendo permiso)'
-        : 'Los cambios en archivos volverán a pedir tu permiso',
-    );
+    showToast(on ? I18N.t('ajustes.autoEdits.on') : I18N.t('ajustes.autoEdits.off'));
   };
 if ($('#verAttempts'))
   $('#verAttempts').onchange = async (e) => {
@@ -867,7 +906,7 @@ if ($('#verAttempts'))
     e.target.value = v;
     CFG.settings.intentosArreglo = v;
     await window.sagitari.setSettings({ intentosArreglo: v });
-    showToast(v ? 'Si una prueba falla, se lo devolveré hasta ' + v + ' vez(ces)' : 'Si una prueba falla, no se reintentará');
+    showToast(v ? I18N.t('ajustes.intentos.aviso', { n: v }) : I18N.t('ajustes.intentos.ninguno'));
   };
 /* --------------------------------------------------------------------------- *
  *  v2.5: reglas del proyecto (SAGITARI.md / AGENTS.md) y tus hooks.
@@ -885,8 +924,7 @@ async function paintInstrucciones() {
   } catch {}
   const fuentes = info.fuentes || [];
   if (!fuentes.length) {
-    cont.innerHTML =
-      '<span class="instrnone">No hay ninguna: SAGITARI usa solo sus propias reglas. Creando una, tus convenciones mandan sobre ellas.</span>';
+    cont.innerHTML = '<span class="instrnone">' + esc(I18N.t('ajustes.reglas.vacio')) + '</span>';
   } else {
     cont.innerHTML = fuentes
       .map(
@@ -897,8 +935,12 @@ async function paintInstrucciones() {
           '<i data-i="check"></i>' +
           esc(String(f.etiqueta || '')) +
           (f.donde === 'usuario'
-            ? ' <em>(tus reglas globales)</em>'
-            : ' <em>(' + (f.chars || 0) + ' caracteres leídos' + (f.recortado ? ', recortado' : '') + ')</em>') +
+            ? ' <em>' + esc(I18N.t('ajustes.reglas.globales')) + '</em>'
+            : ' <em>' +
+              esc(
+                I18N.t(f.recortado ? 'ajustes.reglas.chars.recortado' : 'ajustes.reglas.chars', { n: f.chars || 0 }),
+              ) +
+              '</em>') +
           '</span>',
       )
       .join('');
@@ -910,22 +952,25 @@ async function paintInstrucciones() {
 if ($('#instrReload'))
   $('#instrReload').onclick = async () => {
     await paintInstrucciones();
-    showToast('Reglas del proyecto releídas');
+    showToast(I18N.t('ajustes.reglas.releidas'));
   };
 if ($('#instrCreate'))
   $('#instrCreate').onclick = async () => {
     try {
       const r = await window.sagitari.instruccionesCrear();
       if (r && r.yaExistia) {
-        showToast('Ya existe: ' + r.ruta);
+        showToast(I18N.t('ajustes.reglas.existe', { ruta: r.ruta }));
         return;
       }
       if (r && r.ok) {
         await paintInstrucciones();
-        showToast('Creado ' + r.ruta + ' — ábrelo y escribe tus reglas');
-      } else showToast('No se pudo crear: ' + ((r && r.error) || 'error desconocido'));
+        showToast(I18N.t('ajustes.reglas.creado', { ruta: r.ruta }));
+      } else
+        showToast(
+          I18N.t('ajustes.reglas.crear.error', { motivo: (r && r.error) || I18N.t('ajustes.error.desconocido') }),
+        );
     } catch (e) {
-      showToast('No se pudo crear el archivo');
+      showToast(I18N.t('ajustes.reglas.crear.fallo'));
     }
   };
 const guardarHook = (id, campo, aviso) => {
@@ -933,22 +978,22 @@ const guardarHook = (id, campo, aviso) => {
   if (!el) return;
   el.onchange = async () => {
     const v = String(el.value || '').trim();
-    if (/\n/.test(String(el.value || ''))) showToast('Un hook es UN comando: me quedo con la primera línea');
+    if (/\n/.test(String(el.value || ''))) showToast(I18N.t('ajustes.hook.unaLinea'));
     el.value = v;
     CFG.settings[campo] = v;
     await window.sagitari.setSettings({ [campo]: v });
-    showToast(v ? aviso : 'Hook desactivado');
+    showToast(v ? aviso : I18N.t('ajustes.hook.desactivado'));
   };
 };
-guardarHook('#hookEditar', 'hookEditar', 'Se ejecutará tras cada escritura');
-guardarHook('#hookCerrar', 'hookCerrar', 'Se ejecutará antes de cerrar el turno');
+guardarHook('#hookEditar', 'hookEditar', I18N.t('ajustes.hook.editar.aviso'));
+guardarHook('#hookCerrar', 'hookCerrar', I18N.t('ajustes.hook.cerrar.aviso'));
 if ($('#swThinking'))
   $('#swThinking').onclick = async (e) => {
     const on = !e.currentTarget.classList.contains('on');
     e.currentTarget.classList.toggle('on', on);
     CFG.settings.showThinking = on;
     await window.sagitari.setSettings({ showThinking: on });
-    showToast(on ? 'Se mostrará el razonamiento del modelo' : 'Razonamiento del modelo oculto');
+    showToast(on ? I18N.t('ajustes.razonamiento.on') : I18N.t('ajustes.razonamiento.off'));
   };
 $('#devModeSw').onclick = async (e) => {
   devMode = !e.currentTarget.classList.contains('on');
@@ -978,14 +1023,22 @@ const mcpLines = (obj) =>
     .map(([k, v]) => k + '=' + v)
     .join('\n');
 
-/** Estados del servidor, tal y como los ve el usuario. */
+/** Estados del servidor, tal y como los ve el usuario (texto ya traducido). */
 function mcpStatusLabel(s) {
-  if (!s.enabled) return { text: 'Desactivado', cls: 'off' };
+  if (!s.enabled) return { text: I18N.t('ajustes.mcp.estado.apagado'), cls: 'off' };
   const n = (s.discovered || []).length;
-  if (s.state === 'ready') return { text: 'Listo (' + n + ' herramienta' + (n === 1 ? '' : 's') + ')', cls: 'ok' };
-  if (s.state === 'starting') return { text: 'Conectando…', cls: 'wait' };
-  if (s.state === 'dead') return { text: 'Error: ' + (s.error || 'no arrancó'), cls: 'err' };
-  return { text: 'Sin probar', cls: 'off' };
+  if (s.state === 'ready')
+    return {
+      text: I18N.t(n === 1 ? 'ajustes.mcp.estado.listo.uno' : 'ajustes.mcp.estado.listo.varios', { n }),
+      cls: 'ok',
+    };
+  if (s.state === 'starting') return { text: I18N.t('ajustes.mcp.estado.conectando'), cls: 'wait' };
+  if (s.state === 'dead')
+    return {
+      text: I18N.t('ajustes.error', { motivo: s.error || I18N.t('ajustes.mcp.estado.sinArrancar') }),
+      cls: 'err',
+    };
+  return { text: I18N.t('ajustes.mcp.estado.sinProbar'), cls: 'off' };
 }
 
 async function renderMcp() {
@@ -994,12 +1047,12 @@ async function renderMcp() {
   try {
     MCP_STATE = await window.sagitari.mcpList();
   } catch (e) {
-    showToast('No pude leer los servidores MCP: ' + e.message);
+    showToast(I18N.t('ajustes.mcp.leer.error', { motivo: e.message }));
     return;
   }
   $('#mcpGlobal').classList.toggle('on', MCP_STATE.enabled !== false);
   if (!(MCP_STATE.servers || []).length) {
-    box.innerHTML = '<div class="mcpempty">Ningún servidor MCP. Añade uno o pega el JSON de <code>mcpServers</code> de otro cliente.</div>';
+    box.innerHTML = '<div class="mcpempty">' + esc(I18N.t('ajustes.mcp.vacio')) + '</div>';
     return;
   }
   box.innerHTML = MCP_STATE.servers
@@ -1013,15 +1066,15 @@ async function renderMcp() {
         <span class="mcpdot ${st.cls}"></span>
         <b>${esc(s.name)}</b>
         <span class="mcpst">${esc(st.text)}</span>
-        <span class="mcpdo">${s.transport === 'http' ? 'URL' : 'local'}</span>
+        <span class="mcpdo">${s.transport === 'http' ? 'URL' : esc(I18N.t('ajustes.mcp.local'))}</span>
       </div>
       <div class="mcptools">${lista}</div>
       <div class="mcpacts">
-        <button class="btn ghost" data-mcp="test">Probar</button>
-        <button class="btn ghost" data-mcp="log">Ver log</button>
-        <button class="btn ghost" data-mcp="edit">Editar</button>
-        <button class="btn ghost" data-mcp="toggle">${s.enabled ? 'Desactivar' : 'Activar'}</button>
-        <button class="btn ghost" data-mcp="del">Eliminar</button>
+        <button class="btn ghost" data-mcp="test">${esc(I18N.t('ajustes.mcp.probar'))}</button>
+        <button class="btn ghost" data-mcp="log">${esc(I18N.t('ajustes.mcp.verLog'))}</button>
+        <button class="btn ghost" data-mcp="edit">${esc(I18N.t('ajustes.mcp.editar'))}</button>
+        <button class="btn ghost" data-mcp="toggle">${esc(I18N.t(s.enabled ? 'ajustes.mcp.desactivar' : 'ajustes.mcp.activar'))}</button>
+        <button class="btn ghost" data-mcp="del">${esc(I18N.t('ajustes.mcp.eliminar'))}</button>
       </div>
     </div>`;
     })
@@ -1033,7 +1086,7 @@ async function mcpFormShow(server) {
   const s = server || { transport: 'stdio', tools: {} };
   const card = $('#mcpFormCard');
   card.classList.add('on');
-  $('#mcpFormTitle').textContent = server ? 'Editar servidor' : 'Nuevo servidor';
+  $('#mcpFormTitle').textContent = I18N.t(server ? 'ajustes.mcp.titulo.editar' : 'ajustes.mcp.titulo.nuevo');
   $('#mcpId').value = s.id || '';
   $('#mcpId').disabled = !!server;
   $('#mcpName').value = s.name || '';
@@ -1118,15 +1171,15 @@ $('#mcpSave').onclick = async () => {
   if (s.transport !== 'http' && !$('#mcpId').disabled) {
     const yes = await askConfirm(
       $('#mcpFormCard'),
-      '¿Confiar en este servidor MCP?',
-      'Ejecutará «' +
-        (s.command || '(sin comando)') +
-        '» en tu equipo con tus permisos. Solo continúa si sabes qué programa es y de dónde viene.',
+      I18N.t('ajustes.mcp.confiar.titulo'),
+      I18N.t('ajustes.mcp.confiar.detalle', {
+        comando: s.command || I18N.t('ajustes.mcp.sinComando'),
+      }),
     );
     if (!yes) return;
   }
   const r = await window.sagitari.mcpSave(s);
-  if (!r.ok) return mcpMsg('Error: ' + r.error);
+  if (!r.ok) return mcpMsg(I18N.t('ajustes.error', { motivo: r.error }));
   // El nivel elegido se aplica SIEMPRE al comodín del servidor (el MISMO que edita
   // Seguridad), también con 'default': así el desplegable no es decorativo y se puede
   // volver atrás (sec:setToolPerm borra el comodín cuando recibe 'default'). La clave la
@@ -1135,18 +1188,26 @@ $('#mcpSave').onclick = async () => {
   const wildcard = r.permKey || (r.id ? 'mcp__' + r.id + '__*' : '');
   if (wildcard && nivel) await window.sagitari.secSetToolPerm(wildcard, nivel);
   $('#mcpFormCard').classList.remove('on');
-  mcpMsg('Guardado. Probando la conexión…');
+  mcpMsg(I18N.t('ajustes.mcp.guardado'));
   const t = await window.sagitari.mcpTest(r.id || s.id);
-  mcpMsg(t.ok ? 'Conectado: ' + (t.server ? t.server.discovered.length : 0) + ' herramientas.' : 'No conecta: ' + t.error);
+  mcpMsg(
+    t.ok
+      ? I18N.t('ajustes.mcp.conectado', { n: t.server ? t.server.discovered.length : 0 })
+      : I18N.t('ajustes.mcp.noConecta', { motivo: t.error }),
+  );
   renderMcp();
 };
 $('#mcpFormDelete').onclick = async () => {
   const id = $('#mcpId').value.trim();
-  const yes = await askConfirm($('#mcpFormCard'), '¿Eliminar el servidor MCP «' + id + '»?', 'Se borran su configuración y sus permisos.');
+  const yes = await askConfirm(
+    $('#mcpFormCard'),
+    I18N.t('ajustes.mcp.borrar.confirmar', { id }),
+    I18N.t('ajustes.mcp.borrar.detalle'),
+  );
   if (!yes) return;
   const r = await window.sagitari.mcpDelete(id);
   $('#mcpFormCard').classList.remove('on');
-  mcpMsg(r.ok ? 'Servidor eliminado.' : 'Error: ' + r.error);
+  mcpMsg(r.ok ? I18N.t('ajustes.mcp.borrado') : I18N.t('ajustes.error', { motivo: r.error }));
   renderMcp();
 };
 $('#mcpList').onclick = async (e) => {
@@ -1161,7 +1222,11 @@ $('#mcpList').onclick = async (e) => {
     return renderMcp();
   }
   if (accion === 'del') {
-    const yes = await askConfirm(btn, '¿Eliminar «' + id + '»?', 'Se borran su configuración y sus permisos.');
+    const yes = await askConfirm(
+      btn,
+      I18N.t('ajustes.mcp.borrar.confirmarCorto', { id }),
+      I18N.t('ajustes.mcp.borrar.detalle'),
+    );
     if (!yes) return;
     await window.sagitari.mcpDelete(id);
     // si el formulario estaba editando justo ese servidor, se cierra: dejarlo abierto
@@ -1173,20 +1238,24 @@ $('#mcpList').onclick = async (e) => {
   }
   if (accion === 'log') {
     const r = await window.sagitari.mcpLog(id);
-    return showToast(r.log ? r.log.split('\n').slice(-3).join(' · ') : r.error || 'El servidor no ha escrito nada.');
+    return showToast(r.log ? r.log.split('\n').slice(-3).join(' · ') : r.error || I18N.t('ajustes.mcp.sinSalida'));
   }
   if (accion === 'test') {
-    btn.textContent = 'Probando…';
+    btn.textContent = I18N.t('ajustes.mcp.probando');
     const r = await window.sagitari.mcpTest(id);
-    btn.textContent = 'Probar';
-    mcpMsg(r.ok ? 'Conectado: ' + (r.server ? r.server.discovered.length : 0) + ' herramientas.' : 'No conecta: ' + r.error);
+    btn.textContent = I18N.t('ajustes.mcp.probar');
+    mcpMsg(
+      r.ok
+        ? I18N.t('ajustes.mcp.conectado', { n: r.server ? r.server.discovered.length : 0 })
+        : I18N.t('ajustes.mcp.noConecta', { motivo: r.error }),
+    );
     return renderMcp();
   }
 };
 $('#mcpExportBtn').onclick = async () => {
   const r = await window.sagitari.mcpExport();
-  if (!r.ok) return mcpMsg('Error: ' + r.error);
-  copyText(r.json, 'JSON copiado (contiene tus secretos: no lo compartas).');
+  if (!r.ok) return mcpMsg(I18N.t('ajustes.error', { motivo: r.error }));
+  copyText(r.json, I18N.t('ajustes.mcp.json.copiado'));
 };
 // `window.prompt` NO existe en Electron (lanza «prompt() is not supported»): el
 // cuadro de pegado es propio, como el resto de la interfaz.
@@ -1203,15 +1272,17 @@ $('#mcpPasteCancel').onclick = () => {
 };
 $('#mcpPasteGo').onclick = async () => {
   const json = $('#mcpPasteText').value.trim();
-  if (!json) return mcpMsg('Pega el bloque mcpServers en el cuadro.');
+  if (!json) return mcpMsg(I18N.t('ajustes.mcp.pegar.json'));
   const r = await window.sagitari.mcpImport(json);
-  if (!r.ok) return mcpMsg('Error: ' + r.error);
-  const resumen = r.servers.map((s) => s.id + (s.conflict ? ' (reemplaza el actual)' : '')).join(', ');
-  const yes = await askConfirm($('#mcpPasteBox'), '¿Añadir estos servidores?', resumen);
+  if (!r.ok) return mcpMsg(I18N.t('ajustes.error', { motivo: r.error }));
+  const resumen = r.servers
+    .map((s) => s.id + (s.conflict ? ' ' + I18N.t('ajustes.mcp.reemplaza') : ''))
+    .join(', ');
+  const yes = await askConfirm($('#mcpPasteBox'), I18N.t('ajustes.mcp.anadir.confirmar'), resumen);
   if (!yes) return;
   for (const s of r.servers) await window.sagitari.mcpSave(s);
   $('#mcpPasteBox').hidden = true;
-  mcpMsg('Añadidos: ' + resumen);
+  mcpMsg(I18N.t('ajustes.mcp.anadidos', { lista: resumen }));
   renderMcp();
 };
 
@@ -1435,7 +1506,7 @@ function wizardPintar() {
         )
         .join('') +
       '</div>' +
-      `<div class="wz-note">¿Un servidor propio? Elige «Personalizado (OpenAI-compatible)». Puedes cambiar de proveedor y de modelo cuando quieras desde la pestaña Modelo.</div>`;
+      `<div class="wz-note">${esc(I18N.t('ajustes.wizard.propio.nota'))}</div>`;
     body.querySelectorAll('[data-wz]').forEach((b) => {
       b.onclick = () => {
         wzPreset = b.dataset.wz;
@@ -1455,34 +1526,36 @@ function wizardPintar() {
        en la ruta, y elegirlo aquí es la única forma de que funcionen a la primera. */
     const propia = !!p.baseUrl;
     body.innerHTML = `
-      <div class="field"><label for="wzUrl">Base URL</label><input type="text" id="wzUrl" value="${esc(wzUrl || p.baseUrl || '')}" placeholder="https://…/v1" /></div>
-      ${local ? '' : `<div class="field"><label for="wzKey">API KEY</label><input type="password" id="wzKey" value="${esc(wzKey)}" placeholder="sk-… (vacío para Ollama o LM Studio)" /></div>`}
+      <div class="field"><label for="wzUrl">${esc(I18N.t('ajustes.modelo.baseUrl'))}</label><input type="text" id="wzUrl" value="${esc(wzUrl || p.baseUrl || '')}" placeholder="https://…/v1" /></div>
+      ${local ? '' : `<div class="field"><label for="wzKey">${esc(I18N.t('ajustes.apikey'))}</label><input type="password" id="wzKey" value="${esc(wzKey)}" placeholder="${esc(I18N.t('ajustes.apikey.ph'))}" /></div>`}
       ${
         propia
           ? ''
-          : `<div class="field"><label for="wzFormat">Protocolo de la API</label><select id="wzFormat">
-               <option value="auto">Automático (deducirlo)</option>
+          : `<div class="field"><label for="wzFormat">${esc(I18N.t('ajustes.protocolo'))}</label><select id="wzFormat">
+               <option value="auto">${esc(I18N.t('ajustes.protocolo.auto'))}</option>
                <option value="openai">OpenAI — /chat/completions</option>
                <option value="anthropic">Anthropic — /messages</option>
                <option value="responses">OpenAI Responses — /responses</option>
              </select></div>`
       }
-      <div class="subnote">${esc(p.hint || '')}${local ? ' No necesita clave: sólo tiene que estar en marcha.' : ''}</div>`;
+      <div class="subnote">${esc(p.hint || '')}${local ? ' ' + esc(I18N.t('ajustes.wizard.local.nota')) : ''}</div>`;
     // Al volver «Atrás» se recuerda lo que ya se había elegido.
     if ($('#wzFormat') && wzFormatoElegido) $('#wzFormat').value = wzFormatoElegido;
   } else {
     body.innerHTML = `
-      <div class="field"><label for="wzModel">Modelo</label><select id="wzModel"><option value="">— detecta modelos primero —</option></select></div>
-      <div class="subnote">Elige el modelo con el que trabajará Sagitari. Puedes cambiarlo en cualquier momento desde la pestaña Modelo.</div>`;
+      <div class="field"><label for="wzModel">${esc(I18N.t('ajustes.modelo'))}</label><select id="wzModel"><option value="">${esc(I18N.t('ajustes.modelo.primero'))}</option></select></div>
+      <div class="subnote">${esc(I18N.t('ajustes.wizard.modelo.nota'))}</div>`;
   }
   const foot = document.createElement('div');
   foot.className = 'wz-foot';
   const atras =
-    wzPaso > 1 ? `<button class="btn ghost" id="wzAtras">Atrás</button>` : `<button class="btn ghost" id="wzCerrar">Cerrar</button>`;
+    wzPaso > 1
+      ? `<button class="btn ghost" id="wzAtras">${esc(I18N.t('ajustes.wizard.atras'))}</button>`
+      : `<button class="btn ghost" id="wzCerrar">${esc(I18N.t('ajustes.wizard.cerrar'))}</button>`;
   const next =
     wzPaso < 3
-      ? `<button class="btn primary" id="wzNext"${wzPaso === 1 && !wzPreset ? ' disabled' : ''}>Siguiente</button>`
-      : `<button class="btn primary" id="wzActivar">Activar modelo</button>`;
+      ? `<button class="btn primary" id="wzNext"${wzPaso === 1 && !wzPreset ? ' disabled' : ''}>${esc(I18N.t('ajustes.wizard.siguiente'))}</button>`
+      : `<button class="btn primary" id="wzActivar">${esc(I18N.t('ajustes.wizard.activar'))}</button>`;
   foot.innerHTML = `<span class="wz-msg" id="wzMsg"></span>` + atras + next;
   body.appendChild(foot);
   if ($('#wzCerrar'))
@@ -1502,7 +1575,7 @@ function wizardPintar() {
       if (wzPaso === 2) {
         const url = $('#wzUrl').value.trim();
         if (!url) {
-          $('#wzMsg').textContent = 'Escribe la Base URL del proveedor.';
+          $('#wzMsg').textContent = I18N.t('ajustes.wizard.url.falta');
           return;
         }
         // El protocolo elegido a mano se guarda para los pasos siguientes (el
@@ -1525,7 +1598,7 @@ function wzMsg(t) {
   if (el) el.textContent = t || '';
 }
 async function wizardDetectar() {
-  wzMsg('Detectando modelos…');
+  wzMsg(I18N.t('ajustes.modelo.detectando'));
   /* La base y la clave se leen del estado del wizard, no del DOM: en este paso (#3) sus
      campos ya no existen. Si no hay ninguna escrita se prueba con la del proveedor que
      ya estuviera guardado con esa URL. */
@@ -1540,7 +1613,7 @@ async function wizardDetectar() {
       providerId: pre.baseUrl && pre.baseUrl === url ? pre.id : undefined,
     });
     if (!r.ok) {
-      wzMsg('Error: ' + r.error);
+      wzMsg(I18N.t('ajustes.error', { motivo: r.error }));
       return;
     }
     const sel = $('#wzModel');
@@ -1551,9 +1624,9 @@ async function wizardDetectar() {
       o.textContent = m;
       sel.appendChild(o);
     }
-    wzMsg(r.models.length + ' modelos detectados. Elige uno y activa.');
+    wzMsg(I18N.t('ajustes.wizard.detectados', { n: r.models.length }));
   } catch (e) {
-    wzMsg('Error: ' + ((e && e.message) || e));
+    wzMsg(I18N.t('ajustes.error', { motivo: (e && e.message) || e }));
   }
 }
 /** Protocolo con el que el wizard prueba y guarda. Manda, por este orden: lo que el
@@ -1576,7 +1649,7 @@ async function wizardActivar() {
   const url = wzUrl || (wzProvGuardado && wzProvGuardado.baseUrl) || '';
   const key = String(wzKey || '').trim();
   const model = $('#wzModel') && $('#wzModel').value;
-  if (!url || !model) return wzMsg('Detecta modelos y elige uno.');
+  if (!url || !model) return wzMsg(I18N.t('ajustes.modelo.elegirPrimero'));
   const p = (CFG.presets || []).find((x) => x.id === wzPreset) || {};
   const format = wzFormato();
   wzBusy = true;
@@ -1584,17 +1657,21 @@ async function wizardActivar() {
     if (!wzProvGuardado) {
       const guardar = await window.sagitari.saveProvider({
         id: 'prov_' + Date.now().toString(36),
-        name: p.name || 'Proveedor',
+        name: p.name || I18N.t('ajustes.proveedor.nombre'),
         baseUrl: url,
         apiKey: key,
         format,
         models: [...$('#wzModel').options].map((o) => o.value).filter(Boolean),
       });
       if (guardar && guardar.ok === false) {
-        wzMsg('Error: ' + (guardar.error || 'no se pudo guardar'));
+        wzMsg(I18N.t('ajustes.error', { motivo: guardar.error || I18N.t('ajustes.error.guardar') }));
         return;
       }
-      wzProvGuardado = (CFG.providers || []).find((pr) => pr.baseUrl === url) || { id: null, name: p.name || 'Proveedor', format };
+      wzProvGuardado = (CFG.providers || []).find((pr) => pr.baseUrl === url) || {
+        id: null,
+        name: p.name || I18N.t('ajustes.proveedor.nombre'),
+        format,
+      };
     } else if (wzFormatoElegido) {
       /* Se reutiliza un proveedor ya guardado con esa URL, pero el usuario ha elegido
          protocolo en este paso: se guarda también en él para que la fila «Usar» de la
@@ -1614,10 +1691,17 @@ async function wizardActivar() {
             vision,
             format: wzProvGuardado.format || format,
           }
-        : { name: (wzProvGuardado && wzProvGuardado.name) || 'Proveedor', baseUrl: url, apiKey: key, model, vision, format },
+        : {
+            name: (wzProvGuardado && wzProvGuardado.name) || I18N.t('ajustes.proveedor.nombre'),
+            baseUrl: url,
+            apiKey: key,
+            model,
+            vision,
+            format,
+          },
     );
     if (r && r.ok === false) {
-      wzMsg('Error: ' + (r.error || 'no se pudo activar'));
+      wzMsg(I18N.t('ajustes.error', { motivo: r.error || I18N.t('ajustes.error.activar') }));
       return;
     }
     CFG = await window.sagitari.getConfig();
@@ -1627,9 +1711,9 @@ async function wizardActivar() {
       localStorage.setItem('sagi.wizardOmitido', '1');
     } catch {}
     $('#wizardSetup').classList.remove('on');
-    showToast('Modelo activado: ' + model + '. ¡Todo listo para empezar!');
+    showToast(I18N.t('ajustes.wizard.activado', { modelo: model }));
   } catch (e) {
-    wzMsg('Error: ' + ((e && e.message) || e));
+    wzMsg(I18N.t('ajustes.error', { motivo: (e && e.message) || e }));
   } finally {
     wzBusy = false;
   }
@@ -1643,11 +1727,11 @@ if ($('#apiKeyReveal'))
     const show = k.type === 'password';
     k.type = show ? 'text' : 'password';
     b.classList.toggle('on', show);
-    b.title = show ? 'Ocultar la clave' : 'Mostrar la clave';
+    b.title = I18N.t(show ? 'ajustes.clave.ocultar' : 'ajustes.clave.mostrar');
     // el estado se dice, no solo se dibuja: sin esto el botón siempre anunciaba
     // «no pulsado» mientras la clave estaba a la vista
     b.setAttribute('aria-pressed', show ? 'true' : 'false');
-    b.setAttribute('aria-label', show ? 'Ocultar la clave' : 'Mostrar la clave');
+    b.setAttribute('aria-label', I18N.t(show ? 'ajustes.clave.ocultar' : 'ajustes.clave.mostrar'));
   };
 
 // restablecer límites a los valores recomendados QUE DEFINE EL AGENTE (main los
@@ -1658,13 +1742,13 @@ if ($('#secResetGuardrails'))
     try {
       const m = await window.sagitari.metaGet(hiloActual());
       const d = m && m.guardrailDefaults;
-      if (!d) throw new Error('el agente no informó de sus valores recomendados');
+      if (!d) throw new Error(I18N.t('ajustes.limites.sinDefaults'));
       const r = await window.sagitari.secSetGuardrail(d);
-      if (r && r.ok === false) throw new Error(r.error || 'no se pudo guardar');
+      if (r && r.ok === false) throw new Error(r.error || I18N.t('ajustes.error.guardar'));
       await initSecurity();
-      showToast('Límites restablecidos a los valores recomendados');
+      showToast(I18N.t('ajustes.limites.restablecidos'));
     } catch (e) {
-      showToast('No se pudieron restablecer: ' + ((e && e.message) || 'error'));
+      showToast(I18N.t('ajustes.limites.restablecer.error', { motivo: (e && e.message) || I18N.t('ajustes.error.desconocido') }));
     }
   };
 /* ---- atajos de permiso: «Permitir todo» y la vuelta a lo recomendado ----
@@ -1691,7 +1775,7 @@ async function clavesDePermisos() {
 async function aplicarNivelAPermisos(claves, nivel) {
   if (window.sagitari.secSetToolPermMany) {
     const r = await window.sagitari.secSetToolPermMany(claves, nivel);
-    if (r && r.ok === false) throw new Error(r.error || 'no se pudieron guardar los permisos');
+    if (r && r.ok === false) throw new Error(r.error || I18N.t('ajustes.permisos.guardar.fallo'));
     return;
   }
   for (const t of claves) await window.sagitari.secSetToolPerm(t, nivel);
@@ -1735,15 +1819,15 @@ function mostrarAvisoConDeshacer(texto) {
     return;
   }
   showToast(texto, {
-    etiqueta: 'Deshacer',
+    etiqueta: I18N.t('ajustes.permisos.deshacer'),
     fn: async () => {
       try {
         await restaurarMapaPermisos(cambio.previo, cambio.claves);
         ultimoCambioPermisos = null;
         await renderSecurity();
-        showToast('Permisos de antes restaurados');
+        showToast(I18N.t('ajustes.permisos.deshacer.hecho'));
       } catch (e) {
-        showToast('No se pudo deshacer: ' + ((e && e.message) || 'error'));
+        showToast(I18N.t('ajustes.permisos.deshacer.error', { motivo: (e && e.message) || I18N.t('ajustes.error.desconocido') }));
       }
     },
   });
@@ -1755,20 +1839,20 @@ function mostrarAvisoConDeshacer(texto) {
 async function permitirTodoPermisos(anchor) {
   const claves = await clavesDePermisos();
   if (!claves.length) {
-    showToast('No hay permisos que cambiar');
+    showToast(I18N.t('ajustes.permisos.nada'));
     return false;
   }
   const ok = await askConfirm(
     anchor || null,
-    '¿Permitir las ' + claves.length + ' herramientas sin preguntar?',
-    'El agente podrá ejecutar comandos, escribir y borrar archivos, abrir programas y navegar sin pedirte permiso. Se deshace con «Volver a lo recomendado».',
+    I18N.t('ajustes.permisos.todos.confirmar', { n: claves.length }),
+    I18N.t('ajustes.permisos.todos.detalle'),
   );
   if (!ok) return false;
   const previo = await mapaPermisosActual();
   try {
     await aplicarNivelAPermisos(claves, 'safe');
   } catch (e) {
-    showToast('No se pudieron guardar los permisos: ' + ((e && e.message) || 'error'));
+    showToast(I18N.t('ajustes.permisos.guardar.error', { motivo: (e && e.message) || I18N.t('ajustes.error.desconocido') }));
     return false;
   }
   ultimoCambioPermisos = { previo, claves };
@@ -1782,7 +1866,7 @@ async function restablecerPermisos() {
   try {
     await aplicarNivelAPermisos(claves, 'default');
   } catch (e) {
-    showToast('No se pudieron restablecer: ' + ((e && e.message) || 'error'));
+    showToast(I18N.t('ajustes.limites.restablecer.error', { motivo: (e && e.message) || I18N.t('ajustes.error.desconocido') }));
     return false;
   }
   ultimoCambioPermisos = { previo, claves };
@@ -1793,13 +1877,13 @@ if ($('#secResetPerms'))
   $('#secResetPerms').onclick = async () => {
     if (!(await restablecerPermisos())) return;
     await renderSecurity();
-    mostrarAvisoConDeshacer('Permisos restablecidos a los recomendados');
+    mostrarAvisoConDeshacer(I18N.t('ajustes.permisos.restablecidos'));
   };
 if ($('#secAllowAll'))
   $('#secAllowAll').onclick = async () => {
     if (!(await permitirTodoPermisos($('#secAllowAll')))) return;
     await renderSecurity();
-    mostrarAvisoConDeshacer('Todas las herramientas permitidas sin preguntar');
+    mostrarAvisoConDeshacer(I18N.t('ajustes.permisos.todos'));
   };
 
 // datos: hábitos aprendidos + carpeta de datos
@@ -1822,30 +1906,38 @@ async function renderHabitsPreview() {
     const filas = memFilas(g.cat, s[g.cat]).filter((f) => f.name && f.count > 0);
     if (!filas.length) continue;
     const total = filas.reduce((n, f) => n + f.count, 0);
+    const usos = I18N.t(total === 1 ? 'ajustes.habitos.usos.uno' : 'ajustes.habitos.usos.varios');
+    const olvidar = I18N.t('ajustes.habitos.olvidar', { titulo: g.titulo.toLowerCase() });
     bloques.push(
       `<div class="hgrupo" data-cat="${esc(g.cat)}"><span class="hgr-t">${ic(g.icono)} ${esc(g.titulo)}</span>` +
-        `<span class="hgr-n">${total} ${total === 1 ? 'uso' : 'usos'}</span>` +
+        `<span class="hgr-n">${total} ${esc(usos)}</span>` +
         filas.map((f) => `<span class="hpill">${esc(f.name)} ×${f.count}</span>`).join('') +
-        `<button class="btn ghost sq" data-olvidar="${esc(g.olvidar)}" title="Olvidar ${esc(g.titulo.toLowerCase())}" aria-label="Olvidar ${esc(g.titulo.toLowerCase())}">${ic('trash')}</button></div>`,
+        `<button class="btn ghost sq" data-olvidar="${esc(g.olvidar)}" title="${esc(olvidar)}" aria-label="${esc(olvidar)}">${ic('trash')}</button></div>`,
     );
   }
   box.innerHTML = bloques.length
     ? bloques.join('')
-    : '<span class="hdim">Todavía no hay hábitos: se aprenden con el uso normal de la app.</span>';
+    : '<span class="hdim">' + esc(I18N.t('ajustes.habitos.vacio')) + '</span>';
   box.querySelectorAll('[data-olvidar]').forEach((b) => {
     b.onclick = async () => {
       const categoria = b.dataset.olvidar;
-      if (!(await askConfirm(b, '¿Olvidar lo observado en ' + memTituloCategoria(categoria) + '?', 'Dejará de usarse para conocerte.')))
+      if (
+        !(await askConfirm(
+          b,
+          I18N.t('ajustes.habitos.olvidar.confirmar', { titulo: memTituloCategoria(categoria) }),
+          I18N.t('ajustes.habitos.olvidar.detalle'),
+        ))
+      )
         return;
       b.disabled = true;
       const r = await window.sagitari.habitsForget(categoria);
       if (r && r.ok === false) {
         b.disabled = false;
-        showToast('No se pudo olvidar: ' + (r.error || 'error desconocido'));
+        showToast(I18N.t('ajustes.habitos.olvidar.error', { motivo: r.error || I18N.t('ajustes.error.desconocido') }));
         return;
       }
       await renderHabitsPreview();
-      showToast('Hábitos olvidados: ' + memTituloCategoria(categoria));
+      showToast(I18N.t('ajustes.habitos.olvidados', { titulo: memTituloCategoria(categoria) }));
     };
   });
 }
@@ -1865,8 +1957,8 @@ if ($('#habitsResetBtn'))
     if (
       !(await askConfirm(
         anchor,
-        '¿Reiniciar los hábitos aprendidos?',
-        'Se borra lo que Sagitari ha deducido de tu uso: apps, comandos, webs y tu modo preferido.',
+        I18N.t('ajustes.habitos.reiniciar.confirmar'),
+        I18N.t('ajustes.habitos.reiniciar.detalle'),
       ))
     )
       return;
@@ -1875,7 +1967,7 @@ if ($('#habitsResetBtn'))
       await window.sagitari.habitsReset();
       await renderHabitsPreview();
       if ($('#view-agents').classList.contains('on')) renderHabits();
-      showToast('Hábitos aprendidos reiniciados');
+      showToast(I18N.t('ajustes.habitos.reiniciados'));
     } finally {
       btn.disabled = false;
     }
@@ -1883,7 +1975,7 @@ if ($('#habitsResetBtn'))
 if ($('#openDataDirBtn'))
   $('#openDataDirBtn').onclick = async () => {
     const r = await window.sagitari.openDataDir();
-    if (r && r.ok === false) showToast(r.error || 'No se pudo abrir la carpeta');
+    if (r && r.ok === false) showToast(r.error || I18N.t('ajustes.carpeta.error'));
   };
 
 /* ============ Acerca de: actualizaciones (aviso discreto) ============
@@ -1955,12 +2047,13 @@ function renderUpdate(state) {
 
   const st = $('#updState');
   if (st) {
-    if (s.status === 'checking') st.textContent = 'Buscando actualizaciones…';
-    else if (s.status === 'downloading') st.textContent = 'Descargando la versión ' + (s.latest || '') + '…';
-    else if (s.error) st.textContent = 'No se pudo comprobar: ' + s.error;
-    else if (s.available) st.textContent = 'Nueva versión ' + (s.latest || '') + ' disponible';
-    else if (s.current || s.latest) st.textContent = 'Estás al día';
-    else st.textContent = 'Aún no se ha comprobado.';
+    if (s.status === 'checking') st.textContent = I18N.t('ajustes.upd.buscando');
+    else if (s.status === 'downloading')
+      st.textContent = I18N.t('ajustes.upd.descargandoVersion', { v: s.latest || '' });
+    else if (s.error) st.textContent = I18N.t('ajustes.upd.error', { motivo: s.error });
+    else if (s.available) st.textContent = I18N.t('ajustes.upd.nueva', { v: s.latest || '' });
+    else if (s.current || s.latest) st.textContent = I18N.t('ajustes.upd.aldia');
+    else st.textContent = I18N.t('ajustes.upd.sinComprobar');
   }
 
   const busy = s.status === 'checking' || s.status === 'downloading';
@@ -1968,7 +2061,7 @@ function renderUpdate(state) {
   if (check) {
     check.disabled = busy;
     const lbl = $('#updCheckLabel');
-    if (lbl) lbl.textContent = s.status === 'checking' ? 'Buscando…' : 'Buscar actualizaciones';
+    if (lbl) lbl.textContent = I18N.t(s.status === 'checking' ? 'ajustes.upd.buscandoCorto' : 'ajustes.upd.buscar');
   }
   const dl = $('#updDownloadBtn');
   if (dl) {
@@ -1986,14 +2079,24 @@ function renderUpdate(state) {
     if (puede) {
       const portable = !reintento && s.kind === 'portable';
       const lbl = $('#updInstallLabel');
-      if (lbl) lbl.textContent = reintento ? 'Reintentar la instalación' : portable ? 'Abrir carpeta' : 'Instalar y cerrar';
+      if (lbl)
+        lbl.textContent = I18N.t(
+          reintento
+            ? 'ajustes.upd.instalar.reintentar'
+            : portable
+              ? 'ajustes.upd.instalar.abrirCarpeta'
+              : 'ajustes.upd.instalar.ahora',
+        );
       inst.setAttribute(
         'aria-label',
-        portable
-          ? 'Abrir la carpeta con el archivo descargado'
-          : reintento
-            ? 'Volver a intentar la instalación de la versión ' + (s.pending.version || '') + '; Sagitari se cerrará para instalarse'
-            : 'Instalar la actualización; Sagitari se cerrará para instalarse',
+        I18N.t(
+          portable
+            ? 'ajustes.upd.aria.abrirCarpeta'
+            : reintento
+              ? 'ajustes.upd.aria.reintentar'
+              : 'ajustes.upd.aria.instalar',
+          reintento ? { v: s.pending.version || '' } : undefined,
+        ),
       );
     }
     inst.disabled = busy;
@@ -2011,31 +2114,30 @@ function renderUpdate(state) {
   const bnote = $('#updBarNote');
   if (bnote && downloading) {
     const total = s.progress && s.progress.total;
-    bnote.textContent = 'Descargando… ' + pct + ' %' + (total ? ' (' + updSize(s.progress.received) + ' de ' + updSize(total) + ')' : '');
+    bnote.textContent = total
+      ? I18N.t('ajustes.upd.progreso.total', {
+          pct,
+          recibido: updSize(s.progress.received),
+          total: updSize(total),
+        })
+      : I18N.t('ajustes.upd.progreso', { pct });
   }
 
   // notas: modo de ejecución, firma y qué pasará exactamente al instalar
   const notes = [];
-  if (s.kind === 'dev') notes.push('Estás ejecutando desde el código fuente; para actualizarte, compila o usa el instalador.');
+  if (s.kind === 'dev') notes.push(I18N.t('ajustes.upd.nota.dev'));
   if (s.pending && !ready) {
     notes.push(
       s.pending.exists
-        ? 'La instalación de la versión ' +
-            s.pending.version +
-            ' no llegó a completarse (el asistente no pudo instalarla). El archivo sigue descargado: puedes reintentarlo o abrirlo a mano desde ' +
-            s.pending.path +
-            '.'
-        : 'La instalación de la versión ' +
-            s.pending.version +
-            ' no llegó a completarse y el archivo descargado ya no está: descarga la actualización otra vez.',
+        ? I18N.t('ajustes.upd.nota.pendienteRuta', { v: s.pending.version, ruta: s.pending.path })
+        : I18N.t('ajustes.upd.nota.pendiente', { v: s.pending.version }),
     );
   }
   if (ready) {
-    if (ready.signed === false)
-      notes.push('Esta actualización no está firmada digitalmente: se instala solo con la verificación SHA-512 publicada en la release.');
-    else if (ready.signed === true && ready.signer) notes.push('Firmada digitalmente por ' + ready.signer + '.');
-    if (s.kind === 'nsis') notes.push('La app se cerrará para instalarse. Vuelve a abrirla cuando termine.');
-    if (s.kind === 'portable') notes.push('Cierra la app y ejecuta el archivo nuevo desde la carpeta que se abrirá.');
+    if (ready.signed === false) notes.push(I18N.t('ajustes.upd.nota.sinFirma'));
+    else if (ready.signed === true && ready.signer) notes.push(I18N.t('ajustes.upd.nota.firmada', { firmante: ready.signer }));
+    if (s.kind === 'nsis') notes.push(I18N.t('ajustes.upd.nota.nsis'));
+    if (s.kind === 'portable') notes.push(I18N.t('ajustes.upd.nota.portable'));
   }
   const note = $('#updNote');
   if (note) {
@@ -2054,16 +2156,16 @@ async function refreshUpdate() {
   renderUpdate(updState);
   try {
     const r = await window.sagitari.updateCheck();
-    if (!r) throw new Error('respuesta vacía del actualizador');
+    if (!r) throw new Error(I18N.t('ajustes.upd.respuestaVacia'));
     updState.current = r.current || updState.current;
     updState.latest = r.latest || null;
     updState.available = !!r.available;
     updState.kind = r.kind || updState.kind;
     updState.ready = r.ready || updState.ready;
     updState.pending = r.pending || null; // el motor la descarta sola si ya no aplica
-    updState.error = r.ok === false ? r.error || 'error desconocido' : null;
+    updState.error = r.ok === false ? r.error || I18N.t('ajustes.error.desconocido') : null;
   } catch (e) {
-    updState.error = String((e && e.message) || e || 'error desconocido');
+    updState.error = String((e && e.message) || e || I18N.t('ajustes.error.desconocido'));
   }
   updState.status = updState.ready ? 'ready' : 'idle';
   renderUpdate(updState);
@@ -2093,7 +2195,7 @@ if ($('#updDownloadBtn'))
         updState.status = updState.ready ? 'ready' : 'idle';
         updState.progress = null;
         renderUpdate(updState);
-        updMsg('No se pudo descargar: ' + ((r && r.error) || 'error desconocido'));
+        updMsg(I18N.t('ajustes.upd.descargar.error', { motivo: (r && r.error) || I18N.t('ajustes.error.desconocido') }));
         return;
       }
       updState.ready = { name: r.name, version: r.version, verified: r.verified, signed: r.signed, signer: r.signer };
@@ -2107,7 +2209,7 @@ if ($('#updDownloadBtn'))
       updState.status = updState.ready ? 'ready' : 'idle';
       updState.progress = null;
       renderUpdate(updState);
-      updMsg('No se pudo descargar: ' + ((e && e.message) || 'error desconocido'));
+      updMsg(I18N.t('ajustes.upd.descargar.error', { motivo: (e && e.message) || I18N.t('ajustes.error.desconocido') }));
     }
   };
 
@@ -2123,7 +2225,7 @@ if ($('#updInstallBtn'))
       // a que el asistente esté vivo FUERA de ella (si no, moriría con la app y el
       // usuario se quedaría con la ventana cerrada y nada instalado). Sin este aviso,
       // el botón parecía colgado durante esos segundos.
-      updMsg('Preparando la instalación… no cierres la app todavía.');
+      updMsg(I18N.t('ajustes.upd.preparando'));
       const extra = updUnsignedArmed ? { confirmUnsigned: true } : updSignerArmed ? { confirmSignerChange: true } : undefined;
       const r = reintento ? await window.sagitari.updateRetry(extra) : await window.sagitari.updateInstall(extra);
       // Puerta de binario sin firmar: el motor exige consentimiento activo en dos
@@ -2131,11 +2233,7 @@ if ($('#updInstallBtn'))
       // queda escrito en la tarjeta, no solo en un toast que se pierde. Vale para
       // instalar y para reintentar: lo pendiente también puede ir sin firmar.
       if (r && r.ok === false && r.needsUnsignedConfirm) {
-        updMsg(
-          reintento
-            ? 'Sin firma digital: solo SHA-512. Pulsa «Reintentar la instalación» OTRA VEZ para confirmar que la instalas igualmente.'
-            : 'Sin firma digital: solo SHA-512. Pulsa «Instalar y cerrar» OTRA VEZ para confirmar que la instalas igualmente.',
-        );
+        updMsg(I18N.t(reintento ? 'ajustes.upd.sinFirma.reintentar' : 'ajustes.upd.sinFirma.instalar'));
         renderUpdate(updState);
         updUnsignedArmed = true;
         return;
@@ -2144,9 +2242,7 @@ if ($('#updInstallBtn'))
       // releases anteriores (o perdió la firma). Mismo patrón de doble clic, con su
       // propio aviso para que el usuario sepa QUÉ cambió.
       if (r && r.ok === false && r.needsSignerConfirm) {
-        updMsg(
-          'El firmante de esta actualización NO coincide con el de versiones anteriores. Pulsa «Instalar y cerrar» OTRA VEZ solo si confías en el cambio.',
-        );
+        updMsg(I18N.t('ajustes.upd.firmante'));
         renderUpdate(updState);
         updSignerArmed = true;
         return;
@@ -2160,14 +2256,12 @@ if ($('#updInstallBtn'))
         renderUpdate(updState);
       }
       if (!r || r.ok === false) {
-        updMsg('No se pudo instalar: ' + ((r && r.error) || 'error desconocido'));
+        updMsg(I18N.t('ajustes.upd.instalar.error', { motivo: (r && r.error) || I18N.t('ajustes.error.desconocido') }));
         return;
       }
-      updMsg(
-        r.manual ? 'Archivo listo: ejecútalo desde la carpeta que se acaba de abrir.' : 'Instalando… la app se cerrará para instalarse.',
-      );
+      updMsg(I18N.t(r.manual ? 'ajustes.upd.manual' : 'ajustes.upd.instalando'));
     } catch (e) {
-      updMsg('No se pudo instalar: ' + ((e && e.message) || 'error desconocido'));
+      updMsg(I18N.t('ajustes.upd.instalar.error', { motivo: (e && e.message) || I18N.t('ajustes.error.desconocido') }));
     } finally {
       btn.disabled = false; // si la instalación arranca, la app se cierra antes de llegar aquí
     }
@@ -2176,7 +2270,8 @@ if ($('#updInstallBtn'))
 if ($('#updPageBtn'))
   $('#updPageBtn').onclick = async () => {
     const r = await window.sagitari.updatePage();
-    if (r && r.ok === false) updMsg('No se pudo abrir la página: ' + (r.error || 'error desconocido'));
+    if (r && r.ok === false)
+      updMsg(I18N.t('ajustes.upd.pagina.error', { motivo: r.error || I18N.t('ajustes.error.desconocido') }));
   };
 if ($('#aboutRelBtn')) $('#aboutRelBtn').onclick = () => window.sagitari.updatePage();
 if ($('#aboutRepoBtn')) $('#aboutRepoBtn').onclick = () => window.sagitari.openExternal('https://github.com/dario90vlc/sagitari');
@@ -2194,7 +2289,7 @@ if (window.sagitari.onUpdate)
       setBadge('#nbUpdate', 1, { hot: true });
       if (!updNotified) {
         updNotified = true;
-        showToast('Nueva versión ' + (ev.version || '') + ' disponible · Ajustes → Acerca de');
+        showToast(I18N.t('ajustes.upd.toast.nueva', { v: ev.version || '' }));
       }
       renderUpdate(updState);
       return;
@@ -2211,7 +2306,7 @@ if (window.sagitari.onUpdate)
     if (ev.type === 'install-failed') {
       updState.pending = { version: ev.version || null, path: ev.path || null, exists: ev.exists !== false };
       setBadge('#nbUpdate', 1, { hot: true });
-      showToast('La actualización a ' + (ev.version || 'la versión nueva') + ' no se llegó a instalar · Ajustes → Acerca de');
+      showToast(I18N.t('ajustes.upd.toast.fallo', { v: ev.version || I18N.t('ajustes.upd.versionNueva') }));
       renderUpdate(updState);
       return;
     }
@@ -2232,8 +2327,8 @@ if (window.sagitari.onUpdate)
       const descargando = updState.status === 'downloading';
       updState.progress = null;
       updState.status = updState.ready ? 'ready' : 'idle';
-      if (descargando) updMsg('No se pudo descargar: ' + (ev.message || 'error desconocido'));
-      else updState.error = ev.message || 'error desconocido';
+      if (descargando) updMsg(I18N.t('ajustes.upd.descargar.error', { motivo: ev.message || I18N.t('ajustes.error.desconocido') }));
+      else updState.error = ev.message || I18N.t('ajustes.error.desconocido');
       renderUpdate(updState);
     }
   });
