@@ -16,10 +16,11 @@
 
 const fs = require('fs');
 const path = require('path');
+const i18n = require('../agent/i18n');
 
 function validarWorkspaceRuta(dir, configDir) {
   const p = String(dir || '').trim();
-  if (!path.isAbsolute(p)) return { ok: false, error: 'La ruta tiene que ser absoluta' };
+  if (!path.isAbsolute(p)) return { ok: false, error: i18n.t('ws.absoluta') };
   const sysRx = /^[a-z]:\\(windows|program files|program files \(x86\)|programdata)([\\/]|$)/;
   /* La MISMA comprobación sobre la ruta escrita y sobre la RESUELTA (realpath): antes
      `sysRx` solo miraba el texto, así que `C:\Windows.` (Windows ignora el punto final),
@@ -27,8 +28,8 @@ function validarWorkspaceRuta(dir, configDir) {
      colaban y el espacio de trabajo quedaba en una carpeta del sistema. */
   const guardaSistema = (ruta) => {
     const low = String(ruta).toLowerCase();
-    if (/^[a-z]:[\\/]?$/i.test(low)) return 'La raíz de una unidad no puede ser el espacio de trabajo';
-    if (sysRx.test(low)) return 'Las carpetas del sistema no pueden ser el espacio de trabajo';
+    if (/^[a-z]:[\\/]?$/i.test(low)) return i18n.t('ws.raiz');
+    if (sysRx.test(low)) return i18n.t('ws.sistema');
     return null;
   };
   /* Windows acepta alias que NO son el nombre canónico: el punto/espacio final
@@ -58,7 +59,7 @@ function validarWorkspaceRuta(dir, configDir) {
     return r === '' || (!r.startsWith('..') && !path.isAbsolute(r));
   };
   if (configDir && inDir(real.toLowerCase(), String(configDir).toLowerCase()))
-    return { ok: false, error: 'El directorio de datos de la app no puede ser el espacio de trabajo' };
+    return { ok: false, error: i18n.t('ws.datos') };
   return { ok: true, real };
 }
 

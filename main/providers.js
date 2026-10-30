@@ -8,6 +8,7 @@
    Un modelo puntual puede necesitar otro formato (p. ej. en OpenCode Go); de eso
    se encarga agent/protocols.detectFormat(). */
 const protocols = require('../agent/protocols');
+const i18n = require('../agent/i18n');
 
 const PRESETS = [
   {
@@ -181,6 +182,17 @@ const PRESETS = [
   },
 ];
 
+/* Los textos del catálogo se resuelven al LEERLOS y no al importar el módulo: main.js
+   carga el idioma después de montar los routers, así que traducir aquí sería usar el
+   idioma por defecto. Los getters son enumerables para que viajen igual por IPC. */
+for (const p of PRESETS) {
+  const claveHint = 'prov.hint.' + p.id;
+  const claveNombre = 'prov.name.' + p.id;
+  Object.defineProperty(p, 'hint', { get: () => i18n.t(claveHint), enumerable: true });
+  if (claveNombre in require('../agent/i18n/es')) {
+    Object.defineProperty(p, 'name', { get: () => i18n.t(claveNombre), enumerable: true });
+  }
+}
 const VISION_HINTS = /(gpt-4|gpt-5|4o|vision|llava|llama3\.2-vision|claude|gemini|minimax|pixtral|qwen.*vl|vl-)/i;
 
 function isVisionModel(modelId) {
@@ -218,26 +230,23 @@ function detalleDeError(cuerpo) {
 
 /** @param {number} status @param {string} cuerpo @param {string} [quien] */
 function errorDeProveedor(status, cuerpo, quien) {
-  const conocido = {
-    400: 'la petición no es válida',
-    401: 'la clave no es válida o ha caducado',
-    403: 'el proveedor rechaza esta clave para ese modelo',
-    402: 'ese modelo no está disponible en el proveedor ahora mismo',
-    404: 'ese modelo o esa ruta no existen en el proveedor',
-    429: 'demasiadas peticiones: espera un momento',
-  }[status];
-  const base = conocido || (status >= 500 ? 'el proveedor está fallando' : 'el proveedor devolvió un error');
+  const conocido = i18n.t('prov.err.' + status);
+  // `t` devuelve ⟦clave⟧ si no existe: se usa como «sin traducción conocida».
+  const base = conocido.startsWith('⟦')
+    ? i18n.t(status >= 500 ? 'prov.err.5xx' : 'prov.err.generico')
+    : conocido;
   const detalle = detalleDeError(cuerpo);
-  return new Error((quien ? quien + ': ' : '') + base + ' (HTTP ' + status + ')' + (detalle ? ' — «' + detalle + '»' : ''));
+  const mensaje = i18n.t(detalle ? 'prov.err.http.detalle' : 'prov.err.http', { motivo: base, estado: status, detalle });
+  return new Error(quien ? i18n.t('prov.err.quien', { quien, mensaje }) : mensaje);
 }
 
 /** Lee el cuerpo con tope, abortando al pasarse (ver agent/skills.js:readCapped). */
 async function readCappedText(resp, max) {
   const declared = Number((resp.headers && resp.headers.get('content-length')) || 0);
-  if (declared && declared > max) throw new Error('respuesta demasiado grande (máx. 2 MB)');
+  if (declared && declared > max) throw new Error(i18n.t('prov.grande'));
   if (!resp.body || typeof resp.body.getReader !== 'function') {
     const t = await resp.text();
-    if (t.length > max) throw new Error('respuesta demasiado grande (máx. 2 MB)');
+    if (t.length > max) throw new Error(i18n.t('prov.grande'));
     return t;
   }
   const reader = resp.body.getReader();
@@ -251,7 +260,7 @@ async function readCappedText(resp, max) {
       try {
         reader.cancel().catch(() => {});
       } catch {}
-      throw new Error('respuesta demasiado grande (máx. 2 MB)');
+      throw new Error(i18n.t('prov.grande'));
     }
     chunks.push(value);
   }
@@ -270,7 +279,7 @@ async function listModels(baseUrl, apiKey, fetchFn = fetch, opts = {}) {
   // fetch solo habla http(s), pero un esquema raro o una ruta local no debe ni
   // intentarse: la misma regla que al guardar/activar proveedores.
   if (!/^https?:\/\//i.test(base) && !/^(localhost|127\.0\.0\.1)(:\d+)?([/?#]|$)/i.test(base)) {
-    throw new Error('baseUrl debe ser http(s) o localhost');
+    throw new Error(i18n.t('prov.base'));
   }
   const format = protocols.detectFormat({
     baseUrl: base,
@@ -283,9 +292,7 @@ async function listModels(baseUrl, apiKey, fetchFn = fetch, opts = {}) {
      devolvía un 401 crudo («Invalid credential») que parece un problema de la API cuando
      el problema está aquí: el config llegó de otro perfil o de otro equipo. */
   if (/^enc:v1:/.test(String(apiKey || ''))) {
-    throw new Error(
-      'la clave guardada no se puede descifrar en este equipo (el config llegó de otro perfil o de otro equipo): vuelve a escribirla en Ajustes ▸ Proveedores',
-    );
+    throw new Error(i18n.t('prov.clave.cifrada'));
   }
   const resp = await fetchFn(url, {
     headers: protocols.authHeaders({ baseUrl: base, apiKey }, format),

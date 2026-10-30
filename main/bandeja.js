@@ -8,6 +8,7 @@
 const { Tray, Menu } = require('electron');
 const fs = require('fs');
 const path = require('path');
+const i18n = require('../agent/i18n');
 
 function crearBandeja({ HEADLESS, showWindow, getWin, app }) {
   let tray = null;
@@ -18,19 +19,19 @@ function crearBandeja({ HEADLESS, showWindow, getWin, app }) {
       const ico = path.join(__dirname, '..', 'renderer', 'assets', 'sagitari.ico');
       if (!fs.existsSync(ico)) return;
       tray = new Tray(ico);
-      tray.setToolTip('SAGITARI — tu asistente');
+      tray.setToolTip(i18n.t('bandeja.tooltip'));
       tray.setContextMenu(
         Menu.buildFromTemplate([
-          { label: 'Mostrar SAGITARI', click: () => showWindow() },
+          { label: i18n.t('bandeja.mostrar'), click: () => showWindow() },
           {
-            label: 'Ocultar ventana',
+            label: i18n.t('bandeja.ocultar'),
             click: () => {
               const win = getWin();
               if (win && !win.isDestroyed()) win.hide();
             },
           },
           { type: 'separator' },
-          { label: 'Salir', click: () => app.quit() },
+          { label: i18n.t('bandeja.salir'), click: () => app.quit() },
         ]),
       );
       tray.on('click', () => showWindow());

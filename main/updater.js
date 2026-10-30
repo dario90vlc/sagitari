@@ -20,6 +20,7 @@ const path = require('path');
 const os = require('os');
 const crypto = require('crypto');
 const { spawn } = require('child_process');
+const i18n = require('../agent/i18n');
 
 const REPO = 'dario90vlc/sagitari';
 const API_LATEST = `https://api.github.com/repos/${REPO}/releases/latest`;
@@ -126,9 +127,9 @@ function sha512For(parsed, assetName) {
  */
 function motivoSinFirma({ tieneYml, assetName, expected, error } = {}) {
   if (expected) return null;
-  if (!tieneYml) return 'la release no publica latest.yml';
-  if (error) return 'no se pudo leer el latest.yml de la release (' + error + ')';
-  return 'esta release no publica la firma de ' + assetName + ' (latest.yml solo firma el instalador)';
+  if (!tieneYml) return i18n.t('upd.sin.yml');
+  if (error) return i18n.t('upd.yml.no.leido', { motivo: error });
+  return i18n.t('upd.yml.sin.firma', { archivo: assetName });
 }
 
 /** sha512 en base64 (el formato que usa latest.yml), o null si no se pudo leer. */
@@ -163,8 +164,8 @@ async function checkForUpdate({ currentVersion, fetchFn = fetch, api = API_LATES
       headers: { 'User-Agent': UA, Accept: 'application/vnd.github+json' },
       signal: AbortSignal.timeout(timeoutMs),
     });
-    if (res.status === 404) return { ...base, error: 'sin releases publicadas' }; // repo sin ninguna release
-    if (!res.ok) return { ...base, ok: false, error: 'GitHub respondió ' + res.status };
+    if (res.status === 404) return { ...base, error: i18n.t('upd.sin.releases') }; // repo sin ninguna release
+    if (!res.ok) return { ...base, ok: false, error: i18n.t('upd.github', { estado: res.status }) };
     const rel = await res.json();
     if (!rel || rel.draft || rel.prerelease) return base; // borradores/prerelease no cuentan
     const latest = String(rel.tag_name || '').replace(/^v/i, '');
@@ -181,7 +182,8 @@ async function checkForUpdate({ currentVersion, fetchFn = fetch, api = API_LATES
       assetsOk: !!(assets.setup || assets.portable),
     };
   } catch (e) {
-    const msg = e && e.name === 'TimeoutError' ? 'la comprobación tardó demasiado' : (e && e.message) || 'error de red';
+    const msg =
+      e && e.name === 'TimeoutError' ? i18n.t('upd.comprobacion.lenta') : (e && e.message) || i18n.t('upd.red');
     return { ...base, ok: false, error: msg };
   }
 }
@@ -211,9 +213,9 @@ async function downloadTo(url, dest, { fetchFn = fetch, onProgress = null, timeo
   const bump = () => {
     if (!(idleTimeoutMs > 0)) return;
     clearTimeout(idle);
-    idle = setTimeout(() => ac.abort(new Error('la descarga se quedó sin datos')), idleTimeoutMs);
+    idle = setTimeout(() => ac.abort(new Error(i18n.t('upd.descarga.sin.datos'))), idleTimeoutMs);
   };
-  const deadline = timeoutMs > 0 ? setTimeout(() => ac.abort(new Error('la descarga tardó demasiado')), timeoutMs) : null;
+  const deadline = timeoutMs > 0 ? setTimeout(() => ac.abort(new Error(i18n.t('upd.descarga.lenta'))), timeoutMs) : null;
   const clearWatchdogs = () => {
     clearTimeout(idle);
     clearTimeout(deadline);
@@ -223,7 +225,7 @@ async function downloadTo(url, dest, { fetchFn = fetch, onProgress = null, timeo
       headers: { 'User-Agent': UA, Accept: 'application/octet-stream' },
       signal: ac.signal,
     });
-    if (!res.ok) throw new Error('la descarga respondió ' + res.status);
+    if (!res.ok) throw new Error(i18n.t('upd.descarga.respuesta', { estado: res.status }));
     const total = Number(res.headers && res.headers.get ? res.headers.get('content-length') : 0) || 0;
     const part = dest + '.part';
     await fs.promises.mkdir(path.dirname(dest), { recursive: true });
@@ -608,7 +610,7 @@ async function programarInstalacion({ dir, name, installer, args, logPath, waitM
   const { script, sha256 } = writeHelperPs(psPath, { name, installer, args, logPath, waitMs, graceMs, extraWaitMs, expected, taskName });
   const creada = await exec('schtasks', scheduleCreateArgs({ taskName, psPath, startTime: taskTimePlus(5) }));
   if (creada.code !== 0) {
-    throw new Error('no se pudo programar la instalación (' + String((creada.stderr || creada.stdout || '').trim()).slice(0, 160) + ')');
+    throw new Error(i18n.t('upd.programar.fallo', { detalle: String((creada.stderr || creada.stdout || '').trim()).slice(0, 160) }));
   }
   // El .ps1 vive en %TEMP% y lo ejecuta el servicio del Programador: entre
   // escribirlo y disparar la tarea, otro proceso del usuario podría haberlo
@@ -621,22 +623,24 @@ async function programarInstalacion({ dir, name, installer, args, logPath, waitM
       try {
         await exec('schtasks', ['/delete', '/tn', taskName, '/f']);
       } catch {}
-      throw new Error('el guion de instalación cambió en disco antes de dispararse; abortado por seguridad');
+      const cambiado = new Error(i18n.t('upd.guion.cambio'));
+      cambiado.code = 'guion_cambiado'; // el catch de abajo no puede depender del idioma
+      throw cambiado;
     }
   } catch (e) {
-    if (/cambió en disco/.test(e.message)) throw e;
+    if (e && e.code === 'guion_cambiado') throw e;
     // Si ni siquiera se puede releer, tampoco se dispara a ciegas.
     try {
       await exec('schtasks', ['/delete', '/tn', taskName, '/f']);
     } catch {}
-    throw new Error('no se pudo verificar el guion de instalación (' + e.message + ')');
+    throw new Error(i18n.t('upd.guion.verificar', { motivo: e.message }));
   }
   const disparo = await exec('schtasks', ['/run', '/tn', taskName]);
   if (disparo.code !== 0) {
     try {
       await exec('schtasks', ['/delete', '/tn', taskName, '/f']);
     } catch {}
-    throw new Error('la tarea se programó pero no arrancó (' + String((disparo.stderr || disparo.stdout || '').trim()).slice(0, 160) + ')');
+    throw new Error(i18n.t('upd.tarea.no.arranco', { detalle: String((disparo.stderr || disparo.stdout || '').trim()).slice(0, 160) }));
   }
   return { ok: true, taskName, psPath, script };
 }

@@ -36,6 +36,25 @@ test('idioma: el renderer lee el idioma de argv (canal único, sin IPC)', () => 
   ok(/additionalArguments:\s*\[/.test(ventana), 'la ventana tiene que pasar el argumento');
 });
 
+test('idioma: --sag-idioma=es|en se impone a los ajustes y al locale del sistema', () => {
+  const { idiomaDeArgumentos, resolverIdiomaArranque } = require('../main/idioma');
+  eq(idiomaDeArgumentos(['--sag-idioma=en']), 'en');
+  eq(idiomaDeArgumentos(['x', '--sag-idioma=es']), 'es');
+  eq(idiomaDeArgumentos(['--sag-idioma=fr']), null, 'un valor inválido no anula nada');
+  eq(idiomaDeArgumentos([]), null, 'sin flag no hay anulación');
+  eq(resolverIdiomaArranque('es', 'es-ES', ['--sag-idioma=en']), 'en', 'manda sobre lo guardado en Ajustes');
+  eq(resolverIdiomaArranque('auto', 'es-ES', []), 'es', 'sin flag, como siempre');
+  eq(resolverIdiomaArranque('en', 'es-ES', ['--sag-idioma=basura']), 'en', 'una errata no cambia lo elegido');
+  // main tiene que pasarle los argumentos: si no, el flag existiría y no haría nada
+  const fs = require('fs');
+  const path = require('path');
+  const src = fs.readFileSync(path.join(__dirname, '..', 'main', 'main.js'), 'utf8');
+  ok(
+    /resolverIdiomaArranque\(config\.settings[^;]*process\.argv\)/.test(src),
+    'main resuelve el idioma con los argumentos del proceso',
+  );
+});
+
 test('idioma: los dos diccionarios del motor tienen exactamente las mismas claves', () => {
   const i18n = require('../agent/i18n');
   const es = i18n.claves('es').sort();

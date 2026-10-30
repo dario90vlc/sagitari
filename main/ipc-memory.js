@@ -30,7 +30,10 @@
  *  para que un valor inventado no llegue al perfil. */
 const CATEGORIAS_HABITOS = new Set(['herramientas', 'aplicaciones', 'comandos', 'carpetas', 'webs', 'modos', 'permisos', 'todo']);
 
-const SIN_ALMACEN = { ok: false, error: 'almacén no disponible' };
+const i18n = require('../agent/i18n');
+/* Fábrica y no objeto: `t()` lee el idioma activo en cada llamada y el router se monta
+   antes de que main.js lo fije. */
+const SIN_ALMACEN = () => ({ ok: false, error: i18n.t('memoria.sin.almacen') });
 
 /** Id de una entrada: llega del renderer, así que se comprueba antes de tocar el almacén. */
 const idValido = (payload) => !!(payload && typeof payload.id === 'string' && payload.id.trim());
@@ -51,7 +54,7 @@ function estadoAlmacen(memory) {
 /** Escribir con un almacén que no se ha podido leer perdería hechos: se rechaza y se dice. */
 function bloqueadoParaEscribir(memory) {
   const est = estadoAlmacen(memory);
-  return est.ok ? null : { ok: false, error: est.error || 'no se pudo leer el almacén' };
+  return est.ok ? null : { ok: false, error: est.error || i18n.t('memoria.no.leido') };
 }
 
 /** Ventana a la que empujar los avisos. main.js pasa getWin, como a los demás
@@ -78,12 +81,12 @@ function registerMemoryIpc(ipcMain, ctx) {
      falso). Los canales anteriores a esta corrección devolvían siempre un array. */
   ipcMain.handle('memory:list', () => {
     const est = estadoAlmacen(memory);
-    if (!est.ok) throw new Error(est.error || 'no se pudo leer el almacén');
+    if (!est.ok) throw new Error(est.error || i18n.t('memoria.no.leido'));
     return memory.list();
   });
   ipcMain.handle('memory:add', (e, item) => {
     if (!item || typeof item.text !== 'string' || !item.text.trim()) {
-      return { ok: false, error: 'text es obligatorio' };
+      return { ok: false, error: i18n.t('memoria.texto') };
     }
     const bloqueo = bloqueadoParaEscribir(memory);
     if (bloqueo) return bloqueo;
@@ -96,7 +99,7 @@ function registerMemoryIpc(ipcMain, ctx) {
   });
   ipcMain.handle('memory:update', (e, { id, patch }) => {
     if (!id || typeof id !== 'string') {
-      return { ok: false, error: 'id es obligatorio' };
+      return { ok: false, error: i18n.t('memoria.id') };
     }
     const bloqueo = bloqueadoParaEscribir(memory);
     if (bloqueo) return bloqueo;
@@ -104,7 +107,7 @@ function registerMemoryIpc(ipcMain, ctx) {
   });
   ipcMain.handle('memory:remove', (e, id) => {
     if (!id || typeof id !== 'string') {
-      return { ok: false, error: 'id es obligatorio' };
+      return { ok: false, error: i18n.t('memoria.id') };
     }
     const bloqueo = bloqueadoParaEscribir(memory);
     if (bloqueo) return bloqueo;
@@ -112,33 +115,33 @@ function registerMemoryIpc(ipcMain, ctx) {
   });
 
   /* ---- v2: bandeja de aprobación («Recién aprendido») ---- */
-  ipcMain.handle('memory:tray:list', () => (typeof memory.trayList === 'function' ? memory.trayList() : SIN_ALMACEN));
+  ipcMain.handle('memory:tray:list', () => (typeof memory.trayList === 'function' ? memory.trayList() : SIN_ALMACEN()));
   ipcMain.handle('memory:tray:accept', (e, payload) => {
-    if (!idValido(payload)) return { ok: false, error: 'id es obligatorio' };
-    return typeof memory.trayAceptar === 'function' ? memory.trayAceptar(payload.id) : SIN_ALMACEN;
+    if (!idValido(payload)) return { ok: false, error: i18n.t('memoria.id') };
+    return typeof memory.trayAceptar === 'function' ? memory.trayAceptar(payload.id) : SIN_ALMACEN();
   });
   ipcMain.handle('memory:tray:discard', (e, payload) => {
-    if (!idValido(payload)) return { ok: false, error: 'id es obligatorio' };
-    return typeof memory.trayDescartar === 'function' ? memory.trayDescartar(payload.id) : SIN_ALMACEN;
+    if (!idValido(payload)) return { ok: false, error: i18n.t('memoria.id') };
+    return typeof memory.trayDescartar === 'function' ? memory.trayDescartar(payload.id) : SIN_ALMACEN();
   });
 
   /* ---- v2: papelera (lo olvidado, recuperable 30 días) ---- */
   ipcMain.handle('memory:trash:list', () => {
     const est = estadoAlmacen(memory);
-    if (!est.ok) throw new Error(est.error || 'no se pudo leer el almacén');
-    return typeof memory.listTrash === 'function' ? memory.listTrash() : SIN_ALMACEN;
+    if (!est.ok) throw new Error(est.error || i18n.t('memoria.no.leido'));
+    return typeof memory.listTrash === 'function' ? memory.listTrash() : SIN_ALMACEN();
   });
   ipcMain.handle('memory:trash:restore', (e, payload) => {
-    if (!idValido(payload)) return { ok: false, error: 'id es obligatorio' };
-    return typeof memory.restore === 'function' ? memory.restore(payload.id) : SIN_ALMACEN;
+    if (!idValido(payload)) return { ok: false, error: i18n.t('memoria.id') };
+    return typeof memory.restore === 'function' ? memory.restore(payload.id) : SIN_ALMACEN();
   });
-  ipcMain.handle('memory:trash:empty', () => (typeof memory.trashEmpty === 'function' ? memory.trashEmpty() : SIN_ALMACEN));
+  ipcMain.handle('memory:trash:empty', () => (typeof memory.trashEmpty === 'function' ? memory.trashEmpty() : SIN_ALMACEN()));
 
   /* ---- v2: exportar (JSON legible), olvidarlo todo y recuperar una copia ---- */
   ipcMain.handle('memory:export', () => {
     const bloqueo = bloqueadoParaEscribir(memory);
     if (bloqueo) return bloqueo; // exportar un almacén que no se ha leído copiaría un volcado falso
-    return typeof memory.exportar === 'function' ? memory.exportar() : SIN_ALMACEN;
+    return typeof memory.exportar === 'function' ? memory.exportar() : SIN_ALMACEN();
   });
   /* «Olvídalo todo» promete «todos los hechos, la papelera, la bandeja y tus hábitos», y
      el perfil observado vive en agent/habits.js: se borra desde aquí, que es el único
@@ -146,19 +149,19 @@ function registerMemoryIpc(ipcMain, ctx) {
      hechos no se pudieron olvidar, no se toca el perfil: media promesa es peor que
      ninguna. */
   ipcMain.handle('memory:wipe', () => {
-    if (typeof memory.wipe !== 'function') return SIN_ALMACEN;
+    if (typeof memory.wipe !== 'function') return SIN_ALMACEN();
     const r = memory.wipe();
     if (r && r.ok !== false && habits && typeof habits.reset === 'function') habits.reset();
     return r;
   });
   /* Salida cuando memory.json no se pudo leer: el almacén conserva una copia. */
-  ipcMain.handle('memory:restore-backup', () => (typeof memory.restaurarCopia === 'function' ? memory.restaurarCopia() : SIN_ALMACEN));
+  ipcMain.handle('memory:restore-backup', () => (typeof memory.restaurarCopia === 'function' ? memory.restaurarCopia() : SIN_ALMACEN()));
 
   /* ---- hábitos: olvidar una categoría ---- */
   ipcMain.handle('habits:forget', (e, payload) => {
     const categoria = payload && payload.categoria;
-    if (!CATEGORIAS_HABITOS.has(categoria)) return { ok: false, error: 'categoría no válida' };
-    return typeof habits.olvidar === 'function' ? habits.olvidar(categoria) : SIN_ALMACEN;
+    if (!CATEGORIAS_HABITOS.has(categoria)) return { ok: false, error: i18n.t('memoria.categoria') };
+    return typeof habits.olvidar === 'function' ? habits.olvidar(categoria) : SIN_ALMACEN();
   });
 
   /* El almacén avisa cuando la extracción deja una propuesta: el aviso nace en

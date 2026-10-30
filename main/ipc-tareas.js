@@ -43,6 +43,7 @@ function registerTareasIpc(ipcMain, ctx) {
   const tmPeek = () => ctx.peekTaskManager();
   const runtimes = ctx.runtimes;
   const { persistConfig, checkpoints, securityDefaults, DEFAULT_RISK, CONFIG_DIR, runlog } = ctx;
+  const i18n = require('../agent/i18n');
 
   // ---- v1.2/v1.3 tareas: cola en background, listado, pausa, cancelar, borrar ----
   /* El runId llega del renderer y termina dentro de una ruta (`tasks/<id>/run.json`).
@@ -50,7 +51,9 @@ function registerTareasIpc(ipcMain, ctx) {
      agent/checkpoints.js (defensa en profundidad: `remove()` construye rutas y borra
      recursivamente, y pause/cancel reescriben el run.json apuntado). */
   const runIdOk = (runId) => checkpoints.safeRunId(runId);
-  const ID_MALO = { ok: false, error: 'Identificador de tarea no válido.' };
+  /* Fábrica: este router se monta antes de que main.js fije el idioma, así que el texto
+     se resuelve en cada respuesta y no al registrar los canales. */
+  const ID_MALO = () => ({ ok: false, error: i18n.t('tareas.id.invalido') });
   ipcMain.handle('tasks:list', () => (tmPeek() ? tmPeek().list() : checkpoints.list('all')));
   ipcMain.handle('tasks:enqueue', (e, data) =>
     tm().enqueue({
@@ -62,23 +65,23 @@ function registerTareasIpc(ipcMain, ctx) {
   );
   ipcMain.handle('tasks:pause', (e, runId) => {
     const id = runIdOk(runId);
-    if (!id) return ID_MALO;
-    return tmPeek() ? tmPeek().pause(id) : { ok: false, error: 'sin gestor de tareas' };
+    if (!id) return ID_MALO();
+    return tmPeek() ? tmPeek().pause(id) : { ok: false, error: i18n.t('tareas.sin.gestor') };
   });
   ipcMain.handle('tasks:resume', (e, runId) => {
     const id = runIdOk(runId);
-    return id ? tm().resume(id) : ID_MALO;
+    return id ? tm().resume(id) : ID_MALO();
   });
   ipcMain.handle('tasks:cancel', (e, runId) => {
     const id = runIdOk(runId);
-    if (!id) return ID_MALO;
-    return tmPeek() ? tmPeek().cancel(id) : { ok: false, error: 'sin gestor de tareas' };
+    if (!id) return ID_MALO();
+    return tmPeek() ? tmPeek().cancel(id) : { ok: false, error: i18n.t('tareas.sin.gestor') };
   });
   // borrar una tarea viva exige parar su agente: checkpoints.remove rechaza los
   // estados vivos, así que el borrado pasa por el gestor (que sí detiene y olvida)
   ipcMain.handle('tasks:remove', (e, runId) => {
     const id = runIdOk(runId);
-    if (!id) return ID_MALO;
+    if (!id) return ID_MALO();
     return tmPeek() ? tmPeek().remove(id) : checkpoints.remove(id);
   });
 
@@ -106,7 +109,7 @@ function registerTareasIpc(ipcMain, ctx) {
     if (Agent.routeConfirm(String(id || ''), approved)) return { ok: true };
     // ninguna confirmación viva con ese id: antes se respondía ok y el renderer no
     // podía distinguir «resuelta» de «ya no existe»
-    return { ok: false, error: 'la confirmación ya no está pendiente' };
+    return { ok: false, error: i18n.t('tareas.confirmacion.caducada') };
   });
   /* Validación de sec:setToolPerm. La clave y el nivel existían SOLO en el desplegable del
    renderer: main aceptaba cualquier nombre y cualquier nivel. Se valida contra la MISMA
@@ -130,14 +133,19 @@ function registerTareasIpc(ipcMain, ctx) {
       s.permissions = previo.permissions;
       s.guardrails = previo.guardrails;
       for (const a of runtimes.allAgents()) a.setPolicy(cfg().security);
-      return { ok: false, error: 'no se pudo guardar la seguridad: ' + ((r.error && String(r.error)) || 'error desconocido') };
+      return {
+        ok: false,
+        error: i18n.t('tareas.guardar.fallo', { motivo: (r.error && String(r.error)) || i18n.t('tareas.error.desconocido') }),
+      };
     }
     return { ...r, ...extra() };
   };
   ipcMain.handle('sec:setToolPerm', (e, { tool, level } = {}) => {
     const t = String(tool || '');
-    if (!CLAVES_HERRAMIENTA.has(t) && !COMODIN_MCP_RX.test(t)) return { ok: false, error: 'herramienta desconocida: ' + t };
-    if (level !== 'default' && !NIVELES_PERMISO.includes(level)) return { ok: false, error: 'nivel no válido: ' + level };
+    if (!CLAVES_HERRAMIENTA.has(t) && !COMODIN_MCP_RX.test(t))
+      return { ok: false, error: i18n.t('tareas.herramienta.desconocida', { herramienta: t }) };
+    if (level !== 'default' && !NIVELES_PERMISO.includes(level))
+      return { ok: false, error: i18n.t('tareas.nivel.invalido', { nivel: level }) };
     const previo = fotoSeguridad();
     if (!cfg().security) cfg().security = { permissions: {}, guardrails: securityDefaults.guardrails };
     if (level === 'default') delete cfg().security.permissions[t];
@@ -152,10 +160,12 @@ function registerTareasIpc(ipcMain, ctx) {
      mitad dejaba media tabla aplicada. */
   ipcMain.handle('sec:setToolPermMany', (e, { tools, level } = {}) => {
     const lista = Array.isArray(tools) ? [...new Set(tools.map((t) => String(t || '')))] : [];
-    if (!lista.length) return { ok: false, error: 'sin herramientas' };
-    if (level !== 'default' && !NIVELES_PERMISO.includes(level)) return { ok: false, error: 'nivel no válido: ' + level };
+    if (!lista.length) return { ok: false, error: i18n.t('tareas.sin.herramientas') };
+    if (level !== 'default' && !NIVELES_PERMISO.includes(level))
+      return { ok: false, error: i18n.t('tareas.nivel.invalido', { nivel: level }) };
     for (const t of lista) {
-      if (!CLAVES_HERRAMIENTA.has(t) && !COMODIN_MCP_RX.test(t)) return { ok: false, error: 'herramienta desconocida: ' + t };
+      if (!CLAVES_HERRAMIENTA.has(t) && !COMODIN_MCP_RX.test(t))
+        return { ok: false, error: i18n.t('tareas.herramienta.desconocida', { herramienta: t }) };
     }
     const previo = fotoSeguridad();
     if (!cfg().security) cfg().security = { permissions: {}, guardrails: securityDefaults.guardrails };

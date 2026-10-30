@@ -16,6 +16,7 @@
 
 function registerCambiosIpc(ipcMain, ctx) {
   const { cambios, repomap, instrucciones, runlog, fs, path } = ctx;
+  const i18n = require('../agent/i18n');
   const runtimes = ctx.runtimes;
   /* El dueño de los cambios: la conversación que los hizo. Si el renderer no manda el
      id se resuelve la conversación abierta (lo que hacía el agente único de antes). */
@@ -32,18 +33,18 @@ function registerCambiosIpc(ipcMain, ctx) {
      Se niega con el agente trabajando: deshacer mientras hay una escritura en vuelo
      restauraría un archivo que la herramienta está a punto de volver a escribir. */
   ipcMain.handle('cambios:deshacer', async (e, convId) => {
-    if (trabaja(convId)) return { ok: false, error: 'SAGITARI está trabajando ahora mismo: detén la tarea antes de deshacer' };
+    if (trabaja(convId)) return { ok: false, error: i18n.t('cambios.trabajando.deshacer') };
     const ws = ctx.getWorkspace();
     const d = dueno(convId);
     /* El código viaja junto al texto legible: el renderer decide con `code` y así puede
        traducirse el mensaje sin que el botón de Deshacer se quede colgado. */
-    if (!cambios.puedeDeshacer(ws, d)) return { ok: false, code: 'sin_cambios', error: 'no hay ningún cambio de este turno que deshacer' };
+    if (!cambios.puedeDeshacer(ws, d)) return { ok: false, code: 'sin_cambios', error: i18n.t('cambios.nada') };
     const plan = cambios.planDeshacer(ws, d);
     let r;
     try {
       r = cambios.deshacer(ws, {}, d);
     } catch (e) {
-      return { ok: false, error: 'no se pudo deshacer: ' + ((e && e.message) || e) };
+      return { ok: false, error: i18n.t('cambios.fallo.deshacer', { motivo: (e && e.message) || e }) };
     }
     try {
       repomap.invalidar(ws);
@@ -62,8 +63,8 @@ function registerCambiosIpc(ipcMain, ctx) {
     if (r.fallos > 0) {
       const reintentables = (r.archivos || []).filter((a) => a && a.accion !== 'fuera-del-espacio').length;
       const error = reintentables
-        ? `no se pudieron deshacer ${reintentables} archivo(s) de este turno: se puede reintentar`
-        : `no se pudieron deshacer ${r.fallos} archivo(s): su ruta queda fuera del espacio de trabajo de este turno`;
+        ? i18n.t('cambios.fallos.reintentar', { n: reintentables })
+        : i18n.t('cambios.fallos.fuera', { n: r.fallos });
       return { ok: false, error, ...r, plan: plan.length };
     }
     return { ok: true, ...r, plan: plan.length };
@@ -85,7 +86,7 @@ function registerCambiosIpc(ipcMain, ctx) {
     try {
       return { ok: true, archivos: cambios.diffEstructurado(ws, {}, dueno(convId)) || [] };
     } catch (e) {
-      return { ok: false, error: 'no se pudo preparar el diff: ' + ((e && e.message) || e), archivos: [] };
+      return { ok: false, error: i18n.t('cambios.fallo.diff', { motivo: (e && e.message) || e }), archivos: [] };
     }
   });
 
@@ -93,13 +94,13 @@ function registerCambiosIpc(ipcMain, ctx) {
      agente trabajando por el mismo motivo que deshacer: restauraría un archivo que la
      herramienta está a punto de volver a escribir. */
   ipcMain.handle('cambios:revertir', async (e, convId, archivo) => {
-    if (trabaja(convId)) return { ok: false, error: 'SAGITARI está trabajando ahora mismo: detén la tarea antes de revertir' };
+    if (trabaja(convId)) return { ok: false, error: i18n.t('cambios.trabajando.revertir') };
     const ws = ctx.getWorkspace();
     let r;
     try {
       r = cambios.archivoRevertir(ws, archivo, dueno(convId));
     } catch (e2) {
-      return { ok: false, error: 'no se pudo revertir «' + String(archivo) + '»: ' + ((e2 && e2.message) || e2) };
+      return { ok: false, error: i18n.t('cambios.fallo.revertir', { archivo: String(archivo), motivo: (e2 && e2.message) || e2 }) };
     }
     try {
       repomap.invalidar(ws);

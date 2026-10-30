@@ -21,6 +21,7 @@
  */
 
 const SECRETO_MASK = '••••';
+const i18n = require('../agent/i18n');
 
 /* v4.4: tope duro del presupuesto de un encargo de equipo (USD). El ajuste admite
    0..este valor; se exporta para que la vista Equipo y meta:get compartan el número
@@ -52,14 +53,14 @@ function enmascararMapaSecretos(obj) {
    (antes activar no comprobaba nada y el badge decía «Conectado» con una URL rota).
    `activate` no exige id (el catálogo lo resuelve después) pero sí modelo. */
 function validateProvider(p, { requireId = true, requireModel = false } = {}) {
-  if (!p || typeof p !== 'object') return { ok: false, error: 'proveedor inválido' };
-  if (requireId && (typeof p.id !== 'string' || !p.id.trim())) return { ok: false, error: 'id requerido' };
+  if (!p || typeof p !== 'object') return { ok: false, error: i18n.t('config.prov.invalido') };
+  if (requireId && (typeof p.id !== 'string' || !p.id.trim())) return { ok: false, error: i18n.t('config.prov.id') };
   const baseUrl = typeof p.baseUrl === 'string' ? p.baseUrl.trim() : '';
   if (!baseUrl || (!/^https?:\/\//i.test(baseUrl) && !/^(localhost|127\.0\.0\.1)(:\d+)?([/?#]|$)/i.test(baseUrl))) {
-    return { ok: false, error: 'baseUrl debe ser http(s) o localhost' };
+    return { ok: false, error: i18n.t('config.prov.base') };
   }
   if (requireModel && (typeof p.model !== 'string' || !p.model.trim())) {
-    return { ok: false, error: 'selecciona un modelo antes de activar' };
+    return { ok: false, error: i18n.t('config.prov.modelo') };
   }
   return null;
 }

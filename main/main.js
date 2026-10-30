@@ -15,7 +15,7 @@ ipcMain.handle = (channel, handler) => {
     const url = event && event.senderFrame && event.senderFrame.url ? String(event.senderFrame.url) : '';
     if (!/^file:/i.test(url)) {
       log.warn('[ipc] remitente no autorizado para ' + channel + ': ' + (url || '(sin url)'));
-      return { ok: false, error: 'remitente no autorizado' };
+      return { ok: false, error: i18n.t('error.remitente') };
     }
     return handler(event, ...args);
   };
@@ -45,6 +45,7 @@ const {
 } = require('./config');
 const { crearVentana } = require('./ventana');
 const { crearBandeja } = require('./bandeja');
+const { resolverIdiomaArranque } = require('./idioma');
 const { createRuntimes } = require('./runtimes');
 const log = require('./log');
 
@@ -370,7 +371,7 @@ function applyConfig(raw) {
          la geometría de la ventana, por ejemplo— reescribe la lista entera y lo borraría
          del disco sin que nadie se entere. Se conserva marcado, no se arranca solo y la
          vista lo puede enseñar como inválido. */
-      servers.push({ ...s, invalid: String((v && v.error) || 'no válido') });
+      servers.push({ ...s, invalid: String((v && v.error) || i18n.t('mcp.invalido')) });
       log.warn('[SAGITARI] servidor MCP conservado pero inválido (no se arranca): ' + (s.id || '?') + ' — ' + (v && v.error));
     }
   }
@@ -463,7 +464,7 @@ function avisarDisco(mensaje) {
   const now = Date.now();
   if (now - avisoDiscoAt < 30000) return;
   avisoDiscoAt = now;
-  enviarAviso('No se pudo guardar', mensaje);
+  enviarAviso(i18n.t('aviso.guardar.titulo'), mensaje);
 }
 
 /* Persiste y, si falla, avisa al usuario: los controles de Ajustes ya han
@@ -471,7 +472,7 @@ function avisarDisco(mensaje) {
    usuario creyendo que se guardó algo que se perderá al reiniciar. */
 function persistConfig() {
   const r = saveConfig();
-  if (!r.ok) avisarDisco('La configuración no se pudo escribir en disco (' + r.error + ').');
+  if (!r.ok) avisarDisco(i18n.t('aviso.config.disco', { motivo: r.error }));
   return r;
 }
 
@@ -636,17 +637,13 @@ function wireTaskManager() {
       if (getWin() && !getWin().isDestroyed()) getWin().webContents.send('agent:event', e);
     },
     notify: (run, kind) => {
-      const title =
-        'SAGITARI — tarea ' +
-        (kind === 'completed'
-          ? 'completada'
-          : kind === 'failed'
-            ? 'falló'
-            : kind === 'cancelled'
-              ? 'cancelada'
-              : kind === 'paused'
-                ? 'pausada'
-                : 'actualizada');
+      const ESTADO = {
+        completed: 'aviso.tarea.completada',
+        failed: 'aviso.tarea.fallo',
+        cancelled: 'aviso.tarea.cancelada',
+        paused: 'aviso.tarea.pausada',
+      };
+      const title = i18n.t('aviso.tarea.titulo', { estado: i18n.t(ESTADO[kind] || 'aviso.tarea.actualizada') });
       const body = String(run.goal || '').slice(0, 120);
       try {
         const { Notification } = require('electron');
@@ -1032,9 +1029,10 @@ app.whenReady().then(() => {
   }
   loadConfig();
   /* Idioma: UNA lectura al arrancar, con la configuración ya cargada y antes de crear la
-     ventana. Lo elegido en Ajustes manda; si está en «auto» decide el locale del sistema.
-     El motor queda configurado aquí para todos sus mensajes. */
-  idiomaActivo = i18n.resolverIdioma(config.settings && config.settings.uiLang, app.getLocale());
+     ventana. Lo elegido en Ajustes manda; si está en «auto» decide el locale del sistema,
+     y `--sag-idioma=es|en` se impone a las dos (main/idioma.js, fuera de aquí para poder
+     probarlo sin Electron). El motor queda configurado aquí para todos sus mensajes. */
+  idiomaActivo = resolverIdiomaArranque(config.settings && config.settings.uiLang, app.getLocale(), process.argv);
   i18n.configurar(idiomaActivo);
   if (BANCO) {
     correrBancoYsalir().catch((e) => {

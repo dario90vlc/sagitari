@@ -5,6 +5,7 @@
    ejecutará y la URL a la que se enviará el token. */
 
 const { httpUrlAllowed, buildCmdLine } = require('../agent/mcp-transport');
+const i18n = require('../agent/i18n');
 
 const ID_RX = /^[a-z0-9_-]{1,24}$/;
 const TRANSPORTS = ['stdio', 'http'];
@@ -36,15 +37,15 @@ function validateServer(raw) {
   // '../fuera' saneado en silencio acabaría guardado como «fuera» (el usuario
   // creería haber configurado otra cosa).
   const idBruto = String(s.id == null ? '' : s.id).trim();
-  if (/[\\/]/.test(idBruto) || idBruto.includes('..')) return { ok: false, error: 'El identificador no puede contener rutas.' };
+  if (/[\\/]/.test(idBruto) || idBruto.includes('..')) return { ok: false, error: i18n.t('mcp.id.ruta') };
   const id = rawId(idBruto);
-  if (!id || !ID_RX.test(id)) return { ok: false, error: 'El identificador debe tener letras, números, guion o guion bajo (máx. 24).' };
+  if (!id || !ID_RX.test(id)) return { ok: false, error: i18n.t('mcp.id.formato') };
   // Un transporte desconocido no se degrada a stdio en silencio: se explica.
   const transport = s.transport === undefined || s.transport === null || s.transport === '' ? 'stdio' : String(s.transport);
-  if (!TRANSPORTS.includes(transport)) return { ok: false, error: `Transporte no soportado: «${transport}» (usa stdio o http).` };
+  if (!TRANSPORTS.includes(transport)) return { ok: false, error: i18n.t('mcp.transporte', { transporte: transport }) };
   const timeoutMs = s.timeoutMs === undefined || s.timeoutMs === '' ? 60000 : Number(s.timeoutMs);
   if (!Number.isFinite(timeoutMs) || timeoutMs < 5000 || timeoutMs > 300000) {
-    return { ok: false, error: 'El timeout debe estar entre 5 y 300 segundos.' };
+    return { ok: false, error: i18n.t('mcp.timeout') };
   }
   const base = {
     id,
@@ -60,13 +61,13 @@ function validateServer(raw) {
   };
   if (transport === 'stdio') {
     const command = String(s.command || '').trim();
-    if (!command) return { ok: false, error: 'Falta el comando del servidor.' };
+    if (!command) return { ok: false, error: i18n.t('mcp.comando') };
     // Un `args` que no sea lista (JSON pegado de otro cliente, config editado a mano)
     // reventaba en buildCmdLine como «args.map is not a function», que no explica nada.
     // `null` y `''` NO entran aquí: son «sin argumentos», y abortar por ellos descartaría
     // en silencio un servidor que hasta ahora cargaba bien.
     if (s.args != null && s.args !== '' && !Array.isArray(s.args)) {
-      return { ok: false, error: 'Los argumentos deben ser una lista (ej.: ["-y", "paquete"]).' };
+      return { ok: false, error: i18n.t('mcp.args') };
     }
     try {
       buildCmdLine(command, s.args || []);
@@ -75,16 +76,16 @@ function validateServer(raw) {
     }
     const env = {};
     for (const [k, v] of Object.entries(s.env && typeof s.env === 'object' ? s.env : {})) {
-      if (!/^[A-Za-z_][A-Za-z0-9_]*$/.test(k)) return { ok: false, error: `Nombre de variable inválido: ${k}` };
+      if (!/^[A-Za-z_][A-Za-z0-9_]*$/.test(k)) return { ok: false, error: i18n.t('mcp.var.invalida', { nombre: k }) };
       env[k] = String(v == null ? '' : v);
     }
     return { ok: true, value: { ...base, command, args: (s.args || []).map(String), cwd: String(s.cwd || ''), env } };
   }
   const url = String(s.url || '').trim();
-  if (!httpUrlAllowed(url)) return { ok: false, error: 'La URL debe ser https (o http en localhost/127.0.0.1).' };
+  if (!httpUrlAllowed(url)) return { ok: false, error: i18n.t('mcp.url') };
   const headers = {};
   for (const [k, v] of Object.entries(s.headers && typeof s.headers === 'object' ? s.headers : {})) {
-    if (!/^[A-Za-z0-9-]+$/.test(k)) return { ok: false, error: `Cabecera inválida: ${k}` };
+    if (!/^[A-Za-z0-9-]+$/.test(k)) return { ok: false, error: i18n.t('mcp.cabecera', { nombre: k }) };
     headers[k] = String(v == null ? '' : v);
   }
   return { ok: true, value: { ...base, url, headers } };
@@ -241,10 +242,10 @@ function parseMcpImport(text) {
   try {
     raw = JSON.parse(String(text || ''));
   } catch {
-    return { ok: false, error: 'Eso no es JSON válido.' };
+    return { ok: false, error: i18n.t('mcp.json') };
   }
   const mapa = (raw && raw.mcpServers) || raw;
-  if (!mapa || typeof mapa !== 'object' || Array.isArray(mapa)) return { ok: false, error: 'No encuentro el bloque mcpServers.' };
+  if (!mapa || typeof mapa !== 'object' || Array.isArray(mapa)) return { ok: false, error: i18n.t('mcp.sin.bloque') };
   const servers = [];
   const rechazados = [];
   for (const [id, def] of Object.entries(mapa)) {
@@ -262,7 +263,7 @@ function parseMcpImport(text) {
     if (v.ok) servers.push(v.value);
     else rechazados.push(id + ': ' + v.error);
   }
-  if (!servers.length) return { ok: false, error: 'Ningún servidor válido. ' + rechazados.join(' · ') };
+  if (!servers.length) return { ok: false, error: i18n.t('mcp.sin.servidores', { motivos: rechazados.join(' · ') }) };
   return { ok: true, servers };
 }
 

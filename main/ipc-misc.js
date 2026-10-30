@@ -15,6 +15,7 @@
  */
 
 const { validarWorkspaceRuta } = require('./workspace-ruta');
+const i18n = require('../agent/i18n');
 
 function registerMiscIpc(ipcMain, ctx) {
   // config es un getter (() => config de main): el objeto es único y vivo,
@@ -48,24 +49,24 @@ function registerMiscIpc(ipcMain, ctx) {
     const explicit = String(p || '').trim();
     // UNC (\\servidor\recurso) fuera: no es una carpeta local y no debe poder fijar
     // el espacio de trabajo de la app.
-    if (/^[\\/]{2}/.test(explicit)) return { ok: false, error: 'Ruta de red no permitida' };
+    if (/^[\\/]{2}/.test(explicit)) return { ok: false, error: i18n.t('misc.red') };
     let target = explicit.replace(/^~(?=\/|\\|$)/, app.getPath('home'));
     if (!target) target = app.getPath('desktop');
     let st;
     try {
       st = fs.statSync(target);
     } catch {
-      return { ok: false, error: 'La ruta no existe: ' + target };
+      return { ok: false, error: i18n.t('misc.ruta.no.existe', { ruta: target }) };
     }
     if (st.isFile()) {
       target = path.dirname(target); // un archivo abre su carpeta contenedora
       try {
         st = fs.statSync(target);
       } catch {
-        return { ok: false, error: 'La ruta no es una carpeta: ' + target };
+        return { ok: false, error: i18n.t('misc.ruta.no.carpeta', { ruta: target }) };
       }
     }
-    if (!st.isDirectory()) return { ok: false, error: 'La ruta no es una carpeta: ' + target };
+    if (!st.isDirectory()) return { ok: false, error: i18n.t('misc.ruta.no.carpeta', { ruta: target }) };
     const err = await shell.openPath(target);
     if (err) return { ok: false, error: err };
     // Proyectos = espacio de trabajo: abrir una carpeta aquí la convierte en la activa

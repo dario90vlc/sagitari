@@ -12,6 +12,7 @@
 const { BrowserWindow, screen, shell, dialog, app } = require('electron');
 const { pathToFileURL } = require('url');
 const path = require('path');
+const i18n = require('../agent/i18n');
 
 function crearVentana({ HIDDEN, DEV, INDEX_HTML, getAgent, getConfig, saveConfig, onListo = null, idioma = 'es' }) {
   /* El idioma se lee al ABRIR la ventana, no al montar el factory: main.js monta este
@@ -230,10 +231,10 @@ function crearVentana({ HIDDEN, DEV, INDEX_HTML, getAgent, getConfig, saveConfig
     try {
       eleccion = dialog.showMessageBoxSync(win && !win.isDestroyed() ? win : null, {
         type: 'error',
-        title: 'SAGITARI — la interfaz no ha vuelto',
-        message: 'La interfaz de SAGITARI se ha caído y no ha podido recargarse.',
-        detail: 'Puedes reiniciarla sin cerrar la aplicación.',
-        buttons: ['Reiniciar la interfaz', 'Cerrar SAGITARI'],
+        title: i18n.t('ventana.caida.titulo'),
+        message: i18n.t('ventana.caida.mensaje'),
+        detail: i18n.t('ventana.caida.detalle'),
+        buttons: [i18n.t('ventana.caida.reiniciar'), i18n.t('ventana.caida.cerrar')],
         defaultId: 0,
         cancelId: 1,
       });

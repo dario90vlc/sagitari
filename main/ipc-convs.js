@@ -22,6 +22,12 @@
  */
 
 const { validarWorkspaceRuta } = require('./workspace-ruta');
+const i18n = require('../agent/i18n');
+/* Los DOS títulos por defecto, en cualquier idioma: el título se guarda en
+   conversations.json con el idioma que había al crearla, así que renombrar tiene que
+   reconocer el de antes (español) y el actual. */
+const DICCIONARIOS_TITULO = [require('../agent/i18n/es'), require('../agent/i18n/en')];
+const esTituloPorDefecto = (t) => DICCIONARIOS_TITULO.some((d) => d['conv.nueva'] === t);
 
 function registerConvsIpc(ipcMain, ctx) {
   // config es un getter (() => config de main): el objeto es único y vivo,
@@ -70,13 +76,12 @@ function registerConvsIpc(ipcMain, ctx) {
       console.error('conversations.json ilegible (' + err.message + '): ' + (desdeBak ? 'recuperado desde el .bak' : 'se empieza de cero'));
       // El aviso tiene que llegar a la ventana: en la app empaquetada no hay consola y el
       // toast se suelta cuando la ventana está lista (main.js encola si aún no existe).
-      const aviso =
-        'El historial de conversaciones no se pudo leer (' +
-        err.message +
-        '). ' +
-        (desdeBak ? 'Se ha recuperado la copia de seguridad.' : 'Se empieza de cero.') +
-        (conservado ? ' El fichero ilegible se conserva como «' + path.basename(cuarentena) + '».' : '');
-      if (typeof ctx.avisar === 'function') ctx.avisar('Historial de conversaciones', aviso);
+      const aviso = i18n.t('conv.aviso.ilegible', {
+        motivo: err.message,
+        estado: i18n.t(desdeBak ? 'conv.aviso.ilegible.bak' : 'conv.aviso.ilegible.cero'),
+        conservado: conservado ? i18n.t('conv.aviso.ilegible.conservado', { archivo: path.basename(cuarentena) }) : '',
+      });
+      if (typeof ctx.avisar === 'function') ctx.avisar(i18n.t('conv.aviso.titulo'), aviso);
       else ctx.onSaveError(aviso);
     }
   }
@@ -103,9 +108,7 @@ function registerConvsIpc(ipcMain, ctx) {
     } catch (err) {
       console.error('saveConvs', err.message);
       // el chat es el dato con más valor del usuario: si no se pudo escribir, se dice
-      ctx.onSaveError(
-        'La conversación no se pudo escribir en disco (' + err.message + '). Los mensajes nuevos pueden perderse al cerrar la app.',
-      );
+      ctx.onSaveError(i18n.t('conv.aviso.disco', { motivo: err.message }));
     }
   }
   const convById = (id) => convs.find((c) => c.id === id) || null;
@@ -114,7 +117,7 @@ function registerConvsIpc(ipcMain, ctx) {
     if (!currentConv()) {
       const c = {
         id: 'c' + Date.now().toString(36),
-        title: 'Nueva conversación',
+        title: i18n.t('conv.nueva'),
         createdAt: Date.now(),
         updatedAt: Date.now(),
         messages: [],
@@ -167,7 +170,7 @@ function registerConvsIpc(ipcMain, ctx) {
       if (!v.ok) return v;
       const real = v.real;
       if (!fs.existsSync(real)) fs.mkdirSync(real, { recursive: true });
-      if (!fs.statSync(real).isDirectory()) return { ok: false, error: 'La ruta no es una carpeta' };
+      if (!fs.statSync(real).isDirectory()) return { ok: false, error: i18n.t('conv.ruta.no.carpeta') };
       const previo = cfg().settings.workspace;
       cfg().settings.workspace = real;
       // El disco puede fallar (datos en solo lectura, disco lleno, fichero bloqueado) y
@@ -195,7 +198,7 @@ function registerConvsIpc(ipcMain, ctx) {
       const v = validarWorkspaceRuta(p, configDir());
       if (!v.ok) return v;
       const real = v.real;
-      if (!fs.statSync(real).isDirectory()) return { ok: false, error: 'La ruta no es una carpeta' };
+      if (!fs.statSync(real).isDirectory()) return { ok: false, error: i18n.t('conv.ruta.no.carpeta') };
       const previo = cfg().settings.workspace;
       cfg().settings.workspace = real;
       // El disco puede fallar (datos en solo lectura, disco lleno, fichero bloqueado) y
@@ -216,7 +219,7 @@ function registerConvsIpc(ipcMain, ctx) {
   ipcMain.handle('conv:new', () => {
     const c = {
       id: 'c' + Date.now().toString(36),
-      title: 'Nueva conversación',
+      title: i18n.t('conv.nueva'),
       createdAt: Date.now(),
       updatedAt: Date.now(),
       messages: [],
@@ -233,7 +236,7 @@ function registerConvsIpc(ipcMain, ctx) {
   // se invoca desde el renderer cuando cambia el título del chat
   ipcMain.handle('conv:rename', (e, title) => {
     const c = currentConv();
-    if (c && c.title === 'Nueva conversación' && title) {
+    if (c && esTituloPorDefecto(c.title) && title) {
       c.title = String(title).slice(0, 60);
       c.updatedAt = Date.now();
       saveConvs();
@@ -242,7 +245,7 @@ function registerConvsIpc(ipcMain, ctx) {
   });
   ipcMain.handle('conv:open', (e, id) => {
     const c = convById(id);
-    if (!c) return { ok: false, error: 'Conversación no encontrada' };
+    if (!c) return { ok: false, error: i18n.t('conv.no.encontrada') };
     currentConvId = id;
     /* El agente de ESTA conversación. Si ya existe no se toca: su historial en memoria
        es el vivo (el de la conversación que está trabajando) y rehidratarlo tiraría su
@@ -269,10 +272,10 @@ function registerConvsIpc(ipcMain, ctx) {
      en el mismo milisegundo. */
   ipcMain.handle('conv:fork', (e, id) => {
     const src = convs.find((c) => c.id === id) || currentConv();
-    if (!src) return { ok: false, error: 'Conversación no encontrada' };
+    if (!src) return { ok: false, error: i18n.t('conv.no.encontrada') };
     const c = {
       id: 'c' + Date.now().toString(36) + Math.random().toString(36).slice(2, 5),
-      title: (src.title || 'Conversación') + ' (copia)',
+      title: i18n.t('conv.copia', { titulo: src.title || i18n.t('conv.titulo') }),
       createdAt: Date.now(),
       updatedAt: Date.now(),
       messages: JSON.parse(JSON.stringify(src.messages || [])),
@@ -293,11 +296,11 @@ function registerConvsIpc(ipcMain, ctx) {
      `useSession`). */
   ipcMain.handle('conv:rebobinar', (e, { id, index } = {}) => {
     const c = convById(id) || currentConv();
-    if (!c) return { ok: false, error: 'Conversación no encontrada' };
+    if (!c) return { ok: false, error: i18n.t('conv.no.encontrada') };
     const i = Math.round(Number(index));
-    if (!Number.isFinite(i) || i < 0 || i > c.messages.length) return { ok: false, error: 'Punto de rebobinado fuera del hilo' };
+    if (!Number.isFinite(i) || i < 0 || i > c.messages.length) return { ok: false, error: i18n.t('conv.rebobinar.fuera') };
     // el turno que hay que respetar es el de ESA conversación, no el de la que esté a la vista
-    if (runtimes.isBusy(c.id)) return { ok: false, error: 'SAGITARI está trabajando ahora mismo: detén la tarea antes de rebobinar' };
+    if (runtimes.isBusy(c.id)) return { ok: false, error: i18n.t('conv.trabajando.rebobinar') };
     c.messages = c.messages.slice(0, i);
     c.updatedAt = Date.now();
     // su agente suelta además el resumen plegado y la lista de tareas (describen lo que ya no está)

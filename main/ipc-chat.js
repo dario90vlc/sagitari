@@ -46,6 +46,7 @@ function registerChatIpc(ipcMain, ctx) {
   const configDir = () => ctx.configDir();
   const convsApi = ctx.convsApi;
   const { getSkills, getGlow: glow, dialog, fsp, path, attach, memory } = ctx;
+  const i18n = require('../agent/i18n');
 
   /* La conversación que pide el renderer manda. Si no llega el id (una llamada suelta,
      o antes de que haya ninguna conversación en pantalla) se usa la que está abierta,
@@ -59,11 +60,11 @@ function registerChatIpc(ipcMain, ctx) {
   ipcMain.handle('attachments:pick', async () => {
     try {
       const r = await dialog.showOpenDialog(getWin(), {
-        title: 'Adjuntar a la conversación',
+        title: i18n.t('chat.adjuntar.titulo'),
         properties: ['openFile', 'multiSelections'],
         filters: [
           {
-            name: 'Documentos e imágenes',
+            name: i18n.t('chat.adjuntar.filtro'),
             extensions: [
               'pdf',
               'txt',
@@ -124,7 +125,7 @@ function registerChatIpc(ipcMain, ctx) {
               '7z',
             ],
           },
-          { name: 'Todos los archivos', extensions: ['*'] },
+          { name: i18n.t('chat.adjuntar.todos'), extensions: ['*'] },
         ],
       });
       if (r.canceled || !r.filePaths.length) return [];
@@ -137,7 +138,7 @@ function registerChatIpc(ipcMain, ctx) {
 
   ipcMain.handle('attachments:read', async (e, filePath) => {
     try {
-      if (typeof filePath !== 'string' || !path.isAbsolute(filePath)) return { ok: false, error: 'ruta inválida' };
+      if (typeof filePath !== 'string' || !path.isAbsolute(filePath)) return { ok: false, error: i18n.t('chat.ruta.invalida') };
       // El drag&drop sí puede leer fuera del selector, pero nunca el directorio de
       // datos de la app (ahí viven las API keys y las conversaciones) ni algo que no
       // sea un archivo regular. realpath resuelve enlaces antes de comprobar.
@@ -145,7 +146,7 @@ function registerChatIpc(ipcMain, ctx) {
       try {
         full = await fsp.realpath(filePath);
       } catch {
-        return { ok: false, error: 'La ruta no existe' };
+        return { ok: false, error: i18n.t('chat.ruta.no.existe') };
       }
       // La guarda compara en el MISMO espacio: `full` ya viene resuelto por realpath, así
       // que el directorio de datos también tiene que estarlo. Comparando contra la ruta
@@ -158,10 +159,11 @@ function registerChatIpc(ipcMain, ctx) {
       } catch {
         // El directorio de datos todavía no existe (primer arranque): se compara tal cual.
       }
-      if (attach.insideDir(full, dataDir)) return { ok: false, error: 'ruta no permitida' };
+      if (attach.insideDir(full, dataDir)) return { ok: false, error: i18n.t('chat.ruta.no.permitida') };
       const st = await fsp.stat(full);
-      if (!st.isFile()) return { ok: false, error: 'no es un archivo regular' };
-      if (st.size > attach.MAX_FILE_BYTES) return { ok: false, error: `Supera ${Math.round(attach.MAX_FILE_BYTES / 1048576)} MB` };
+      if (!st.isFile()) return { ok: false, error: i18n.t('chat.no.archivo') };
+      if (st.size > attach.MAX_FILE_BYTES)
+        return { ok: false, error: i18n.t('chat.tamano.max', { mb: Math.round(attach.MAX_FILE_BYTES / 1048576) }) };
       const name = path.basename(full);
       const kind = attach.kindOf(name, st.size);
       if (kind === 'image') {
@@ -170,10 +172,10 @@ function registerChatIpc(ipcMain, ctx) {
       }
       if (kind === 'text') {
         const text = attach.textOf(await fsp.readFile(full), name);
-        if (text === null) return { ok: true, att: { name, kind: 'binary', size: st.size, note: 'parece binario' } };
+        if (text === null) return { ok: true, att: { name, kind: 'binary', size: st.size, note: i18n.t('chat.adjunto.binario') } };
         return { ok: true, att: { name, kind: 'text', size: st.size, text } };
       }
-      return { ok: true, att: { name, kind: 'binary', size: st.size, note: 'binario' } };
+      return { ok: true, att: { name, kind: 'binary', size: st.size, note: i18n.t('chat.adjunto.binario.generico') } };
     } catch (err) {
       return { ok: false, error: err.message };
     }
@@ -209,7 +211,7 @@ function registerChatIpc(ipcMain, ctx) {
     // ninguna todavía, se estrena una como antes). El id explícito se valida: si no
     // existe, no se contesta en otra conversación por error.
     const c = convId ? convsApi.convById(convId) : convsApi.ensureConv();
-    if (!c) return { ok: false, error: 'Conversación no encontrada' };
+    if (!c) return { ok: false, error: i18n.t('conv.no.encontrada') };
     const a = runtimes.agentFor(c.id); // su agente: se crea (e hidrata desde el hilo guardado) la primera vez
     // ---- adjuntos: texto plano inline, imágenes como partes multimodales ----
     const atts = Array.isArray(attachments) ? attachments : [];
@@ -307,10 +309,10 @@ function registerChatIpc(ipcMain, ctx) {
   // regenerar: descarta la última respuesta y vuelve a pedírsela al modelo
   ipcMain.handle('chat:retry', async (e, convId) => {
     const c = convDe(convId);
-    if (!c) return { ok: false, error: 'sin conversación' };
+    if (!c) return { ok: false, error: i18n.t('chat.sin.conversacion') };
     const a = runtimes.agentFor(c.id);
     // regenerar durante un turno en curso lo pisaría: exigimos que esté libre
-    if (a.isBusy()) return { ok: false, error: 'hay un turno en curso; deténlo antes de regenerar' };
+    if (a.isBusy()) return { ok: false, error: i18n.t('chat.turno.en.curso') };
     trazaNueva(c.id); // regenerar es un turno nuevo: su rastro se guarda con su respuesta
     // quita la última respuesta del historial guardado (y solo esa). Se busca
     // DESPUÉS del último mensaje del usuario: un turno que falló no llega a
@@ -347,7 +349,7 @@ function registerChatIpc(ipcMain, ctx) {
   ipcMain.handle('chat:pause', (e, convId) => {
     const c = convDe(convId);
     const a = c ? runtimes.peek(c.id) : null;
-    return a ? a.pause() : { ok: false, error: 'sin agente' };
+    return a ? a.pause() : { ok: false, error: i18n.t('chat.sin.agente') };
   });
   /* Órdenes de barra que necesitan el proceso principal. El renderer reconoce la orden y
      NO la manda como mensaje: entra por aquí y devuelve el texto que se pinta como línea
@@ -355,7 +357,7 @@ function registerChatIpc(ipcMain, ctx) {
      así que no se guarda ni se envía al modelo como si fuera un turno. */
   ipcMain.handle('chat:command', async (e, { convId, name, args } = {}) => {
     const c = convDe(convId);
-    if (!c) return { ok: false, error: 'la conversación todavía no está lista' };
+    if (!c) return { ok: false, error: i18n.t('chat.conv.no.lista') };
     // El agente de ESA conversación: /cost y /compact son de su hilo, no del de la
     // pestaña que esté a la vista.
     const a = runtimes.agentFor(c.id);
@@ -367,30 +369,29 @@ function registerChatIpc(ipcMain, ctx) {
        reescribe el contexto y con un turno en vuelo se pisaría consigo mismo. */
     if (cmd === 'cost') {
       const u = typeof a.usageResumen === 'function' ? a.usageResumen() : null;
-      if (!u || !u.turns) return { ok: true, text: 'Todavía no hay consumo que contar en esta conversación.' };
-      const tokens = Number(u.tokens || 0).toLocaleString('es-ES');
-      const turnos = u.turns === 1 ? '1 turno' : u.turns + ' turnos';
-      return {
-        ok: true,
-        text: `Esta conversación: ${tokens} tokens en ${turnos}${u.costUsd ? ' · ' + Number(u.costUsd).toFixed(4) + ' USD' : ''}.`,
-      };
+      if (!u || !u.turns) return { ok: true, text: i18n.t('chat.coste.vacio') };
+      // El separador de miles sigue al idioma en pantalla, no a un locale fijo.
+      const tokens = Number(u.tokens || 0).toLocaleString(i18n.idiomaActual() === 'en' ? 'en-US' : 'es-ES');
+      const turnos = u.turns === 1 ? i18n.t('chat.turno.uno') : i18n.t('chat.turno.varios', { n: u.turns });
+      const coste = u.costUsd ? i18n.t('chat.coste.usd', { coste: Number(u.costUsd).toFixed(4) }) : '';
+      return { ok: true, text: i18n.t('chat.coste.resumen', { tokens, turnos, coste }) };
     }
-    if (a.isBusy()) return { ok: false, error: 'SAGISTARI está trabajando ahora mismo: espera a que termine o detén la tarea' };
+    if (a.isBusy()) return { ok: false, error: i18n.t('chat.trabajando') };
     if (cmd === 'compact') {
       let r;
       try {
         r = await a.compact(cfg());
       } catch (err) {
-        return { ok: false, error: 'no se pudo compactar: ' + ((err && err.message) || err) };
+        return { ok: false, error: i18n.t('chat.no.compacto', { motivo: (err && err.message) || err }) };
       }
-      if (!r || r.ok === false) return { ok: false, error: (r && r.error) || 'no se pudo compactar' };
+      if (!r || r.ok === false) return { ok: false, error: (r && r.error) || i18n.t('chat.compacto.fallo') };
       return {
         ok: true,
-        text: `Contexto compactado: ${r.antes} mensajes → ${r.despues}. El resumen queda como punto de partida.`,
+        text: i18n.t('chat.compacto.hecho', { antes: r.antes, despues: r.despues }),
       };
     }
     void args;
-    return { ok: false, error: 'orden desconocida: /' + cmd };
+    return { ok: false, error: i18n.t('chat.orden.desconocida', { cmd }) };
   });
   /* `chat:clear` se ha eliminado: no lo llamaba nadie (ni el renderer ni el puente). */
 }

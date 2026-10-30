@@ -4213,20 +4213,23 @@ test('auditoría: workspace:pick valida como workspace:set', () => {
      shell:openPath. Antes estaba copiada verbatim en las tres (y en shell:openPath
      no estaba en absoluto). */
   const ruta = fs.readFileSync(path.join(__dirname, '..', 'main', 'workspace-ruta.js'), 'utf8');
-  ok(/carpetas del sistema/.test(ruta), 'la validación rechaza carpetas del sistema');
-  ok(/datos de la app/.test(ruta), 'y el directorio de datos de la app');
-  ok(/raíz de una unidad/.test(ruta), 'y la raíz de una unidad');
+  /* Los textos viven ahora en el diccionario del motor (agent/i18n): aquí se comprueba
+     que cada rechazo usa SU clave y que la clave dice lo que tiene que decir. */
+  const dict = require('../agent/i18n/es');
+  ok(/ws\.sistema/.test(ruta) && /carpetas del sistema/.test(dict['ws.sistema']), 'la validación rechaza carpetas del sistema');
+  ok(/ws\.datos/.test(ruta) && /datos de la app/.test(dict['ws.datos']), 'y el directorio de datos de la app');
+  ok(/ws\.raiz/.test(ruta) && /raíz de una unidad/.test(dict['ws.raiz']), 'y la raíz de una unidad');
   const iPick = MAIN_ALL.indexOf("ipcMain.handle('workspace:pick'");
   ok(iPick > -1, 'debe existir el handler');
   const bloque = MAIN_ALL.slice(iPick, iPick + 1800);
   ok(/validarWorkspaceRuta\(/.test(bloque), 'pick tiene que usar ESA validación, no una copia');
   // una sola copia de cada rechazo en todo el proceso principal
   eq(
-    (MAIN_ALL.match(/carpetas del sistema no pueden ser el espacio de trabajo/g) || []).length,
+    (MAIN_ALL.match(/i18n\.t\('ws\.sistema'\)/g) || []).length,
     1,
     'los rechazos viven en un único sitio: repetirlos los deja divergir',
   );
-  eq((MAIN_ALL.match(/raíz de una unidad no puede ser el espacio de trabajo/g) || []).length, 1, 'y la de la raíz');
+  eq((MAIN_ALL.match(/i18n\.t\('ws\.raiz'\)/g) || []).length, 1, 'y la de la raíz');
 });
 
 /* ---------- Fase 3: updater sin firma (TOFU + guion verificado) ---------- */
@@ -4250,7 +4253,10 @@ test('fase3: TOFU de firmante con puerta de cambio explícita', () => {
 test('fase3: el guion del ayudante se verifica antes de disparar la tarea', () => {
   const SRC = fs.readFileSync(path.join(__dirname, '..', 'main', 'updater.js'), 'utf8');
   ok(/sha256/.test(SRC), 'writeHelperPs debe devolver la huella del guion');
-  ok(/cambió en disco/.test(SRC), 'programarInstalacion debe comparar la huella antes del /run');
+  ok(
+    /upd\.guion\.cambio/.test(SRC) && /cambió en disco/.test(require('../agent/i18n/es')['upd.guion.cambio']),
+    'programarInstalacion debe comparar la huella antes del /run',
+  );
   ok(/\/delete', '\/tn'/.test(SRC), 'si la huella no cuadra, la tarea se borra y no se dispara');
 });
 

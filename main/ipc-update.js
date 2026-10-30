@@ -19,6 +19,7 @@ function registerUpdateIpc(ipcMain, ctx) {
   const cfg = () => (typeof ctx.config === 'function' ? ctx.config() : ctx.config);
   const getWin = () => ctx.getWin();
   const { saveConfig, updater, UPDATE_API, DATA_DIR, runlog, app, shell, fsp, fs, path } = ctx;
+  const i18n = require('../agent/i18n');
   const { spawn } = require('child_process');
   /* ---------- actualizaciones (releases de GitHub) ----------
    Sin dependencias: se consulta la API pública, se descarga el binario de esta
@@ -146,10 +147,10 @@ function registerUpdateIpc(ipcMain, ctx) {
 
   ipcMain.handle('update:download', async () => {
     const r = lastUpdate && lastUpdate.available ? lastUpdate : await checkUpdates();
-    if (!r.available) return { ok: false, error: 'no hay ninguna actualización disponible' };
+    if (!r.available) return { ok: false, error: i18n.t('upd.no.disponible') };
     const kind = updater.hostKind({ isPackaged: app.isPackaged });
     const asset = updater.assetFor(kind, r.assets);
-    if (!asset) return { ok: false, error: 'esta release no trae binarios para Windows' };
+    if (!asset) return { ok: false, error: i18n.t('upd.sin.binarios') };
     const target = updater.downloadTarget({ kind, assetName: asset.name });
     runlog.log({ agent: 'sagitari', event: 'update_download_start', version: r.latest, asset: asset.name });
     try {
@@ -195,17 +196,13 @@ function registerUpdateIpc(ipcMain, ctx) {
         });
         sendUpdate({
           type: 'error',
-          message: expected
-            ? 'La descarga no coincide con la firma publicada; se ha descartado.'
-            : 'La release no publica la firma sha512 de este archivo; se ha descartado por seguridad.',
+          message: expected ? i18n.t('upd.descarga.desajuste') : i18n.t('upd.descarga.sin.firma'),
         });
         return {
           ok: false,
           error: expected
-            ? 'la verificación sha512 falló: el archivo se ha descartado'
-            : motivo +
-              ': descartado por seguridad. Puedes instalarlo a mano desde ' +
-              (r.url || 'https://github.com/' + updater.REPO + '/releases'),
+            ? i18n.t('upd.verificacion.fallo')
+            : i18n.t('upd.descartado.manual', { motivo, url: r.url || 'https://github.com/' + updater.REPO + '/releases' }),
         };
       }
       updateReady = { path: target.path, name: asset.name, verified, expected, version: r.latest, kind };
@@ -320,7 +317,7 @@ function registerUpdateIpc(ipcMain, ctx) {
           hijo.unref();
         } catch {}
       } catch (e2) {
-        return { ok: false, error: 'no se pudo preparar el instalador: ' + e2.message };
+        return { ok: false, error: i18n.t('upd.instalador.preparar', { motivo: e2.message }) };
       }
       hijo.on('error', () => {});
     }
@@ -347,7 +344,7 @@ function registerUpdateIpc(ipcMain, ctx) {
       setTimeout(mirar, 150);
     });
     if (!arrancado) {
-      const reason = 'el asistente no llegó a arrancar (vía ' + via + ': sin PowerShell, tarea bloqueada o política del equipo)';
+      const reason = i18n.t('upd.asistente.fallo', { via });
       // La tarea se programó con `/sc once /st <+5 min>` ADEMÁS del `/run`: si el
       // ayudante no llegó a arrancar, esa tarea sigue viva y se dispararía sola
       // cinco minutos después, sin la app delante y sin nadie esperando su rastro.
@@ -363,7 +360,7 @@ function registerUpdateIpc(ipcMain, ctx) {
       const pendiente2 = pendingInfo();
       return {
         ok: false,
-        error: 'no se pudo arrancar el asistente de instalación: ' + reason + '. Puedes instalar a mano: ' + d.path,
+        error: i18n.t('upd.asistente.error', { motivo: reason, ruta: d.path }),
         pending: pendiente2,
       };
     }
@@ -388,8 +385,8 @@ function registerUpdateIpc(ipcMain, ctx) {
 
   ipcMain.handle('update:install', async (e, opts) => {
     const d = updateReady;
-    if (!d) return { ok: false, error: 'todavía no hay ninguna actualización descargada' };
-    if (!fs.existsSync(d.path)) return { ok: false, error: 'el archivo descargado ya no está en su sitio' };
+    if (!d) return { ok: false, error: i18n.t('upd.sin.descarga') };
+    if (!fs.existsSync(d.path)) return { ok: false, error: i18n.t('upd.archivo.fuera') };
     if (d.kind === 'portable') {
       // un portable no puede reemplazarse a sí mismo mientras se ejecuta:
       // se deja al lado y se le enseña al usuario dónde está
@@ -398,12 +395,11 @@ function registerUpdateIpc(ipcMain, ctx) {
       } catch {}
       return { ok: true, manual: true, name: d.name, path: d.path };
     }
-    if (d.kind === 'dev') return { ok: false, error: 'estás ejecutando desde el código fuente: instala con el instalador' };
+    if (d.kind === 'dev') return { ok: false, error: i18n.t('upd.dev') };
     // Un binario sin verificar no se ejecuta nunca. Y el fichero vive en %TEMP%,
     // que cualquier proceso del usuario puede escribir: se vuelve a comprobar el
     // hash justo antes de lanzarlo para cerrar esa ventana (TOCTOU).
-    if (d.verified !== true || !d.expected)
-      return { ok: false, error: 'esta actualización no está verificada; descártala y vuelve a intentarlo' };
+    if (d.verified !== true || !d.expected) return { ok: false, error: i18n.t('upd.no.verificada') };
     // Puerta de binario sin firmar: el SHA-512 demuestra integridad pero no
     // autenticidad (un repo comprometido sirve binario y hash a la vez), y los
     // binarios actuales no llevan firma Authenticode. No se puede bloquear sin
@@ -418,8 +414,8 @@ function registerUpdateIpc(ipcMain, ctx) {
         needsUnsignedConfirm: true,
         error:
           d.signed === false
-            ? 'esta actualización NO está firmada digitalmente (solo verificada por SHA-512). Pulsa Instalar otra vez si aceptas instalarla igualmente.'
-            : 'no se pudo comprobar la firma digital de esta actualización (solo verificada por SHA-512). Pulsa Instalar otra vez si aceptas instalarla igualmente.',
+            ? i18n.t('upd.sin.firmar')
+            : i18n.t('upd.firma.no.comprobada'),
       };
     }
     /* Puerta de cambio de firmante (TOFU): si una release anterior vino firmada y
@@ -431,12 +427,10 @@ function registerUpdateIpc(ipcMain, ctx) {
       return {
         ok: false,
         needsSignerConfirm: true,
-        error:
-          'el firmante de esta actualización NO coincide con el de releases anteriores (esperado: ' +
-          (d.signerExpected || 'desconocido') +
-          '; recibido: ' +
-          (d.signer || 'sin firma') +
-          '). Si confías en el cambio, pulsa Instalar otra vez.',
+        error: i18n.t('upd.firmante.cambio', {
+          esperado: d.signerExpected || i18n.t('upd.firmante.desconocido'),
+          recibido: d.signer || i18n.t('upd.firmante.ninguno'),
+        }),
       };
     }
     try {
@@ -444,11 +438,11 @@ function registerUpdateIpc(ipcMain, ctx) {
         await fsp.rm(d.path, { force: true }).catch(() => {});
         updateReady = null;
         runlog.log({ agent: 'sagitari', event: 'update_verify_failed', version: d.version, reason: 'hash cambiado antes de instalar' });
-        sendUpdate({ type: 'error', message: 'El archivo descargado cambió después de verificarlo; se ha borrado.' });
-        return { ok: false, error: 'el instalador ya no coincide con la firma: descartado' };
+        sendUpdate({ type: 'error', message: i18n.t('upd.cambio.descarga') });
+        return { ok: false, error: i18n.t('upd.instalador.desajuste') };
       }
     } catch (e) {
-      return { ok: false, error: 'no se pudo verificar el instalador: ' + e.message };
+      return { ok: false, error: i18n.t('upd.instalador.verificar', { motivo: e.message }) };
     }
     return lanzarInstalador(d);
   });
@@ -458,10 +452,10 @@ function registerUpdateIpc(ipcMain, ctx) {
   // solo entonces se lanza otra vez.
   ipcMain.handle('update:retry', async (e, opts) => {
     const p = updatePending;
-    if (!p) return { ok: false, error: 'no hay ninguna instalación pendiente', pending: null };
+    if (!p) return { ok: false, error: i18n.t('upd.sin.pendiente'), pending: null };
     if (!fs.existsSync(p.path)) {
       clearPending();
-      return { ok: false, error: 'el instalador descargado ya no está en su sitio: vuelve a descargar la actualización', pending: null };
+      return { ok: false, error: i18n.t('upd.pendiente.fuera'), pending: null };
     }
     // El hash se RE-VERIFICA siempre y `expected` es OBLIGATORIO (fail-closed): antes un
     // `expected` ausente saltaba la comprobación entera y el fichero se lanzaba sin más.
@@ -476,9 +470,7 @@ function registerUpdateIpc(ipcMain, ctx) {
       });
       return {
         ok: false,
-        error: p.expected
-          ? 'el instalador ya no coincide con la firma publicada: vuelve a descargar la actualización'
-          : 'esta instalación pendiente no trae hash publicado: vuelve a descargar la actualización',
+        error: p.expected ? i18n.t('upd.pendiente.hash') : i18n.t('upd.pendiente.sin.hash'),
         pending: null,
       };
     }
@@ -497,8 +489,7 @@ function registerUpdateIpc(ipcMain, ctx) {
         ok: false,
         needsUnsignedConfirm: true,
         pending: pendingInfo(),
-        error:
-          'esta actualización NO está firmada digitalmente (solo verificada por SHA-512). Pulsa Reintentar otra vez si aceptas instalarla igualmente.',
+        error: i18n.t('upd.sin.firmar.reintentar'),
       };
     }
     // el intento pudo volver a quedar a medias; la tarjeta se queda con lo que hay ahora
@@ -518,7 +509,7 @@ function registerUpdateIpc(ipcMain, ctx) {
     const url = (lastUpdate && lastUpdate.url) || `https://github.com/${updater.REPO}/releases`;
     // Solo http(s): `url` viene de la API de releases y no debe convertirse en una orden
     // arbitraria a shell.openExternal (mismo límite que ipc-misc.js y ventana.js).
-    if (typeof url !== 'string' || !/^https?:\/\//i.test(url)) return { ok: false, error: 'URL no permitida' };
+    if (typeof url !== 'string' || !/^https?:\/\//i.test(url)) return { ok: false, error: i18n.t('upd.url') };
     try {
       await shell.openExternal(url);
       return { ok: true };

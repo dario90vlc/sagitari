@@ -18,6 +18,7 @@ function registerMcpIpc(ipcMain, ctx) {
   // se lee fresco en cada handler para no capturar una foto vieja.
   const cfg = () => (typeof ctx.config === 'function' ? ctx.config() : ctx.config);
   const { wireMcp, persistConfig, mcpState, mcpExport, setAgentPolicy, mcpConfig, serverSlug } = ctx;
+  const i18n = require('../agent/i18n');
 
   ipcMain.handle('mcp:list', () => mcpState());
 
@@ -76,7 +77,7 @@ function registerMcpIpc(ipcMain, ctx) {
     const config = cfg();
     const sid = mcpConfig.rawId(id);
     const s = (config.mcp.servers || []).find((x) => x.id === sid);
-    if (!s) return { ok: false, error: 'servidor MCP desconocido' };
+    if (!s) return { ok: false, error: i18n.t('mcp.desconocido') };
     s.enabled = enabled !== false;
     // reconfigure aplica el cambio: apagado suelta el proceso y deja de ofrecer herramientas
     wireMcp();
