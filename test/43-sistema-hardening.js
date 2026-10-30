@@ -1053,3 +1053,10 @@ test('cambios: el registro de «tocado» no se corta a las 48 escrituras del dif
     cambios.limpiar();
   }
 });
+
+test('idioma: settings:set solo acepta auto, es o en', () => {
+  const fs = require('fs');
+  const src = fs.readFileSync(require('path').join(__dirname, '..', 'main', 'ipc-config.js'), 'utf8');
+  ok(src.includes("'uiLang'"), 'uiLang tiene que estar en la lista blanca');
+  ok(/\[.auto.,\s*.es.,\s*.en.\]/.test(src), 'y validarse contra los tres valores');
+});

@@ -41,6 +41,8 @@ async function fillSettings() {
   $('#setUserName').value = CFG.settings.userName || '';
   // apariencia: aspecto, color de interfaz, color del glow e intensidad
   $('#uiSkin').value = skinActual(CFG.settings);
+  // idioma: el que quedó guardado (o «auto»); no se valida aquí porque main ya lo hace
+  if ($('#uiLang')) $('#uiLang').value = CFG.settings.uiLang || 'auto';
   $('#glowColor').value =
     !CFG.settings.glowColor || CFG.settings.glowColor === 'match'
       ? 'match'
@@ -401,6 +403,23 @@ $('#uiSkin').onchange = async (e) => {
   paintTiles();
   await window.sagitari.setSettings({ uiSkin: valor });
 };
+/* El idioma NO se repinta en vivo: los textos ya pintados seguirían en el otro idioma a
+   medias, así que se guarda y se avisa de que hace falta reiniciar. Si el disco falla se
+   revierte el select para que no enseñe una elección que no se guardó. */
+if ($('#uiLang'))
+  $('#uiLang').onchange = async (e) => {
+    const valor = ['auto', 'es', 'en'].includes(e.target.value) ? e.target.value : 'auto';
+    const anterior = CFG.settings.uiLang || 'auto';
+    CFG.settings.uiLang = valor;
+    const r = await window.sagitari.setSettings({ uiLang: valor });
+    if (r && r.saveError) {
+      CFG.settings.uiLang = anterior;
+      e.target.value = anterior;
+      showToast(I18N.t('ajustes.idioma.error'));
+      return;
+    }
+    showToast(I18N.t('ajustes.idioma.guardado'));
+  };
 $('#uiColor').onchange = async (e) => {
   CFG.settings.uiColor = e.target.value;
   applyTheme();

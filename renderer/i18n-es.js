@@ -5,4 +5,9 @@ window.I18N_ES = {
   'prueba.ph': 'Escribe aquí',
   'prueba.title': 'Título de prueba',
   'prueba.aria': 'Etiqueta de prueba',
+  'ajustes.idioma.titulo': 'Idioma de la interfaz',
+  'ajustes.idioma.nota': 'Se aplica al reiniciar SAGITARI.',
+  'ajustes.idioma.auto': 'Automático (el de Windows)',
+  'ajustes.idioma.guardado': 'Idioma guardado: se aplica al reiniciar',
+  'ajustes.idioma.error': 'No se pudo guardar el idioma',
 };

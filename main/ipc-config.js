@@ -179,6 +179,9 @@ function registerConfigIpc(ipcMain, ctx) {
     'theme',
     'uiColor',
     'uiSkin',
+    /* Idioma de la interfaz elegido en Ajustes («auto» = el de Windows). Solo se lee al
+       arrancar: el renderer no repinta en vivo, así que aquí solo se guarda. */
+    'uiLang',
     'glowColor',
     'glowStrength',
     'glassTint',
@@ -225,6 +228,9 @@ function registerConfigIpc(ipcMain, ctx) {
        dejaría `data-skin` con un nombre que ninguna hoja conoce, o sea el aspecto base sin
        que la interfaz lo sepa; se descarta y se conserva el que había. */
     if ('uiSkin' in clean && !['holo', 'console', 'canvas'].includes(clean.uiSkin)) delete clean.uiSkin;
+    /* Idioma de la interfaz: solo los tres que existen. Un valor inventado dejaría la app
+       sin idioma hasta el siguiente arranque, así que se descarta. */
+    if ('uiLang' in clean && !['auto', 'es', 'en'].includes(clean.uiLang)) delete clean.uiLang;
     /* Razonamiento visible (v2.3): booleano estricto. Un «true»/«false» en texto significaría
        verdadero siempre, y el ajuste no se podría apagar. */
     if ('showThinking' in clean && typeof clean.showThinking !== 'boolean') delete clean.showThinking;
