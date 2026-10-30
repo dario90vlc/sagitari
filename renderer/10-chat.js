@@ -2182,7 +2182,7 @@ if ($('#undoBtn'))
       const r = await window.sagitari.undoChanges(hiloActual());
       if (!r || r.ok === false) {
         // si el motor dice que ya no hay nada que deshacer, el botón no debe quedarse ahí
-        if (r && /no hay ningún cambio/.test(String(r.error || ''))) ocultarDeshacer();
+        if (r && r.code === 'sin_cambios') ocultarDeshacer();
         showToast('No se pudo deshacer: ' + ((r && r.error) || 'error desconocido'));
         return;
       }

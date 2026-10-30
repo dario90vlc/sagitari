@@ -5085,3 +5085,15 @@ test('auditoría: un flujo alternativo NTFS (archivo:flujo) no se escribe ni se 
   const normal = await executeTool('write_file', { path: 'otra.txt', content: 'x' }, { workspace: dir });
   ok(/escritos/.test(String(normal)), 'una ruta normal sigue escribiéndose: ' + String(normal).slice(0, 120));
 });
+
+test('idioma: el prefijo de error de las herramientas es el mismo en los dos idiomas', () => {
+  /* El agente decide si una herramienta falló por el texto que empieza por el prefijo
+     de error. Ese prefijo sale del diccionario y tiene que ser idéntico en es y en:
+     si se traduce, todo fallo deja de detectarse en el idioma donde cambie. */
+  const i18n = require('../agent/i18n');
+  for (const idioma of ['es', 'en']) {
+    i18n.configurar(idioma);
+    ok(i18n.err('comun.detenido').startsWith('Error: '), 'prefijo estable en ' + idioma);
+  }
+  i18n.configurar('es');
+});

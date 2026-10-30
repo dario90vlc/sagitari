@@ -23,6 +23,9 @@ const arboles = require('./arboles'); // v3.0: árboles de trabajo por subagente
 const equipoMotor = require('./equipo'); // v4.4: motor del MODO EQUIPO (compañeros vivos, buzón, tablero)
 const models = require('./models');
 const habits = require('./habits');
+/* El prefijo de error de una herramienta es contrato: sale del diccionario y es el
+   mismo en los dos idiomas, así que aquí se lee de ahí y no de un literal suelto. */
+const i18n = require('./i18n');
 const opencode = require('./opencode'); // identificación de sesión (OpenCode Go/Zen)
 const { recursos, paraHerramienta } = require('./recursos'); // v2.5: bloqueo por recurso (navegador, disco, terminal)
 const protocols = require('./protocols'); // multi-formato: OpenAI / Anthropic / Responses
@@ -2047,7 +2050,11 @@ class Agent {
       action: 'ok',
       text,
       images,
-      failed: falloExplicito === null ? typeof text === 'string' && text.startsWith('Error') : falloExplicito,
+      /* El prefijo de error sale del diccionario y no de un literal: `i18n.err` compone
+         «comun.error + ': '». Se compara solo la palabra porque varias herramientas ya
+         devuelven «Error al…»/«Error en…» sin dos puntos; exigir el «: » las daría por
+         buenas. */
+      failed: falloExplicito === null ? typeof text === 'string' && text.startsWith(i18n.t('comun.error')) : falloExplicito,
       args,
       confirmed,
     };

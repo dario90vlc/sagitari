@@ -512,7 +512,7 @@ window.sagitari.onAgentEvent((ev) => {
         feed(ev.name || 'herramienta', 'pur');
         break;
       case 'tool_result':
-        feed((ev.name || '') + ' — ' + String(ev.result || 'ok').slice(0, 90), String(ev.result || '').startsWith('Error') ? 'err' : 'ok');
+        feed((ev.name || '') + ' — ' + String(ev.result || 'ok').slice(0, 90), ev.ok === false ? 'err' : 'ok');
         break;
       case 'delegate_start':
         feed(etiquetaEquipo(ev), 'pur');

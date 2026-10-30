@@ -35,7 +35,9 @@ function registerCambiosIpc(ipcMain, ctx) {
     if (trabaja(convId)) return { ok: false, error: 'SAGITARI está trabajando ahora mismo: detén la tarea antes de deshacer' };
     const ws = ctx.getWorkspace();
     const d = dueno(convId);
-    if (!cambios.puedeDeshacer(ws, d)) return { ok: false, error: 'no hay ningún cambio de este turno que deshacer' };
+    /* El código viaja junto al texto legible: el renderer decide con `code` y así puede
+       traducirse el mensaje sin que el botón de Deshacer se quede colgado. */
+    if (!cambios.puedeDeshacer(ws, d)) return { ok: false, code: 'sin_cambios', error: 'no hay ningún cambio de este turno que deshacer' };
     const plan = cambios.planDeshacer(ws, d);
     let r;
     try {

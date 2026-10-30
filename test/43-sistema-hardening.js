@@ -1082,3 +1082,23 @@ test('idioma: settings:set solo acepta auto, es o en', () => {
   ok(cfgObj.settings.uiLang === 'en', 'un guardado fallido no deja el idioma fantasma en main');
   ok(r && r.saveError, 'y el renderer recibe el aviso para revertir el select');
 });
+
+test('deshacer: el «no hay nada que deshacer» viaja como código, no como texto', () => {
+  /* El renderer decidía si el botón de Deshacer ya no pinta nada leyendo el TEXTO del
+     error («no hay ningún cambio»). Al traducir la interfaz esa frase cambia y la
+     decisión se queda sin base; el código viaja en el resultado y sobrevive. */
+  const fs = require('fs');
+  const src = fs.readFileSync(require('path').join(__dirname, '..', 'main', 'ipc-cambios.js'), 'utf8');
+  ok(/code:\s*'sin_cambios'/.test(src), 'el motor tiene que devolver el código');
+  const chat = fs.readFileSync(require('path').join(__dirname, '..', 'renderer', '10-chat.js'), 'utf8');
+  ok(!/no hay ningún cambio/.test(chat), 'el renderer no puede mirar el texto del error');
+  ok(/code === 'sin_cambios'/.test(chat), 'tiene que mirar el código');
+});
+
+test('aviso: el color del registro usa el ok del evento, no el texto del resultado', () => {
+  /* `tool_result` ya trae `ok`; deducir el fallo del prefijo «Error» del texto ata el
+     color a una palabra que se traduce. */
+  const fs = require('fs');
+  const src = fs.readFileSync(require('path').join(__dirname, '..', 'renderer', '20-app.js'), 'utf8');
+  ok(!/startsWith\('Error'\)/.test(src), 'nada de decidir por el prefijo del texto');
+});
