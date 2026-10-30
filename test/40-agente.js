@@ -797,8 +797,15 @@ test('renderer: cada delegación cierra con su tarjeta (estado y evidencia)', ()
   /* El marcado vive en `buildDelegationCard` porque una conversación GUARDADA también
      tiene que repintar la tarjeta: `delegationCard` solo la coloca en el turno vivo. */
   const fn = app.match(/function buildDelegationCard[\s\S]*?\n\}/)[0];
-  ok(/RESULTADO/.test(fn) && /DETALLES/.test(fn) && /EVIDENCIA/.test(fn), 'enseña resultado, detalles y evidencia');
-  ok(/FAILED/.test(fn) && /PARCIAL/.test(fn), 'distingue el cierre completo del parcial y del fallo');
+  /* Los rótulos son claves del diccionario: se mide que el marcado los pida por su CLAVE
+     (la existencia de la clave la vigila la prueba de claves usadas), no la prosa. */
+  for (const clave of ['chat.tcard.resultado', 'chat.tcard.detalles', 'chat.tcard.evidencia'])
+    ok(fn.includes("I18N.t('" + clave + "')"), 'enseña ' + clave);
+  /* El estado llega del motor en sus CÓDIGOS (OK / PARTIAL / FAILED) y la tarjeta los
+   traduce con sus claves: se miden los dos, no la prosa. */
+  ok(/estado === 'FAILED'/.test(fn) && /estado === 'PARTIAL'/.test(fn), 'distingue el cierre completo del parcial y del fallo');
+  for (const clave of ['chat.deleg.fallo', 'chat.deleg.parcial', 'chat.deleg.ok'])
+    ok(fn.includes(clave), 'rotula el cierre con ' + clave);
   ok(!/card\.dataset\.tool =/.test(fn), 'la tarjeta no se hace pasar por herramienta: no debe confundirse con una tool_card');
   const env = app.match(/function delegationCard[\s\S]*?\n\}/)[0];
   ok(/buildDelegationCard/.test(env), 'la del turno vivo reutiliza ese mismo marcado');
@@ -1641,7 +1648,10 @@ test('renderer: el tablero del equipo pinta las delegaciones en vivo', () => {
   ok(/equipoCierra\(ev\);/.test(app), 'y el cierre la resuelve');
   const chip = fnDe('equipoChip');
   ok(/toolchip run/.test(chip) && /pulse-dot/.test(chip), 'la fila nace en marcha (punto pulsante)');
-  ok(/Criterio de éxito/.test(chip), 'y el tooltip lleva el criterio con el que trabaja');
+  ok(
+    chip.includes("I18N.t('chat.equipo.criterio'"),
+    'y el tooltip lleva el criterio con el que trabaja (por la clave chat.equipo.criterio)',
+  );
   const cierra = fnDe('equipoCierra');
   ok(/FAILED/.test(cierra) && /PARTIAL/.test(cierra), 'distingue el fallo y el parcial');
   const limpieza = fnDe('closePendingCards');
@@ -1753,7 +1763,11 @@ test('renderer: el separador de día sale al cambiar de día, no en cada turno',
   ok(/stampDia === dia/.test(fn) && /stampDia = dia/.test(fn), 'el estampado se salta el mismo día');
   ok(/etiquetaDia/.test(fn), 'y dice Hoy / Ayer / la fecha');
   const etiqueta = app.match(/function etiquetaDia[\s\S]*?\n\}/)[0];
-  ok(/'Ayer'/.test(etiqueta) && /toLocaleDateString\('es-ES'/.test(etiqueta), 'con la fecha en castellano para los días antiguos');
+  ok(
+    etiqueta.includes("I18N.t('chat.dia.ayer')") && /toLocaleDateString\(LOCALE/.test(etiqueta),
+    'con «Ayer» por clave y la fecha en el idioma de la interfaz',
+  );
+  ok(/const LOCALE = I18N\.idioma === 'en' \? 'en-US' : 'es-ES'/.test(app), 'y el castellano es el idioma de casa: es-ES');
   ok(/stampDia = null;/.test(app), 'una conversación nueva vuelve a estampar el día');
   ok(/dayStamp\(m\.ts\)/.test(app), 'al restaurar se estampa el día de los mensajes, no el de hoy');
   ok(/dayStamp\(\);\s*\/\/[^\n]*cruza la medianoche/.test(app), 'y también con la pregunta, si cruza la medianoche');
@@ -1816,7 +1830,7 @@ test('conversación: al reabrir la app se repinta el turno con sus tarjetas', ()
   ok(/className = 'seg'/.test(seg), 'el tramo de texto es su propio bloque (la piel la pone .seg)');
   const card = app.match(/function cardDeTraza[\s\S]*?\n\}/)[0];
   ok(
-    /t\.ok === undefined[\s\S]*?no llegó a devolver su resultado/.test(card),
+    /t\.ok === undefined[\s\S]{0,220}?ok: false[\s\S]{0,160}?chat\.tcard\.cortada/.test(card),
     'una herramienta que no llegó a terminar se dice tal cual, no se pinta en verde',
   );
   ok(/K\.fmtDuration/.test(app) && !/setInterval\(.*restaurar/.test(app), 'con los tiempos que se guardaron, y sin arrancar ningún reloj');
@@ -4181,8 +4195,13 @@ test('auditoría: el contenido de la web llega delimitado como datos de terceros
 
 test('auditoría: MCP nuevo pide confianza y updateAll pide confirmación', () => {
   const renderer = readRenderer();
-  ok(/¿Confiar en este servidor MCP\?/.test(renderer), 'guardar un servidor stdio nuevo debe pedir confianza');
-  ok(/¿Actualizar todas las skills desde sus repos\?/.test(renderer), 'updateAll debe pedir confirmación');
+  /* Las preguntas viven en el diccionario: se mide que se pidan por su clave y que la
+     clave siga siendo una pregunta (no un aviso cualquiera). */
+  ok(renderer.includes("I18N.t('ajustes.mcp.confiar.titulo')"), 'guardar un servidor stdio nuevo debe pedir confianza');
+  ok(renderer.includes("I18N.t('skills.actualizar.confirmar')"), 'updateAll debe pedir confirmación');
+  const dict = require('../renderer/i18n-es');
+  ok(/\?$/.test(dict['ajustes.mcp.confiar.titulo']), 'y la confianza del servidor se pregunta en el diccionario');
+  ok(/\?$/.test(dict['skills.actualizar.confirmar']), 'igual que la actualización de todas las skills');
   const agentSrc = fs.readFileSync(path.join(__dirname, '..', 'agent', 'agent.js'), 'utf8');
   ok(/CONTENIDO DE TERCEROS/.test(agentSrc), 'el system prompt debe avisar de la desconfianza en skills');
 });

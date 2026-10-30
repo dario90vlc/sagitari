@@ -530,9 +530,21 @@ test('sidebar: grupos, contadores, pie y atajos coherentes con las vistas', () =
   ok(hot, 'falta la tabla de atajos del sidebar');
   const keys = hot[1].split(',').map((s) => s.trim().replace(/^['"]|['"]$/g, ''));
   eq(new Set(keys).size, keys.length, 'sin atajos repetidos');
-  const promised = [...html.matchAll(/class="navitem[^"]*"\s+data-view="([^"]+)"\s+title="[^"]*\(Alt\+(\d+)\)"/g)];
+  /* El tooltip de la barra es una CLAVE (data-i18n-title): se lee la clave y se resuelve
+     en el diccionario español, que es el texto que el usuario ve de fábrica. Así se sigue
+     midiendo el contrato (la tabla promete lo mismo que los tooltips) sin clavar la prosa.
+     «skills» es el único ítem sin clave: su tooltip sigue en el marcado. */
+  const dictEs = require('../renderer/i18n-es');
+  const promised = [...html.matchAll(/class="navitem[^"]*"\s+data-view="([^"]+)"([^>]*)>/g)]
+    .map(([, view, attrs]) => {
+      const clave = (attrs.match(/data-i18n-title="([^"]+)"/) || [])[1];
+      const title = clave ? dictEs[clave] || '' : (attrs.match(/\stitle="([^"]*)"/) || [])[1] || '';
+      const m = title.match(/\(Alt\+(\d+)\)/);
+      return m ? [view, m[1]] : null;
+    })
+    .filter(Boolean);
   eq(promised.length, keys.length, 'los ítems con «(Alt+N)» en el tooltip y la tabla de atajos deben coincidir');
-  promised.forEach(([, view, num]) => {
+  promised.forEach(([view, num]) => {
     eq(keys[Number(num) - 1], view, 'Alt+' + num + ' debe abrir la vista prometida en el tooltip');
   });
   ok(!keys.includes('mcp'), 'MCP no tiene atajo: no puede estar en VIEW_HOTKEY');
@@ -730,7 +742,11 @@ test('apariencia: Ajustes expone color de UI, color de glow e intensidad', () =>
     'glassTintLabel',
   ])
     ok(html.includes('id="' + id + '"'), 'falta #' + id);
-  ok(html.includes('<b>Apariencia</b>'), 'debe existir la tarjeta Apariencia');
+  /* La tarjeta existe y está marcada con su clave; el título en castellano es el del
+     diccionario (así la prueba no se ata a la prosa del marcado). */
+  const dictEs = require('../renderer/i18n-es');
+  ok(/<b[^>]*data-i18n="ajustes\.apariencia\.titulo"/.test(html), 'debe existir la tarjeta Apariencia');
+  eq(dictEs['ajustes.apariencia.titulo'], 'Apariencia', 'y su título dice «Apariencia» en castellano');
   const app = readRenderer();
   ok(/const PALETTES = \{[\s\S]{0,1400}\};/.test(app), 'debe existir la tabla PALETTES');
   ok(/function applyTheme\(\)/.test(app), 'debe existir applyTheme');
