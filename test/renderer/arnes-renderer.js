@@ -124,6 +124,10 @@ function montar(opts = {}) {
 
   // `icons.js` real: los `<i data-i>` de index.html lo necesitan.
   const scripts = [
+    // Los diccionarios antes que i18n.js: el motor los lee al cargarse.
+    'i18n-es.js',
+    'i18n-en.js',
+    'i18n.js',
     'icons.js',
     'marked.min.js',
     'chatkit.js',

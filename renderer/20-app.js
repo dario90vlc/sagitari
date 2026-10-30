@@ -1558,6 +1558,12 @@ function autoGrow(el) {
 }
 $('#chatInput').addEventListener('input', () => autoGrow($('#chatInput')));
 
+// ============ idioma: pasada única sobre el marcado estático ============
+/* Aquí y no más arriba: a esta altura todos los scripts han declarado sus handlers y el
+   markup de index.html está completo, así que una sola pasada deja la interfaz en el
+   idioma que decidió el proceso principal antes de que nadie pinte encima. */
+if (window.I18N) I18N.aplicarDOM();
+
 // ============ window buttons ============
 $('#btnMin').onclick = () => window.sagitari.minimize();
 $('#btnMax').onclick = () => window.sagitari.maximize();

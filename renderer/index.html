@@ -1595,6 +1595,11 @@
     </svg>
     <script src="marked.min.js"></script>
     <script src="chatkit.js"></script>
+    <!-- Idioma: los dos diccionarios son globales y van ANTES que el motor; el renderer no
+         usa módulos, así que i18n.js lee `window.I18N_ES`/`window.I18N_EN` al cargarse. -->
+    <script src="i18n-es.js"></script>
+    <script src="i18n-en.js"></script>
+    <script src="i18n.js"></script>
     <script src="10-chat.js"></script>
     <script src="20-app.js"></script>
     <script src="30-ajustes.js"></script>
