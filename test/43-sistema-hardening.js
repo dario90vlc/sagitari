@@ -1055,8 +1055,30 @@ test('cambios: el registro de «tocado» no se corta a las 48 escrituras del dif
 });
 
 test('idioma: settings:set solo acepta auto, es o en', () => {
-  const fs = require('fs');
-  const src = fs.readFileSync(require('path').join(__dirname, '..', 'main', 'ipc-config.js'), 'utf8');
-  ok(src.includes("'uiLang'"), 'uiLang tiene que estar en la lista blanca');
-  ok(/\[.auto.,\s*.es.,\s*.en.\]/.test(src), 'y validarse contra los tres valores');
+  /* Se EJECUTA el canal: leer el fuente con includes("'uiLang'") también casaba con la
+     guarda de validación, así que la prueba seguía verde sin la clave en la lista blanca. */
+  const cfgmod = require('../main/ipc-config');
+  const handlers = {};
+  const ipc = { handle: (nombre, fn) => (handlers[nombre] = fn) };
+  const cfgObj = { settings: { uiLang: 'auto' }, providers: [], active: null };
+  const ctx = {
+    config: () => cfgObj,
+    persistConfig: () => ({ ok: true }),
+    glow: () => {},
+    getWin: () => null,
+    isHidden: () => true,
+    PRESETS: [],
+    listModels: async () => [],
+  };
+  cfgmod.registerConfigIpc(ipc, ctx);
+  handlers['settings:set'](null, { uiLang: 'en' });
+  ok(cfgObj.settings.uiLang === 'en', 'uiLang tiene que estar en la lista blanca');
+  handlers['settings:set'](null, { uiLang: 'fr' });
+  ok(cfgObj.settings.uiLang === 'en', 'y validarse contra los tres valores');
+  /* Con el disco en contra, main no puede quedarse el idioma: el siguiente guardado
+     correcto de otro ajuste lo escribiría y la app arrancaría en él. */
+  cfgmod.registerConfigIpc(ipc, { ...ctx, persistConfig: () => ({ ok: false, error: 'EACCES' }) });
+  const r = handlers['settings:set'](null, { uiLang: 'es' });
+  ok(cfgObj.settings.uiLang === 'en', 'un guardado fallido no deja el idioma fantasma en main');
+  ok(r && r.saveError, 'y el renderer recibe el aviso para revertir el select');
 });

@@ -287,6 +287,7 @@ function registerConfigIpc(ipcMain, ctx) {
       if (v.length > 500) v = v.slice(0, 500).trim();
       clean[k] = v;
     }
+    const previoUiLang = config.settings.uiLang;
     config.settings = { ...config.settings, ...clean };
     /* `autoEdits` es una preferencia del usuario (vive en `settings`, que es lo que lee la
        interfaz) pero el motor de permisos solo ve la POLÍTICA. Se refleja en las dos y se
@@ -297,6 +298,11 @@ function registerConfigIpc(ipcMain, ctx) {
       if (typeof ctx.setAgentPolicy === 'function') ctx.setAgentPolicy(config.security);
     }
     const saved = persistConfig();
+    /* El idioma se lee SOLO al arrancar (main/main.js: resolverIdioma). Si el disco falla, el
+       renderer revierte su copia pero main se quedaría con el idioma fantasma, y el siguiente
+       guardado correcto de cualquier otro ajuste lo escribiría: la app arrancaría en un idioma
+       que se dijo no guardado. Se deshace aquí, antes de devolver. */
+    if (!saved.ok && 'uiLang' in clean) config.settings = { ...config.settings, uiLang: previoUiLang };
     if ('glowEnabled' in clean && !clean.glowEnabled) glow('off');
     // si cambió la apariencia, el renderer repinta el tema; si el glow está
     // activo, relanzamos el estado actual para que el nuevo color se vea al momento
