@@ -1155,7 +1155,9 @@ test('idioma: el renderer no lleva textos fijos fuera de los diccionarios', () =
     }
     return fuera;
   };
-  const permitido = (crudo) => {
+  // una lista de clases (`class="btn ghost sq"`): solo en contexto de atributo `class=`
+  const CLASES = /^[a-z0-9_-]+(?:\s+[a-z0-9_-]+)*$/;
+  const permitido = (crudo, esClase) => {
     // se recorta antes de clasificar: `"aic ${look.cls}"` es la clase `aic`, no una frase
     const s = sinInterpolar(crudo).trim();
     return (
@@ -1167,26 +1169,52 @@ test('idioma: el renderer no lleva textos fijos fuera de los diccionarios', () =
       /^[.#]/.test(s) || // clase CSS o id
       /^[a-z][a-z0-9+.-]*:\/\//i.test(s) || // URL
       /^sagitari$/i.test(s) || // el nombre del producto
+      (esClase && CLASES.test(s)) || // el valor de un `class="…"`, que es una lista
       esMarcado(s) // una etiqueta con sus atributos, sin texto dentro
     );
+  };
+
+  /* Los trozos de código que van dentro de cada `${…}`: ahí también puede haber una frase
+     (`${x || 'Sin datos'}`), y el literal de fuera no la delata porque el marcado se
+     clasifica como marcado. */
+  const interpolaciones = (s) => {
+    const dentro = [];
+    for (let i = 0; i < s.length; i++) {
+      if (s[i] !== '$' || s[i + 1] !== '{') continue;
+      const desde = i + 2;
+      let hondo = 1;
+      i += 2;
+      while (i < s.length && hondo > 0) {
+        if (s[i] === '{') hondo++;
+        else if (s[i] === '}') hondo--;
+        i++;
+      }
+      dentro.push(s.slice(desde, i - 1));
+      i--; // el bucle vuelve a avanzar: el `}` que cierra no entra
+    }
+    return dentro;
   };
 
   /* Devuelve los literales sospechosos de un trozo de código. */
   const sospechososDe = (lineas) => {
     const fuera = [];
+    const revisar = (tramo) => {
+      for (const m of tramo.matchAll(LITERAL)) {
+        const cuerpo = m[0].slice(1, -1);
+        // ¿es el valor de un `class="…"`? Entonces una lista de clases no es una frase
+        const esClase = /class=\s*$/.test(tramo.slice(0, m.index));
+        if (!permitido(cuerpo, esClase)) fuera.push(cuerpo);
+        for (const dentro of interpolaciones(cuerpo)) revisar(dentro);
+      }
+    };
     for (let i = 0; i < lineas.length; i++) {
       const linea = lineas[i];
       // la prosa de un comentario no se pinta: solo cuentan las líneas de código
       if (/^\s*(\/\/|\*|\/\*)/.test(linea)) continue;
       if (!SINKS.test(linea)) continue;
-      const tramos = [linea];
-      if (CONTINUA.test(linea.trim())) tramos.push(lineas[i + 1] || '');
-      for (const tramo of tramos) {
-        for (const m of tramo.matchAll(LITERAL)) {
-          const s = m[0].slice(1, -1);
-          if (!permitido(s)) fuera.push(s);
-        }
-      }
+      revisar(linea);
+      // una sentencia puede seguir en la línea siguiente
+      if (CONTINUA.test(linea.trim())) revisar(lineas[i + 1] || '');
     }
     return fuera;
   };
@@ -1212,6 +1240,21 @@ test('idioma: el renderer no lleva textos fijos fuera de los diccionarios', () =
     sospechososDe(['el.textContent = "No se pudo copiar";']).join(' | '),
     'No se pudo copiar',
     'también con comillas dobles',
+  );
+  eq(
+    sospechososDe(['el.innerHTML = `<b>${x || \'Sin datos\'}</b>`;']).join(' | '),
+    'Sin datos',
+    'y dentro de la interpolación de una plantilla',
+  );
+  eq(
+    sospechososDe(['box.innerHTML = `<button class="btn ghost sq">${esc(x)}</button>`;']).join(' | '),
+    '',
+    'sin confundir una lista de clases con una frase',
+  );
+  eq(
+    sospechososDe(["el.textContent = 'error desconocido';"]).join(' | '),
+    'error desconocido',
+    'pero una frase suelta sin contexto de atributo sigue cayendo',
   );
   eq(
     sospechososDe(['tray.innerHTML = `<div class="subnote">Sin resultados.</div>`;']).join(' | '),
