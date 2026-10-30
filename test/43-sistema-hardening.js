@@ -1102,3 +1102,34 @@ test('aviso: el color del registro usa el ok del evento, no el texto del resulta
   const src = fs.readFileSync(require('path').join(__dirname, '..', 'renderer', '20-app.js'), 'utf8');
   ok(!/startsWith\('Error'\)/.test(src), 'nada de decidir por el prefijo del texto');
 });
+
+test('idioma: el renderer no lleva textos fijos fuera de los diccionarios', () => {
+  /* Barrido del JS de la interfaz: un literal en español que llega a un nodo, a un aviso
+     o al registro es una frase que se queda sin traducir. La lista blanca son los ficheros
+     que aún no se han pasado, y se vacía tarea a tarea. */
+  const fs = require('fs');
+  const path = require('path');
+  const RAIZ = path.join(__dirname, '..', 'renderer');
+  /* Lista blanca: ficheros que aún no se han pasado, que se vacía tarea a tarea. */
+  const PENDIENTES = ['30-ajustes.js', '40-vistas.js', 'memoria-ui.js', 'chatkit.js'];
+  /* Dónde acaba un texto: nodos, avisos y registro de actividad. */
+  const SINKS = /textContent|innerHTML|showToast\(|feed\(/;
+  /* Los literales se leen de UNA línea y EMPAREJADOS: con un `[^']*` suelto el cierre de
+     una clave hacía de apertura y la «frase» se comía el comentario de tres líneas más
+     abajo, así que la prueba no podía ponerse verde ni con todo traducido. */
+  const LITERAL = /'(?:[^'\\\n]|\\.)*'/g;
+  const ESPANOL = /[áéíóúüñ¿¡]/i;
+  const sospechosos = [];
+  for (const f of fs.readdirSync(RAIZ).filter((x) => x.endsWith('.js') && !x.startsWith('i18n'))) {
+    if (PENDIENTES.includes(f)) continue;
+    for (const linea of fs.readFileSync(path.join(RAIZ, f), 'utf8').split(/\r?\n/)) {
+      // la prosa de un comentario no se pinta: solo cuentan las líneas de código
+      if (/^\s*(\/\/|\*|\/\*)/.test(linea)) continue;
+      if (!SINKS.test(linea)) continue;
+      for (const m of linea.matchAll(LITERAL)) {
+        if (ESPANOL.test(m[0])) sospechosos.push(f + ': ' + m[0].slice(1, 41));
+      }
+    }
+  }
+  eq(sospechosos.slice(0, 5).join(' | '), '', 'textos en español sin clave');
+});

@@ -4,6 +4,9 @@
 /* exported renderMarket, pintarCtxMeter, resetCtxMeter, pintarRailEquipo */
 /* global hiloActual, eventoDeOtraPestana, equipoDe, estadoEquipo, badgeEquipoPermisos, equipoEvento */
 /* global equipoChat, equipoPermiso, equipoFicha, sysline, newConversation */
+/* LOCALE lo declara 10-chat.js (mismo ámbito global): el idioma de las fechas y las horas
+   es el mismo para toda la interfaz. */
+/* global LOCALE */
 // ============ activity feed + live agents ============
 const FEED_MAX = 6;
 /* v5.0.1: eventos que NO pertenecen a una conversación concreta y por eso se atienden
@@ -16,7 +19,7 @@ const EVENTOS_DE_LA_APP = new Set(['confirm_request', 'toast', 'task_done', 'tas
    y solo si el rail existe; el intervalo vive mientras la ventana viva). */
 function tickBoardClock() {
   const el = document.getElementById('boardClock');
-  if (el) el.textContent = new Date().toLocaleTimeString('es-ES', { hour: '2-digit', minute: '2-digit', second: '2-digit', hour12: false });
+  if (el) el.textContent = new Date().toLocaleTimeString(LOCALE, { hour: '2-digit', minute: '2-digit', second: '2-digit', hour12: false });
 }
 tickBoardClock();
 setInterval(tickBoardClock, 1000);
@@ -24,31 +27,41 @@ function feed(text, color) {
   const f = $('#activityFeed');
   const it = document.createElement('div');
   it.className = 'fitem';
-  it.innerHTML = `<span class="dot ${color || 'pur'}"></span><span class="ft-txt">${esc(text)}</span><span class="ft">${new Date().toLocaleTimeString('es', { hour: '2-digit', minute: '2-digit', second: '2-digit' })}</span>`;
+  it.innerHTML = `<span class="dot ${color || 'pur'}"></span><span class="ft-txt">${esc(text)}</span><span class="ft">${new Date().toLocaleTimeString(LOCALE, { hour: '2-digit', minute: '2-digit', second: '2-digit' })}</span>`;
   f.prepend(it);
   while (f.children.length > FEED_MAX) f.lastChild.remove();
 }
 
+/* `name` NO se traduce: es la clave con la que se compara el texto de estado que manda el
+   motor (`agentStartForStatus`) y con la que se deduplica el rail (`data-agent`). Lo que
+   se pinta es `label` y `desc`, que son claves del diccionario. */
 const AGENT_MAP = {
-  run_command: { el: 'agentCard-ops', name: 'Operador', icon: 'terminal', cls: 'a-p2', desc: 'Ejecutando comandos' },
-  read_file: { el: 'agentCard-file', name: 'Archivador', icon: 'folder', cls: 'a-y', desc: 'Leyendo archivos' },
-  write_file: { el: 'agentCard-file', name: 'Archivador', icon: 'folder', cls: 'a-y', desc: 'Escribiendo archivos' },
-  list_dir: { el: 'agentCard-file', name: 'Archivador', icon: 'folder', cls: 'a-y', desc: 'Explorando carpetas' },
-  search_files: { el: 'agentCard-researcher', name: 'Investigador', icon: 'search', cls: 'a-b', desc: 'Buscando información' },
-  open_app: { el: 'agentCard-ops', name: 'Operador', icon: 'terminal', cls: 'a-p2', desc: 'Abriendo aplicaciones' },
-  open_url: { el: 'agentCard-navigator', name: 'Navegador', icon: 'compass', cls: 'a-c', desc: 'Abriendo enlaces' },
-  browser_control: { el: 'agentCard-navigator', name: 'Navegador', icon: 'compass', cls: 'a-c', desc: 'Controlando el navegador' },
-  screenshot: { el: 'agentCard-analyst', name: 'Analista', icon: 'camera', cls: 'a-b2', desc: 'Analizando la pantalla' },
-  view_image: { el: 'agentCard-analyst', name: 'Analista', icon: 'eye', cls: 'a-b2', desc: 'Analizando una imagen' },
-  clipboard: { el: 'agentCard-ops', name: 'Operador', icon: 'clipboard', cls: 'a-p2', desc: 'Gestionando portapapeles' },
-  notify: { el: 'agentCard-ops', name: 'Operador', icon: 'bell', cls: 'a-p2', desc: 'Enviando notificación' },
-  media_control: { el: 'agentCard-ops', name: 'Operador', icon: 'music', cls: 'a-p2', desc: 'Control multimedia' },
-  window_manage: { el: 'agentCard-ops', name: 'Operador', icon: 'window', cls: 'a-p2', desc: 'Gestionando ventanas' },
-  system_info: { el: 'agentCard-analyst', name: 'Analista', icon: 'monitor', cls: 'a-b2', desc: 'Leyendo el sistema' },
+  run_command: { el: 'agentCard-ops', name: 'Operador', label: 'agentes.agente.operador', icon: 'terminal', cls: 'a-p2', desc: 'agentes.agente.operador.desc' },
+  read_file: { el: 'agentCard-file', name: 'Archivador', label: 'agentes.agente.archivador', icon: 'folder', cls: 'a-y', desc: 'agentes.agente.archivador.leer' },
+  write_file: { el: 'agentCard-file', name: 'Archivador', label: 'agentes.agente.archivador', icon: 'folder', cls: 'a-y', desc: 'agentes.agente.archivador.escribir' },
+  list_dir: { el: 'agentCard-file', name: 'Archivador', label: 'agentes.agente.archivador', icon: 'folder', cls: 'a-y', desc: 'agentes.agente.archivador.explorar' },
+  search_files: { el: 'agentCard-researcher', name: 'Investigador', label: 'agentes.agente.investigador', icon: 'search', cls: 'a-b', desc: 'agentes.agente.investigador.desc' },
+  open_app: { el: 'agentCard-ops', name: 'Operador', label: 'agentes.agente.operador', icon: 'terminal', cls: 'a-p2', desc: 'agentes.agente.operador.abrirApp' },
+  open_url: { el: 'agentCard-navigator', name: 'Navegador', label: 'agentes.agente.navegador', icon: 'compass', cls: 'a-c', desc: 'agentes.agente.navegador.abrir' },
+  browser_control: { el: 'agentCard-navigator', name: 'Navegador', label: 'agentes.agente.navegador', icon: 'compass', cls: 'a-c', desc: 'agentes.agente.navegador.controlar' },
+  screenshot: { el: 'agentCard-analyst', name: 'Analista', label: 'agentes.agente.analista', icon: 'camera', cls: 'a-b2', desc: 'agentes.agente.analista.pantalla' },
+  view_image: { el: 'agentCard-analyst', name: 'Analista', label: 'agentes.agente.analista', icon: 'eye', cls: 'a-b2', desc: 'agentes.agente.analista.imagen' },
+  clipboard: { el: 'agentCard-ops', name: 'Operador', label: 'agentes.agente.operador', icon: 'clipboard', cls: 'a-p2', desc: 'agentes.agente.operador.portapapeles' },
+  notify: { el: 'agentCard-ops', name: 'Operador', label: 'agentes.agente.operador', icon: 'bell', cls: 'a-p2', desc: 'agentes.agente.operador.notificar' },
+  media_control: { el: 'agentCard-ops', name: 'Operador', label: 'agentes.agente.operador', icon: 'music', cls: 'a-p2', desc: 'agentes.agente.operador.multimedia' },
+  window_manage: { el: 'agentCard-ops', name: 'Operador', label: 'agentes.agente.operador', icon: 'window', cls: 'a-p2', desc: 'agentes.agente.operador.ventanas' },
+  system_info: { el: 'agentCard-analyst', name: 'Analista', label: 'agentes.agente.analista', icon: 'monitor', cls: 'a-b2', desc: 'agentes.agente.analista.sistema' },
 };
 
 function agentStart(toolName) {
-  const a = AGENT_MAP[toolName] || { el: 'agentCard-ops', name: 'Operador', icon: 'terminal', cls: 'a-p2', desc: 'Trabajando' };
+  const a = AGENT_MAP[toolName] || {
+    el: 'agentCard-ops',
+    name: 'Operador',
+    label: 'agentes.agente.operador',
+    icon: 'terminal',
+    cls: 'a-p2',
+    desc: 'agentes.agente.trabajando',
+  };
   const card = document.getElementById(a.el);
   if (card) card.classList.add('on');
   const rail = $('#railAgents');
@@ -56,7 +69,7 @@ function agentStart(toolName) {
     const d = document.createElement('div');
     d.className = 'ragent';
     d.dataset.agent = a.name;
-    d.innerHTML = `<div class="aic ${a.cls || 'a-p2'}">${ic(a.icon)}</div><div><b>${esc(a.name)}</b><small>${esc(a.desc)}</small></div><span class="adot"></span>`;
+    d.innerHTML = `<div class="aic ${a.cls || 'a-p2'}">${ic(a.icon)}</div><div><b>${esc(I18N.t(a.label))}</b><small>${esc(I18N.t(a.desc))}</small></div><span class="adot"></span>`;
     rail.prepend(d);
     while (rail.children.length > 4) rail.lastChild.remove();
   }
@@ -108,7 +121,9 @@ function updateAgentCount() {
      la vista (lo mantiene 20-app.js al vuelo de cada evento). */
   const estado = $('#railState');
   if (estado) {
-    estado.textContent = n ? (n === 1 ? '1 agente activo' : n + ' agentes activos') : busy ? 'Sagitari trabajando' : 'En reposo';
+    estado.textContent = n
+      ? I18N.t(n === 1 ? 'agentes.rail.uno' : 'agentes.rail.varios', { n: n })
+      : I18N.t(busy ? 'agentes.rail.trabajando' : 'agentes.rail.reposo');
   }
   const live = $('#railLive');
   if (live) live.classList.toggle('busy', !n && !!busy);
@@ -177,11 +192,11 @@ async function renderToolTray() {
   try {
     fired = ((await window.sagitari.getAgentsLive()) || {}).toolsFired || [];
   } catch (e) {
-    tray.innerHTML = `<div class="subnote">No se pudo leer la actividad: ${esc((e && e.message) || e)}</div>`;
+    tray.innerHTML = `<div class="subnote">${esc(I18N.t('agentes.tray.error', { motivo: (e && e.message) || e }))}</div>`;
     return;
   }
   if (!fired.length) {
-    tray.innerHTML = '<div class="subnote">Todavía no se ha usado ninguna herramienta en esta sesión.</div>';
+    tray.innerHTML = `<div class="subnote">${esc(I18N.t('agentes.tray.vacio'))}</div>`;
     marcarTrayVacio(tray, true);
     return;
   }
@@ -206,11 +221,11 @@ async function renderHealth() {
     err = e;
   }
   if (err) {
-    box.innerHTML = `<div class="subnote">No se pudo leer la salud del modelo: ${esc((err && err.message) || err)}</div>`;
+    box.innerHTML = `<div class="subnote">${esc(I18N.t('agentes.salud.error', { motivo: (err && err.message) || err }))}</div>`;
     return;
   }
   if (!rows.length) {
-    box.innerHTML = '<div class="subnote">Sin datos todavía. Cada llamada al modelo registrará latencia, errores y tokens aquí.</div>';
+    box.innerHTML = `<div class="subnote">${esc(I18N.t('agentes.salud.vacio'))}</div>`;
     marcarTrayVacio(box, true);
     return;
   }
@@ -219,17 +234,19 @@ async function renderHealth() {
   box.innerHTML = rows
     .map((r) => {
       const health = r.errorRate >= 0.3 ? 'mag' : r.errorRate > 0 ? 'a-y' : 'ok';
-      const tok = (r.tokensIn + r.tokensOut).toLocaleString('es');
-      const errs = r.errors ? r.errors + (r.errors === 1 ? ' error' : ' errores') : '';
-      const rel = r.fallbacks ? r.fallbacks + (r.fallbacks === 1 ? ' relevo' : ' relevos') : '';
+      const tok = (r.tokensIn + r.tokensOut).toLocaleString(I18N.idioma === 'en' ? 'en-US' : 'es-ES');
+      const errs = r.errors ? I18N.t(r.errors === 1 ? 'agentes.salud.error.uno' : 'agentes.salud.error.varios', { n: r.errors }) : '';
+      const rel = r.fallbacks
+        ? I18N.t(r.fallbacks === 1 ? 'agentes.salud.relevo.uno' : 'agentes.salud.relevo.varios', { n: r.fallbacks })
+        : '';
       return `<div class="hrow" title="${esc(r.lastError || '')}">
       <span class="dot ${health}"></span>
       <b class="hmod">${esc(r.model)}</b>
-      <span class="hstat">${r.calls} llamadas</span>
-      <span class="hstat">${r.avgLatencyMs || '—'} ms</span>
-      <span class="hstat">${tok} tok</span>
-      <span class="hstat${errs ? ' bad' : ''}">${errs}</span>
-      <span class="hstat">${rel}</span>
+      <span class="hstat">${esc(I18N.t('agentes.salud.llamadas', { n: r.calls }))}</span>
+      <span class="hstat">${esc(I18N.t('agentes.salud.latencia', { n: r.avgLatencyMs || '—' }))}</span>
+      <span class="hstat">${esc(I18N.t('agentes.salud.tokens', { n: tok }))}</span>
+      <span class="hstat${errs ? ' bad' : ''}">${esc(errs)}</span>
+      <span class="hstat">${esc(rel)}</span>
     </div>`;
     })
     .join('');
@@ -255,12 +272,12 @@ async function renderHabits() {
   const c = s.confirms || {};
   if (c.approved || c.denied)
     parts.push(
-      `<div class="toolchip"><span class="tc-mark">${ic('check')}</span><span class="tc-txt" title="Confirmaciones aceptadas y denegadas">confirmaciones: ${c.approved || 0} aceptadas · ${c.denied || 0} denegadas</span></div>`,
+      `<div class="toolchip"><span class="tc-mark">${ic('check')}</span><span class="tc-txt" title="${esc(I18N.t('agentes.habitos.confirmaciones'))}">${esc(
+        I18N.t('agentes.habitos.confirmaciones.texto', { ok: c.approved || 0, no: c.denied || 0 }),
+      )}</span></div>`,
     );
   const hayHabitos = parts.filter(Boolean).length > 0;
-  box.innerHTML =
-    parts.filter(Boolean).join('') ||
-    '<div class="subnote">Aún no hay hábitos observados. Se aprenden solo de lo que SAGITARI hace por ti.</div>';
+  box.innerHTML = parts.filter(Boolean).join('') || `<div class="subnote">${esc(I18N.t('agentes.habitos.vacio'))}</div>`;
   marcarTrayVacio(box, !hayHabitos);
 }
 
@@ -269,9 +286,13 @@ function importSummary(inst) {
   const list = Array.isArray(inst) ? inst : [];
   const ok = list.filter((s) => !s.skipped).map((s) => s.name);
   const omitidas = list.filter((s) => s.skipped);
-  let txt = ok.length ? 'Instaladas: ' + ok.join(', ') : 'No se instaló ninguna skill';
+  let txt = ok.length
+    ? I18N.t('skills.instaladas', { lista: ok.join(', ') })
+    : I18N.t('skills.ninguna');
   if (omitidas.length) {
-    txt += ' · Omitidas: ' + omitidas.map((s) => s.name + (s.reason ? ' (' + s.reason + ')' : '')).join(', ');
+    txt += ' · ' + I18N.t('skills.omitidas', {
+      lista: omitidas.map((s) => s.name + (s.reason ? ' (' + s.reason + ')' : '')).join(', '),
+    });
   }
   return txt;
 }
@@ -286,7 +307,7 @@ async function skillsImportConfirmed(repo, say) {
   const r = await window.sagitari.skillsImport(repo, skillImportArmed[repo] ? { confirm: true } : undefined);
   if (r && r.needsConfirm) {
     skillImportArmed[repo] = true;
-    say('Revisa antes de instalar — ' + (r.error || 'pulsa otra vez para confirmar.'));
+    say(I18N.t('skills.previa', { motivo: r.error || I18N.t('skills.previa.confirmar') }));
     return null; // previa mostrada: el segundo clic instala
   }
   delete skillImportArmed[repo];
@@ -306,14 +327,14 @@ async function renderMarket() {
     <div class="memitem">
       <span class="tc-mark">${ic('zap')}</span>
       <span class="mt"><b>${esc(f.repo)}</b> <span class="md">· ${esc(f.category)}</span><br><small class="md">${esc(f.description)}</small></span>
-      ${f.installed ? '<span class="md" style="color:var(--ok)">✓ instalado</span>' : `<button class="btn primary sq" data-install="${esc(f.repo)}" title="Instalar">${ic('download')}</button>`}
+      ${f.installed ? `<span class="md" style="color:var(--ok)">${esc(I18N.t('skills.instalado'))}</span>` : `<button class="btn primary sq" data-install="${esc(f.repo)}" title="${esc(I18N.t('skills.instalar'))}">${ic('download')}</button>`}
     </div>`,
       )
-      .join('') || '<div class="subnote">Catálogo no disponible sin conexión.</div>';
+      .join('') || `<div class="subnote">${esc(I18N.t('skills.catalogo.sinConexion'))}</div>`;
   box.querySelectorAll('[data-install]').forEach((b) => {
     b.onclick = async () => {
       b.disabled = true;
-      $('#marketMsg').textContent = 'Instalando ' + b.dataset.install + '…';
+      $('#marketMsg').textContent = I18N.t('skills.instalando', { repo: b.dataset.install });
       try {
         const inst = await skillsImportConfirmed(b.dataset.install, (t) => {
           $('#marketMsg').textContent = t;
@@ -325,7 +346,7 @@ async function renderMarket() {
         $('#marketMsg').textContent = importSummary(inst);
         renderSkills();
       } catch (e) {
-        $('#marketMsg').textContent = 'Error: ' + (e.message || e);
+        $('#marketMsg').textContent = I18N.t('skills.error', { motivo: e.message || e });
       }
       renderMarket();
     };
@@ -337,7 +358,7 @@ $('#marketSearchBtn').onclick = async () => {
   const q = $('#marketQuery').value.trim();
   if (!q) return;
   const box = $('#marketList');
-  $('#marketMsg').textContent = 'Buscando en GitHub…';
+  $('#marketMsg').textContent = I18N.t('skills.buscando');
   btn.disabled = true;
   try {
     const res = await window.sagitari.marketSearch(q);
@@ -348,10 +369,10 @@ $('#marketSearchBtn').onclick = async () => {
       <div class="memitem">
         <span class="tc-mark">${ic('search')}</span>
         <span class="mt"><b>${esc(r.repo)}</b> <span class="md">★ ${esc(r.stars)}</span><br><small class="md">${esc(r.description)}</small></span>
-        <button class="btn primary sq" data-install="${esc(r.repo)}" title="Instalar">${ic('download')}</button>
+        <button class="btn primary sq" data-install="${esc(r.repo)}" title="${esc(I18N.t('skills.instalar'))}">${ic('download')}</button>
       </div>`,
         )
-        .join('') || '<div class="subnote">Sin resultados.</div>';
+        .join('') || `<div class="subnote">${esc(I18N.t('skills.sinResultados'))}</div>`;
     box.querySelectorAll('[data-install]').forEach((b) => {
       b.onclick = async () => {
         b.disabled = true;
@@ -363,16 +384,16 @@ $('#marketSearchBtn').onclick = async () => {
             b.disabled = false;
             return;
           } // previa a la vista: reactivar para el segundo clic
-          $('#marketMsg').textContent = 'Instalado: ' + b.dataset.install;
+          $('#marketMsg').textContent = I18N.t('skills.instaladoUno', { repo: b.dataset.install });
           renderSkills();
         } catch (e) {
-          $('#marketMsg').textContent = 'Error: ' + (e.message || e);
+          $('#marketMsg').textContent = I18N.t('skills.error', { motivo: e.message || e });
         }
       };
     });
     $('#marketMsg').textContent = '';
   } catch (e) {
-    $('#marketMsg').textContent = 'Error: ' + (e.message || e);
+    $('#marketMsg').textContent = I18N.t('skills.error', { motivo: e.message || e });
   } finally {
     btn.disabled = false;
   }
@@ -384,19 +405,19 @@ $('#skillsUpdateAllBtn').onclick = async () => {
   // obedecerá: no es un «update» inocuo y no se hace en silencio.
   const yes = await askConfirm(
     $('#skillsUpdateAllBtn'),
-    '¿Actualizar todas las skills desde sus repos?',
-    'Traerá instrucciones nuevas de terceros que el agente obedecerá.',
+    I18N.t('skills.actualizar.confirmar'),
+    I18N.t('skills.actualizar.detalle'),
   );
   if (!yes) return;
-  $('#marketMsg').textContent = 'Actualizando skills…';
+  $('#marketMsg').textContent = I18N.t('skills.actualizando');
   btn.disabled = true;
   try {
     const res = await window.sagitari.skillsUpdateAll();
     const changed = res.filter((r) => r.changed).length;
-    $('#marketMsg').textContent = `${res.length} skills con origen · ${changed} actualizadas`;
+    $('#marketMsg').textContent = I18N.t('skills.actualizadas', { n: res.length, cambiadas: changed });
     renderSkills();
   } catch (e) {
-    $('#marketMsg').textContent = 'Error: ' + (e.message || e);
+    $('#marketMsg').textContent = I18N.t('skills.error', { motivo: e.message || e });
   } finally {
     btn.disabled = false;
   }
@@ -482,8 +503,8 @@ function pintarCtxMeter(ev) {
   const tokens = Number(ev.tokens) || 0;
   const limite = Number(ev.limite) || 0;
   el.title = limite
-    ? K.thousands(tokens) + ' de ' + K.thousands(limite) + ' tokens de contexto'
-    : K.thousands(tokens) + ' tokens de contexto';
+    ? I18N.t('chat.ctx.title', { tokens: K.thousands(tokens), limite: K.thousands(limite) })
+    : I18N.t('chat.ctx.titleSinLimite', { tokens: K.thousands(tokens) });
 }
 
 /** Sin contexto que enseñar (conversación nueva, o sin evento todavía): se esconde, en vez
@@ -509,7 +530,7 @@ window.sagitari.onAgentEvent((ev) => {
         feed(ev.text, 'pur');
         break;
       case 'tool':
-        feed(ev.name || 'herramienta', 'pur');
+        feed(ev.name || I18N.t('chat.evento.herramienta'), 'pur');
         break;
       case 'tool_result':
         feed((ev.name || '') + ' — ' + String(ev.result || 'ok').slice(0, 90), ev.ok === false ? 'err' : 'ok');
@@ -518,37 +539,37 @@ window.sagitari.onAgentEvent((ev) => {
         feed(etiquetaEquipo(ev), 'pur');
         break;
       case 'delegate_done': {
-        const who = (K.subagent(ev.subagent) || {}).label || 'Subagente';
+        const who = (K.subagent(ev.subagent) || {}).label || I18N.t('chat.subagente');
         const st = String(ev.status || 'OK').toUpperCase();
         feed(
           who +
             ' — ' +
-            (st === 'FAILED' ? 'falló' : st === 'PARTIAL' ? 'a medias' : 'terminó') +
+            I18N.t(st === 'FAILED' ? 'chat.deleg.fin.fallo' : st === 'PARTIAL' ? 'chat.deleg.fin.medias' : 'chat.deleg.fin.termino') +
             (ev.result ? ': ' + String(ev.result).slice(0, 80) : ''),
           st === 'FAILED' ? 'err' : 'ok',
         );
         break;
       }
       case 'task_done':
-        feed('Tarea en segundo plano completada', 'ok');
+        feed(I18N.t('tareas.evento.hecha'), 'ok');
         if ($('#view-tasks').classList.contains('on')) renderTasks();
         refreshAgentsPanels();
         break;
       case 'task_interrupted':
-        feed('Tarea en segundo plano interrumpida — recuperable', 'err');
+        feed(I18N.t('tareas.evento.interrumpida'), 'err');
         if ($('#view-tasks').classList.contains('on')) renderTasks();
         break;
       case 'task_update':
-        feed(ev.note || 'Tarea: ' + ev.status, 'blu');
+        feed(ev.note || I18N.t('tareas.evento.actualizada', { estado: ev.status }), 'blu');
         if ($('#view-tasks').classList.contains('on')) renderTasks();
         break;
       case 'guardrail':
-        feed('Límite de seguridad (segundo plano): ' + String(ev.reason || '').slice(0, 90), 'err');
-        showToast(String(ev.reason || 'Límite de seguridad en una tarea'));
+        feed(I18N.t('chat.guardrail.segundoPlano', { motivo: String(ev.reason || '').slice(0, 90) }), 'err');
+        showToast(String(ev.reason || I18N.t('chat.guardrail.tarea')));
         break;
       case 'error':
-        feed('Error en una tarea en segundo plano', 'err');
-        showToast(ev.message || 'Error en una tarea en segundo plano');
+        feed(I18N.t('tareas.evento.error'), 'err');
+        showToast(ev.message || I18N.t('tareas.evento.error'));
         break;
       case 'confirm_request':
         showConfirm(ev);
@@ -627,7 +648,7 @@ window.sagitari.onAgentEvent((ev) => {
       d._hasta = Date.now();
       // el texto de la cabecera lo lleva el reloj (pensando… 12,4 s): aquí no se pisa
       scheduleThinkRender(d);
-      setChatStatus('Razonando…');
+      setChatStatus(I18N.t('chat.razonando'));
       break;
     }
     case 'thinking_done': {
@@ -677,7 +698,7 @@ window.sagitari.onAgentEvent((ev) => {
     case 'delegate_start':
       freezeStream(); // igual que con herramientas: intercalado cronológico
       equipoChip(ev);
-      setChatStatus(etiquetaEquipo(ev) + ' — trabajando…');
+      setChatStatus(I18N.t('chat.delegate.trabajando', { quien: etiquetaEquipo(ev) }));
       feed(etiquetaEquipo(ev), 'pur');
       break;
     // v2.6: el modelo actualizó su lista de tareas: se repinta el estado real
@@ -690,17 +711,20 @@ window.sagitari.onAgentEvent((ev) => {
       equipoCierra(ev);
       agentStop();
       feed(
-        ((K.subagent(ev.subagent) || {}).label || 'Subagente') +
+        ((K.subagent(ev.subagent) || {}).label || I18N.t('chat.subagente')) +
           ' — ' +
-          (String(ev.status || 'OK').toUpperCase() === 'FAILED' ? 'falló' : 'terminó'),
+          I18N.t(String(ev.status || 'OK').toUpperCase() === 'FAILED' ? 'chat.deleg.fin.fallo' : 'chat.deleg.fin.termino'),
         String(ev.status || '').toUpperCase() === 'FAILED' ? 'err' : 'ok',
       );
       break;
     case 'tool_result':
       completeToolCard(ev);
       agentStop();
-      feed(K.tool(ev.name).label + (ev.ok === false ? ' — falló' : ' — completado'), ev.ok === false ? 'err' : 'ok');
-      setChatStatus('Herramienta completada, continuando…');
+      feed(
+        K.tool(ev.name).label + ' — ' + I18N.t(ev.ok === false ? 'chat.deleg.fin.fallo' : 'chat.evento.completado'),
+        ev.ok === false ? 'err' : 'ok',
+      );
+      setChatStatus(I18N.t('chat.herramienta.continuando'));
       refreshAgentsPanels();
       break;
     case 'image': {
@@ -727,14 +751,14 @@ window.sagitari.onAgentEvent((ev) => {
       setSendMode();
       syncChatBadge();
       glowOffSoon();
-      setChatStatus('Listo · ' + lastTurnLabel(), 'done');
-      feed('Respuesta lista', 'cy');
+      setChatStatus(I18N.t('chat.listo', { resumen: lastTurnLabel() }), 'done');
+      feed(I18N.t('chat.respuestaLista'), 'cy');
       if (devMode) paintMeta();
       break;
     }
     case 'guardrail':
-      toolChip('Límite de seguridad — ' + ev.reason.slice(0, 100), 'err');
-      feed('Límite de seguridad', 'err');
+      toolChip(I18N.t('chat.guardrail.tarjeta', { motivo: ev.reason.slice(0, 100) }), 'err');
+      feed(I18N.t('chat.guardrail'), 'err');
       showToast(ev.reason);
       break;
     /* v2.5: el contexto se está llenando. No es un error —el turno sigue y se sueltan
@@ -742,8 +766,13 @@ window.sagitari.onAgentEvent((ev) => {
        corta y, si el turno va muy largo, lo que toca es empezar una conversación nueva. */
     case 'contexto': {
       const pct = Math.round((ev.uso || 0) * 100);
-      const aprox = ev.tokens ? ' (~' + Math.round(ev.tokens / 1000) + 'k de ' + Math.round((ev.ventana || 0) / 1000) + 'k tokens)' : '';
-      feed('Contexto al ' + pct + '%' + aprox + ': se sueltan los bloques más antiguos del envío (la conversación se conserva)', 'pur');
+      const aprox = ev.tokens
+        ? I18N.t('chat.contexto.aprox', {
+            usados: Math.round(ev.tokens / 1000),
+            ventana: Math.round((ev.ventana || 0) / 1000),
+          })
+        : '';
+      feed(I18N.t('chat.contexto.aviso', { pct: pct, aprox: aprox }), 'pur');
       break;
     }
     case 'paused':
@@ -752,21 +781,21 @@ window.sagitari.onAgentEvent((ev) => {
       syncChatBadge();
       glowOffSoon();
       agentStop();
-      feed('Tarea pausada — punto de control guardado', 'blu');
-      showToast('Tarea pausada. Reanúdala desde el panel Tareas.');
+      feed(I18N.t('chat.pausada.feed'), 'blu');
+      showToast(I18N.t('chat.pausada.toast'));
       break;
     case 'task_done':
-      feed('Tarea completada y verificada', 'ok');
+      feed(I18N.t('tareas.evento.completada'), 'ok');
       if ($('#view-tasks').classList.contains('on')) renderTasks();
       refreshAgentsPanels();
       break;
     case 'task_interrupted':
-      feed('Tarea interrumpida — recuperable en Tareas', 'err');
+      feed(I18N.t('tareas.evento.interrumpidaEn'), 'err');
       if ($('#view-tasks').classList.contains('on')) renderTasks();
       refreshAgentsPanels();
       break;
     case 'task_update':
-      feed(ev.note || 'Tarea: ' + ev.status, 'blu');
+      feed(ev.note || I18N.t('tareas.evento.actualizada', { estado: ev.status }), 'blu');
       if ($('#view-tasks').classList.contains('on')) renderTasks();
       break;
     case 'confirm_request':
@@ -782,7 +811,7 @@ window.sagitari.onAgentEvent((ev) => {
         currentRunMode = K.mode(ev.mode || mode).key;
         applyModeTheme(currentRunMode);
         setChatStatus(K.mode(currentRunMode).tagline);
-        feed('Sagitari está trabajando · ' + K.mode(currentRunMode).label, 'blu');
+        feed(I18N.t('chat.trabajando', { modo: K.mode(currentRunMode).label }), 'blu');
         if (devMode) paintMeta(); // métricas del turno que arranca, no las del anterior
       } else {
         // terminó la ejecución: el color vuelve al modo que tengas elegido
@@ -805,8 +834,8 @@ window.sagitari.onAgentEvent((ev) => {
       syncChatBadge();
       glowOffSoon();
       agentStop();
-      setChatStatus('Detenido por el usuario');
-      feed('Detenido por el usuario', 'err');
+      setChatStatus(I18N.t('chat.detenido.usuario'));
+      feed(I18N.t('chat.detenido.usuario'), 'err');
       if (devMode) paintMeta();
       break;
     case 'toast':
@@ -818,7 +847,7 @@ window.sagitari.onAgentEvent((ev) => {
       const ocupado = /ocupad/i.test(String(ev.message || ''));
       if (ocupado) {
         showToast(ev.message);
-        feed('Envío ignorado: el agente sigue trabajando', 'err');
+        feed(I18N.t('chat.envioIgnorado'), 'err');
         break;
       }
       const hadTurn = !!pendingAssistant;
@@ -838,7 +867,7 @@ window.sagitari.onAgentEvent((ev) => {
         pista.textContent = ex.pista;
         const reintentar = document.createElement('button');
         reintentar.className = 'btn';
-        reintentar.textContent = 'Reintentar';
+        reintentar.textContent = I18N.t('chat.reintentar');
         reintentar.onclick = () => {
           window.sagitari.retryChat();
         };
@@ -857,7 +886,7 @@ window.sagitari.onAgentEvent((ev) => {
       syncChatBadge();
       glowOffSoon();
       agentStop();
-      feed('Error en la tarea', 'err');
+      feed(I18N.t('tareas.evento.error'), 'err');
       if (devMode) paintMeta();
       break;
     }
@@ -883,7 +912,8 @@ function showConfirm(ev) {
      cuenta en su insignia de pendientes (puede estar esperando mientras otro trabaja); el
      líder no lleva `member` y no tiene insignia que sumar. */
   if (ev.member) equipoPermiso(ev.convId || hiloActual(), ev.member, +1);
-  if (confirmQueue.length > 1) feed('Confirmación en cola (' + confirmQueue.length + ' pendientes): ' + ev.tool, 'blu');
+  if (confirmQueue.length > 1)
+    feed(I18N.t('chat.confirmacion.cola', { n: confirmQueue.length, herramienta: ev.tool }), 'blu');
   paintConfirm();
 }
 
@@ -896,9 +926,9 @@ function paintConfirm() {
     if (bar) bar.hidden = true;
     return;
   }
-  const who = ev.runId ? ' (tarea en segundo plano)' : '';
+  const who = ev.runId ? I18N.t('chat.confirmacion.tarea') : '';
   // con varias esperando se dice cuál se está viendo: «1 de 3»
-  const prog = confirmQueue.length > 1 ? ' · 1 de ' + confirmQueue.length : '';
+  const prog = confirmQueue.length > 1 ? I18N.t('chat.confirmacion.unoDe', { n: confirmQueue.length }) : '';
   /* El LITERAL manda: el comando, la ruta o la URL exactos. Antes sólo aparecía
      en un `small` de 12 px recortado a 240 caracteres y 3 líneas, mientras lo que
      el ojo leía primero era la descripción genérica («Ejecutar comando en la
@@ -909,10 +939,16 @@ function paintConfirm() {
     cmd.textContent = literal;
     cmd.title = literal; // el literal completo, aunque la caja tenga tope de alto
   }
+  /* «quien pide» es opcional (el líder del equipo o un compañero): con él, la frase lleva
+     su nombre; sin él, la de siempre. */
+  const quien = quienPidePermiso(ev);
   $('#confirmTitle').textContent =
-    (quienPidePermiso(ev) ? quienPidePermiso(ev) + ' quiere: ' : 'El agente quiere: ') + (ev.description || ev.tool) + who + prog;
+    I18N.t(quien ? 'chat.confirmacion.quiere' : 'chat.confirmacion.agenteQuiere', { quien: quien }) +
+    (ev.description || ev.tool) +
+    who +
+    prog;
   // el detalle dice con qué herramienta se hace: nunca queda vacío
-  $('#confirmDetail').textContent = ev.tool ? 'Herramienta: ' + ev.tool : '';
+  $('#confirmDetail').textContent = ev.tool ? I18N.t('chat.confirmacion.herramienta', { herramienta: ev.tool }) : '';
   bar.hidden = false;
   // al mostrarse es un diálogo modal de aviso: el lector de pantalla lo anuncia
   bar.setAttribute('role', 'alertdialog');
@@ -923,7 +959,7 @@ function paintConfirm() {
   // acto deliberado, y el error por defecto es no ejecutar.
   if (bar.tabIndex < 0) bar.tabIndex = -1;
   bar.focus();
-  feed('Esperando tu confirmación: ' + (literal || ev.tool), 'blu');
+  feed(I18N.t('chat.confirmacion.esperando', { que: literal || ev.tool }), 'blu');
 }
 
 /* Quién pide el permiso, dicho para la barra: el compañero del equipo por su nombre, y el
@@ -937,7 +973,7 @@ function quienPidePermiso(ev) {
     return (f && f.name) || ev.memberName || ev.member;
   }
   const e = equipoDe(convId, false);
-  return e && e.estado === 'vivo' ? 'el líder del equipo' : null;
+  return e && e.estado === 'vivo' ? I18N.t('chat.confirmacion.lider') : null;
 }
 
 /* El permiso ya no está pendiente: se descuenta de la insignia de su compañero. Se llama en
@@ -1008,11 +1044,11 @@ function askConfirm(anchor, message, detail) {
     bar.innerHTML = `<span class="cb-dot"></span>
       <div class="cb-txt"><b></b><small></small></div>
       <div class="btnrow" style="margin:0">
-        <button class="btn primary" data-ok>Confirmar</button>
-        <button class="btn ghost" data-no>Cancelar</button>
+        <button class="btn primary" data-ok>${esc(I18N.t('chat.confirmar.ok'))}</button>
+        <button class="btn ghost" data-no>${esc(I18N.t('chat.confirmar.no'))}</button>
       </div>`;
     bar.querySelector('b').textContent = message;
-    bar.querySelector('small').textContent = detail || 'Esta acción no se puede deshacer.';
+    bar.querySelector('small').textContent = detail || I18N.t('chat.confirmar.noDeshacer');
     let done = false;
     /* Las vistas se repintan con `innerHTML = ''` (renderTasks, renderHistory,
        renderMemoria, renderSkills…), lo que arrancaba la barra del DOM sin pasar
@@ -1074,25 +1110,17 @@ async function paintMeta() {
     const r = m.run || {};
     const gr = m.guardrails || {};
     line.hidden = false;
-    line.textContent =
-      (m.model || '—') +
-      ' · turno: ' +
-      (r.tokensIn || 0) +
-      ' in / ' +
-      (r.tokensOut || 0) +
-      ' out tok · ' +
-      (r.llmCalls || 0) +
-      ' llamadas · ' +
-      (r.toolCalls || 0) +
-      ' herramientas · ' +
-      (r.lastLatencyMs || 0) +
-      ' ms' +
-      ' · límites: ' +
-      (gr.maxSteps || '∞') +
-      ' pasos / ' +
-      (gr.maxDurationMs ? Math.round(gr.maxDurationMs / 60000) + ' min' : '∞') +
-      ' / silencio ' +
-      ((CFG.settings.llmTimeoutMs ?? 120000) ? Math.round((CFG.settings.llmTimeoutMs ?? 120000) / 1000) + ' s' : '∞');
+    line.textContent = I18N.t('chat.meta.linea', {
+      modelo: m.model || '—',
+      tokensIn: r.tokensIn || 0,
+      tokensOut: r.tokensOut || 0,
+      llamadas: r.llmCalls || 0,
+      herramientas: r.toolCalls || 0,
+      ms: r.lastLatencyMs || 0,
+      pasos: gr.maxSteps || '∞',
+      minutos: gr.maxDurationMs ? Math.round(gr.maxDurationMs / 60000) : '∞',
+      segundos: (CFG.settings.llmTimeoutMs ?? 120000) ? Math.round((CFG.settings.llmTimeoutMs ?? 120000) / 1000) : '∞',
+    });
   } catch {
     line.hidden = true;
   }
@@ -1114,7 +1142,7 @@ function setSendMode() {
   const b = $('#chatSend');
   b.innerHTML = ic(busy ? 'stop' : 'send');
   b.classList.toggle('stop', busy);
-  b.title = busy ? 'Detener' : 'Enviar';
+  b.title = I18N.t(busy ? 'chat.detener' : 'chat.enviar');
   // La pausa solo existe mientras hay un turno que pausar: un control que no
   // puede hacer nada en reposo no se enseña.
   const p = $('#chatPause');
@@ -1140,7 +1168,7 @@ async function enviarTexto(text, atts = []) {
   // los adjuntos se ven en la burbuja (miniaturas y nombres), no solo en el texto
   const visAtts = atts.filter((a) => (a.kind === 'image' ? a.dataUrl : true));
   if (visAtts.length) paintAttachments(b, visAtts);
-  setChatTitle(text || (atts[0] && atts[0].name) || 'Nueva conversación');
+  setChatTitle(text || (atts[0] && atts[0].name) || I18N.t('chat.nueva.title'));
   pinned = true;
   scroll(true);
   window.sagitari.glow('think');
@@ -1152,12 +1180,12 @@ async function enviarTexto(text, atts = []) {
   syncChatBadge();
   try {
     const r = await window.sagitari.sendChat(hiloActual(), text, null, atts);
-    if (r && r.ok === false) throw new Error(r.error || 'no se pudo enviar');
+    if (r && r.ok === false) throw new Error(r.error || I18N.t('chat.enviar.error'));
   } catch (e) {
     busy = false;
     setSendMode();
     syncChatBadge();
-    showToast('No se pudo enviar: ' + ((e && e.message) || e));
+    showToast(I18N.t('chat.enviar.errorDetalle', { motivo: (e && e.message) || e }));
   }
 }
 
@@ -1168,7 +1196,7 @@ async function sendFrom(elId) {
   // Por eso este caso va ANTES de la comprobación de texto vacío.
   if (busy) {
     window.sagitari.stopChat();
-    feed('Deteniendo…', 'err');
+    feed(I18N.t('chat.deteniendo'), 'err');
     return;
   }
   const text = el.value.trim();
@@ -1203,11 +1231,15 @@ async function despacharOrden(cmd) {
      lo que se ve. */
   if (cmd.name === 'new') {
     await newConversation();
-    sysline('Conversación nueva. La anterior queda guardada en el historial.');
+    sysline(I18N.t('chat.orden.nueva'));
     return;
   }
   if (cmd.name === 'help') {
-    sysline('Órdenes: ' + K.COMMANDS.map((c) => '/' + c.name + (c.args ? ' ' + c.args : '') + ' — ' + c.descripcion).join(' · '));
+    sysline(
+      I18N.t('chat.orden.ayuda', {
+        lista: K.COMMANDS.map((c) => '/' + c.name + (c.args ? ' ' + c.args : '') + ' — ' + c.descripcion).join(' · '),
+      }),
+    );
     return;
   }
   /* La orden cruza el IPC y algunas tardan (un `/compact` llama al modelo: segundos).
@@ -1221,10 +1253,11 @@ async function despacharOrden(cmd) {
   };
   try {
     const r = await window.sagitari.chatCommand(conv, cmd.name, cmd.args);
-    if (r && r.ok === false) enHilo('No se pudo «' + nombre + '»: ' + (r.error || 'orden no disponible'));
-    else enHilo((r && r.text) || 'Hecho.');
+    if (r && r.ok === false)
+      enHilo(I18N.t('chat.orden.error', { orden: nombre, motivo: r.error || I18N.t('chat.orden.noDisponible') }));
+    else enHilo((r && r.text) || I18N.t('chat.orden.hecho'));
   } catch (e) {
-    enHilo('No se pudo «' + nombre + '»: ' + ((e && e.message) || e));
+    enHilo(I18N.t('chat.orden.error', { orden: nombre, motivo: (e && e.message) || e }));
   }
 }
 
@@ -1262,7 +1295,7 @@ function renderAttachStrip() {
     chip.appendChild(meta);
     const x = document.createElement('button');
     x.className = 'rm';
-    x.title = 'Quitar';
+    x.title = I18N.t('chat.adjunto.quitar');
     x.innerHTML = ic('x');
     x.onclick = () => {
       pendingAttachments = pendingAttachments.filter((p) => p !== a);
@@ -1305,12 +1338,12 @@ function paintAttachments(bubbleEl, atts) {
 
 async function addAttachmentPath(p) {
   if (pendingAttachments.length >= MAX_ATTACHMENTS) {
-    showToast(`Máximo ${MAX_ATTACHMENTS} adjuntos por mensaje`);
+    showToast(I18N.t('chat.adjunto.maximo', { n: MAX_ATTACHMENTS }));
     return;
   }
   const r = await window.sagitari.attachmentsRead(p);
   if (!r || !r.ok) {
-    showToast('No se pudo leer: ' + ((r && r.error) || 'error desconocido'));
+    showToast(I18N.t('chat.adjunto.error', { motivo: (r && r.error) || I18N.t('chat.error.desconocido') }));
     return;
   }
   if (pendingAttachments.some((a) => a.name === r.att.name && a.size === r.att.size)) return; // ya está
@@ -1336,18 +1369,18 @@ async function addAttachmentFiles(files) {
   const list = [...(files || [])];
   const room = MAX_ATTACHMENTS - pendingAttachments.length;
   if (room <= 0) {
-    showToast(`Máximo ${MAX_ATTACHMENTS} adjuntos por mensaje`);
+    showToast(I18N.t('chat.adjunto.maximo', { n: MAX_ATTACHMENTS }));
     return;
   }
   // recorta al hueco REAL: antes cortaba a 8 y los que sobraban se perdían sin aviso
-  if (list.length > room) showToast(`Máximo ${MAX_ATTACHMENTS} adjuntos por mensaje`);
+  if (list.length > room) showToast(I18N.t('chat.adjunto.maximo', { n: MAX_ATTACHMENTS }));
   for (const f of list.slice(0, room)) {
     if (f && f.path) await addAttachmentPath(f.path);
     else if (f && f.type && f.type.startsWith('image/') && f.dataUrl) {
       // imagen pegada/drag&drop desde fuera del sistema de ficheros
       if (pendingAttachments.length < MAX_ATTACHMENTS && !pendingAttachments.some((a) => a.dataUrl === f.dataUrl)) {
         pendingAttachments.push({
-          name: f.name || 'imagen pegada',
+          name: f.name || I18N.t('chat.adjunto.imagenPegada'),
           kind: 'image',
           size: Math.round((f.dataUrl.length * 3) / 4),
           dataUrl: f.dataUrl,
@@ -1364,7 +1397,7 @@ $('#chatAttach').onclick = async () => {
     const paths = await window.sagitari.attachmentsPick();
     for (const p of paths || []) await addAttachmentPath(p);
   } catch (e) {
-    showToast('No se pudieron adjuntar archivos: ' + ((e && e.message) || e));
+    showToast(I18N.t('chat.adjunto.adjuntarError', { motivo: (e && e.message) || e }));
   }
 };
 
@@ -1383,7 +1416,7 @@ chatView.addEventListener('drop', (e) => {
   if (files.length) addAttachmentFiles(files.map((f) => ({ path: filePathOf(f), name: f.name, type: f.type })));
   else {
     const txt = (e.dataTransfer || {}).getData('text/uri-list') || (e.dataTransfer || {}).getData('text/plain');
-    if (txt && /^data:image\//.test(txt.trim())) addAttachmentFiles([{ dataUrl: txt.trim(), name: 'imagen pegada' }]);
+    if (txt && /^data:image\//.test(txt.trim())) addAttachmentFiles([{ dataUrl: txt.trim(), name: I18N.t('chat.adjunto.imagenPegada') }]);
   }
 });
 
@@ -1395,7 +1428,7 @@ $('#chatInput').addEventListener('paste', (e) => {
   // con el cupo lleno se avisa ANTES de bloquear el pegado: un slice(0,0) se lo
   // tragaba en silencio y el usuario creía que no había funcionado
   if (pendingAttachments.length >= MAX_ATTACHMENTS) {
-    showToast(`Máximo ${MAX_ATTACHMENTS} adjuntos por mensaje`);
+    showToast(I18N.t('chat.adjunto.maximo', { n: MAX_ATTACHMENTS }));
     return;
   }
   e.preventDefault();
@@ -1403,7 +1436,7 @@ $('#chatInput').addEventListener('paste', (e) => {
     const blob = it.getAsFile && it.getAsFile();
     if (!blob) continue;
     const fr = new FileReader();
-    fr.onload = () => addAttachmentFiles([{ dataUrl: String(fr.result), name: 'imagen pegada' }]);
+    fr.onload = () => addAttachmentFiles([{ dataUrl: String(fr.result), name: I18N.t('chat.adjunto.imagenPegada') }]);
     fr.readAsDataURL(blob);
   }
 });
@@ -1458,11 +1491,11 @@ function renderSkillMenu(query) {
     );
   };
   if (ordenes.length) {
-    filas.push('<div class="sm-head">ÓRDENES — escribe para filtrar</div>');
+    filas.push(`<div class="sm-head">${esc(I18N.t('skills.paleta.ordenes'))}</div>`);
     for (const c of ordenes) fila(c.name, 'terminal', '/' + c.name, c.descripcion || '');
   }
   if (items.length) {
-    filas.push('<div class="sm-head">SKILLS — escribe para filtrar</div>');
+    filas.push(`<div class="sm-head">${esc(I18N.t('skills.paleta.skills'))}</div>`);
     for (const s of items) fila(s.name, 'zap', s.name, s.description || '');
   }
   skillMenu.innerHTML = filas.join('');
@@ -1570,7 +1603,7 @@ $('#btnMax').onclick = () => window.sagitari.maximize();
 // estado visual del botón (maximizar/restaurar) + clase .maximized en el shell
 window.sagitari.onWinState((isMax) => {
   $('#btnMax').innerHTML = ic(isMax ? 'restore' : 'maximize');
-  $('#btnMax').title = isMax ? 'Restaurar' : 'Maximizar';
+  $('#btnMax').title = I18N.t(isMax ? 'barra.ventana.restaurar' : 'barra.ventana.maximizar');
   document.getElementById('shell').classList.toggle('maximized', !!isMax);
 });
 // doble clic en el titlebar = maximizar/restaurar

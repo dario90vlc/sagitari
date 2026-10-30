@@ -64,7 +64,7 @@ function crearRuntime(id, el) {
   cont.setAttribute('role', 'log');
   cont.setAttribute('aria-live', 'polite');
   cont.setAttribute('aria-relevant', 'additions text');
-  cont.setAttribute('aria-label', 'Conversación');
+  cont.setAttribute('aria-label', I18N.t('chat.mensajes.aria'));
   cont.setAttribute('aria-busy', 'false');
   if (!el) {
     cont.hidden = true;
@@ -235,7 +235,7 @@ function crearPestana(rt) {
 function pintarPestana(rt) {
   const t = rt.tab;
   if (!t) return;
-  const nombre = rt.titulo || 'Nueva conversación';
+  const nombre = rt.titulo || I18N.t('chat.nueva.title');
   const on = rt === rtActivo;
   t.classList.toggle('busy', rt.busy);
   t.classList.toggle('on', on);
@@ -245,7 +245,7 @@ function pintarPestana(rt) {
   t.setAttribute('tabindex', on ? '0' : '-1');
   // señala el nodo que controla (el de la activa es el `#messages` de la vista)
   t.setAttribute('aria-controls', on ? 'messages' : idDeNodo(rt));
-  t.setAttribute('aria-label', 'Conversación «' + nombre + '»' + (rt.busy ? ' — trabajando ahora' : ''));
+  t.setAttribute('aria-label', I18N.t(rt.busy ? 'chat.pestana.aria.ocupada' : 'chat.pestana.aria', { nombre: nombre }));
   t.title = nombre;
   // el id se fija también aquí: la pestaña de arranque se ADOPTA (pasa de no tener id a
   // tenerlo) y su pestaña ya estaba creada
@@ -253,7 +253,7 @@ function pintarPestana(rt) {
   const etiqueta = t.querySelector('.ctab-name');
   if (etiqueta) etiqueta.textContent = nombre;
   const x = t.querySelector('.ctab-x');
-  if (x) x.setAttribute('aria-label', 'Cerrar la pestaña de «' + nombre + '» (la conversación sigue en Historial)');
+  if (x) x.setAttribute('aria-label', I18N.t('chat.pestana.cerrar.aria', { nombre: nombre }));
 }
 
 /** Pinta el strip. Se pone al día EN SU SITIO (no se rehace el innerHTML) para no perder
@@ -301,7 +301,7 @@ function abrirRuntime(id) {
 function cerrarPestana(rt) {
   if (!rt || runtimes.get(rt.id) !== rt) return;
   if (runtimes.size <= 1) {
-    showToast('Es la única conversación abierta: cambia a otra o abre una nueva');
+    showToast(I18N.t('chat.pestana.unica'));
     return;
   }
   const otras = [...runtimes.values()].filter((r) => r !== rt);
@@ -397,8 +397,8 @@ function eventoDeOtraPestana(ev) {
          sin esto, un tope en la pestaña de al lado pasaba en silencio. */
       rt.busy = false;
       reflejarTurno(rt);
-      showToast('Límite de seguridad: ' + String(ev.reason || '').slice(0, 100));
-      feed('Límite de seguridad', 'err');
+      showToast(I18N.t('chat.guardrail.aviso', { motivo: String(ev.reason || '').slice(0, 100) }));
+      feed(I18N.t('chat.guardrail'), 'err');
       break;
     case 'context':
       rt.ctx = ev;
@@ -424,7 +424,7 @@ function fijarTurno(hay) {
     de la que entra. */
 function pintarHiloActivo() {
   const rt = rtActual();
-  setChatTitle(rt.titulo || 'Nueva conversación', false); // su nombre ya está guardado
+  setChatTitle(rt.titulo || I18N.t('chat.nueva.title'), false); // su nombre ya está guardado
   if (rt.estado) setChatStatus(rt.estado.texto, rt.estado.tipo);
   else setChatStatus('');
   if (rt.ctx) pintarCtxMeter(rt.ctx);
@@ -480,14 +480,14 @@ function reportarError(origen, detalle) {
   const msg = String((detalle && (detalle.message || (detalle.reason && detalle.reason.message))) || detalle || 'desconocido');
   window.__errores.push(origen + ': ' + msg);
   try {
-    feed('Fallo en la interfaz — ' + K.clip(msg, 80), 'err');
+    feed(I18N.t('chat.interfaz.feed', { motivo: K.clip(msg, 80) }), 'err');
   } catch {}
   try {
-    showToast('La interfaz encontró un problema: ' + K.clip(msg, 120));
+    showToast(I18N.t('chat.interfaz.toast', { motivo: K.clip(msg, 120) }));
   } catch {}
   try {
     const b = ensureAssistantBubble();
-    b.innerHTML = `<span class="errmsg">${ic('alert')} Fallo en la interfaz: ${esc(msg)}</span>`;
+    b.innerHTML = `<span class="errmsg">${ic('alert')} ${esc(I18N.t('chat.interfaz.burbuja', { motivo: msg }))}</span>`;
     finishAssistant('');
   } catch {}
 }
@@ -571,8 +571,8 @@ const VIEW_HOTKEY = ['chat', 'tasks', 'projects', 'agents', 'memory', 'skills', 
 function applyCompact(on) {
   $('#app').classList.toggle('compact', on);
   const b = $('#sideToggle');
-  b.title = (on ? 'Expandir' : 'Compactar') + ' la barra lateral (Alt+B)';
-  b.setAttribute('aria-label', on ? 'Expandir barra lateral' : 'Compactar barra lateral');
+  b.title = I18N.t(on ? 'barra.expandir.title' : 'barra.compactar.title');
+  b.setAttribute('aria-label', I18N.t(on ? 'barra.expandir.aria' : 'barra.compactar.aria'));
   b.setAttribute('aria-pressed', on ? 'true' : 'false');
   try {
     localStorage.setItem('sagi.sideCompact', on ? '1' : '0');
@@ -621,7 +621,7 @@ function setSideActive() {
   const d = sm.querySelector('.dot');
   if (d) d.className = 'dot ' + m.dot;
   $('#sideModeLabel').textContent = m.label;
-  sm.title = `Modo ${m.label} — ${m.desc} (Alt+M)`;
+  sm.title = I18N.t('barra.modo.titulo', { modo: m.label, descripcion: m.desc });
 }
 
 let sideBadgeErr = false; // evita repetir el aviso en cada sondeo
@@ -642,9 +642,9 @@ async function refreshSidebar() {
     // un canal IPC caído NO es «cero tareas»: avisa una vez con el error real
     if (!sideBadgeErr) {
       sideBadgeErr = true;
-      const msg = String((e && e.message) || e || 'error desconocido');
-      feed('No se pudo leer el estado lateral — ' + K.clip(msg, 80), 'err');
-      showToast('No se pudo leer el estado: ' + K.clip(msg, 120));
+      const msg = String((e && e.message) || e || I18N.t('chat.error.desconocido'));
+      feed(I18N.t('chat.estado.lateral.feed', { motivo: K.clip(msg, 80) }), 'err');
+      showToast(I18N.t('chat.estado.lateral.toast', { motivo: K.clip(msg, 120) }));
     }
   }
 }
@@ -824,7 +824,8 @@ function enhanceCode(root) {
     const head = document.createElement('div');
     head.className = 'codeblock-head';
     head.innerHTML =
-      `<span>${esc(lang || 'código')}</span>` + `<button class="cb-copy" data-copy title="Copiar código">${ic('copy')}</button>`;
+      `<span>${esc(lang || I18N.t('chat.codigo.lenguaje'))}</span>` +
+      `<button class="cb-copy" data-copy title="${esc(I18N.t('chat.codigo.copiar'))}">${ic('copy')}</button>`;
     pre.parentNode.insertBefore(wrap, pre);
     wrap.append(head, pre);
   });
@@ -837,7 +838,7 @@ document.addEventListener('click', (e) => {
   e.stopPropagation();
   const box = btn.closest('.codeblock');
   const pre = box && box.querySelector('pre');
-  if (pre) copyText(pre.textContent, 'Código copiado');
+  if (pre) copyText(pre.textContent, I18N.t('chat.codigo.copiado'));
 });
 
 // los enlaces del markdown se abren SIEMPRE en el navegador del sistema: la
@@ -878,15 +879,18 @@ function pinImage(img) {
   img.addEventListener('load', fix);
   img.addEventListener('error', fix);
 }
+/* El idioma de la interfaz también manda en las fechas: sin esto, la versión inglesa
+   seguiría diciendo «12 de marzo». Se resuelve una vez, como el diccionario. */
+const LOCALE = I18N.idioma === 'en' ? 'en-US' : 'es-ES';
 function nowClock(ts) {
-  return new Date(ts || Date.now()).toLocaleTimeString('es', { hour: '2-digit', minute: '2-digit' });
+  return new Date(ts || Date.now()).toLocaleTimeString(LOCALE, { hour: '2-digit', minute: '2-digit' });
 }
 /** «Hoy» / «Ayer» / «12 de marzo», según cuánto hace de esa fecha. */
 function etiquetaDia(ts) {
   const dias = Math.round((new Date().setHours(0, 0, 0, 0) - new Date(ts || Date.now()).setHours(0, 0, 0, 0)) / 86400000);
-  if (dias <= 0) return 'Hoy';
-  if (dias === 1) return 'Ayer';
-  return new Date(ts).toLocaleDateString('es-ES', { day: 'numeric', month: 'long' });
+  if (dias <= 0) return I18N.t('chat.dia.hoy');
+  if (dias === 1) return I18N.t('chat.dia.ayer');
+  return new Date(ts).toLocaleDateString(LOCALE, { day: 'numeric', month: 'long' });
 }
 /* Separador de día: se estampa cuando CAMBIA el día, no antes de cada turno.
    Antes cada respuesta del agente metía un «Hoy · 14:32» entre la pregunta y la
@@ -956,7 +960,7 @@ function setChatStatus(text, kind) {
 async function copyText(text, okMsg) {
   const s = String(text === null || text === undefined ? '' : text);
   if (!s.trim()) {
-    showToast('No hay nada que copiar');
+    showToast(I18N.t('chat.copiar.vacio'));
     return false;
   }
   try {
@@ -969,10 +973,10 @@ async function copyText(text, okMsg) {
       document.execCommand('copy');
       ta.remove();
     }
-    showToast(okMsg || 'Copiado al portapapeles');
+    showToast(okMsg || I18N.t('chat.copiar.hecho'));
     return true;
   } catch {
-    showToast('No se pudo copiar');
+    showToast(I18N.t('chat.copiar.fallo'));
     return false;
   }
 }
@@ -1012,7 +1016,7 @@ function bubble(role, opts) {
   if (role === 'user') {
     // la inicial es el primer PUNTO DE CÓDIGO: cortar por unidades UTF-16 partía el
     // emoji de un nombre y dejaba media mitad en el avatar
-    av.textContent = (Array.from(CFG.settings.userName || 'Tú')[0] || 'T').toUpperCase();
+    av.textContent = (Array.from(CFG.settings.userName || I18N.t('chat.tu'))[0] || 'T').toUpperCase();
   } else {
     const img = document.createElement('img');
     img.className = 'avimg';
@@ -1025,7 +1029,7 @@ function bubble(role, opts) {
   const head = document.createElement('div');
   head.className = 'msg-head';
   head.innerHTML =
-    `<span class="msg-who">${esc(role === 'user' ? CFG.settings.userName || 'Tú' : 'Sagitari')}</span>` +
+    `<span class="msg-who">${esc(role === 'user' ? CFG.settings.userName || I18N.t('chat.tu') : 'Sagitari')}</span>` +
     `<span class="msg-ts">${ts}</span>`;
   const body = document.createElement('div');
   body.className = 'msg-body';
@@ -1060,24 +1064,24 @@ function msgActions(holder, text, opts) {
   // conversación»): copiar el markdown crudo daba **negritas** y vallas
   if (!o.onlyRewind)
     row.appendChild(
-      mk('copy', 'Copiar este mensaje', () => {
+      mk('copy', I18N.t('chat.copiar.mensaje'), () => {
         const bub = holder.querySelector('.bubble') || holder;
         // el razonamiento es interno: al copiar el mensaje se copia la respuesta, no
         // lo que el modelo pensó por el camino (el bloque tiene su propio botón)
         const copia = bub.cloneNode(true);
         copia.querySelectorAll('.thinkblock').forEach((x) => x.remove());
-        copyText(copia.innerText, 'Mensaje copiado');
+        copyText(copia.innerText, I18N.t('chat.copiar.mensaje.hecho'));
       }),
     );
-  if (o.retry) row.appendChild(mk('refresh', 'Regenerar esta respuesta', regenerate));
+  if (o.retry) row.appendChild(mk('refresh', I18N.t('chat.regenerar'), regenerate));
   /* F7: volver el hilo hasta aquí — se conserva lo anterior y se tira este mensaje con
      todo lo que venga después. Sólo se ofrece en mensajes que existen de verdad en el
      hilo guardado (el índice sale del DOM: ver `indiceMensaje`). */
   const idx = indiceMensaje(holder);
   if (idx >= 0) {
-    const rb = mk('history', 'Volver el hilo hasta aquí', () => rebobinarHilo(idx, rb));
+    const rb = mk('history', I18N.t('chat.rebobinar'), () => rebobinarHilo(idx, rb));
     rb.dataset.rewind = String(idx);
-    rb.setAttribute('aria-label', 'Volver el hilo hasta aquí');
+    rb.setAttribute('aria-label', I18N.t('chat.rebobinar'));
     row.appendChild(rb);
   }
   // una fila sin nada que ofrecer no se pinta: el mensaje se queda sin pie
@@ -1096,7 +1100,7 @@ function refreshMsgActions() {
       const btn = document.createElement('button');
       btn.className = 'mact';
       btn.dataset.retry = '1';
-      btn.title = 'Regenerar esta respuesta';
+      btn.title = I18N.t('chat.regenerar');
       btn.innerHTML = ic('refresh');
       btn.onclick = regenerate;
       row.insertBefore(btn, row.children[1] || null);
@@ -1128,15 +1132,11 @@ async function rebobinarHilo(idx, btn) {
   const ancla = btn.closest ? btn.closest('.msg') : null;
   btn.disabled = true;
   try {
-    const ok = await askConfirm(
-      ancla,
-      '¿Volver el hilo hasta aquí?',
-      'Se descartarán este mensaje y todos los siguientes. Lo anterior se conserva y sigues en la misma conversación.',
-    );
+    const ok = await askConfirm(ancla, I18N.t('chat.rebobinar.confirmar'), I18N.t('chat.rebobinar.detalle'));
     if (!ok) return;
     const r = await window.sagitari.convRebobinar(hiloActual(), idx);
     if (!r || r.ok === false) {
-      showToast('No se pudo rebobinar: ' + ((r && r.error) || 'error desconocido'));
+      showToast(I18N.t('chat.rebobinar.error', { motivo: (r && r.error) || I18N.t('chat.error.desconocido') }));
       return;
     }
     const mensajes = r.messages || [];
@@ -1145,9 +1145,9 @@ async function rebobinarHilo(idx, btn) {
     // el hilo YA está truncado en main: si el chat no puede repintarse ahora (ejecución en
     // vuelo), se dice y no se pinta un título que no corresponde al hilo guardado
     if (resetChatView(mensajes) === false) return;
-    setChatTitle((mensajes.find((m) => m.role === 'user') || {}).content || 'Nueva conversación');
-    feed('Hilo rebobinado a un punto anterior', 'blu');
-    showToast('Hilo rebobinado');
+    setChatTitle((mensajes.find((m) => m.role === 'user') || {}).content || I18N.t('chat.nueva.title'));
+    feed(I18N.t('chat.rebobinar.feed'), 'blu');
+    showToast(I18N.t('chat.rebobinar.hecho'));
   } finally {
     btn.disabled = false;
   }
@@ -1155,7 +1155,7 @@ async function rebobinarHilo(idx, btn) {
 
 async function regenerate() {
   if (busy) {
-    showToast('Espera a que termine la ejecución actual');
+    showToast(I18N.t('chat.regenerar.espera'));
     return;
   }
   const last = lastAssistantEl;
@@ -1164,7 +1164,7 @@ async function regenerate() {
   const nextSibling = msgEl ? msgEl.nextSibling : null;
   if (msgEl) msgEl.remove();
   lastAssistantEl = null;
-  showToast('Regenerando respuesta…');
+  showToast(I18N.t('chat.regenerar.curso'));
   let r;
   try {
     r = await window.sagitari.retryChat(hiloActual());
@@ -1177,7 +1177,7 @@ async function regenerate() {
     if (parent && msgEl) parent.insertBefore(msgEl, nextSibling);
     lastAssistantEl = msgEl ? msgEl.querySelector('.bubble') : null;
     refreshMsgActions();
-    showToast('No se pudo regenerar: ' + ((r && r.error) || 'error desconocido'));
+    showToast(I18N.t('chat.regenerar.error', { motivo: (r && r.error) || I18N.t('chat.error.desconocido') }));
   }
 }
 
@@ -1228,7 +1228,7 @@ function buildToolGroup() {
   head.setAttribute('tabindex', '0');
   head.setAttribute('aria-expanded', 'true');
   head.innerHTML =
-    `<span class="tg-ic">${ic('tools')}</span><b class="tg-title">Herramientas</b>` +
+    `<span class="tg-ic">${ic('tools')}</span><b class="tg-title">${esc(I18N.t('chat.herramientas'))}</b>` +
     `<span class="tg-fails" hidden></span>` +
     `<span class="tg-meta"></span><span class="tg-chev">${ic('chevron')}</span>`;
   const body = document.createElement('div');
@@ -1271,6 +1271,12 @@ function ensureToolGroup() {
   return pendingTurn.group;
 }
 
+/* El recuento de fallos de una tanda, en singular y plural: lo dicen la cabecera del
+   grupo en vivo y la del grupo repintado. */
+function textoFallos(n) {
+  return I18N.t(n === 1 ? 'chat.fallos.uno' : 'chat.fallos.varios', { n: n });
+}
+
 function refreshToolGroup() {
   if (!pendingTurn || !pendingTurn.group) return;
   const g = pendingTurn.group;
@@ -1279,13 +1285,17 @@ function refreshToolGroup() {
      cabía «en curso…», y con doce herramientas no decía cuánto faltaba); al cerrarse
      todas, el tiempo total acumulado. */
   const enCurso = pendingTurn.cards.filter((c) => c.classList.contains('run')).length;
-  g.meta.textContent = enCurso ? enCurso + ' en curso' : pendingTurn.totalMs ? K.fmtDuration(pendingTurn.totalMs) : '';
+  g.meta.textContent = enCurso
+    ? I18N.t('chat.enCurso', { n: enCurso })
+    : pendingTurn.totalMs
+      ? K.fmtDuration(pendingTurn.totalMs)
+      : '';
   /* Y si algo falló, la cabecera lo dice: con el grupo plegado, un fallo dentro era
      invisible hasta abrirlo a mano. */
   const fallos = pendingTurn.fails || 0;
   if (g.fails) {
     g.fails.hidden = !fallos;
-    g.fails.textContent = fallos === 1 ? '1 fallo' : fallos + ' fallos';
+    g.fails.textContent = textoFallos(fallos);
   }
   g.el.classList.toggle('has-fails', !!fallos);
 }
@@ -1334,7 +1344,14 @@ let thinkVivo = null;
     para lo que dura menos de un segundo, que en un contador que corre cada 250 ms parpadea.) */
 function segundosUI(ms) {
   const s = Math.max(0, Number(ms) || 0) / 1000;
-  return (s < 10 ? s.toFixed(1) : String(Math.round(s))).replace('.', ',') + ' s';
+  const cifra = s < 10 ? s.toFixed(1) : String(Math.round(s));
+  /* El separador decimal es del idioma, no del número: en español es «,». */
+  return I18N.t('chat.segundos', { n: I18N.idioma === 'en' ? cifra : cifra.replace('.', ',') });
+}
+
+/** «1 paso» / «3 pasos», que es como se cuenta el razonamiento y el plan. */
+function textoPasos(n) {
+  return I18N.t(n === 1 ? 'chat.pasos.uno' : 'chat.pasos.varios', { n: n });
 }
 
 function metaRazonamiento(d) {
@@ -1344,21 +1361,27 @@ function metaRazonamiento(d) {
   // la luz que late es señal de «sigue pensando», no de «está abierto»: un bloque ya
   // terminado no puede quedarse parpadeando para siempre
   d.classList.toggle('th-vivo', !d._terminado); // no `live`: esa clase es de la barra lateral (display:flex)
+  /* El cierre de un turno pregunta si este bloque se quedó a medias. Antes lo deducía del
+     TEXTO («pensando…»), que al traducirse deja de casar; el dato va en el nodo. */
+  el.dataset.estado = d._terminado ? 'cerrado' : 'vivo';
   const pasos = d._pasos || nLineas(d._texto);
   if (!d._terminado) {
     el.classList.remove('gist');
-    el.textContent = 'pensando… ' + segundosUI(Date.now() - (d._inicio || Date.now())) + (pasos ? ' · ' + pasos + (pasos === 1 ? ' paso' : ' pasos') : '');
+    el.textContent = I18N.t('chat.pensando', {
+      segundos: segundosUI(Date.now() - (d._inicio || Date.now())),
+      pasos: pasos ? ' · ' + textoPasos(pasos) : '',
+    });
     return;
   }
   if (cerrado) {
     // plegado: manda el resumen. Es lo que permite seguir el hilo sin abrir cada bloque.
     const g = primeraLineaUtil(d._texto);
     el.classList.toggle('gist', !!g);
-    el.textContent = g || 'pensó ' + K.fmtDuration(d._ms || 0);
+    el.textContent = g || I18N.t('chat.penso', { duracion: K.fmtDuration(d._ms || 0) });
     return;
   }
   el.classList.remove('gist');
-  el.textContent = pasos + (pasos === 1 ? ' paso' : ' pasos') + ' · ' + K.fmtDuration(d._ms || 0);
+  el.textContent = textoPasos(pasos) + ' · ' + K.fmtDuration(d._ms || 0);
 }
 function relojRazonamiento(d) {
   thinkVivo = d;
@@ -1382,9 +1405,9 @@ function buildThinkBlock() {
   d.className = 'thinkblock open';
   d.innerHTML =
     '<div class="think-head" role="button" tabindex="0" aria-expanded="true">' +
-    `<span class="th-ic">${ic('brain')}</span><b>Razonamiento</b>` +
-    '<span class="th-meta">pensando…</span>' +
-    `<button class="th-copy" title="Copiar el razonamiento">${ic('copy')}</button>` +
+    `<span class="th-ic">${ic('brain')}</span><b>${esc(I18N.t('chat.razonamiento'))}</b>` +
+    `<span class="th-meta">${esc(I18N.t('chat.razonamiento.pensando'))}</span>` +
+    `<button class="th-copy" title="${esc(I18N.t('chat.razonamiento.copiar'))}">${ic('copy')}</button>` +
     `<span class="th-chev">${ic('chevron')}</span></div>` +
     '<div class="think-body"></div>';
   const head = d.querySelector('.think-head');
@@ -1408,7 +1431,7 @@ function buildThinkBlock() {
   });
   d.querySelector('.th-copy').onclick = (e) => {
     e.stopPropagation();
-    copyText(d._texto || '', 'Razonamiento copiado');
+    copyText(d._texto || '', I18N.t('chat.razonamiento.copiado'));
   };
   return d;
 }
@@ -1507,15 +1530,15 @@ function buildToolCard(ev) {
     <div class="tcard-head">
       <span class="tcard-ic">${ic(meta.icon)}</span>
       <span class="tcard-name">${esc(meta.label)}</span>
-      ${miembro ? `<span class="tcard-sub" title="Compañero del equipo (${esc(ev.member)})">${esc(miembro.name)}</span>` : ''}
-      ${sub ? `<span class="tcard-sub" title="Subagente">${esc(sub.label)}</span>` : ''}
+      ${miembro ? `<span class="tcard-sub" title="${esc(I18N.t('chat.tcard.companero', { id: ev.member }))}">${esc(miembro.name)}</span>` : ''}
+      ${sub ? `<span class="tcard-sub" title="${esc(I18N.t('chat.tcard.subagente'))}">${esc(sub.label)}</span>` : ''}
       <span class="tcard-args" title="${esc(JSON.stringify(ev.args || {}))}">${esc(args)}</span>
       <span class="tcard-time"></span>
       <span class="tcard-chev">${ic('chevron')}</span>
     </div>
     <div class="tcard-body"></div>`;
   const body = card.querySelector('.tcard-body');
-  body.innerHTML = `<div class="tb-label">ARGUMENTOS</div><pre class="args">${esc(JSON.stringify(ev.args || {}, null, 2))}</pre>`;
+  body.innerHTML = `<div class="tb-label">${esc(I18N.t('chat.tcard.argumentos'))}</div><pre class="args">${esc(JSON.stringify(ev.args || {}, null, 2))}</pre>`;
   // tarjeta plegable operable por teclado
   const tchead = card.querySelector('.tcard-head');
   tchead.setAttribute('role', 'button');
@@ -1584,7 +1607,7 @@ function pintarResultadoTarjeta(card, ev) {
         String(ev.result || '')
           .split(/\r?\n/)
           .map((s) => s.trim())
-          .find(Boolean) || 'falló sin decir por qué';
+          .find(Boolean) || I18N.t('chat.tcard.fallo.sinMotivo');
       note.textContent = K.clip(linea.replace(/^Error:\s*/i, ''), 160);
       note.title = K.clip(String(ev.result || ''), 2000);
       head.insertBefore(note, head.querySelector('.tcard-time'));
@@ -1598,11 +1621,11 @@ function pintarResultadoTarjeta(card, ev) {
   const salida = String(ev.result || '');
   const cuantas = salida ? salida.split(/\r?\n/).length : 0;
   wrap.innerHTML =
-    `<div class="tb-label">RESULTADO${cuantas > 1 ? ' · ' + cuantas + ' líneas' : ''}<button class="tcard-copy" title="Copiar resultado">${ic('copy')}</button></div>` +
-    `<pre>${esc(K.clip(salida, 1200)) || '(sin salida)'}</pre>`;
+    `<div class="tb-label">${esc(I18N.t('chat.tcard.resultado'))}${cuantas > 1 ? ' · ' + esc(I18N.t('chat.tcard.lineas', { n: cuantas })) : ''}<button class="tcard-copy" title="${esc(I18N.t('chat.tcard.copiar'))}">${ic('copy')}</button></div>` +
+    `<pre>${esc(K.clip(salida, 1200)) || esc(I18N.t('chat.tcard.sinSalida'))}</pre>`;
   wrap.querySelector('.tcard-copy').onclick = (e) => {
     e.stopPropagation();
-    copyText(ev.result, 'Resultado copiado');
+    copyText(ev.result, I18N.t('chat.tcard.copiado'));
   };
   body.appendChild(wrap);
   return { ok, took };
@@ -1640,19 +1663,19 @@ function completeToolCard(ev) {
  * viene ya calculado del evento (agent.js), no se reinterpreta en la interfaz.
  */
 function buildDelegationCard(ev) {
-  const sub = K.subagent(ev.subagent) || { label: 'Subagente', icon: 'agents', cls: 'a-p2' };
+  const sub = K.subagent(ev.subagent) || { label: I18N.t('chat.subagente'), icon: 'agents', cls: 'a-p2' };
   const estado = String(ev.status || 'OK').toUpperCase();
   const fallo = estado === 'FAILED';
   const parcial = estado === 'PARTIAL';
   const card = document.createElement('div');
   card.className = 'tcard dcard ' + (fallo ? 'err' : parcial ? 'part' : 'done');
   if (ev.subagent) card.dataset.delegate = String(ev.subagent); // nunca `dataset.tool`: no es una herramienta
-  const etiqueta = fallo ? 'FALLÓ' : parcial ? 'PARCIAL' : 'OK';
+  const etiqueta = I18N.t(fallo ? 'chat.deleg.fallo' : parcial ? 'chat.deleg.parcial' : 'chat.deleg.ok');
   card.innerHTML = `
     <div class="tcard-head">
       <span class="tcard-ic">${ic(fallo ? 'alert' : 'check')}</span>
       <span class="tcard-name">${esc(sub.label)}</span>
-      <span class="dcard-status ${fallo ? 'fail' : parcial ? 'part' : 'ok'}" title="Estado del subagente">${esc(etiqueta)}</span>
+      <span class="dcard-status ${fallo ? 'fail' : parcial ? 'part' : 'ok'}" title="${esc(I18N.t('chat.deleg.estado'))}">${esc(etiqueta)}</span>
       <span class="tcard-args" title="${esc(String(ev.result || ''))}">${esc(K.clip(String(ev.result || ''), 110))}</span>
       <span class="tcard-time">${ev.durationMs ? esc(K.fmtDuration(Number(ev.durationMs))) : ''}</span>
       <span class="tcard-chev">${ic('chevron')}</span>
@@ -1660,9 +1683,9 @@ function buildDelegationCard(ev) {
     <div class="tcard-body"></div>`;
   const body = card.querySelector('.tcard-body');
   body.innerHTML =
-    `<div class="tb-label">RESULTADO</div><pre>${esc(String(ev.result || '(sin resumen)'))}</pre>` +
-    (ev.details ? `<div class="tb-label">DETALLES</div><pre>${esc(String(ev.details))}</pre>` : '') +
-    (ev.evidence ? `<div class="tb-label">EVIDENCIA</div><pre>${esc(String(ev.evidence))}</pre>` : '');
+    `<div class="tb-label">${esc(I18N.t('chat.tcard.resultado'))}</div><pre>${esc(String(ev.result || I18N.t('chat.deleg.sinResumen')))}</pre>` +
+    (ev.details ? `<div class="tb-label">${esc(I18N.t('chat.tcard.detalles'))}</div><pre>${esc(String(ev.details))}</pre>` : '') +
+    (ev.evidence ? `<div class="tb-label">${esc(I18N.t('chat.tcard.evidencia'))}</div><pre>${esc(String(ev.evidence))}</pre>` : '');
   const head = card.querySelector('.tcard-head');
   head.setAttribute('role', 'button');
   head.setAttribute('tabindex', '0');
@@ -1732,7 +1755,7 @@ function cardDeTraza(t) {
           name: t.name,
           ok: false,
           durationMs: t.ms,
-          result: 'Esta herramienta no llegó a devolver su resultado: el turno se cortó antes.',
+          result: I18N.t('chat.tcard.cortada'),
         })
       : pintarResultadoTarjeta(card, { name: t.name, ok: t.ok, result: t.result, durationMs: t.ms });
   return { card, ok: r.ok, took: r.took };
@@ -1743,7 +1766,7 @@ function cerrarGrupoTraza(grp, cuantas, fallos, total) {
   grp.title.textContent = K.toolCount(cuantas);
   grp.meta.textContent = total ? K.fmtDuration(total) : '';
   grp.fails.hidden = !fallos;
-  grp.fails.textContent = fallos === 1 ? '1 fallo' : fallos + ' fallos';
+  grp.fails.textContent = textoFallos(fallos);
   grp.el.classList.toggle('has-fails', !!fallos);
   /* Las filas se QUEDAN a la vista: el turno es una traza y esconder lo que hizo es
      justo lo que el usuario pedía dejar de hacer. La cabecera sigue plegándolas. */
@@ -1852,7 +1875,7 @@ function restaurarTraza(bubbleEl, trace, html) {
    resuelve al acabar (delegate_done) con OK, PARCIAL o fallo. Así se ve al instante qué
    está haciendo cada subagente sin esperar al cierre del turno. */
 function etiquetaEquipo(ev) {
-  const who = (K.subagent(ev.subagent) || {}).label || 'Subagente';
+  const who = (K.subagent(ev.subagent) || {}).label || I18N.t('chat.subagente');
   const tarea = K.clip(
     String(ev.task || '')
       .replace(/\s+/g, ' ')
@@ -1873,7 +1896,7 @@ function ensureTeamBoard() {
     head.setAttribute('tabindex', '0');
     head.setAttribute('aria-expanded', 'true');
     head.innerHTML =
-      `<span class="tg-ic">${ic('agents')}</span><b class="tg-title">Equipo</b>` +
+      `<span class="tg-ic">${ic('agents')}</span><b class="tg-title">${esc(I18N.t('chat.equipo'))}</b>` +
       `<span class="tg-meta"></span><span class="tg-chev">${ic('chevron')}</span>`;
     const body = document.createElement('div');
     body.className = 'tgroup-body';
@@ -1909,11 +1932,12 @@ function equipoChip(ev) {
   const chip = document.createElement('div');
   chip.className = 'toolchip run';
   chip.dataset.subagent = String(ev.subagent || '');
-  chip.title = etiquetaEquipo(ev) + (ev.expect ? '\n\nCriterio de éxito: ' + K.clip(ev.expect, 300) : '');
+  chip.title =
+    etiquetaEquipo(ev) + (ev.expect ? '\n\n' + I18N.t('chat.equipo.criterio', { texto: K.clip(ev.expect, 300) }) : '');
   chip.innerHTML = `<span class="tc-mark"><span class="pulse-dot"></span></span><span class="tc-txt">${esc(etiquetaEquipo(ev))}</span>`;
   board.body.appendChild(chip);
   board.chips.push({ subagent: String(ev.subagent || ''), el: chip, cerrado: false });
-  board.meta.textContent = `${equipoEnMarcha()} en marcha`;
+  board.meta.textContent = I18N.t('chat.equipo.enMarcha', { n: equipoEnMarcha() });
   return chip;
 }
 
@@ -1935,10 +1959,12 @@ function equipoCierra(ev) {
   if (mark) mark.innerHTML = ic(estado === 'FAILED' ? 'alert' : 'check');
   if (estado === 'PARTIAL') {
     const txt = chip.el.querySelector('.tc-txt');
-    if (txt) txt.textContent += ' · a medias';
+    if (txt) txt.textContent += ' · ' + I18N.t('chat.equipo.medias');
   }
   const enMarcha = equipoEnMarcha();
-  pendingTurn.team.meta.textContent = enMarcha ? `${enMarcha} en marcha` : 'todos han terminado';
+  pendingTurn.team.meta.textContent = enMarcha
+    ? I18N.t('chat.equipo.enMarcha', { n: enMarcha })
+    : I18N.t('chat.equipo.todosTerminaron');
 }
 
 /* ---------- v4.4: tarjeta del EQUIPO (modo EQUIPO) ----------
@@ -1959,14 +1985,14 @@ function buildEquipoCard() {
   card.innerHTML = `
     <div class="tcard-head">
       <span class="tcard-ic">${ic('agents')}</span>
-      <span class="tcard-name">Equipo</span>
-      <span class="dcard-status part" title="Estado del equipo">en marcha</span>
+      <span class="tcard-name">${esc(I18N.t('chat.equipo'))}</span>
+      <span class="dcard-status part" title="${esc(I18N.t('chat.equipo.estadoTarjeta'))}">${esc(I18N.t('chat.equipo.pill.marcha'))}</span>
       <span class="tcard-args"></span>
       <span class="tcard-time"></span>
       <span class="tcard-chev">${ic('chevron')}</span>
     </div>
     <div class="tcard-body">
-      <div class="tb-label">REPARTO DEL LÍDER</div>
+      <div class="tb-label">${esc(I18N.t('chat.equipo.reparto.titulo'))}</div>
       <div class="eqmiembros"></div>
     </div>`;
   const head = card.querySelector('.tcard-head');
@@ -1995,12 +2021,22 @@ function equipoFilaMiembro(m) {
   return `<div class="eqmiembro" data-miembro="${esc(m.id)}">
     <span class="eqid">${esc(m.id)}</span>
     <span class="eqquien">${esc(m.name || m.id)}</span>
-    <span class="eqque">${esc(m.tarea || 'sin encargo todavía')}${
-      m.estado === 'esperando' && m.atencion ? ' — te necesita: ' + esc(K.clip(m.atencion, 90)) : ''
+    <span class="eqque">${esc(m.tarea || I18N.t('chat.equipo.sinEncargo'))}${
+      m.estado === 'esperando' && m.atencion
+        ? ' — ' + esc(I18N.t('chat.equipo.teNecesita', { texto: K.clip(m.atencion, 90) }))
+        : ''
     }${m.estado === 'terminado' && m.resumen ? ' — ' + esc(K.clip(m.resumen, 160)) : ''}</span>
     ${badgeEquipoPermisos(m)}
     <span class="abadge ${est.cls}">${esc(est.label)}</span>
   </div>`;
+}
+
+/** «3 compañeros · 2 en marcha · 1 esperando», con los plurales de cada idioma. */
+function resumenReparto(cuantos, enMarcha, esperan) {
+  const partes = [I18N.t(cuantos === 1 ? 'chat.equipo.companeros.uno' : 'chat.equipo.companeros.varios', { n: cuantos })];
+  partes.push(I18N.t('chat.equipo.enMarcha', { n: enMarcha }));
+  if (esperan) partes.push(I18N.t('chat.equipo.esperando', { n: esperan }));
+  return partes.join(' · ');
 }
 
 /** Repinta el reparto (y, si el encargo cerró, su resultado) desde el estado ACUMULADO del
@@ -2013,7 +2049,9 @@ function pintarEquipoCard(card, e) {
   const esperan = miembros.filter((m) => m.estado === 'esperando').length;
   const reparto = card.querySelector('.eqmiembros');
   if (reparto)
-    reparto.innerHTML = miembros.length ? miembros.map(equipoFilaMiembro).join('') : '<div class="subnote">Sin reparto todavía.</div>';
+    reparto.innerHTML = miembros.length
+      ? miembros.map(equipoFilaMiembro).join('')
+      : `<div class="subnote">${esc(I18N.t('chat.equipo.sinReparto'))}</div>`;
   const args = card.querySelector('.tcard-args');
   /* El equipo puede estar cerrado y un compañero seguir vivo (esperando tu permiso, o
      trabajando después de concederlo): mientras quede alguien, la tarjeta no puede decir
@@ -2022,10 +2060,12 @@ function pintarEquipoCard(card, e) {
   if (args)
     args.textContent = fin
       ? K.clip(resumenEquipo(e), 110)
-      : `${miembros.length} ${miembros.length === 1 ? 'compañero' : 'compañeros'} · ${enMarcha} en marcha${esperan ? ' · ' + esperan + ' esperando' : ''}`;
+      : resumenReparto(miembros.length, enMarcha, esperan);
   const pill = card.querySelector('.dcard-status');
   if (pill) {
-    pill.textContent = fin ? (e.ok === false ? 'se detuvo' : 'terminado') : 'en marcha';
+    pill.textContent = fin
+      ? I18N.t(e.ok === false ? 'chat.equipo.pill.detenido' : 'chat.equipo.pill.terminado')
+      : I18N.t('chat.equipo.pill.marcha');
     pill.className = 'dcard-status ' + (fin ? (e.ok === false ? 'fail' : 'ok') : 'part');
   }
   if (!fin) return;
@@ -2040,12 +2080,15 @@ function pintarEquipoCard(card, e) {
     wrap.dataset.result = '1';
     const g = e.gasto || {};
     const gasto = [];
-    if (Number.isFinite(Number(g.tokens)) && Number(g.tokens) > 0) gasto.push(K.thousands(g.tokens) + ' tokens');
+    if (Number.isFinite(Number(g.tokens)) && Number(g.tokens) > 0)
+      gasto.push(I18N.t('chat.equipo.gasto.tokens', { n: K.thousands(g.tokens) }));
     if (Number.isFinite(Number(g.costUsd)) && Number(g.costUsd) > 0) gasto.push('$' + Number(g.costUsd).toFixed(4));
     wrap.innerHTML =
-      `<div class="tb-label">${e.ok === false ? 'EL EQUIPO SE DETUVO' : 'RESULTADO AGREGADO'}</div>` +
+      `<div class="tb-label">${esc(I18N.t(e.ok === false ? 'chat.equipo.detenidoTitulo' : 'chat.equipo.agregado'))}</div>` +
       `<pre>${esc(resumenEquipo(e))}</pre>` +
-      (gasto.length ? `<div class="tb-label">GASTO DEL EQUIPO</div><pre>${esc(gasto.join(' · '))}</pre>` : '');
+      (gasto.length
+        ? `<div class="tb-label">${esc(I18N.t('chat.equipo.gasto'))}</div><pre>${esc(gasto.join(' · '))}</pre>`
+        : '');
     body.appendChild(wrap);
   }
 }
@@ -2061,30 +2104,36 @@ function equipoChat(ev) {
      resto de la actividad del turno. */
   const n = e ? e.orden.length : 0;
   switch (tipo) {
-    case 'team_start':
-      setChatStatus(`Equipo · ${n === 1 ? '1 compañero' : n + ' compañeros'} repartiendo el trabajo…`);
-      feed(`Equipo: ${n === 1 ? '1 compañero' : n + ' compañeros'}`, 'a-y');
+    case 'team_start': {
+      const cuantos = I18N.t(n === 1 ? 'chat.equipo.companeros.uno' : 'chat.equipo.companeros.varios', { n: n });
+      setChatStatus(I18N.t('chat.equipo.repartiendo', { resumen: cuantos }));
+      feed(I18N.t('chat.equipo.feed', { resumen: cuantos }), 'a-y');
       break;
+    }
     case 'team_member': {
       const m = e && e.miembros.get(String(ev.id || ''));
-      if (m) setChatStatus(`Equipo · ${m.name}: ${K.clip(m.tarea || 'sin encargo todavía', 70)}`);
+      if (m)
+        setChatStatus(I18N.t('chat.equipo.miembro', { nombre: m.name, tarea: K.clip(m.tarea || I18N.t('chat.equipo.sinEncargo'), 70) }));
       break;
     }
     case 'team_message':
-      setChatStatus(`Equipo · ${nombreEquipo(e, ev.de)} escribe a ${nombreEquipo(e, ev.para)}`);
+      setChatStatus(I18N.t('chat.equipo.escribe', { de: nombreEquipo(e, ev.de), para: nombreEquipo(e, ev.para) }));
       break;
     case 'team_done': {
       const f = e && e.miembros.get(String(ev.id || ''));
       feed(
-        `${(f && f.name) || ev.id} — ${ev.ok === false ? 'no pudo con el encargo' : 'terminó su parte'}`,
+        I18N.t(ev.ok === false ? 'chat.equipo.miembro.fallo' : 'chat.equipo.miembro.fin', { nombre: (f && f.name) || ev.id }),
         ev.ok === false ? 'err' : 'ok',
       );
       break;
     }
     case 'team_end': {
       const mal = e ? e.ok === false : false;
-      setChatStatus('Equipo · ' + (mal ? 'se detuvo' : 'encargo cerrado'));
-      feed(mal ? 'El equipo se detuvo' : 'Equipo: encargo cerrado', mal ? 'err' : 'ok');
+      setChatStatus(I18N.t('chat.equipo.estado', { estado: I18N.t(mal ? 'chat.equipo.seDetuvo' : 'chat.equipo.cerrado') }));
+      feed(
+        I18N.t(mal ? 'chat.equipo.feed.detenido' : 'chat.equipo.feed.cerrado'),
+        mal ? 'err' : 'ok',
+      );
       break;
     }
     default:
@@ -2146,10 +2195,10 @@ function mostrarDeshacer(archivos) {
   const txt = $('#undoText');
   if (txt) {
     const muestra = lista.slice(0, 3).join(', ') + (lista.length > 3 ? '…' : '');
-    txt.textContent =
-      lista.length === 1
-        ? 'Se ha cambiado 1 archivo (' + muestra + ').'
-        : 'Se han cambiado ' + lista.length + ' archivos (' + muestra + ').';
+    txt.textContent = I18N.t(lista.length === 1 ? 'chat.deshacer.archivo.uno' : 'chat.deshacer.archivo.varios', {
+      n: lista.length,
+      muestra: muestra,
+    });
   }
   bar.hidden = false;
   // los cambios son de la conversación que los hizo: quedan apuntados en SU runtime para
@@ -2183,18 +2232,18 @@ if ($('#undoBtn'))
       if (!r || r.ok === false) {
         // si el motor dice que ya no hay nada que deshacer, el botón no debe quedarse ahí
         if (r && r.code === 'sin_cambios') ocultarDeshacer();
-        showToast('No se pudo deshacer: ' + ((r && r.error) || 'error desconocido'));
+        showToast(I18N.t('chat.deshacer.error', { motivo: (r && r.error) || I18N.t('chat.error.desconocido') }));
         return;
       }
       ocultarDeshacer();
       const partes = [];
-      if (r.restaurados) partes.push(r.restaurados + ' restaurado(s)');
-      if (r.borrados) partes.push(r.borrados + ' borrado(s)');
-      if (r.fallos) partes.push(r.fallos + ' sin poder tocar (no se pudo leer su contenido antes)');
-      showToast('Cambios del turno deshechos: ' + (partes.join(', ') || 'no había nada'));
-      feed('Cambio del turno deshecho', 'blu');
+      if (r.restaurados) partes.push(I18N.t('chat.deshacer.restaurados', { n: r.restaurados }));
+      if (r.borrados) partes.push(I18N.t('chat.deshacer.borrados', { n: r.borrados }));
+      if (r.fallos) partes.push(I18N.t('chat.deshacer.fallos', { n: r.fallos }));
+      showToast(I18N.t('chat.deshacer.hecho', { detalle: partes.join(', ') || I18N.t('chat.deshacer.nada') }));
+      feed(I18N.t('chat.deshacer.feed'), 'blu');
     } catch (err) {
-      showToast('No se pudo deshacer: ' + ((err && err.message) || err));
+      showToast(I18N.t('chat.deshacer.error', { motivo: (err && err.message) || err }));
     } finally {
       btn.disabled = false;
     }
@@ -2217,7 +2266,7 @@ async function abrirDiffPanel() {
   if (!diffPanel || !diffList) return;
   const r = await window.sagitari.cambiosDiff(hiloActual());
   if (!r || r.ok === false) {
-    showToast('No se pudieron leer los cambios: ' + ((r && r.error) || 'error desconocido'));
+    showToast(I18N.t('chat.diff.error', { motivo: (r && r.error) || I18N.t('chat.error.desconocido') }));
     return;
   }
   pintarDiff(r.archivos || [], diffList);
@@ -2257,15 +2306,17 @@ if (diffList)
       const r = await window.sagitari.cambiosRevertir(hiloActual(), archivo);
       if (!r || r.ok === false) {
         btn.disabled = false;
-        showToast('No se pudo revertir «' + archivo + '»: ' + ((r && r.error) || 'error desconocido'));
+        showToast(
+          I18N.t('chat.diff.revertir.error', { archivo: archivo, motivo: (r && r.error) || I18N.t('chat.error.desconocido') }),
+        );
         return;
       }
-      showToast('«' + archivo + '» vuelto a como estaba antes del turno');
-      feed('Archivo revertido: ' + archivo, 'blu');
+      showToast(I18N.t('chat.diff.revertido', { archivo: archivo }));
+      feed(I18N.t('chat.diff.revertido.feed', { archivo: archivo }), 'blu');
       await refrescarDiffPanel();
     } catch (err) {
       btn.disabled = false;
-      showToast('No se pudo revertir «' + archivo + '»: ' + ((err && err.message) || err));
+      showToast(I18N.t('chat.diff.revertir.error', { archivo: archivo, motivo: (err && err.message) || err }));
     }
   });
 // Escape cierra el panel: es el mismo gesto con el que se cierran los menús de la casa
@@ -2294,7 +2345,7 @@ function renderPlanCard(container, steps, before, prev) {
   const card = document.createElement('div');
   card.className = 'plancard';
   card.innerHTML =
-    `<div class="plancard-head">${ic('map')}<b>PLAN</b><span class="pl-count"></span></div>` +
+    `<div class="plancard-head">${ic('map')}<b>${esc(I18N.t('chat.plan'))}</b><span class="pl-count"></span></div>` +
     '<ol>' +
     steps.map((s) => `<li data-step="${s.n}"><span class="pl-n">${s.n}</span><span>${esc(s.text)}</span></li>`).join('') +
     '</ol>';
@@ -2307,7 +2358,7 @@ function renderPlanCard(container, steps, before, prev) {
      reiniciaba a 0. */
   const done = Math.max(0, Math.min(prev ? prev.done || 0 : 0, items.length));
   for (let i = 0; i < done; i++) items[i].classList.add('done');
-  count.textContent = done ? `${done}/${items.length} pasos` : `${steps.length} pasos`;
+  count.textContent = textoCuentaPasos(done, items.length);
   return {
     el: card,
     total: items.length,
@@ -2324,7 +2375,7 @@ function renderPlanCard(container, steps, before, prev) {
       cur.classList.remove('now');
       cur.classList.add('done');
       this.done++;
-      count.textContent = `${this.done}/${this.total} pasos`;
+      count.textContent = textoCuentaPasos(this.done, this.total);
       if (items[this.done]) items[this.done].classList.add('now');
     },
   };
@@ -2345,15 +2396,20 @@ function todoStatusMeta(status) {
       ? { cls: 'now', icn: 'play' }
       : { cls: '', icn: '' };
 }
+/** «2/5 pasos» mientras avanza, «5 pasos» cuando aún no hay ninguno hecho. */
+function textoCuentaPasos(hechos, total) {
+  return hechos ? I18N.t('chat.pasos.hechos', { hechos: hechos, total: total }) : textoPasos(total);
+}
+
 function todoCount(todos) {
   const done = todos.filter((t) => t && t.status === 'completed').length;
-  return done ? done + '/' + todos.length + ' pasos' : todos.length + ' pasos';
+  return textoCuentaPasos(done, todos.length);
 }
 function buildTodoCard(todos) {
   const card = document.createElement('div');
   card.className = 'plancard todocard';
   card.innerHTML =
-    `<div class="plancard-head">${ic('list')}<b>TAREAS</b><span class="pl-count">${esc(todoCount(todos))}</span></div>` +
+    `<div class="plancard-head">${ic('list')}<b>${esc(I18N.t('chat.tareas'))}</b><span class="pl-count">${esc(todoCount(todos))}</span></div>` +
     '<ol>' +
     todos
       .map((t) => {
@@ -2398,7 +2454,7 @@ function closePendingCards(failed) {
   // un razonamiento que se quedó a medias se marca: «pensando…» para siempre mentiría
   if (pendingTurn.think) {
     const meta = pendingTurn.think.querySelector('.th-meta');
-    if (meta && /pensando/.test(meta.textContent)) meta.textContent = 'interrumpido';
+    if (meta && meta.dataset.estado === 'vivo') meta.textContent = I18N.t('chat.interrumpido');
   }
   // los chips del tablero del equipo que quedaron «en marcha» también se cierran
   if (pendingTurn.team) {
@@ -2410,7 +2466,7 @@ function closePendingCards(failed) {
       const mark = chip.el.querySelector('.tc-mark');
       if (mark) mark.innerHTML = ic(failed ? 'alert' : 'close');
     }
-    pendingTurn.team.meta.textContent = failed ? 'interrumpido' : 'detenido';
+    pendingTurn.team.meta.textContent = I18N.t(failed ? 'chat.interrumpido' : 'chat.detenido');
   }
   for (const card of pendingTurn.cards) {
     if (!card.classList.contains('run')) continue; // ya tenía su resultado
@@ -2423,13 +2479,13 @@ function closePendingCards(failed) {
       const wrap = document.createElement('div');
       wrap.dataset.result = '1';
       wrap.innerHTML =
-        `<div class="tb-label">${failed ? 'ERROR' : 'CANCELADO'}</div>` +
-        `<pre>${failed ? 'La ejecución falló antes de recibir el resultado.' : 'Detenido por el usuario antes de recibir el resultado.'}</pre>`;
+        `<div class="tb-label">${esc(I18N.t(failed ? 'chat.titulo.error' : 'chat.titulo.cancelado'))}</div>` +
+        `<pre>${esc(I18N.t(failed ? 'chat.cortada.error' : 'chat.cortada.detenido'))}</pre>`;
       body.appendChild(wrap);
     }
   }
   // el grupo tampoco puede seguir diciendo «en curso…» para siempre
-  if (pendingTurn.group) pendingTurn.group.meta.textContent = failed ? 'interrumpido' : 'detenido';
+  if (pendingTurn.group) pendingTurn.group.meta.textContent = I18N.t(failed ? 'chat.interrumpido' : 'chat.detenido');
 }
 
 function finishAssistant(finalText, opts) {
@@ -2540,7 +2596,7 @@ function finishAssistant(finalText, opts) {
     holder.appendChild(div);
     const tag = document.createElement('div');
     tag.className = 'subnote';
-    tag.textContent = o.failed ? 'Respuesta interrumpida por un error' : 'Respuesta interrumpida';
+    tag.textContent = I18N.t(o.failed ? 'chat.respuestaInterrumpida.error' : 'chat.respuestaInterrumpida');
     holder.appendChild(tag);
   }
   // turno completado: el plan queda cerrado. Si se detuvo a medias (sin
@@ -2554,11 +2610,11 @@ function finishAssistant(finalText, opts) {
   if (finalText && pendingTurn && pendingTurn.tools) {
     lastTurnSummary = K.toolCount(pendingTurn.tools) + (pendingTurn.totalMs ? ' · ' + K.fmtDuration(pendingTurn.totalMs) : '');
   } else if (finalText && pendingTurn && pendingTurn.plan) {
-    lastTurnSummary = pendingTurn.plan.total + ' pasos completados';
+    lastTurnSummary = I18N.t('chat.resumen.pasos', { n: pendingTurn.plan.total });
   } else if (!finalText) {
-    lastTurnSummary = o.failed ? 'error en la ejecución' : 'detenido por el usuario';
+    lastTurnSummary = I18N.t(o.failed ? 'chat.resumen.error' : 'chat.resumen.detenido');
   } else {
-    lastTurnSummary = 'respuesta entregada';
+    lastTurnSummary = I18N.t('chat.resumen.entregada');
   }
   // el pie ofrece copiar también lo que quedó a medias
   const said = narrativa || keptText;
