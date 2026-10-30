@@ -1345,127 +1345,217 @@
               <!-- ===== AGENTE ===== -->
               <div class="setpanel" data-panel="agent" id="setpanel-agent" role="tabpanel" aria-labelledby="tab-agent">
                 <div class="setcard">
-                  <div class="sc-head"><b>Memoria</b><span class="sc-hint">Cuánto de lo que sabe de ti entra en cada respuesta</span></div>
+                  <div class="sc-head">
+                    <b data-i18n="ajustes.agente.memoria.titulo">Memoria</b
+                    ><span class="sc-hint" data-i18n="ajustes.agente.memoria.nota"
+                      >Cuánto de lo que sabe de ti entra en cada respuesta</span
+                    >
+                  </div>
                   <div class="swrow srow" data-keys="memoria sensibilidad relevancia recuerdos contexto">
                     <span class="st"
-                      ><b>Memoria que entra en cada respuesta</b
-                      ><small
+                      ><b data-i18n="ajustes.agente.contexto.titulo">Memoria que entra en cada respuesta</b
+                      ><small data-i18n="ajustes.agente.contexto.nota"
                         >Cuántos recuerdos tuyos se añaden al contexto. «Solo lo más claro» deja fuera todo lo que no encaje de lleno con lo
                         que pides; «Casi todo» trae también lo parecido. Más memoria da mejores respuestas y gasta más tokens por
                         turno.</small
                       ></span
                     >
-                    <select id="memSens" aria-label="Memoria que entra en cada respuesta" style="width: 170px">
-                      <option value="0">Casi todo</option>
-                      <option value="1">Bastante</option>
-                      <option value="2">Normal</option>
-                      <option value="3">Solo lo más claro</option>
+                    <select
+                      id="memSens"
+                      data-i18n-aria="ajustes.agente.contexto.titulo"
+                      aria-label="Memoria que entra en cada respuesta"
+                      style="width: 170px"
+                    >
+                      <option value="0" data-i18n="ajustes.agente.contexto.casiTodo">Casi todo</option>
+                      <option value="1" data-i18n="ajustes.agente.contexto.bastante">Bastante</option>
+                      <option value="2" data-i18n="ajustes.agente.contexto.normal">Normal</option>
+                      <option value="3" data-i18n="ajustes.agente.contexto.soloClaro">Solo lo más claro</option>
                     </select>
                   </div>
                 </div>
 
                 <div class="setcard">
                   <div class="sc-head">
-                    <b>Tareas en segundo plano</b><span class="sc-hint">Sagitari puede trabajar mientras sigues hablando</span>
+                    <b data-i18n="ajustes.agente.tareas.titulo">Tareas en segundo plano</b
+                    ><span class="sc-hint" data-i18n="ajustes.agente.tareas.nota"
+                      >Sagitari puede trabajar mientras sigues hablando</span
+                    >
                   </div>
                   <div class="swrow srow" data-keys="tareas simultaneas concurrencia background paralelo">
                     <span class="st"
-                      ><b>Tareas a la vez</b
-                      ><small
+                      ><b data-i18n="ajustes.agente.tareas.vez">Tareas a la vez</b
+                      ><small data-i18n="ajustes.agente.tareas.vez.nota"
                         >Cuántas tareas de la cola pueden avanzar al mismo tiempo mientras sigues hablando (de 1 a 4). Cómo va cada una se
                         ve en la vista Tareas.</small
                       ></span
                     >
-                    <input type="number" id="setMaxTasks" aria-label="Tareas a la vez (1-4)" min="1" max="4" style="width: 80px" />
+                    <input
+                      type="number"
+                      id="setMaxTasks"
+                      data-i18n-aria="ajustes.agente.tareas.vez.aria"
+                      aria-label="Tareas a la vez (1-4)"
+                      min="1"
+                      max="4"
+                      style="width: 80px"
+                    />
                   </div>
                   <div class="swrow srow" data-keys="recuperar tareas interrumpidas arrancar reanudar">
                     <span class="st"
-                      ><b>Recuperar tareas interrumpidas al arrancar</b
-                      ><small>Si cierras la app con tareas a medias, se reanudan solas.</small></span
+                      ><b data-i18n="ajustes.agente.tareas.recuperar">Recuperar tareas interrumpidas al arrancar</b
+                      ><small data-i18n="ajustes.agente.tareas.recuperar.nota"
+                        >Si cierras la app con tareas a medias, se reanudan solas.</small
+                      ></span
                     >
-                    <div class="sw on" id="swAutoResume" role="switch" tabindex="0" aria-checked="true" aria-label="Recuperar tareas interrumpidas al arrancar"></div>
+                    <div
+                      class="sw on"
+                      id="swAutoResume"
+                      role="switch"
+                      tabindex="0"
+                      aria-checked="true"
+                      data-i18n-aria="ajustes.agente.tareas.recuperar"
+                      aria-label="Recuperar tareas interrumpidas al arrancar"
+                    ></div>
                   </div>
                 </div>
 
                 <div class="setcard">
                   <div class="sc-head">
-                    <b>Delegación y verificación</b><span class="sc-hint">Cómo reparte el trabajo y cómo comprueba que quedó bien</span>
+                    <b data-i18n="ajustes.agente.delegacion.titulo">Delegación y verificación</b
+                    ><span class="sc-hint" data-i18n="ajustes.agente.delegacion.nota"
+                      >Cómo reparte el trabajo y cómo comprueba que quedó bien</span
+                    >
                   </div>
                   <div class="swrow srow" data-keys="modelo por agente subagentes ahorro coste barato enrutado">
                     <span class="st"
-                      ><b>Modelo por agente</b
-                      ><small
+                      ><b data-i18n="ajustes.agente.modelo">Modelo por agente</b
+                      ><small data-i18n="ajustes.agente.modelo.nota"
                         >Deja que los subagentes que sólo leen, mueven archivos o miran capturas usen el modelo más ligero de tu proveedor;
                         el que verifica y el chat siguen con el que elegiste.</small
                       ></span
                     >
-                    <div class="sw" id="swAgenteModelo" role="switch" tabindex="0" aria-checked="false" aria-label="Modelo por agente"></div>
+                    <div
+                      class="sw"
+                      id="swAgenteModelo"
+                      role="switch"
+                      tabindex="0"
+                      aria-checked="false"
+                      data-i18n-aria="ajustes.agente.modelo"
+                      aria-label="Modelo por agente"
+                    ></div>
                   </div>
                   <div class="swrow srow" data-keys="verificar comprobar resultado cierre calidad subagentes evidencia">
                     <span class="st"
-                      ><b>Verificación antes de cerrar</b
-                      ><small
+                      ><b data-i18n="ajustes.agente.verificar">Verificación antes de cerrar</b
+                      ><small data-i18n="ajustes.agente.verificar.nota"
                         >Cuando una tarea cambia archivos, SAGITARI comprueba el resultado (o lo delega en su agente de verificación) antes
                         de dártela por hecha. Apágalo si prefieres respuestas más rápidas.</small
                       ></span
                     >
-                    <div class="sw" id="swVerificar" role="switch" tabindex="0" aria-checked="false" aria-label="Verificación antes de cerrar"></div>
+                    <div
+                      class="sw"
+                      id="swVerificar"
+                      role="switch"
+                      tabindex="0"
+                      aria-checked="false"
+                      data-i18n-aria="ajustes.agente.verificar"
+                      aria-label="Verificación antes de cerrar"
+                    ></div>
                   </div>
                   <div class="swrow srow" data-keys="revisar revision codigo diff cambio revisor calidad">
                     <span class="st"
-                      ><b>Revisar el cambio antes de cerrar</b
-                      ><small
+                      ><b data-i18n="ajustes.agente.revisar">Revisar el cambio antes de cerrar</b
+                      ><small data-i18n="ajustes.agente.revisar.nota"
                         >Cuando una tarea modifica archivos, un agente de revisión lee el diff antes de dártelo por hecho y busca lo que
                         está mal: contratos rotos, casos límite, restos del nombre viejo. Si encuentra algo bloqueante, SAGITARI lo arregla
                         en el mismo turno. Apágalo si prefieres respuestas más rápidas.</small
                       ></span
                     >
-                    <div class="sw" id="swRevisar" role="switch" tabindex="0" aria-checked="false" aria-label="Revisar el cambio antes de cerrar"></div>
+                    <div
+                      class="sw"
+                      id="swRevisar"
+                      role="switch"
+                      tabindex="0"
+                      aria-checked="false"
+                      data-i18n-aria="ajustes.agente.revisar"
+                      aria-label="Revisar el cambio antes de cerrar"
+                    ></div>
                   </div>
                   <div class="swrow srow" data-keys="diagnosticos escribir comprobar lint errores proyecto tipos eslint ruff mypy">
                     <span class="st"
-                      ><b>Comprobar el proyecto al escribir</b
-                      ><small
+                      ><b data-i18n="ajustes.agente.comprobar">Comprobar el proyecto al escribir</b
+                      ><small data-i18n="ajustes.agente.comprobar.nota"
                         >Cada vez que SAGITARI escribe un archivo, pasa los comprobadores del proyecto (ESLint, Ruff, Flake8, Mypy) sobre
                         las líneas que ha cambiado y el fallo vuelve al instante, en el mismo paso. Lo que ya estaba mal en el archivo no
                         cuenta como suyo. Apágalo si prefieres que escribir no ejecute nada.</small
                       ></span
                     >
-                    <div class="sw" id="swDiagnosticos" role="switch" tabindex="0" aria-checked="false" aria-label="Comprobar el proyecto al escribir"></div>
+                    <div
+                      class="sw"
+                      id="swDiagnosticos"
+                      role="switch"
+                      tabindex="0"
+                      aria-checked="false"
+                      data-i18n-aria="ajustes.agente.comprobar"
+                      aria-label="Comprobar el proyecto al escribir"
+                    ></div>
                   </div>
                   <div class="swrow srow" data-keys="pruebas test cierre ejecutar verificar npm test compilacion">
                     <span class="st"
-                      ><b>Ejecutar las pruebas al cerrar</b
-                      ><small
+                      ><b data-i18n="ajustes.agente.pruebas">Ejecutar las pruebas al cerrar</b
+                      ><small data-i18n="ajustes.agente.pruebas.nota"
                         >Antes de darte el turno por terminado, SAGITARI ejecuta el comando de pruebas del proyecto —o su compilación si no
                         hay pruebas— y mira la salida de verdad. Si falla, se le devuelve el fallo y lo arregla: el turno no cierra en verde
                         con algo roto.</small
                       ></span
                     >
-                    <div class="sw" id="swCierre" role="switch" tabindex="0" aria-checked="false" aria-label="Ejecutar las pruebas al cerrar"></div>
+                    <div
+                      class="sw"
+                      id="swCierre"
+                      role="switch"
+                      tabindex="0"
+                      aria-checked="false"
+                      data-i18n-aria="ajustes.agente.pruebas"
+                      aria-label="Ejecutar las pruebas al cerrar"
+                    ></div>
                   </div>
                   <div class="swrow srow" data-keys="aislamiento arboles subagentes paralelo git worktree conflicto fusion">
                     <span class="st"
-                      ><b>Aislar a los subagentes que escriben</b
-                      ><small
+                      ><b data-i18n="ajustes.agente.arboles">Aislar a los subagentes que escriben</b
+                      ><small data-i18n="ajustes.agente.arboles.nota"
                         >Los especialistas que escriben código trabajan en su propio árbol de git y sus cambios vuelven al proyecto como un
                         parche comprobado antes de aplicarse: dos agentes a la vez dejan de pisarse. Si algo no encaja, no se aplica nada y
                         te lo dice. Necesita que el proyecto sea un repositorio git; sin git trabaja como siempre. Apágalo para que escriban
                         directamente sobre tus archivos.</small
                       ></span
                     >
-                    <div class="sw" id="swArboles" role="switch" tabindex="0" aria-checked="false" aria-label="Aislar a los subagentes que escriben"></div>
+                    <div
+                      class="sw"
+                      id="swArboles"
+                      role="switch"
+                      tabindex="0"
+                      aria-checked="false"
+                      data-i18n-aria="ajustes.agente.arboles"
+                      aria-label="Aislar a los subagentes que escriben"
+                    ></div>
                   </div>
                   <div class="swrow srow" data-keys="cache prompt contexto ahorro coste rapido tokens proveedor">
                     <span class="st"
-                      ><b>Aprovechar el caché de prompt</b
-                      ><small
+                      ><b data-i18n="ajustes.agente.cache">Aprovechar el caché de prompt</b
+                      ><small data-i18n="ajustes.agente.cache.nota"
                         >El prompt de cada paso (herramientas, mapa del proyecto, reglas y conversación) se guarda en el proveedor y se
                         relee a una fracción del precio, con la misma respuesta. Se apaga solo si usas un proveedor compatible que no
                         entienda el campo y te rechace las peticiones.</small
                       ></span
                     >
-                    <div class="sw" id="swCache" role="switch" tabindex="0" aria-checked="false" aria-label="Aprovechar el caché de prompt"></div>
+                    <div
+                      class="sw"
+                      id="swCache"
+                      role="switch"
+                      tabindex="0"
+                      aria-checked="false"
+                      data-i18n-aria="ajustes.agente.cache"
+                      aria-label="Aprovechar el caché de prompt"
+                    ></div>
                   </div>
                   <!-- avanzado: paralelismo y reintentos, plegados por defecto -->
                   <div class="setcard advcard" id="advAgentCard">
@@ -1478,32 +1568,37 @@
                       aria-controls="advAgentBody"
                     >
                       <div class="sc-head">
-                        <b>Avanzado · paralelismo y reintentos</b
-                        ><span class="sc-hint">Cuánto trabajo va a la vez y cuántas veces se reintenta un fallo</span>
+                        <b data-i18n="ajustes.agente.avanzado.titulo">Avanzado · paralelismo y reintentos</b
+                        ><span class="sc-hint" data-i18n="ajustes.agente.avanzado.nota"
+                          >Cuánto trabajo va a la vez y cuántas veces se reintenta un fallo</span
+                        >
                       </div>
                       <span class="chev"><i data-i="chevron"></i></span>
                     </div>
                     <div class="advbody" id="advAgentBody">
                       <div class="grid2">
                         <div class="field srow" data-keys="subagentes delegaciones limite equipo tope">
-                          <label for="grDelegations">Subagentes por turno (0 = sin tope)</label
+                          <label for="grDelegations" data-i18n="ajustes.agente.delegaciones"
+                            >Subagentes por turno (0 = sin tope)</label
                           ><input type="number" id="grDelegations" min="0" />
                         </div>
                         <div class="field srow" data-keys="paralelo simultaneo concurrencia herramientas rapidez">
-                          <label for="parTools">Herramientas en paralelo (1-4)</label><input type="number" id="parTools" min="1" max="4" />
+                          <label for="parTools" data-i18n="ajustes.agente.paralelo">Herramientas en paralelo (1-4)</label
+                          ><input type="number" id="parTools" min="1" max="4" />
                         </div>
                       </div>
-                      <div class="subnote">
+                      <div class="subnote" data-i18n="ajustes.agente.delegaciones.nota">
                         Cada subagente tiene su propio presupuesto de pasos, así que sin este tope un turno largo acaba en una cadena de
                         delegaciones. Al alcanzarlo, SAGITARI no se detiene: termina la tarea con lo que ya tiene.
                       </div>
                       <div class="grid2">
                         <div class="field srow" data-keys="intentos arreglo fallo pruebas reintentos vueltas">
-                          <label for="verAttempts">Intentos de arreglar un fallo (0-5)</label
+                          <label for="verAttempts" data-i18n="ajustes.agente.intentos"
+                            >Intentos de arreglar un fallo (0-5)</label
                           ><input type="number" id="verAttempts" min="0" max="5" />
                         </div>
                       </div>
-                      <div class="subnote">
+                      <div class="subnote" data-i18n="ajustes.agente.paralelo.nota">
                         Varias órdenes del mismo mensaje se ejecutan a la vez cuando no chocan: el navegador es uno solo, la escritura en
                         disco va en cola y la terminal admite dos comandos. Con 1, todo va en orden.
                       </div>
@@ -1511,15 +1606,22 @@
                            para a TODOS: los que trabajan y los que esperan un permiso. -->
                       <div class="grid2">
                         <div class="field srow" data-keys="equipo presupuesto tope gasto coste dolares limite compañeros miembros">
-                          <label for="eqPresupuesto">Presupuesto del equipo en USD (0 = sin tope propio)</label
+                          <label for="eqPresupuesto" data-i18n="ajustes.agente.equipo.presupuesto"
+                            >Presupuesto del equipo en USD (0 = sin tope propio)</label
                           ><input type="number" id="eqPresupuesto" min="0" step="0.5" />
                         </div>
                       </div>
                       <div class="subnote">
-                        Gasto máximo de un encargo en modo EQUIPO (el líder y todos sus compañeros juntos). Al alcanzarlo, el equipo
-                        <b>para a todos</b>: se detienen los compañeros que están trabajando y los que esperan un permiso, el tablero se
-                        queda tal y como estaba en ese momento y te lo dice en el chat. Con 0 no hay tope propio del equipo: siguen contando
-                        los límites de gasto de arriba.
+                        <span data-i18n="ajustes.agente.equipo.nota.uno"
+                          >Gasto máximo de un encargo en modo EQUIPO (el líder y todos sus compañeros juntos). Al alcanzarlo, el
+                          equipo</span
+                        >
+                        <b data-i18n="ajustes.agente.equipo.para">para a todos</b
+                        ><span data-i18n="ajustes.agente.equipo.nota.dos"
+                          >: se detienen los compañeros que están trabajando y los que esperan un permiso, el tablero se queda tal y como
+                          estaba en ese momento y te lo dice en el chat. Con 0 no hay tope propio del equipo: siguen contando los límites
+                          de gasto de arriba.</span
+                        >
                       </div>
                     </div>
                     <!-- /advbody -->
@@ -1529,36 +1631,60 @@
 
                 <div class="setcard">
                   <div class="sc-head">
-                    <b>Reglas del proyecto y hooks</b><span class="sc-hint">Cómo se comporta dentro de tus repositorios</span>
+                    <b data-i18n="ajustes.agente.reglas.titulo">Reglas del proyecto y hooks</b
+                    ><span class="sc-hint" data-i18n="ajustes.agente.reglas.nota"
+                      >Cómo se comporta dentro de tus repositorios</span
+                    >
                   </div>
                   <div class="srow" data-keys="sagitari md agents md reglas instrucciones convenciones proyecto estilo">
                     <div class="subnote" style="margin-top: 0">
-                      Si el proyecto tiene un <b>SAGITARI.md</b> o un <b>AGENTS.md</b> en su raíz (o en <b>.sagitari/</b>), sus reglas se
-                      leen siempre, antes de tocar nada: convenciones, qué no tocar, cómo se llama cada cosa. Valen también para los
-                      subagentes. En la carpeta de datos puedes tener un <b>AGENTS.md</b> con las tuyas, para todos los proyectos a la vez.
+                      <span data-i18n="ajustes.agente.reglas.ley.uno">Si el proyecto tiene un</span> <b>SAGITARI.md</b>
+                      <span data-i18n="ajustes.agente.reglas.ley.dos">o un</span> <b>AGENTS.md</b>
+                      <span data-i18n="ajustes.agente.reglas.ley.tres">en su raíz (o en</span> <b>.sagitari/</b
+                      ><span data-i18n="ajustes.agente.reglas.ley.cuatro"
+                        >), sus reglas se leen siempre, antes de tocar nada: convenciones, qué no tocar, cómo se llama cada cosa. Valen
+                        también para los subagentes. En la carpeta de datos puedes tener un</span
+                      >
+                      <b>AGENTS.md</b>
+                      <span data-i18n="ajustes.agente.reglas.ley.cinco"
+                        >con las tuyas, para todos los proyectos a la vez.</span
+                      >
                     </div>
                     <div id="instrList" class="instrlist"></div>
                     <div class="btnrow" style="margin: 12px 0 0">
                       <button class="btn ghost" id="instrReload">
-                        <span class="bi"><i data-i="refresh"></i></span> Comprobar
+                        <span class="bi"><i data-i="refresh"></i></span>
+                        <span data-i18n="ajustes.agente.reglas.comprobar">Comprobar</span>
                       </button>
                       <button class="btn ghost" id="instrCreate">
-                        <span class="bi"><i data-i="plus"></i></span> Crear SAGITARI.md
+                        <span class="bi"><i data-i="plus"></i></span>
+                        <span data-i18n="ajustes.agente.reglas.crear">Crear SAGITARI.md</span>
                       </button>
                     </div>
                   </div>
                   <div class="field srow" data-keys="hook editar escribir formatear prettier lint fix comando automatico">
-                    <label for="hookEditar">Hook tras escribir un archivo (opcional)</label>
+                    <label for="hookEditar" data-i18n="ajustes.agente.hook.editar"
+                      >Hook tras escribir un archivo (opcional)</label
+                    >
                     <input type="text" id="hookEditar" placeholder="npx prettier --write {{file}}" spellcheck="false" />
                     <div class="subnote">
-                      Se ejecuta después de escribir y su salida se le enseña al modelo. Marcadores: <b>{{file}}</b> (el archivo),
-                      <b>{{files}}</b> (todos los de ese paso), <b>{{dir}}</b> (el espacio de trabajo); se ponen entre comillas solos.
+                      <span data-i18n="ajustes.agente.hook.editar.nota.uno"
+                        >Se ejecuta después de escribir y su salida se le enseña al modelo. Marcadores:</span
+                      >
+                      <b>{{file}}</b>
+                      <span data-i18n="ajustes.agente.hook.editar.nota.dos">(el archivo),</span> <b>{{files}}</b>
+                      <span data-i18n="ajustes.agente.hook.editar.nota.tres">(todos los de ese paso),</span> <b>{{dir}}</b>
+                      <span data-i18n="ajustes.agente.hook.editar.nota.cuatro"
+                        >(el espacio de trabajo); se ponen entre comillas solos.</span
+                      >
                     </div>
                   </div>
                   <div class="field srow" data-keys="hook cerrar pruebas lint comprobar comando final">
-                    <label for="hookCerrar">Hook antes de cerrar el turno (opcional)</label>
+                    <label for="hookCerrar" data-i18n="ajustes.agente.hook.cerrar"
+                      >Hook antes de cerrar el turno (opcional)</label
+                    >
                     <input type="text" id="hookCerrar" placeholder="npm run lint" spellcheck="false" />
-                    <div class="subnote">
+                    <div class="subnote" data-i18n="ajustes.agente.hook.cerrar.nota">
                       Se ejecuta antes de dar el turno por terminado. Si falla, el turno no cierra: SAGITARI lee la salida y lo arregla,
                       igual que con las pruebas del proyecto.
                     </div>
@@ -1566,27 +1692,56 @@
                 </div>
 
                 <div class="setcard">
-                  <div class="sc-head"><b>Conversación</b><span class="sc-hint">Qué se ve de lo que Sagitari piensa por dentro</span></div>
+                  <div class="sc-head">
+                    <b data-i18n="ajustes.agente.conversacion.titulo">Conversación</b
+                    ><span class="sc-hint" data-i18n="ajustes.agente.conversacion.nota"
+                      >Qué se ve de lo que Sagitari piensa por dentro</span
+                    >
+                  </div>
                   <div class="swrow srow" data-keys="razonamiento thinking pensar proceso interno razonar">
                     <span class="st"
-                      ><b>Mostrar el razonamiento del modelo</b
-                      ><small
+                      ><b data-i18n="ajustes.agente.razonamiento">Mostrar el razonamiento del modelo</b
+                      ><small data-i18n="ajustes.agente.razonamiento.nota"
                         >Los modelos que razonan (Claude, la serie o y GPT-5, DeepSeek R1…) enseñan su proceso antes de responder. Aparece
                         plegado encima de la respuesta y se pliega solo al empezar a contestar. Puede costar tokens extra en algunos
                         proveedores.</small
                       ></span
                     >
-                    <div class="sw" id="swThinking" role="switch" tabindex="0" aria-checked="false" aria-label="Mostrar el razonamiento del modelo"></div>
+                    <div
+                      class="sw"
+                      id="swThinking"
+                      role="switch"
+                      tabindex="0"
+                      aria-checked="false"
+                      data-i18n-aria="ajustes.agente.razonamiento"
+                      aria-label="Mostrar el razonamiento del modelo"
+                    ></div>
                   </div>
                 </div>
 
                 <div class="setcard">
-                  <div class="sc-head"><b>Diagnóstico</b><span class="sc-hint">Para depurar el comportamiento del agente</span></div>
+                  <div class="sc-head">
+                    <b data-i18n="ajustes.agente.diagnostico.titulo">Diagnóstico</b
+                    ><span class="sc-hint" data-i18n="ajustes.agente.diagnostico.nota"
+                      >Para depurar el comportamiento del agente</span
+                    >
+                  </div>
                   <div class="swrow srow" data-keys="modo desarrollador metricas debug tokens latencia coste">
                     <span class="st"
-                      ><b>Modo desarrollador</b><small>Muestra métricas en vivo (tokens, latencia, coste) bajo el chat.</small></span
+                      ><b data-i18n="ajustes.agente.dev">Modo desarrollador</b
+                      ><small data-i18n="ajustes.agente.dev.nota"
+                        >Muestra métricas en vivo (tokens, latencia, coste) bajo el chat.</small
+                      ></span
                     >
-                    <div class="sw" id="devModeSw" role="switch" tabindex="0" aria-checked="false" aria-label="Modo desarrollador"></div>
+                    <div
+                      class="sw"
+                      id="devModeSw"
+                      role="switch"
+                      tabindex="0"
+                      aria-checked="false"
+                      data-i18n-aria="ajustes.agente.dev"
+                      aria-label="Modo desarrollador"
+                    ></div>
                   </div>
                 </div>
               </div>
@@ -1594,77 +1749,112 @@
               <!-- ===== DATOS ===== -->
               <div class="setpanel" data-panel="data" id="setpanel-data" role="tabpanel" aria-labelledby="tab-data">
                 <div class="setcard">
-                  <div class="sc-head"><b>Espacio de trabajo</b><span class="sc-hint">Dónde trabaja el agente con tus archivos</span></div>
+                  <div class="sc-head">
+                    <b data-i18n="ajustes.datos.espacio.titulo">Espacio de trabajo</b
+                    ><span class="sc-hint" data-i18n="ajustes.datos.espacio.nota"
+                      >Dónde trabaja el agente con tus archivos</span
+                    >
+                  </div>
                   <div class="srow" data-keys="espacio trabajo carpeta workspace proyectos ruta">
                     <div class="btnrow" style="margin: 0">
                       <button class="btn" id="wsPick">
-                        <span class="bi"><i data-i="folder"></i></span> Cambiar carpeta…
+                        <span class="bi"><i data-i="folder"></i></span>
+                        <span data-i18n="ajustes.datos.espacio.cambiar">Cambiar carpeta…</span>
                       </button>
                     </div>
-                    <div class="subnote">Ahora mismo: <b id="wsPathLabel">—</b></div>
                     <div class="subnote">
-                      Carpeta donde Sagitari crea y modifica archivos, y donde se ejecutan los comandos: las rutas relativas («informe.md»)
-                      aterrizan aquí. Es el mismo espacio que abre la vista <b>Espacio de trabajo</b>, donde también se puede escribir la
-                      ruta a mano.
+                      <span data-i18n="ajustes.datos.espacio.ahora">Ahora mismo:</span> <b id="wsPathLabel">—</b>
+                    </div>
+                    <div class="subnote">
+                      <span data-i18n="ajustes.datos.espacio.ley.uno"
+                        >Carpeta donde Sagitari crea y modifica archivos, y donde se ejecutan los comandos: las rutas relativas
+                        («informe.md») aterrizan aquí. Es el mismo espacio que abre la vista</span
+                      >
+                      <b data-i18n="ajustes.datos.espacio.vista">Espacio de trabajo</b
+                      ><span data-i18n="ajustes.datos.espacio.ley.dos"
+                        >, donde también se puede escribir la ruta a mano.</span
+                      >
                     </div>
                   </div>
                 </div>
 
                 <div class="setcard">
-                  <div class="sc-head"><b>Atajos de teclado</b><span class="sc-hint">Disponibles en toda la app</span></div>
+                  <div class="sc-head">
+                    <b data-i18n="ajustes.datos.atajos.titulo">Atajos de teclado</b
+                    ><span class="sc-hint" data-i18n="ajustes.datos.atajos.nota">Disponibles en toda la app</span>
+                  </div>
                   <div class="swrow srow" data-keys="atajo mostrar ocultar ventana ctrl alt s">
-                    <span class="st"><b>Mostrar u ocultar la ventana</b></span
+                    <span class="st"><b data-i18n="ajustes.datos.atajos.ventana">Mostrar u ocultar la ventana</b></span
                     ><span class="kbdrow"><kbd class="kbd">Ctrl</kbd><kbd class="kbd">Alt</kbd><kbd class="kbd">S</kbd></span>
                   </div>
                   <div class="swrow srow" data-keys="atajo traer al frente primer plano ventana alt shift s">
-                    <span class="st"><b>Traer la ventana al frente</b></span
+                    <span class="st"><b data-i18n="ajustes.datos.atajos.frente">Traer la ventana al frente</b></span
                     ><span class="kbdrow"><kbd class="kbd">Alt</kbd><kbd class="kbd">Shift</kbd><kbd class="kbd">S</kbd></span>
                   </div>
                   <div class="swrow srow" data-keys="atajo pulso glow resplandor">
-                    <span class="st"><b>Pulso de resplandor</b></span
+                    <span class="st"><b data-i18n="ajustes.datos.atajos.pulso">Pulso de resplandor</b></span
                     ><span class="kbdrow"><kbd class="kbd">Ctrl</kbd><kbd class="kbd">Shift</kbd><kbd class="kbd">G</kbd></span>
                   </div>
                   <div class="swrow srow" data-keys="atajo modo act plan think equipo agente">
-                    <span class="st"><b>Cambiar de modo (Act / Plan / Think / Equipo)</b></span
+                    <span class="st"><b data-i18n="ajustes.datos.atajos.modo">Cambiar de modo (Act / Plan / Think / Equipo)</b></span
                     ><span class="kbdrow"><kbd class="kbd">Alt</kbd><kbd class="kbd">M</kbd></span>
                   </div>
                 </div>
 
                 <div class="setcard">
                   <div class="sc-head">
-                    <b>Hábitos aprendidos</b><span class="sc-hint">Lo que Sagitari ha deducido de cómo trabajas</span>
+                    <b data-i18n="ajustes.datos.habitos.titulo">Hábitos aprendidos</b
+                    ><span class="sc-hint" data-i18n="ajustes.datos.habitos.nota"
+                      >Lo que Sagitari ha deducido de cómo trabajas</span
+                    >
                   </div>
                   <div class="srow" data-keys="habitos aprendizaje preferencias reiniciar borrar">
-                    <div class="subnote" style="margin-top: 0">
+                    <div class="subnote" style="margin-top: 0" data-i18n="ajustes.datos.habitos.ley">
                       Apps y webs que usas, comandos frecuentes, carpetas y tu modo preferido. Nada de esto sale de tu equipo.
                     </div>
                     <div id="habitsPreview" class="habitprev"></div>
                     <div class="btnrow" style="margin: 12px 0 0">
                       <button class="btn ghost danger" id="habitsResetBtn">
-                        <span class="bi"><i data-i="trash"></i></span> Reiniciar hábitos aprendidos
+                        <span class="bi"><i data-i="trash"></i></span>
+                        <span data-i18n="ajustes.datos.habitos.reiniciar">Reiniciar hábitos aprendidos</span>
                       </button>
                     </div>
                   </div>
                 </div>
 
                 <div class="setcard">
-                  <div class="sc-head"><b>Carpeta de datos</b><span class="sc-hint">Configuración, memoria, skills y tareas</span></div>
+                  <div class="sc-head">
+                    <b data-i18n="ajustes.datos.carpeta.titulo">Carpeta de datos</b
+                    ><span class="sc-hint" data-i18n="ajustes.datos.carpeta.nota"
+                      >Configuración, memoria, skills y tareas</span
+                    >
+                  </div>
                   <div class="swrow srow" data-keys="carpeta datos copia seguridad ruta backup abrir">
-                    <span class="st"><b>Ubicación</b><small id="dataDirPath">—</small></span>
+                    <span class="st"><b data-i18n="ajustes.datos.carpeta.ubicacion">Ubicación</b><small id="dataDirPath">—</small></span>
                     <button class="btn ghost" id="openDataDirBtn">
-                      <span class="bi"><i data-i="external"></i></span> Abrir
+                      <span class="bi"><i data-i="external"></i></span>
+                      <span data-i18n="ajustes.datos.carpeta.abrir">Abrir</span>
                     </button>
                   </div>
-                  <div class="subnote">Copia esta carpeta para respaldar tu configuración, tu memoria y tus skills.</div>
+                  <div class="subnote" data-i18n="ajustes.datos.carpeta.copia">
+                    Copia esta carpeta para respaldar tu configuración, tu memoria y tus skills.
+                  </div>
                 </div>
               </div>
 
               <!-- ===== ACERCA DE ===== -->
               <div class="setpanel" data-panel="about" id="setpanel-about" role="tabpanel" aria-labelledby="tab-about">
                 <div class="setcard">
-                  <div class="sc-head"><b>Actualizaciones</b><span class="sc-hint">Desde GitHub, y solo cuando tú lo pidas</span></div>
+                  <div class="sc-head">
+                    <b data-i18n="ajustes.acerca.actualizaciones.titulo">Actualizaciones</b
+                    ><span class="sc-hint" data-i18n="ajustes.acerca.actualizaciones.nota"
+                      >Desde GitHub, y solo cuando tú lo pidas</span
+                    >
+                  </div>
                   <div class="swrow srow" data-keys="actualizacion actualizar version update ultima comprobar estado">
-                    <span class="st"><b>Versión instalada</b><small id="updState">Aún no se ha comprobado.</small></span>
+                    <span class="st"
+                      ><b data-i18n="ajustes.acerca.version">Versión instalada</b><small id="updState">Aún no se ha comprobado.</small></span
+                    >
                     <span class="kbd" id="updCurrent">—</span>
                   </div>
                   <div
@@ -1679,6 +1869,7 @@
                       aria-valuemin="0"
                       aria-valuemax="100"
                       aria-valuenow="0"
+                      data-i18n-aria="ajustes.acerca.progreso.aria"
                       aria-label="Progreso de la descarga"
                     >
                       <span id="updBarFill"></span>
@@ -1686,11 +1877,23 @@
                     <div class="subnote" id="updBarNote">Descargando…</div>
                   </div>
                   <div class="btnrow">
-                    <button class="btn" id="updCheckBtn" aria-label="Buscar actualizaciones publicadas en GitHub">
+                    <button
+                      class="btn"
+                      id="updCheckBtn"
+                      data-i18n-aria="ajustes.acerca.buscar.aria"
+                      aria-label="Buscar actualizaciones publicadas en GitHub"
+                    >
                       <span class="bi"><i data-i="refresh"></i></span><span id="updCheckLabel">Buscar actualizaciones</span>
                     </button>
-                    <button class="btn primary" id="updDownloadBtn" hidden aria-label="Descargar la actualización disponible">
-                      <span class="bi"><i data-i="download"></i></span> Descargar
+                    <button
+                      class="btn primary"
+                      id="updDownloadBtn"
+                      hidden
+                      data-i18n-aria="ajustes.acerca.descargar.aria"
+                      aria-label="Descargar la actualización disponible"
+                    >
+                      <span class="bi"><i data-i="download"></i></span>
+                      <span data-i18n="ajustes.acerca.descargar">Descargar</span>
                     </button>
                     <button
                       class="btn primary"
@@ -1700,8 +1903,14 @@
                     >
                       <span class="bi"><i data-i="download"></i></span><span id="updInstallLabel">Instalar y cerrar</span>
                     </button>
-                    <button class="btn ghost" id="updPageBtn" aria-label="Ver las novedades de la versión en GitHub">
-                      <span class="bi"><i data-i="external"></i></span> Ver novedades
+                    <button
+                      class="btn ghost"
+                      id="updPageBtn"
+                      data-i18n-aria="ajustes.acerca.novedades.aria"
+                      aria-label="Ver las novedades de la versión en GitHub"
+                    >
+                      <span class="bi"><i data-i="external"></i></span>
+                      <span data-i18n="ajustes.acerca.novedades">Ver novedades</span>
                     </button>
                   </div>
                   <div class="subnote" id="updNote" hidden></div>
@@ -1711,21 +1920,38 @@
                 <div class="setcard aboutcard">
                   <div class="about-hero" data-keys="aplicacion about acerca sagitari version actual repositorio releases">
                     <img class="about-mark" src="assets/sagitari-mark.png" alt="" />
-                    <div class="ah-main"><b>SAGITARI</b><small>Asistente agéntico de escritorio para tu equipo.</small></div>
+                    <div class="ah-main">
+                      <b>SAGITARI</b
+                      ><small data-i18n="ajustes.acerca.lema">Asistente agéntico de escritorio para tu equipo.</small>
+                    </div>
                     <span class="kbd" id="aboutVersion">—</span>
                   </div>
                   <div class="btnrow" style="margin: 16px 0 0">
-                    <button class="btn ghost" id="aboutRepoBtn" aria-label="Abrir el repositorio de Sagitari en GitHub">
-                      <span class="bi"><i data-i="code"></i></span> Repositorio
+                    <button
+                      class="btn ghost"
+                      id="aboutRepoBtn"
+                      data-i18n-aria="ajustes.acerca.repo.aria"
+                      aria-label="Abrir el repositorio de Sagitari en GitHub"
+                    >
+                      <span class="bi"><i data-i="code"></i></span>
+                      <span data-i18n="ajustes.acerca.repo">Repositorio</span>
                     </button>
-                    <button class="btn ghost" id="aboutRelBtn" aria-label="Abrir la página de versiones en GitHub">
-                      <span class="bi"><i data-i="external"></i></span> Releases
+                    <button
+                      class="btn ghost"
+                      id="aboutRelBtn"
+                      data-i18n-aria="ajustes.acerca.releases.aria"
+                      aria-label="Abrir la página de versiones en GitHub"
+                    >
+                      <span class="bi"><i data-i="external"></i></span>
+                      <span data-i18n="ajustes.acerca.releases">Releases</span>
                     </button>
                   </div>
                 </div>
               </div>
 
-              <div class="setempty" id="setNoResults" hidden>Ningún ajuste coincide con esa búsqueda.</div>
+              <div class="setempty" id="setNoResults" hidden data-i18n="ajustes.busqueda.sinresultados">
+                Ningún ajuste coincide con esa búsqueda.
+              </div>
             </div>
           </section>
         </main>
@@ -1741,14 +1967,14 @@
               <span class="live" id="railLive"
                 ><span class="dot ok"></span><span id="railState">En reposo</span></span
               >
-              <span class="board-clock" id="boardClock" title="Hora local">--:--:--</span>
+              <span class="board-clock" id="boardClock" data-i18n-title="chat.reloj.title" title="Hora local">--:--:--</span>
             </div>
             <div class="rc-count">
               <span id="agentCount">0</span
               ><span class="mini-dots"><span class="dot ok"></span><span class="dot pur"></span><span class="dot blu"></span></span>
             </div>
             <div id="railAgents" class="rail-agents"></div>
-            <div class="rail-sub">Actividad</div>
+            <div class="rail-sub" data-i18n="chat.actividad">Actividad</div>
             <div id="activityFeed" class="feed"></div>
           </div>
         </aside>
@@ -1772,8 +1998,8 @@
           <!-- El permiso NO se concede por defecto: el botón con peso es el
            que deniega y el foco no entra en la barra. Ejecutar en tu PC
            exige un clic deliberado, no un Enter al vuelo. -->
-          <button class="btn ghost" id="confirmOk">Permitir</button>
-          <button class="btn primary" id="confirmNo">Denegar</button>
+          <button class="btn ghost" id="confirmOk" data-i18n="modal.permiso.permitir">Permitir</button>
+          <button class="btn primary" id="confirmNo" data-i18n="modal.permiso.denegar">Denegar</button>
         </div>
       </div>
     </div>

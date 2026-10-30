@@ -347,4 +347,140 @@ window.I18N_EN = {
   'ajustes.bucles.restablecer': 'Reset recommended limits',
   'ajustes.bucles.aviso':
     'If the agent repeats the same action without moving forward, Sagitari stops the run by itself to protect the system.',
+
+  /* settings: agent */
+  'ajustes.agente.memoria.titulo': 'Memory',
+  'ajustes.agente.memoria.nota': 'How much of what it knows about you goes into every reply',
+  'ajustes.agente.contexto.titulo': 'Memory that goes into every reply',
+  'ajustes.agente.contexto.nota':
+    'How many of your memories are added to the context. «Only the clearest» leaves out anything that does not fully match what you ask for; «Almost everything» also brings in what is merely similar. More memory gives better answers and spends more tokens per turn.',
+  'ajustes.agente.contexto.casiTodo': 'Almost everything',
+  'ajustes.agente.contexto.bastante': 'A fair amount',
+  'ajustes.agente.contexto.normal': 'Normal',
+  'ajustes.agente.contexto.soloClaro': 'Only the clearest',
+  'ajustes.agente.tareas.titulo': 'Background tasks',
+  'ajustes.agente.tareas.nota': 'Sagitari can work while you keep talking',
+  'ajustes.agente.tareas.vez': 'Tasks at once',
+  'ajustes.agente.tareas.vez.aria': 'Tasks at once (1-4)',
+  'ajustes.agente.tareas.vez.nota':
+    'How many queued tasks can move forward at the same time while you keep talking (1 to 4). Each one’s progress shows in the Tasks view.',
+  'ajustes.agente.tareas.recuperar': 'Resume interrupted tasks on startup',
+  'ajustes.agente.tareas.recuperar.nota': 'If you close the app with half-done tasks, they resume on their own.',
+  'ajustes.agente.delegacion.titulo': 'Delegation and verification',
+  'ajustes.agente.delegacion.nota': 'How it splits the work and how it checks it went well',
+  'ajustes.agente.modelo': 'Model per agent',
+  'ajustes.agente.modelo.nota':
+    'Let subagents that only read, move files or look at screenshots use your provider’s lightest model; the verifier and the chat keep the one you picked.',
+  'ajustes.agente.verificar': 'Verify before closing',
+  'ajustes.agente.verificar.nota':
+    'When a task changes files, SAGITARI checks the result (or delegates it to its verification agent) before calling it done. Turn it off if you prefer faster replies.',
+  'ajustes.agente.revisar': 'Review the change before closing',
+  'ajustes.agente.revisar.nota':
+    'When a task modifies files, a review agent reads the diff before calling it done and looks for what is wrong: broken contracts, edge cases, leftovers of the old name. If it finds something blocking, SAGITARI fixes it in the same turn. Turn it off if you prefer faster replies.',
+  'ajustes.agente.comprobar': 'Check the project while writing',
+  'ajustes.agente.comprobar.nota':
+    'Every time SAGITARI writes a file, it runs the project’s checkers (ESLint, Ruff, Flake8, Mypy) on the lines it changed and the failure comes back instantly, in the same step. What was already wrong in the file does not count against it. Turn it off if you prefer writing to run nothing.',
+  'ajustes.agente.pruebas': 'Run the tests when closing',
+  'ajustes.agente.pruebas.nota':
+    'Before handing the turn back, SAGITARI runs the project’s test command —or its build if there are no tests— and really looks at the output. If it fails, the failure goes back and gets fixed: the turn does not close green with something broken.',
+  'ajustes.agente.arboles': 'Isolate subagents that write',
+  'ajustes.agente.arboles.nota':
+    'Specialists that write code work in their own git tree and their changes come back to the project as a checked patch before being applied: two agents at once stop stepping on each other. If something does not fit, nothing is applied and it tells you. It needs the project to be a git repository; without git it works as always. Turn it off so they write straight into your files.',
+  'ajustes.agente.cache': 'Use the prompt cache',
+  'ajustes.agente.cache.nota':
+    'Each step’s prompt (tools, project map, rules and conversation) is stored at the provider and re-read at a fraction of the price, with the same answer. It turns itself off if you use a compatible provider that does not understand the field and rejects your requests.',
+  'ajustes.agente.avanzado.titulo': 'Advanced · parallelism and retries',
+  'ajustes.agente.avanzado.nota': 'How much work runs at once and how often a failure is retried',
+  'ajustes.agente.delegaciones': 'Subagents per turn (0 = no cap)',
+  'ajustes.agente.delegaciones.nota':
+    'Each subagent has its own step budget, so without this cap a long turn ends up as a chain of delegations. When it is reached, SAGITARI does not stop: it finishes the task with what it already has.',
+  'ajustes.agente.paralelo': 'Tools in parallel (1-4)',
+  'ajustes.agente.paralelo.nota':
+    'Several orders from the same message run at once when they do not clash: the browser is a single one, disk writes queue up and the terminal takes two commands. With 1, everything runs in order.',
+  'ajustes.agente.intentos': 'Attempts to fix a failure (0-5)',
+  'ajustes.agente.equipo.presupuesto': 'Team budget in USD (0 = no budget of its own)',
+  'ajustes.agente.equipo.nota.uno':
+    'Maximum spend for a job in TEAM mode (the leader and all its peers together). When it is reached, the team',
+  'ajustes.agente.equipo.para': 'stops them all',
+  'ajustes.agente.equipo.nota.dos':
+    ': the peers that are working and those waiting for a permission stop, the board stays exactly as it was at that moment and it tells you in the chat. With 0 there is no team budget: the spend limits above still count.',
+  'ajustes.agente.reglas.titulo': 'Project rules and hooks',
+  'ajustes.agente.reglas.nota': 'How it behaves inside your repositories',
+  'ajustes.agente.reglas.ley.uno': 'If the project has a',
+  'ajustes.agente.reglas.ley.dos': 'or an',
+  'ajustes.agente.reglas.ley.tres': 'at its root (or in',
+  'ajustes.agente.reglas.ley.cuatro':
+    '), its rules are always read, before touching anything: conventions, what not to touch, what each thing is called. They apply to subagents too. In the data folder you can keep an',
+  'ajustes.agente.reglas.ley.cinco': 'with your own, for all projects at once.',
+  'ajustes.agente.reglas.comprobar': 'Check',
+  'ajustes.agente.reglas.crear': 'Create SAGITARI.md',
+  'ajustes.agente.hook.editar': 'Hook after writing a file (optional)',
+  'ajustes.agente.hook.editar.nota.uno':
+    'It runs after writing and its output is shown to the model. Placeholders:',
+  'ajustes.agente.hook.editar.nota.dos': '(the file),',
+  'ajustes.agente.hook.editar.nota.tres': '(all of that step),',
+  'ajustes.agente.hook.editar.nota.cuatro':
+    '(the workspace); they are quoted on their own.',
+  'ajustes.agente.hook.cerrar': 'Hook before closing the turn (optional)',
+  'ajustes.agente.hook.cerrar.nota':
+    'It runs before handing the turn back. If it fails, the turn does not close: SAGITARI reads the output and fixes it, just like with the project tests.',
+  'ajustes.agente.conversacion.titulo': 'Conversation',
+  'ajustes.agente.conversacion.nota': 'What you see of what Sagitari thinks inside',
+  'ajustes.agente.razonamiento': 'Show the model’s reasoning',
+  'ajustes.agente.razonamiento.nota':
+    'Reasoning models (Claude, the o series and GPT-5, DeepSeek R1…) show their process before answering. It appears folded above the reply and folds itself once it starts answering. It may cost extra tokens with some providers.',
+  'ajustes.agente.diagnostico.titulo': 'Diagnostics',
+  'ajustes.agente.diagnostico.nota': 'To debug the agent’s behaviour',
+  'ajustes.agente.dev': 'Developer mode',
+  'ajustes.agente.dev.nota': 'Shows live metrics (tokens, latency, cost) under the chat.',
+
+  /* settings: data */
+  'ajustes.datos.espacio.titulo': 'Workspace',
+  'ajustes.datos.espacio.nota': 'Where the agent works with your files',
+  'ajustes.datos.espacio.cambiar': 'Change folder…',
+  'ajustes.datos.espacio.ahora': 'Right now:',
+  'ajustes.datos.espacio.ley.uno':
+    'Folder where Sagitari creates and modifies files, and where commands run: relative paths («report.md») land here. It is the same space the',
+  'ajustes.datos.espacio.vista': 'Workspace',
+  'ajustes.datos.espacio.ley.dos': ' view opens, where you can also type the path by hand.',
+  'ajustes.datos.atajos.titulo': 'Keyboard shortcuts',
+  'ajustes.datos.atajos.nota': 'Available across the whole app',
+  'ajustes.datos.atajos.ventana': 'Show or hide the window',
+  'ajustes.datos.atajos.frente': 'Bring the window to the front',
+  'ajustes.datos.atajos.pulso': 'Glow pulse',
+  'ajustes.datos.atajos.modo': 'Switch mode (Act / Plan / Think / Team)',
+  'ajustes.datos.habitos.titulo': 'Learned habits',
+  'ajustes.datos.habitos.nota': 'What Sagitari has worked out from how you work',
+  'ajustes.datos.habitos.ley':
+    'Apps and sites you use, frequent commands, folders and your favourite mode. None of this leaves your machine.',
+  'ajustes.datos.habitos.reiniciar': 'Reset learned habits',
+  'ajustes.datos.carpeta.titulo': 'Data folder',
+  'ajustes.datos.carpeta.nota': 'Settings, memory, skills and tasks',
+  'ajustes.datos.carpeta.ubicacion': 'Location',
+  'ajustes.datos.carpeta.abrir': 'Open',
+  'ajustes.datos.carpeta.copia':
+    'Copy this folder to back up your settings, your memory and your skills.',
+
+  /* settings: about */
+  'ajustes.acerca.actualizaciones.titulo': 'Updates',
+  'ajustes.acerca.actualizaciones.nota': 'From GitHub, and only when you ask for it',
+  'ajustes.acerca.version': 'Installed version',
+  'ajustes.acerca.progreso.aria': 'Download progress',
+  'ajustes.acerca.buscar.aria': 'Look for updates published on GitHub',
+  'ajustes.acerca.descargar': 'Download',
+  'ajustes.acerca.descargar.aria': 'Download the available update',
+  'ajustes.acerca.novedades': 'See what’s new',
+  'ajustes.acerca.novedades.aria': 'See what’s new in this version on GitHub',
+  'ajustes.acerca.lema': 'Agentic desktop assistant for your machine.',
+  'ajustes.acerca.repo': 'Repository',
+  'ajustes.acerca.repo.aria': 'Open the Sagitari repository on GitHub',
+  'ajustes.acerca.releases': 'Releases',
+  'ajustes.acerca.releases.aria': 'Open the releases page on GitHub',
+  'ajustes.busqueda.sinresultados': 'No setting matches that search.',
+
+  /* conversation rail and consent gate */
+  'chat.actividad': 'Activity',
+  'chat.reloj.title': 'Local time',
+  'modal.permiso.permitir': 'Allow',
+  'modal.permiso.denegar': 'Deny',
 };

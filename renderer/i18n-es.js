@@ -347,4 +347,140 @@ window.I18N_ES = {
   'ajustes.bucles.restablecer': 'Restablecer límites recomendados',
   'ajustes.bucles.aviso':
     'Si el agente repite la misma acción sin avanzar, Sagitari detiene la ejecución sola para proteger el sistema.',
+
+  /* ajustes: agente */
+  'ajustes.agente.memoria.titulo': 'Memoria',
+  'ajustes.agente.memoria.nota': 'Cuánto de lo que sabe de ti entra en cada respuesta',
+  'ajustes.agente.contexto.titulo': 'Memoria que entra en cada respuesta',
+  'ajustes.agente.contexto.nota':
+    'Cuántos recuerdos tuyos se añaden al contexto. «Solo lo más claro» deja fuera todo lo que no encaje de lleno con lo que pides; «Casi todo» trae también lo parecido. Más memoria da mejores respuestas y gasta más tokens por turno.',
+  'ajustes.agente.contexto.casiTodo': 'Casi todo',
+  'ajustes.agente.contexto.bastante': 'Bastante',
+  'ajustes.agente.contexto.normal': 'Normal',
+  'ajustes.agente.contexto.soloClaro': 'Solo lo más claro',
+  'ajustes.agente.tareas.titulo': 'Tareas en segundo plano',
+  'ajustes.agente.tareas.nota': 'Sagitari puede trabajar mientras sigues hablando',
+  'ajustes.agente.tareas.vez': 'Tareas a la vez',
+  'ajustes.agente.tareas.vez.aria': 'Tareas a la vez (1-4)',
+  'ajustes.agente.tareas.vez.nota':
+    'Cuántas tareas de la cola pueden avanzar al mismo tiempo mientras sigues hablando (de 1 a 4). Cómo va cada una se ve en la vista Tareas.',
+  'ajustes.agente.tareas.recuperar': 'Recuperar tareas interrumpidas al arrancar',
+  'ajustes.agente.tareas.recuperar.nota': 'Si cierras la app con tareas a medias, se reanudan solas.',
+  'ajustes.agente.delegacion.titulo': 'Delegación y verificación',
+  'ajustes.agente.delegacion.nota': 'Cómo reparte el trabajo y cómo comprueba que quedó bien',
+  'ajustes.agente.modelo': 'Modelo por agente',
+  'ajustes.agente.modelo.nota':
+    'Deja que los subagentes que sólo leen, mueven archivos o miran capturas usen el modelo más ligero de tu proveedor; el que verifica y el chat siguen con el que elegiste.',
+  'ajustes.agente.verificar': 'Verificación antes de cerrar',
+  'ajustes.agente.verificar.nota':
+    'Cuando una tarea cambia archivos, SAGITARI comprueba el resultado (o lo delega en su agente de verificación) antes de dártela por hecha. Apágalo si prefieres respuestas más rápidas.',
+  'ajustes.agente.revisar': 'Revisar el cambio antes de cerrar',
+  'ajustes.agente.revisar.nota':
+    'Cuando una tarea modifica archivos, un agente de revisión lee el diff antes de dártelo por hecho y busca lo que está mal: contratos rotos, casos límite, restos del nombre viejo. Si encuentra algo bloqueante, SAGITARI lo arregla en el mismo turno. Apágalo si prefieres respuestas más rápidas.',
+  'ajustes.agente.comprobar': 'Comprobar el proyecto al escribir',
+  'ajustes.agente.comprobar.nota':
+    'Cada vez que SAGITARI escribe un archivo, pasa los comprobadores del proyecto (ESLint, Ruff, Flake8, Mypy) sobre las líneas que ha cambiado y el fallo vuelve al instante, en el mismo paso. Lo que ya estaba mal en el archivo no cuenta como suyo. Apágalo si prefieres que escribir no ejecute nada.',
+  'ajustes.agente.pruebas': 'Ejecutar las pruebas al cerrar',
+  'ajustes.agente.pruebas.nota':
+    'Antes de darte el turno por terminado, SAGITARI ejecuta el comando de pruebas del proyecto —o su compilación si no hay pruebas— y mira la salida de verdad. Si falla, se le devuelve el fallo y lo arregla: el turno no cierra en verde con algo roto.',
+  'ajustes.agente.arboles': 'Aislar a los subagentes que escriben',
+  'ajustes.agente.arboles.nota':
+    'Los especialistas que escriben código trabajan en su propio árbol de git y sus cambios vuelven al proyecto como un parche comprobado antes de aplicarse: dos agentes a la vez dejan de pisarse. Si algo no encaja, no se aplica nada y te lo dice. Necesita que el proyecto sea un repositorio git; sin git trabaja como siempre. Apágalo para que escriban directamente sobre tus archivos.',
+  'ajustes.agente.cache': 'Aprovechar el caché de prompt',
+  'ajustes.agente.cache.nota':
+    'El prompt de cada paso (herramientas, mapa del proyecto, reglas y conversación) se guarda en el proveedor y se relee a una fracción del precio, con la misma respuesta. Se apaga solo si usas un proveedor compatible que no entienda el campo y te rechace las peticiones.',
+  'ajustes.agente.avanzado.titulo': 'Avanzado · paralelismo y reintentos',
+  'ajustes.agente.avanzado.nota': 'Cuánto trabajo va a la vez y cuántas veces se reintenta un fallo',
+  'ajustes.agente.delegaciones': 'Subagentes por turno (0 = sin tope)',
+  'ajustes.agente.delegaciones.nota':
+    'Cada subagente tiene su propio presupuesto de pasos, así que sin este tope un turno largo acaba en una cadena de delegaciones. Al alcanzarlo, SAGITARI no se detiene: termina la tarea con lo que ya tiene.',
+  'ajustes.agente.paralelo': 'Herramientas en paralelo (1-4)',
+  'ajustes.agente.paralelo.nota':
+    'Varias órdenes del mismo mensaje se ejecutan a la vez cuando no chocan: el navegador es uno solo, la escritura en disco va en cola y la terminal admite dos comandos. Con 1, todo va en orden.',
+  'ajustes.agente.intentos': 'Intentos de arreglar un fallo (0-5)',
+  'ajustes.agente.equipo.presupuesto': 'Presupuesto del equipo en USD (0 = sin tope propio)',
+  'ajustes.agente.equipo.nota.uno':
+    'Gasto máximo de un encargo en modo EQUIPO (el líder y todos sus compañeros juntos). Al alcanzarlo, el equipo',
+  'ajustes.agente.equipo.para': 'para a todos',
+  'ajustes.agente.equipo.nota.dos':
+    ': se detienen los compañeros que están trabajando y los que esperan un permiso, el tablero se queda tal y como estaba en ese momento y te lo dice en el chat. Con 0 no hay tope propio del equipo: siguen contando los límites de gasto de arriba.',
+  'ajustes.agente.reglas.titulo': 'Reglas del proyecto y hooks',
+  'ajustes.agente.reglas.nota': 'Cómo se comporta dentro de tus repositorios',
+  'ajustes.agente.reglas.ley.uno': 'Si el proyecto tiene un',
+  'ajustes.agente.reglas.ley.dos': 'o un',
+  'ajustes.agente.reglas.ley.tres': 'en su raíz (o en',
+  'ajustes.agente.reglas.ley.cuatro':
+    '), sus reglas se leen siempre, antes de tocar nada: convenciones, qué no tocar, cómo se llama cada cosa. Valen también para los subagentes. En la carpeta de datos puedes tener un',
+  'ajustes.agente.reglas.ley.cinco': 'con las tuyas, para todos los proyectos a la vez.',
+  'ajustes.agente.reglas.comprobar': 'Comprobar',
+  'ajustes.agente.reglas.crear': 'Crear SAGITARI.md',
+  'ajustes.agente.hook.editar': 'Hook tras escribir un archivo (opcional)',
+  'ajustes.agente.hook.editar.nota.uno':
+    'Se ejecuta después de escribir y su salida se le enseña al modelo. Marcadores:',
+  'ajustes.agente.hook.editar.nota.dos': '(el archivo),',
+  'ajustes.agente.hook.editar.nota.tres': '(todos los de ese paso),',
+  'ajustes.agente.hook.editar.nota.cuatro':
+    '(el espacio de trabajo); se ponen entre comillas solos.',
+  'ajustes.agente.hook.cerrar': 'Hook antes de cerrar el turno (opcional)',
+  'ajustes.agente.hook.cerrar.nota':
+    'Se ejecuta antes de dar el turno por terminado. Si falla, el turno no cierra: SAGITARI lee la salida y lo arregla, igual que con las pruebas del proyecto.',
+  'ajustes.agente.conversacion.titulo': 'Conversación',
+  'ajustes.agente.conversacion.nota': 'Qué se ve de lo que Sagitari piensa por dentro',
+  'ajustes.agente.razonamiento': 'Mostrar el razonamiento del modelo',
+  'ajustes.agente.razonamiento.nota':
+    'Los modelos que razonan (Claude, la serie o y GPT-5, DeepSeek R1…) enseñan su proceso antes de responder. Aparece plegado encima de la respuesta y se pliega solo al empezar a contestar. Puede costar tokens extra en algunos proveedores.',
+  'ajustes.agente.diagnostico.titulo': 'Diagnóstico',
+  'ajustes.agente.diagnostico.nota': 'Para depurar el comportamiento del agente',
+  'ajustes.agente.dev': 'Modo desarrollador',
+  'ajustes.agente.dev.nota': 'Muestra métricas en vivo (tokens, latencia, coste) bajo el chat.',
+
+  /* ajustes: datos */
+  'ajustes.datos.espacio.titulo': 'Espacio de trabajo',
+  'ajustes.datos.espacio.nota': 'Dónde trabaja el agente con tus archivos',
+  'ajustes.datos.espacio.cambiar': 'Cambiar carpeta…',
+  'ajustes.datos.espacio.ahora': 'Ahora mismo:',
+  'ajustes.datos.espacio.ley.uno':
+    'Carpeta donde Sagitari crea y modifica archivos, y donde se ejecutan los comandos: las rutas relativas («informe.md») aterrizan aquí. Es el mismo espacio que abre la vista',
+  'ajustes.datos.espacio.vista': 'Espacio de trabajo',
+  'ajustes.datos.espacio.ley.dos': ', donde también se puede escribir la ruta a mano.',
+  'ajustes.datos.atajos.titulo': 'Atajos de teclado',
+  'ajustes.datos.atajos.nota': 'Disponibles en toda la app',
+  'ajustes.datos.atajos.ventana': 'Mostrar u ocultar la ventana',
+  'ajustes.datos.atajos.frente': 'Traer la ventana al frente',
+  'ajustes.datos.atajos.pulso': 'Pulso de resplandor',
+  'ajustes.datos.atajos.modo': 'Cambiar de modo (Act / Plan / Think / Equipo)',
+  'ajustes.datos.habitos.titulo': 'Hábitos aprendidos',
+  'ajustes.datos.habitos.nota': 'Lo que Sagitari ha deducido de cómo trabajas',
+  'ajustes.datos.habitos.ley':
+    'Apps y webs que usas, comandos frecuentes, carpetas y tu modo preferido. Nada de esto sale de tu equipo.',
+  'ajustes.datos.habitos.reiniciar': 'Reiniciar hábitos aprendidos',
+  'ajustes.datos.carpeta.titulo': 'Carpeta de datos',
+  'ajustes.datos.carpeta.nota': 'Configuración, memoria, skills y tareas',
+  'ajustes.datos.carpeta.ubicacion': 'Ubicación',
+  'ajustes.datos.carpeta.abrir': 'Abrir',
+  'ajustes.datos.carpeta.copia':
+    'Copia esta carpeta para respaldar tu configuración, tu memoria y tus skills.',
+
+  /* ajustes: acerca de */
+  'ajustes.acerca.actualizaciones.titulo': 'Actualizaciones',
+  'ajustes.acerca.actualizaciones.nota': 'Desde GitHub, y solo cuando tú lo pidas',
+  'ajustes.acerca.version': 'Versión instalada',
+  'ajustes.acerca.progreso.aria': 'Progreso de la descarga',
+  'ajustes.acerca.buscar.aria': 'Buscar actualizaciones publicadas en GitHub',
+  'ajustes.acerca.descargar': 'Descargar',
+  'ajustes.acerca.descargar.aria': 'Descargar la actualización disponible',
+  'ajustes.acerca.novedades': 'Ver novedades',
+  'ajustes.acerca.novedades.aria': 'Ver las novedades de la versión en GitHub',
+  'ajustes.acerca.lema': 'Asistente agéntico de escritorio para tu equipo.',
+  'ajustes.acerca.repo': 'Repositorio',
+  'ajustes.acerca.repo.aria': 'Abrir el repositorio de Sagitari en GitHub',
+  'ajustes.acerca.releases': 'Releases',
+  'ajustes.acerca.releases.aria': 'Abrir la página de versiones en GitHub',
+  'ajustes.busqueda.sinresultados': 'Ningún ajuste coincide con esa búsqueda.',
+
+  /* rail de la conversación y puerta de consentimiento */
+  'chat.actividad': 'Actividad',
+  'chat.reloj.title': 'Hora local',
+  'modal.permiso.permitir': 'Permitir',
+  'modal.permiso.denegar': 'Denegar',
 };
