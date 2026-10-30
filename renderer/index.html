@@ -476,15 +476,25 @@
 
           <!-- TOOLS -->
           <section class="view" id="view-tools">
-            <h1 class="sr-only">Herramientas</h1>
+            <h1 class="sr-only" data-i18n="herram.titulo">Herramientas</h1>
             <div class="viewhead">
-              <h2>Herramientas</h2>
+              <h2 data-i18n="herram.titulo">Herramientas</h2>
               <div class="vh-actions">
-                <button class="btn ghost" id="toolsResetPerms" title="Vuelve a los niveles que recomienda cada herramienta">
-                  <span class="bi"><i data-i="history"></i></span> Volver a lo recomendado
+                <button
+                  class="btn ghost"
+                  id="toolsResetPerms"
+                  data-i18n-title="herram.recomendado.title"
+                  title="Vuelve a los niveles que recomienda cada herramienta"
+                >
+                  <span class="bi"><i data-i="history"></i></span> <span data-i18n="herram.recomendado">Volver a lo recomendado</span>
                 </button>
-                <button class="btn danger" id="toolsAllowAll" title="Permite todas las herramientas sin preguntar">
-                  <span class="bi"><i data-i="key"></i></span> Permitir todo
+                <button
+                  class="btn danger"
+                  id="toolsAllowAll"
+                  data-i18n-title="herram.permitirTodo.title"
+                  title="Permite todas las herramientas sin preguntar"
+                >
+                  <span class="bi"><i data-i="key"></i></span> <span data-i18n="herram.permitirTodo">Permitir todo</span>
                 </button>
               </div>
             </div>
@@ -493,18 +503,20 @@
 
           <!-- MEMORY -->
           <section class="view" id="view-memory">
-            <h1 class="sr-only">Memoria</h1>
+            <h1 class="sr-only" data-i18n="memoria.titulo">Memoria</h1>
             <div class="viewhead">
-              <h2>Memoria</h2>
+              <h2 data-i18n="memoria.titulo">Memoria</h2>
               <div class="vh-actions">
                 <input
                   type="text"
                   id="memInput"
+                  data-i18n-aria="memoria.anadir.aria"
                   aria-label="Añade algo que Sagitari debe recordar"
+                  data-i18n-ph="memoria.anadir.ph"
                   placeholder="Añade algo que Sagitari debe recordar…"
                 />
                 <button class="btn" id="memAdd">
-                  <span class="bi"><i data-i="plus"></i></span> Añadir
+                  <span class="bi"><i data-i="plus"></i></span> <span data-i18n="memoria.anadir">Añadir</span>
                 </button>
               </div>
             </div>
@@ -512,18 +524,28 @@
             <div class="memwrap">
               <!-- 1. Lo que sé de ti -->
               <div class="memsec">
-                <h3 class="memsec-t">Lo que sé de ti <span class="memsec-note" id="memFichaCuenta"></span></h3>
-                <p class="memsec-lead">
+                <h3 class="memsec-t">
+                  <span data-i18n="memoria.ficha.titulo">Lo que sé de ti</span> <span class="memsec-note" id="memFichaCuenta"></span>
+                </h3>
+                <p class="memsec-lead" data-i18n="memoria.ficha.lead">
                   Hechos duraderos que uso cuando encajan con lo que me pides. Corrígelos, cámbiales la importancia o bórralos cuando
                   quieras: son tuyos.
                 </p>
-                <div id="memFiltro" class="memfiltro" role="group" aria-label="Filtrar por etiqueta"></div>
-                <label class="sr-only" for="memSearch">Buscar en lo que sé de ti</label>
+                <div
+                  id="memFiltro"
+                  class="memfiltro"
+                  role="group"
+                  data-i18n-aria="memoria.filtro.aria"
+                  aria-label="Filtrar por etiqueta"
+                ></div>
+                <label class="sr-only" for="memSearch" data-i18n="memoria.ficha.buscar.aria">Buscar en lo que sé de ti</label>
                 <input
                   type="search"
                   id="memSearch"
                   class="memsearch"
+                  data-i18n-ph="memoria.ficha.buscar.ph"
                   placeholder="Buscar en lo que sé de ti…"
+                  data-i18n-aria="memoria.ficha.buscar.aria"
                   aria-label="Buscar en lo que sé de ti"
                 />
                 <div id="memUndoBox" class="memundo" role="status" hidden></div>
@@ -532,8 +554,11 @@
 
               <!-- 2. Recién aprendido -->
               <div class="memsec">
-                <h3 class="memsec-t">Recién aprendido <span class="memsec-note" id="memBandejaCuenta"></span></h3>
-                <p class="memsec-lead">
+                <h3 class="memsec-t">
+                  <span data-i18n="memoria.bandeja.titulo">Recién aprendido</span>
+                  <span class="memsec-note" id="memBandejaCuenta"></span>
+                </h3>
+                <p class="memsec-lead" data-i18n="memoria.bandeja.lead">
                   Lo que se aprende de tus mensajes cae aquí y espera tu aprobación. Solo se guarda sin preguntar si activas «Guardar sin
                   preguntar».
                 </p>
@@ -542,8 +567,8 @@
 
               <!-- 3. Cómo trabajas conmigo -->
               <div class="memsec">
-                <h3 class="memsec-t">Cómo trabajas conmigo</h3>
-                <p class="memsec-lead">
+                <h3 class="memsec-t" data-i18n="memoria.habitos.titulo">Cómo trabajas conmigo</h3>
+                <p class="memsec-lead" data-i18n="memoria.habitos.lead">
                   Lo que he ido observando de tu forma de trabajar: qué herramientas, webs y carpetas repites. Vive en un fichero local de
                   este equipo, viaja al modelo configurado dentro del prompt y puedes olvidar un grupo entero.
                 </p>
@@ -552,13 +577,21 @@
 
               <!-- 4. Buscar en lo que hemos hablado -->
               <div class="memsec">
-                <h3 class="memsec-t">Buscar en lo que hemos hablado</h3>
-                <p class="memsec-lead">Encontrará una decisión o un dato de cualquier conversación anterior, aunque sea de hace semanas.</p>
+                <h3 class="memsec-t" data-i18n="memoria.hablar.titulo">Buscar en lo que hemos hablado</h3>
+                <p class="memsec-lead" data-i18n="memoria.hablar.lead">
+                  Encontrará una decisión o un dato de cualquier conversación anterior, aunque sea de hace semanas.
+                </p>
                 <form class="membuscar" id="memBuscarForm">
-                  <label class="sr-only" for="memBuscar">Buscar en nuestras conversaciones</label>
-                  <input type="search" id="memBuscar" class="memsearch" placeholder="¿Qué decidimos sobre…?" />
+                  <label class="sr-only" for="memBuscar" data-i18n="memoria.hablar.aria">Buscar en nuestras conversaciones</label>
+                  <input
+                    type="search"
+                    id="memBuscar"
+                    class="memsearch"
+                    data-i18n-ph="memoria.hablar.ph"
+                    placeholder="¿Qué decidimos sobre…?"
+                  />
                   <button class="btn" id="memBuscarBtn" type="submit">
-                    <span class="bi"><i data-i="search"></i></span> Buscar
+                    <span class="bi"><i data-i="search"></i></span> <span data-i18n="memoria.hablar.boton">Buscar</span>
                   </button>
                 </form>
                 <p class="memsec-nota" id="memBuscarNota" hidden></p>
@@ -567,12 +600,16 @@
 
               <!-- 5. Papelera -->
               <div class="memsec">
-                <h3 class="memsec-t">Papelera <span class="memsec-note" id="memPapeleraCuenta"></span></h3>
-                <p class="memsec-lead">
+                <h3 class="memsec-t">
+                  <span data-i18n="memoria.papelera.titulo">Papelera</span> <span class="memsec-note" id="memPapeleraCuenta"></span>
+                </h3>
+                <p class="memsec-lead" data-i18n="memoria.papelera.lead">
                   Lo que he olvidado. Se queda aquí 30 días por si lo quieres de vuelta; después se borra de verdad.
                 </p>
                 <div class="membarra" id="memPapeleraBarra" hidden>
-                  <button class="btn ghost danger" id="memPapeleraVaciar" type="button">Vaciar la papelera</button>
+                  <button class="btn ghost danger" id="memPapeleraVaciar" type="button" data-i18n="memoria.papelera.vaciar">
+                    Vaciar la papelera
+                  </button>
                 </div>
                 <div id="memPapelera" class="memlist" aria-live="polite"></div>
               </div>
@@ -581,8 +618,8 @@
               <div class="memsec mempie">
                 <div class="srow">
                   <span class="st"
-                    ><b>Que aprenda de nuestras conversaciones</b
-                    ><small
+                    ><b data-i18n="memoria.aprender.titulo">Que aprenda de nuestras conversaciones</b
+                    ><small data-i18n="memoria.aprender.nota"
                       >Al cerrar cada turno propone hechos duraderos que ve en tus frases y los deja en «Recién aprendido». Tú decides qué
                       se guarda. Con esto apagado, la memoria solo cambia cuando la escribes tú.</small
                     ></span
@@ -593,45 +630,62 @@
                     role="switch"
                     tabindex="0"
                     aria-checked="true"
+                    data-i18n-aria="memoria.aprender.titulo"
                     aria-label="Que aprenda de nuestras conversaciones"
                   ></div>
                 </div>
                 <div class="srow">
                   <span class="st"
-                    ><b>Guardar sin preguntar</b><small>Lo que proponga se guarda solo, sin pasar por «Recién aprendido».</small></span
+                    ><b data-i18n="memoria.auto.titulo">Guardar sin preguntar</b
+                    ><small data-i18n="memoria.auto.nota"
+                      >Lo que proponga se guarda solo, sin pasar por «Recién aprendido».</small
+                    ></span
                   >
-                  <div class="sw" id="swMemAuto" role="switch" tabindex="0" aria-checked="false" aria-label="Guardar sin preguntar"></div>
+                  <div
+                    class="sw"
+                    id="swMemAuto"
+                    role="switch"
+                    tabindex="0"
+                    aria-checked="false"
+                    data-i18n-aria="memoria.auto.titulo"
+                    aria-label="Guardar sin preguntar"
+                  ></div>
                 </div>
                 <p class="memlimites">
-                  <span
+                  <span data-i18n="memoria.limites.uno"
                     >Tu memoria vive en un fichero local de este equipo. Los recuerdos y los hábitos que encajan con la conversación se
                     envían al modelo que tengas configurado, igual que el resto del mensaje.</span
                   >
-                  <span
+                  <span data-i18n="memoria.limites.dos"
                     >Nada entra sin tu aprobación (salvo que enciendas «guardar sin preguntar»), y todo lo que sé lo puedes leer, corregir,
                     exportar o borrar desde esta pantalla.</span
                   >
                 </p>
                 <div class="btnrow memacciones">
                   <button class="btn ghost" id="memExport" type="button">
-                    <span class="bi"><i data-i="download"></i></span> Exportar mi memoria
+                    <span class="bi"><i data-i="download"></i></span>
+                    <span data-i18n="memoria.exportar">Exportar mi memoria</span>
                   </button>
                   <button class="btn ghost" id="memOlvidarTodo" type="button">
-                    <span class="bi"><i data-i="wave"></i></span> Olvidar todo lo observado
+                    <span class="bi"><i data-i="wave"></i></span>
+                    <span data-i18n="memoria.olvidar.observado">Olvidar todo lo observado</span>
                   </button>
                   <button class="btn ghost danger" id="memWipe" type="button">
-                    <span class="bi"><i data-i="trash"></i></span> Olvídalo todo
+                    <span class="bi"><i data-i="trash"></i></span> <span data-i18n="memoria.olvidar.todo">Olvídalo todo</span>
                   </button>
                 </div>
                 <div class="memwipe" id="memWipeBox" hidden>
                   <p>
-                    Esto borra <b>todos</b> los hechos, la papelera, la bandeja y tus hábitos, y no se puede deshacer. Escribe
-                    <b>OLVIDAR</b> para confirmar.
+                    <span data-i18n="memoria.wipe.antes">Esto borra</span> <b>todos</b>
+                    <span data-i18n="memoria.wipe.medio"
+                      >los hechos, la papelera, la bandeja y tus hábitos, y no se puede deshacer. Escribe</span
+                    >
+                    <b>OLVIDAR</b> <span data-i18n="memoria.wipe.despues">para confirmar.</span>
                   </p>
-                  <label class="sr-only" for="memWipeInput">Escribe OLVIDAR para confirmar</label>
+                  <label class="sr-only" for="memWipeInput" data-i18n="memoria.wipe.confirmar">Escribe OLVIDAR para confirmar</label>
                   <input id="memWipeInput" type="text" autocomplete="off" spellcheck="false" placeholder="OLVIDAR" />
-                  <button class="btn danger" id="memWipeGo" type="button" disabled>Olvidar todo</button>
-                  <button class="btn ghost" id="memWipeCancel" type="button">Cancelar</button>
+                  <button class="btn danger" id="memWipeGo" type="button" disabled data-i18n="memoria.wipe.olvidar">Olvidar todo</button>
+                  <button class="btn ghost" id="memWipeCancel" type="button" data-i18n="memoria.wipe.cancelar">Cancelar</button>
                 </div>
               </div>
             </div>
@@ -639,55 +693,60 @@
 
           <!-- SKILLS -->
           <section class="view" id="view-skills">
-            <h1 class="sr-only">Skills</h1>
+            <h1 class="sr-only" data-i18n="skills.titulo">Skills</h1>
             <div class="viewhead">
-              <h2>Skills</h2>
+              <h2 data-i18n="skills.titulo">Skills</h2>
               <div class="vh-actions">
                 <input
                   type="text"
                   id="skillImportInput"
+                  data-i18n-aria="skills.importar.aria"
                   aria-label="Repositorio de GitHub (owner/repo) con SKILL.md"
+                  data-i18n-ph="skills.importar.ph"
                   placeholder="owner/repo de GitHub con SKILL.md…"
                 />
                 <button class="btn" id="skillImportBtn">
-                  <span class="bi"><i data-i="download"></i></span> Importar
+                  <span class="bi"><i data-i="download"></i></span> <span data-i18n="skills.importar">Importar</span>
                 </button>
                 <button class="btn ghost" id="skillsFolderBtn">
-                  <span class="bi"><i data-i="folder"></i></span> Carpeta
+                  <span class="bi"><i data-i="folder"></i></span> <span data-i18n="skills.carpeta">Carpeta</span>
                 </button>
               </div>
             </div>
-            <p class="subnote" style="margin-top: -6px; margin-bottom: 14px">
+            <p class="subnote" style="margin-top: -6px; margin-bottom: 14px" data-i18n="skills.nota">
               Las skills son instrucciones especializadas (SKILL.md) que Sagitari carga solo cuando la tarea lo necesita: sin coste en
               tokens hasta que aplican. Importa packs desde GitHub (owner/repo), crea las tuyas o edita la carpeta directamente.
             </p>
             <div id="skillsList" class="memlist"></div>
             <div class="tooltray skills-tray">
-              <div class="tt-head">CATÁLOGO DE PACKS · LISTOS PARA INSTALAR</div>
+              <div class="tt-head" data-i18n="skills.catalogo">CATÁLOGO DE PACKS · LISTOS PARA INSTALAR</div>
               <div class="btnrow">
                 <input
                   type="text"
                   id="marketQuery"
+                  data-i18n-aria="skills.buscar.aria"
                   aria-label="Buscar packs de skills en GitHub"
+                  data-i18n-ph="skills.buscar.ph"
                   placeholder="Buscar packs en GitHub: blender, wordpress, excel…"
                   style="flex: 1; min-width: 180px"
                 />
                 <button class="btn ghost" id="marketSearchBtn">
-                  <span class="bi"><i data-i="search"></i></span> Buscar
+                  <span class="bi"><i data-i="search"></i></span> <span data-i18n="skills.buscar">Buscar</span>
                 </button>
                 <button class="btn ghost" id="skillsUpdateAllBtn">
-                  <span class="bi"><i data-i="history"></i></span> Actualizar todas
+                  <span class="bi"><i data-i="history"></i></span> <span data-i18n="skills.actualizarTodas">Actualizar todas</span>
                 </button>
               </div>
               <div id="marketList" class="memlist" style="margin-top: 10px"></div>
               <span class="saving" id="marketMsg"></span>
             </div>
             <div class="tooltray skills-tray">
-              <div class="tt-head">CREAR SKILL</div>
+              <div class="tt-head" data-i18n="skills.crear.titulo">CREAR SKILL</div>
               <div class="btnrow">
                 <input
                   type="text"
                   id="skillNewName"
+                  data-i18n-aria="skills.nombre.aria"
                   aria-label="Nombre de la skill"
                   placeholder="nombre-ejemplo"
                   style="flex: 1; min-width: 160px"
@@ -695,20 +754,24 @@
                 <input
                   type="text"
                   id="skillNewDesc"
+                  data-i18n-aria="skills.desc.aria"
                   aria-label="Qué hace la skill y cuándo usarla"
+                  data-i18n-ph="skills.desc.ph"
                   placeholder="Qué hace y cuándo usarla"
                   style="flex: 2; min-width: 240px"
                 />
               </div>
               <textarea
                 id="skillNewBody"
+                data-i18n-aria="skills.cuerpo.aria"
                 aria-label="Instrucciones que seguirá Sagitari (markdown)"
                 rows="5"
+                data-i18n-ph="skills.cuerpo.ph"
                 placeholder="Instrucciones que seguirá Sagitari… (markdown)"
               ></textarea>
               <div class="btnrow" style="margin-top: 8px">
                 <button class="btn primary" id="skillCreateBtn">
-                  <span class="bi"><i data-i="plus"></i></span> Crear skill
+                  <span class="bi"><i data-i="plus"></i></span> <span data-i18n="skills.crear">Crear skill</span>
                 </button>
                 <span class="saving" id="skillMsg"></span>
               </div>
@@ -717,11 +780,18 @@
 
           <!-- SETTINGS -->
           <section class="view" id="view-settings">
-            <h1 class="sr-only">Ajustes</h1>
+            <h1 class="sr-only" data-i18n="ajustes.titulo">Ajustes</h1>
             <div class="viewhead">
-              <h2>Ajustes</h2>
+              <h2 data-i18n="ajustes.titulo">Ajustes</h2>
               <div class="vh-actions">
-                <input type="search" id="setSearch" aria-label="Buscar en ajustes" placeholder="Buscar en ajustes…" />
+                <input
+                  type="search"
+                  id="setSearch"
+                  data-i18n-aria="ajustes.buscar.aria"
+                  aria-label="Buscar en ajustes"
+                  data-i18n-ph="ajustes.buscar.ph"
+                  placeholder="Buscar en ajustes…"
+                />
               </div>
             </div>
 
@@ -733,7 +803,9 @@
                 <small id="activeModelMeta">Elige un proveedor y activa un modelo para empezar.</small>
               </div>
               <span class="ac-badge off" id="activeModelBadge">sin activar</span>
-              <button class="btn ghost" id="btnChangeModel" title="Ir a proveedor y modelo">Cambiar</button>
+              <button class="btn ghost" id="btnChangeModel" data-i18n-title="ajustes.cambiar.title" title="Ir a proveedor y modelo" data-i18n="ajustes.cambiar">
+                Cambiar
+              </button>
             </div>
 
             <!-- wizard de primer uso: aparece sólo si no hay modelo activo y no se ha saltado -->
@@ -741,7 +813,8 @@
               <div class="wz-head">
                 <div class="wz-ic"><i data-i="spark"></i></div>
                 <div>
-                  <b>Configura tu primer modelo</b><small id="wzSub">Tres pasos y listo. Puedes cerrar esto y volver cuando quieras.</small>
+                  <b data-i18n="ajustes.wizard.titulo">Configura tu primer modelo</b
+                  ><small id="wzSub" data-i18n="ajustes.wizard.sub">Tres pasos y listo. Puedes cerrar esto y volver cuando quieras.</small>
                 </div>
               </div>
               <div class="wz-steps" aria-hidden="true">
@@ -762,7 +835,8 @@
                 aria-selected="true"
                 tabindex="0"
               >
-                <i data-i="spark"></i><span class="sl">Modelo</span><small>Proveedor y conexión</small>
+                <i data-i="spark"></i><span class="sl" data-i18n="ajustes.tab.modelo">Modelo</span
+                ><small data-i18n="ajustes.tab.modelo.sub">Proveedor y conexión</small>
               </button>
               <button
                 class="settab"
@@ -773,7 +847,8 @@
                 aria-selected="false"
                 tabindex="-1"
               >
-                <i data-i="eye"></i><span class="sl">Apariencia</span><small>Color, vidrio y luz</small>
+                <i data-i="eye"></i><span class="sl" data-i18n="ajustes.tab.apariencia">Apariencia</span
+                ><small data-i18n="ajustes.tab.apariencia.sub">Color, vidrio y luz</small>
               </button>
               <button
                 class="settab"
@@ -784,7 +859,8 @@
                 aria-selected="false"
                 tabindex="-1"
               >
-                <i data-i="key"></i><span class="sl">Seguridad</span><small>Permisos y límites</small>
+                <i data-i="key"></i><span class="sl" data-i18n="ajustes.tab.seguridad">Seguridad</span
+                ><small data-i18n="ajustes.tab.seguridad.sub">Permisos y límites</small>
               </button>
               <button
                 class="settab"
@@ -795,7 +871,8 @@
                 aria-selected="false"
                 tabindex="-1"
               >
-                <i data-i="agents"></i><span class="sl">Agente</span><small>Memoria y tareas</small>
+                <i data-i="agents"></i><span class="sl" data-i18n="ajustes.tab.agente">Agente</span
+                ><small data-i18n="ajustes.tab.agente.sub">Memoria y tareas</small>
               </button>
               <button
                 class="settab"
@@ -806,7 +883,8 @@
                 aria-selected="false"
                 tabindex="-1"
               >
-                <i data-i="history"></i><span class="sl">Datos</span><small>Espacio, atajos, hábitos</small>
+                <i data-i="history"></i><span class="sl" data-i18n="ajustes.tab.datos">Datos</span
+                ><small data-i18n="ajustes.tab.datos.sub">Espacio, atajos, hábitos</small>
               </button>
               <button
                 class="settab"
@@ -817,7 +895,8 @@
                 aria-selected="false"
                 tabindex="-1"
               >
-                <i data-i="spark"></i><span class="sl">Acerca de</span><small>Versión y actualizaciones</small>
+                <i data-i="spark"></i><span class="sl" data-i18n="ajustes.tab.acerca">Acerca de</span
+                ><small data-i18n="ajustes.tab.acerca.sub">Versión y actualizaciones</small>
               </button>
             </div>
 
@@ -825,20 +904,23 @@
               <!-- ===== MODELO ===== -->
               <div class="setpanel on" data-panel="model" id="setpanel-model" role="tabpanel" aria-labelledby="tab-model">
                 <div class="setcard">
-                  <div class="sc-head"><b>Proveedor y modelo</b><span class="sc-hint">La API que usará Sagitari</span></div>
+                  <div class="sc-head">
+                    <b data-i18n="ajustes.modelo.titulo">Proveedor y modelo</b
+                    ><span class="sc-hint" data-i18n="ajustes.modelo.nota">La API que usará Sagitari</span>
+                  </div>
                   <div class="field srow" data-keys="preset proveedor api plantilla">
-                    <label for="presetSel">Proveedor predefinido</label>
+                    <label for="presetSel" data-i18n="ajustes.preset">Proveedor predefinido</label>
                     <select id="presetSel"></select>
                     <div class="subnote" id="presetHint"></div>
                   </div>
                   <div class="grid2">
                     <div class="field srow" data-keys="nombre proveedor etiqueta">
-                      <label for="pName">Nombre</label><input type="text" id="pName" />
+                      <label for="pName" data-i18n="ajustes.nombre">Nombre</label><input type="text" id="pName" />
                     </div>
                     <div class="field srow" data-keys="formato api protocolo endpoint anthropic responses openai">
-                      <label for="apiFormat">Protocolo de la API</label>
+                      <label for="apiFormat" data-i18n="ajustes.protocolo">Protocolo de la API</label>
                       <select id="apiFormat">
-                        <option value="auto">Automático (deducirlo)</option>
+                        <option value="auto" data-i18n="ajustes.protocolo.auto">Automático (deducirlo)</option>
                         <option value="openai">OpenAI — /chat/completions</option>
                         <option value="anthropic">Anthropic — /messages</option>
                         <option value="responses">OpenAI Responses — /responses</option>
@@ -846,7 +928,7 @@
                     </div>
                   </div>
                   <div class="srow" data-keys="formato api protocolo endpoint anthropic responses openai">
-                    <div class="subnote">
+                    <div class="subnote" data-i18n="ajustes.protocolo.nota">
                       Cómo habla Sagitari con este servidor. «Automático» lo deduce por proveedor y modelo (en OpenCode Go, los Qwen y
                       MiniMax usan /messages y Grok o GPT-Luna usan /responses); fíjalo a mano si tu servidor habla Anthropic sin decirlo
                       en la dirección. Se guarda al cambiarlo y también lo usa «Detectar modelos».
@@ -858,40 +940,49 @@
                   <div class="field srow" data-keys="api key token clave secreta">
                     <label for="pKey">API key</label>
                     <div class="keyrow">
-                      <input type="password" id="pKey" placeholder="sk-… (vacío para Ollama o LM Studio)" />
+                      <input
+                        type="password"
+                        id="pKey"
+                        data-i18n-ph="ajustes.apikey.ph"
+                        placeholder="sk-… (vacío para Ollama o LM Studio)"
+                      />
                       <button
                         class="btn ghost sq"
                         id="apiKeyReveal"
                         type="button"
+                        data-i18n-title="ajustes.clave.title"
                         title="Mostrar u ocultar la clave"
+                        data-i18n-aria="ajustes.clave.aria"
                         aria-label="Mostrar la clave"
                         aria-pressed="false"
                       >
                         <i data-i="eye"></i>
                       </button>
                     </div>
-                    <div class="subnote">Se guarda en tu equipo, dentro de la carpeta de datos de Sagitari.</div>
+                    <div class="subnote" data-i18n="ajustes.clave.nota">
+                      Se guarda en tu equipo, dentro de la carpeta de datos de Sagitari.
+                    </div>
                   </div>
                   <div class="srow" data-keys="detectar modelos guardar proveedor">
                     <div class="btnrow">
                       <button class="btn" id="btnDetect">
-                        <span class="bi"><i data-i="search"></i></span> Detectar modelos
+                        <span class="bi"><i data-i="search"></i></span> <span data-i18n="ajustes.detectar">Detectar modelos</span>
                       </button>
                       <button class="btn" id="btnSaveProv">
-                        <span class="bi"><i data-i="save"></i></span> Guardar proveedor
+                        <span class="bi"><i data-i="save"></i></span> <span data-i18n="ajustes.guardarProveedor">Guardar proveedor</span>
                       </button>
                     </div>
                   </div>
                   <div class="field srow" data-keys="modelo model id elegir">
-                    <label for="modelSel">Modelo</label
+                    <label for="modelSel" data-i18n="ajustes.modelo">Modelo</label
                     ><select id="modelSel">
-                      <option value="">— detecta modelos primero —</option>
+                      <option value="" data-i18n="ajustes.modelo.primero">— detecta modelos primero —</option>
                     </select>
                   </div>
                   <div class="srow" data-keys="activar modelo usar">
                     <div class="btnrow">
                       <button class="btn primary" id="btnActivate">
-                        <span class="bi"><i data-i="play"></i></span> Activar este modelo
+                        <span class="bi"><i data-i="play"></i></span> <span data-i18n="ajustes.activar">Activar este modelo</span>
                       </button>
                     </div>
                   </div>
@@ -900,7 +991,8 @@
 
                 <div class="setcard">
                   <div class="sc-head">
-                    <b>Proveedores guardados</b><span class="sc-hint">Reutiliza una configuración con un clic</span>
+                    <b data-i18n="ajustes.guardados.titulo">Proveedores guardados</b
+                    ><span class="sc-hint" data-i18n="ajustes.guardados.nota">Reutiliza una configuración con un clic</span>
                   </div>
                   <div class="provlist"><div id="provList"></div></div>
                 </div>
@@ -908,21 +1000,27 @@
               <!-- ===== APARIENCIA ===== -->
               <div class="setpanel" data-panel="apariencia" id="setpanel-apariencia" role="tabpanel" aria-labelledby="tab-apariencia">
                 <div class="setcard">
-                  <div class="sc-head"><b>Personal</b><span class="sc-hint">Cómo apareces en la conversación</span></div>
+                  <div class="sc-head">
+                    <b data-i18n="ajustes.personal.titulo">Personal</b
+                    ><span class="sc-hint" data-i18n="ajustes.personal.nota">Cómo apareces en la conversación</span>
+                  </div>
                   <div class="swrow srow" data-keys="nombre usuario como te llamas identidad mensajes avatar">
                     <span class="st"
-                      ><b>Tu nombre</b
-                      ><small
+                      ><b data-i18n="ajustes.personal.nombre">Tu nombre</b
+                      ><small data-i18n="ajustes.personal.nombre.nota"
                         >Etiqueta tus mensajes en la conversación y da la inicial de tu avatar. También se le dice al modelo —en una sola
                         línea, saneado— para que se dirija a ti por tu nombre; si lo dejas vacío, no se le envía nada.</small
                       ></span
                     >
-                    <input type="text" id="setUserName" aria-label="Tu nombre" style="width: 160px" />
+                    <input type="text" id="setUserName" data-i18n-aria="ajustes.personal.nombre" aria-label="Tu nombre" style="width: 160px" />
                   </div>
                 </div>
 
                 <div class="setcard">
-                  <div class="sc-head"><b>Apariencia</b><span class="sc-hint">Color y luz de la interfaz; se aplica al momento</span></div>
+                  <div class="sc-head">
+                    <b data-i18n="ajustes.apariencia.titulo">Apariencia</b
+                    ><span class="sc-hint" data-i18n="ajustes.apariencia.nota">Color y luz de la interfaz; se aplica al momento</span>
+                  </div>
                   <div class="themerow block" data-keys="idioma language idioma interfaz">
                     <span class="st"
                       ><b data-i18n="ajustes.idioma.titulo">Idioma de la interfaz</b><br /><small class="md" data-i18n="ajustes.idioma.nota"
@@ -937,66 +1035,92 @@
                   </div>
                   <div class="swrow srow" data-keys="glow resplandor bordes luz ambiental" data-solo-holo>
                     <span class="st"
-                      ><b>Glow ambiental en los bordes</b
-                      ><small>El marco se ilumina cuando el agente piensa, trabaja o te habla.</small></span
+                      ><b data-i18n="ajustes.glow.titulo">Glow ambiental en los bordes</b
+                      ><small data-i18n="ajustes.glow.nota"
+                        >El marco se ilumina cuando el agente piensa, trabaja o te habla.</small
+                      ></span
                     >
-                    <div class="sw on" id="swGlow" role="switch" tabindex="0" aria-checked="true" aria-label="Glow ambiental en los bordes"></div>
+                    <div
+                      class="sw on"
+                      id="swGlow"
+                      role="switch"
+                      tabindex="0"
+                      aria-checked="true"
+                      data-i18n-aria="ajustes.glow.titulo"
+                      aria-label="Glow ambiental en los bordes"
+                    ></div>
                   </div>
                   <div class="themerow block" data-keys="aspecto skin apariencia estilo consola lienzo holo materia">
                     <span class="st"
-                      ><b>Aspecto</b
-                      ><small id="skinHint">Holo es el vidrio de la casa. Consola y Lienzo son planos: sin desenfoque y sin luz en el marco.</small></span
+                      ><b data-i18n="ajustes.aspecto">Aspecto</b
+                      ><small id="skinHint" data-i18n="ajustes.aspecto.nota"
+                        >Holo es el vidrio de la casa. Consola y Lienzo son planos: sin desenfoque y sin luz en el marco.</small
+                      ></span
                     >
-                    <div class="pals" id="uiSkinTiles" role="group" aria-label="Aspecto de la interfaz">
+                    <div class="pals" id="uiSkinTiles" role="group" data-i18n-aria="ajustes.aspecto.aria" aria-label="Aspecto de la interfaz">
                       <button type="button" class="pal" data-pal="holo">
-                        <span class="pal-dot skin-holo" aria-hidden="true"></span><b>Holo</b></button
+                        <span class="pal-dot skin-holo" aria-hidden="true"></span
+                        ><b data-i18n="ajustes.aspecto.holo">Holo</b></button
                       ><button type="button" class="pal" data-pal="console">
-                        <span class="pal-dot skin-console" aria-hidden="true"></span><b>Consola</b></button
+                        <span class="pal-dot skin-console" aria-hidden="true"></span
+                        ><b data-i18n="ajustes.aspecto.consola">Consola</b></button
                       ><button type="button" class="pal" data-pal="canvas">
-                        <span class="pal-dot skin-canvas" aria-hidden="true"></span><b>Lienzo</b>
+                        <span class="pal-dot skin-canvas" aria-hidden="true"></span
+                        ><b data-i18n="ajustes.aspecto.lienzo">Lienzo</b>
                       </button>
                     </div>
-                    <select id="uiSkin" aria-label="Aspecto de la interfaz" hidden>
-                      <option value="holo">Holo</option>
-                      <option value="console">Consola</option>
-                      <option value="canvas">Lienzo</option>
+                    <select id="uiSkin" data-i18n-aria="ajustes.aspecto.aria" aria-label="Aspecto de la interfaz" hidden>
+                      <option value="holo" data-i18n="ajustes.aspecto.holo">Holo</option>
+                      <option value="console" data-i18n="ajustes.aspecto.consola">Consola</option>
+                      <option value="canvas" data-i18n="ajustes.aspecto.lienzo">Lienzo</option>
                     </select>
                   </div>
                   <div class="themerow block" data-keys="color tema apariencia acento interfaz">
-                    <span class="st"><b>Color de la interfaz</b><small>Tiñe bordes, menús, botones y detalles de toda la app.</small></span>
-                    <div class="pals" id="uiColorTiles" role="group" aria-label="Color de la interfaz">
-                      <button type="button" class="pal" data-pal="violet"><span class="pal-dot" style="--pc: 128, 110, 214"></span><b>Violeta</b></button><button type="button" class="pal" data-pal="magenta"><span class="pal-dot" style="--pc: 184, 92, 196"></span><b>Magenta</b></button><button type="button" class="pal" data-pal="cyan"><span class="pal-dot" style="--pc: 40, 146, 170"></span><b>Cian</b></button><button type="button" class="pal" data-pal="emerald"><span class="pal-dot" style="--pc: 44, 156, 116"></span><b>Esmeralda</b></button><button type="button" class="pal" data-pal="amber"><span class="pal-dot" style="--pc: 196, 128, 40"></span><b>Ámbar</b></button><button type="button" class="pal" data-pal="ice"><span class="pal-dot" style="--pc: 84, 134, 214"></span><b>Hielo</b></button><button type="button" class="pal" data-pal="aurora"><span class="pal-dot" style="--pc: 106, 128, 184"></span><b>Aurora</b></button>
+                    <span class="st"
+                      ><b data-i18n="ajustes.color">Color de la interfaz</b
+                      ><small data-i18n="ajustes.color.nota"
+                        >Tiñe bordes, menús, botones y detalles de toda la app.</small
+                      ></span
+                    >
+                    <div class="pals" id="uiColorTiles" role="group" data-i18n-aria="ajustes.color" aria-label="Color de la interfaz">
+                      <button type="button" class="pal" data-pal="violet"><span class="pal-dot" style="--pc: 128, 110, 214"></span><b data-i18n="ajustes.color.violeta">Violeta</b></button><button type="button" class="pal" data-pal="magenta"><span class="pal-dot" style="--pc: 184, 92, 196"></span><b data-i18n="ajustes.color.magenta">Magenta</b></button><button type="button" class="pal" data-pal="cyan"><span class="pal-dot" style="--pc: 40, 146, 170"></span><b data-i18n="ajustes.color.cian">Cian</b></button><button type="button" class="pal" data-pal="emerald"><span class="pal-dot" style="--pc: 44, 156, 116"></span><b data-i18n="ajustes.color.esmeralda">Esmeralda</b></button><button type="button" class="pal" data-pal="amber"><span class="pal-dot" style="--pc: 196, 128, 40"></span><b data-i18n="ajustes.color.ambar">Ámbar</b></button><button type="button" class="pal" data-pal="ice"><span class="pal-dot" style="--pc: 84, 134, 214"></span><b data-i18n="ajustes.color.hielo">Hielo</b></button><button type="button" class="pal" data-pal="aurora"><span class="pal-dot" style="--pc: 106, 128, 184"></span><b data-i18n="ajustes.color.aurora">Aurora</b></button>
                     </div>
                     <span class="colordot" id="dotUiColor"></span>
-                    <select id="uiColor" aria-label="Color de la interfaz" hidden>
-                      <option value="violet">Violeta</option>
-                      <option value="magenta">Magenta</option>
-                      <option value="cyan">Cian</option>
-                      <option value="emerald">Esmeralda</option>
-                      <option value="amber">Ámbar</option>
-                      <option value="ice">Hielo</option>
-                      <option value="aurora">Aurora</option>
+                    <select id="uiColor" data-i18n-aria="ajustes.color" aria-label="Color de la interfaz" hidden>
+                      <option value="violet" data-i18n="ajustes.color.violeta">Violeta</option>
+                      <option value="magenta" data-i18n="ajustes.color.magenta">Magenta</option>
+                      <option value="cyan" data-i18n="ajustes.color.cian">Cian</option>
+                      <option value="emerald" data-i18n="ajustes.color.esmeralda">Esmeralda</option>
+                      <option value="amber" data-i18n="ajustes.color.ambar">Ámbar</option>
+                      <option value="ice" data-i18n="ajustes.color.hielo">Hielo</option>
+                      <option value="aurora" data-i18n="ajustes.color.aurora">Aurora</option>
                     </select>
                   </div>
                   <div class="themerow block" data-keys="color glow resplandor luz" data-solo-holo>
-                    <span class="st"><b>Color del glow</b><small id="glowColorHint">Sigue el color de la interfaz.</small></span>
-                    <div class="pals" id="glowColorTiles" role="group" aria-label="Color del glow">
-                      <button type="button" class="pal" data-pal="match"><span class="pal-dot mix"></span><b>Como la interfaz</b></button><button type="button" class="pal" id="glowOtherBtn"><span class="pal-dot plus" aria-hidden="true"></span><b>Otro color…</b></button><button type="button" class="pal" data-pal="violet"><span class="pal-dot" style="--pc: 128, 110, 214"></span><b>Violeta</b></button><button type="button" class="pal" data-pal="magenta"><span class="pal-dot" style="--pc: 184, 92, 196"></span><b>Magenta</b></button><button type="button" class="pal" data-pal="cyan"><span class="pal-dot" style="--pc: 40, 146, 170"></span><b>Cian</b></button><button type="button" class="pal" data-pal="emerald"><span class="pal-dot" style="--pc: 44, 156, 116"></span><b>Esmeralda</b></button><button type="button" class="pal" data-pal="amber"><span class="pal-dot" style="--pc: 196, 128, 40"></span><b>Ámbar</b></button><button type="button" class="pal" data-pal="ice"><span class="pal-dot" style="--pc: 84, 134, 214"></span><b>Hielo</b></button><button type="button" class="pal" data-pal="aurora"><span class="pal-dot" style="--pc: 106, 128, 184"></span><b>Aurora</b></button>
+                    <span class="st"
+                      ><b data-i18n="ajustes.glowColor">Color del glow</b
+                      ><small id="glowColorHint">Sigue el color de la interfaz.</small></span
+                    >
+                    <div class="pals" id="glowColorTiles" role="group" data-i18n-aria="ajustes.glowColor" aria-label="Color del glow">
+                      <button type="button" class="pal" data-pal="match"><span class="pal-dot mix"></span><b data-i18n="ajustes.glowColor.como">Como la interfaz</b></button><button type="button" class="pal" id="glowOtherBtn"><span class="pal-dot plus" aria-hidden="true"></span><b data-i18n="ajustes.glowColor.otro">Otro color…</b></button><button type="button" class="pal" data-pal="violet"><span class="pal-dot" style="--pc: 128, 110, 214"></span><b data-i18n="ajustes.color.violeta">Violeta</b></button><button type="button" class="pal" data-pal="magenta"><span class="pal-dot" style="--pc: 184, 92, 196"></span><b data-i18n="ajustes.color.magenta">Magenta</b></button><button type="button" class="pal" data-pal="cyan"><span class="pal-dot" style="--pc: 40, 146, 170"></span><b data-i18n="ajustes.color.cian">Cian</b></button><button type="button" class="pal" data-pal="emerald"><span class="pal-dot" style="--pc: 44, 156, 116"></span><b data-i18n="ajustes.color.esmeralda">Esmeralda</b></button><button type="button" class="pal" data-pal="amber"><span class="pal-dot" style="--pc: 196, 128, 40"></span><b data-i18n="ajustes.color.ambar">Ámbar</b></button><button type="button" class="pal" data-pal="ice"><span class="pal-dot" style="--pc: 84, 134, 214"></span><b data-i18n="ajustes.color.hielo">Hielo</b></button><button type="button" class="pal" data-pal="aurora"><span class="pal-dot" style="--pc: 106, 128, 184"></span><b data-i18n="ajustes.color.aurora">Aurora</b></button>
                     </div>
                     <span class="colordot glow" id="dotGlowColor"></span>
-                    <select id="glowColor" aria-label="Color del glow" hidden>
-                      <option value="match">Igual que la interfaz</option>
-                      <option value="violet">Violeta</option>
-                      <option value="magenta">Magenta</option>
-                      <option value="cyan">Cian</option>
-                      <option value="emerald">Esmeralda</option>
-                      <option value="amber">Ámbar</option>
-                      <option value="ice">Hielo</option>
-                      <option value="aurora">Aurora</option>
+                    <select id="glowColor" data-i18n-aria="ajustes.glowColor" aria-label="Color del glow" hidden>
+                      <option value="match" data-i18n="ajustes.glowColor.igual">Igual que la interfaz</option>
+                      <option value="violet" data-i18n="ajustes.color.violeta">Violeta</option>
+                      <option value="magenta" data-i18n="ajustes.color.magenta">Magenta</option>
+                      <option value="cyan" data-i18n="ajustes.color.cian">Cian</option>
+                      <option value="emerald" data-i18n="ajustes.color.esmeralda">Esmeralda</option>
+                      <option value="amber" data-i18n="ajustes.color.ambar">Ámbar</option>
+                      <option value="ice" data-i18n="ajustes.color.hielo">Hielo</option>
+                      <option value="aurora" data-i18n="ajustes.color.aurora">Aurora</option>
                     </select>
                   </div>
                   <div class="themerow" data-keys="intensidad glow resplandor fuerza brillo" data-solo-holo>
-                    <span class="st"><b>Intensidad del glow</b><small id="glowStrengthLabel">Equilibrado</small></span>
+                    <span class="st"
+                      ><b data-i18n="ajustes.intensidad">Intensidad del glow</b
+                      ><small id="glowStrengthLabel">Equilibrado</small></span
+                    >
                     <div style="text-align: right">
                       <input
                         type="range"
@@ -1005,15 +1129,21 @@
                         step="0.05"
                         class="glowslider"
                         id="glowStrength"
+                        data-i18n-aria="ajustes.intensidad"
                         aria-label="Intensidad del glow"
                       />
                       <div class="glowlabels">
-                        <span id="lblSuave">Suave</span><span id="lblEq">Equilibrado</span><span id="lblInt">Intenso</span>
+                        <span id="lblSuave" data-i18n="ajustes.intensidad.suave">Suave</span
+                        ><span id="lblEq" data-i18n="ajustes.intensidad.equilibrado">Equilibrado</span
+                        ><span id="lblInt" data-i18n="ajustes.intensidad.intenso">Intenso</span>
                       </div>
                     </div>
                   </div>
                   <div class="themerow" data-keys="vidrio glass transparencia tintado claro opaco" data-solo-holo>
-                    <span class="st"><b>Vidrio: de ultra claro a tintado</b><small id="glassTintLabel">Equilibrado</small></span>
+                    <span class="st"
+                      ><b data-i18n="ajustes.vidrio">Vidrio: de ultra claro a tintado</b
+                      ><small id="glassTintLabel">Equilibrado</small></span
+                    >
                     <div style="text-align: right">
                       <input
                         type="range"
@@ -1022,11 +1152,13 @@
                         step="0.05"
                         class="glowslider"
                         id="glassTint"
+                        data-i18n-aria="ajustes.vidrio.aria"
                         aria-label="Transparencia del vidrio"
                       />
                       <div class="glowlabels">
-                        <span id="lblGlassClaro">Ultra claro</span><span id="lblGlassEq">Equilibrado</span
-                        ><span id="lblGlassTint">Tintado</span>
+                        <span id="lblGlassClaro" data-i18n="ajustes.vidrio.claro">Ultra claro</span
+                        ><span id="lblGlassEq" data-i18n="ajustes.vidrio.equilibrado">Equilibrado</span
+                        ><span id="lblGlassTint" data-i18n="ajustes.vidrio.tintado">Tintado</span>
                       </div>
                     </div>
                   </div>
@@ -1037,7 +1169,8 @@
               <div class="setpanel" data-panel="security" id="setpanel-security" role="tabpanel" aria-labelledby="tab-security">
                 <div class="setcard">
                   <div class="sc-head">
-                    <b>Permisos por herramienta</b><span class="sc-hint">Qué puede hacer el agente sin preguntarte</span>
+                    <b data-i18n="ajustes.permisos.titulo">Permisos por herramienta</b
+                    ><span class="sc-hint" data-i18n="ajustes.permisos.nota">Qué puede hacer el agente sin preguntarte</span>
                   </div>
                   <div
                     class="srow"
@@ -1048,36 +1181,57 @@
                   <div class="srow" data-keys="restablecer permisos recomendados defecto">
                     <div class="btnrow" style="margin: 10px 0 0">
                       <button class="btn ghost" id="secResetPerms">
-                        <span class="bi"><i data-i="history"></i></span> Restablecer permisos recomendados
+                        <span class="bi"><i data-i="history"></i></span>
+                        <span data-i18n="ajustes.permisos.restablecer">Restablecer permisos recomendados</span>
                       </button>
-                      <button class="btn danger" id="secAllowAll" title="Pone todas las herramientas en «permitir siempre»">
-                        <span class="bi"><i data-i="key"></i></span> Permitir todo
+                      <button
+                        class="btn danger"
+                        id="secAllowAll"
+                        data-i18n-title="ajustes.permisos.todo.title"
+                        title="Pone todas las herramientas en «permitir siempre»"
+                      >
+                        <span class="bi"><i data-i="key"></i></span> <span data-i18n="herram.permitirTodo">Permitir todo</span>
                       </button>
                     </div>
                     <div class="subnote">
-                      «Por defecto» usa el nivel recomendado de cada herramienta (aparece indicado en cada fila). «Permitir siempre» se
-                      ejecuta sin preguntar · «Preguntar antes» pide permiso en cada uso · «Bloqueado» la impide por completo.
-                      <b>Permitir todo</b> deja todas en «Permitir siempre» de una vez: te lo confirma antes y se deshace con el botón de
-                      al lado.
+                      <span data-i18n="ajustes.permisos.leyenda.uno"
+                        >«Por defecto» usa el nivel recomendado de cada herramienta (aparece indicado en cada fila). «Permitir siempre» se
+                        ejecuta sin preguntar · «Preguntar antes» pide permiso en cada uso · «Bloqueado» la impide por completo.</span
+                      >
+                      <b data-i18n="herram.permitirTodo">Permitir todo</b>
+                      <span data-i18n="ajustes.permisos.leyenda.dos"
+                        >deja todas en «Permitir siempre» de una vez: te lo confirma antes y se deshace con el botón de al lado.</span
+                      >
                     </div>
                   </div>
                 </div>
 
                 <div class="setcard">
                   <div class="sc-head">
-                    <b>Ediciones de archivos</b><span class="sc-hint">El «sí» automático para crear, editar y parchear archivos</span>
+                    <b data-i18n="ajustes.ediciones.titulo">Ediciones de archivos</b
+                    ><span class="sc-hint" data-i18n="ajustes.ediciones.nota"
+                      >El «sí» automático para crear, editar y parchear archivos</span
+                    >
                   </div>
                   <div class="swrow srow" data-keys="ediciones automaticas aceptar cambios archivos escribir sin preguntar">
                     <span class="st"
-                      ><b>Aceptar las ediciones de archivos sin preguntar</b
-                      ><small
+                      ><b data-i18n="ajustes.ediciones.activar">Aceptar las ediciones de archivos sin preguntar</b
+                      ><small data-i18n="ajustes.ediciones.activar.nota"
                         >SAGITARI crea, edita y parchea archivos sin pedirte permiso en cada cambio. NO cubre los comandos de terminal, ni
                         abrir programas, ni el navegador: eso sigue pidiendo confirmación. Y manda la tabla de permisos de arriba: una
                         herramienta puesta en «Bloqueado» sigue bloqueada, y esto solo le quita la pregunta a las que están en «Preguntar
                         antes» (escribir un archivo, editarlo y aplicar parches).</small
                       ></span
                     >
-                    <div class="sw" id="swAutoEdits" role="switch" tabindex="0" aria-checked="false" aria-label="Aceptar las ediciones de archivos sin preguntar"></div>
+                    <div
+                      class="sw"
+                      id="swAutoEdits"
+                      role="switch"
+                      tabindex="0"
+                      aria-checked="false"
+                      data-i18n-aria="ajustes.ediciones.activar"
+                      aria-label="Aceptar las ediciones de archivos sin preguntar"
+                    ></div>
                   </div>
                 </div>
 
@@ -1092,70 +1246,92 @@
                     aria-controls="advLimitsBody"
                   >
                     <div class="sc-head">
-                      <b>Avanzado · límites de cada tarea</b
-                      ><span class="sc-hint">Cuánto puede durar y gastar una tarea antes de pararse</span>
+                      <b data-i18n="ajustes.avanzado.titulo">Avanzado · límites de cada tarea</b
+                      ><span class="sc-hint" data-i18n="ajustes.avanzado.nota"
+                        >Cuánto puede durar y gastar una tarea antes de pararse</span
+                      >
                     </div>
                     <span class="chev"><i data-i="chevron"></i></span>
                   </div>
                   <div class="advbody" id="advLimitsBody">
                     <div class="grid2">
                       <div class="field srow" data-keys="pasos maximos limite steps">
-                        <label for="grSteps">Pasos máximos (0 = sin límite)</label><input type="number" id="grSteps" min="0" />
+                        <label for="grSteps" data-i18n="ajustes.limites.pasos">Pasos máximos (0 = sin límite)</label
+                        ><input type="number" id="grSteps" min="0" />
                       </div>
                       <div class="field srow" data-keys="herramientas maximas limite llamadas tools">
-                        <label for="grToolCalls">Llamadas a herramientas (0 = sin límite)</label
+                        <label for="grToolCalls" data-i18n="ajustes.limites.llamadas"
+                          >Llamadas a herramientas (0 = sin límite)</label
                         ><input type="number" id="grToolCalls" min="0" />
                       </div>
                       <div class="field srow" data-keys="minutos tiempo maximo duracion">
-                        <label for="grMinutes">Minutos máximos (0 = sin límite)</label><input type="number" id="grMinutes" min="0" />
+                        <label for="grMinutes" data-i18n="ajustes.limites.minutos">Minutos máximos (0 = sin límite)</label
+                        ><input type="number" id="grMinutes" min="0" />
                       </div>
                       <div class="field srow" data-keys="tokens limite consumo">
-                        <label for="grTokens">Tokens máximos (0 = sin límite)</label><input type="number" id="grTokens" min="0" />
+                        <label for="grTokens" data-i18n="ajustes.limites.tokens">Tokens máximos (0 = sin límite)</label
+                        ><input type="number" id="grTokens" min="0" />
                       </div>
                       <div class="field srow" data-keys="coste dinero dolares presupuesto gasto">
-                        <label for="grCost">Coste máximo $ (0 = sin límite)</label><input type="number" id="grCost" min="0" step="0.1" />
+                        <label for="grCost" data-i18n="ajustes.limites.coste">Coste máximo $ (0 = sin límite)</label
+                        ><input type="number" id="grCost" min="0" step="0.1" />
                       </div>
                     </div>
-                    <div class="subnote">
+                    <div class="subnote" data-i18n="ajustes.limites.nota">
                       Al alcanzar cualquiera de estos límites la ejecución se detiene y queda como tarea recuperable desde la vista Tareas.
                     </div>
 
                     <div class="setcard">
                       <div class="sc-head">
-                        <b>Espera del modelo</b><span class="sc-hint">Cuánto aguanta Sagitari sin recibir respuesta</span>
+                        <b data-i18n="ajustes.espera.titulo">Espera del modelo</b
+                        ><span class="sc-hint" data-i18n="ajustes.espera.nota"
+                          >Cuánto aguanta Sagitari sin recibir respuesta</span
+                        >
                       </div>
                       <div class="grid2">
                         <div class="field srow" data-keys="timeout sin respuesta silencio espera datos modelo">
-                          <label for="grLlmTimeout">Segundos de espera de una respuesta (0 = sin límite)</label
+                          <label for="grLlmTimeout" data-i18n="ajustes.espera.campo"
+                            >Segundos de espera de una respuesta (0 = sin límite)</label
                           ><input type="number" id="grLlmTimeout" min="0" step="30" />
                         </div>
                       </div>
                       <div class="subnote">
-                        Es la espera máxima sin recibir nada del modelo <em>mientras</em> responde: al pasarse, la petición se corta con un
-                        error en vez de quedarse colgada esperando para siempre. Súbelo con modelos lentos o proveedores que tardan en
-                        arrancar, y ponlo a 0 para esperar sin límite.
+                        <span data-i18n="ajustes.espera.ayuda.uno">Es la espera máxima sin recibir nada del modelo</span>
+                        <em data-i18n="ajustes.espera.mientras">mientras</em>
+                        <span data-i18n="ajustes.espera.ayuda.dos"
+                          >responde: al pasarse, la petición se corta con un error en vez de quedarse colgada esperando para siempre.
+                          Súbelo con modelos lentos o proveedores que tardan en arrancar, y ponlo a 0 para esperar sin límite.</span
+                        >
                       </div>
                     </div>
 
                     <div class="setcard">
                       <div class="sc-head">
-                        <b>Protección anti-bucles</b><span class="sc-hint">Que el agente no se quede dando vueltas</span>
+                        <b data-i18n="ajustes.bucles.titulo">Protección anti-bucles</b
+                        ><span class="sc-hint" data-i18n="ajustes.bucles.nota"
+                          >Que el agente no se quede dando vueltas</span
+                        >
                       </div>
                       <div class="grid2">
                         <div class="field srow" data-keys="repeticiones bucle loop identicas">
-                          <label for="grLoop">Repeticiones de una acción = bucle</label><input type="number" id="grLoop" min="2" />
+                          <label for="grLoop" data-i18n="ajustes.bucles.repeticiones"
+                            >Repeticiones de una acción = bucle</label
+                          ><input type="number" id="grLoop" min="2" />
                         </div>
                         <div class="field srow" data-keys="pasos sin progreso estancado stall">
-                          <label for="grStall">Pasos sin progreso (0 = sin límite)</label><input type="number" id="grStall" min="0" />
+                          <label for="grStall" data-i18n="ajustes.bucles.pasos"
+                            >Pasos sin progreso (0 = sin límite)</label
+                          ><input type="number" id="grStall" min="0" />
                         </div>
                       </div>
                       <div class="srow">
                         <div class="btnrow" style="margin: 6px 0 0">
                           <button class="btn ghost" id="secResetGuardrails">
-                            <span class="bi"><i data-i="history"></i></span> Restablecer límites recomendados
+                            <span class="bi"><i data-i="history"></i></span>
+                            <span data-i18n="ajustes.bucles.restablecer">Restablecer límites recomendados</span>
                           </button>
                         </div>
-                        <div class="subnote">
+                        <div class="subnote" data-i18n="ajustes.bucles.aviso">
                           Si el agente repite la misma acción sin avanzar, Sagitari detiene la ejecución sola para proteger el sistema.
                         </div>
                       </div>
