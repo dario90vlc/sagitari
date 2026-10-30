@@ -21,8 +21,12 @@ function idiomaActual() {
   return activo;
 }
 
+/** Traduce. `||` y no `??`: una entrada vacía en el diccionario también tiene que caer
+    al español. La cascada «clave en es y no en en» es hoy inalcanzable porque la prueba
+    de paridad exige las mismas claves en los dos: es defensa, no cobertura. */
 function t(clave, vars) {
-  const texto = (DICCIONARIOS[activo] && DICCIONARIOS[activo][clave]) ?? DICCIONARIOS.es[clave] ?? '⟦' + clave + '⟧';
+  const dicc = DICCIONARIOS[activo];
+  const texto = (dicc && dicc[clave]) || DICCIONARIOS.es[clave] || '⟦' + clave + '⟧';
   return String(texto).replace(/\{(\w+)\}/g, (m, k) => (vars && vars[k] !== undefined ? String(vars[k]) : m));
 }
 

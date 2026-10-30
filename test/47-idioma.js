@@ -14,13 +14,16 @@ test('idioma: resolverIdioma decide por el locale y respeta lo elegido', () => {
   eq(i18n.resolverIdioma('inventado', 'es-ES'), 'es', 'un valor inválido cae en auto');
 });
 
-test('idioma: t() interpola, cae al español y nunca queda vacío', () => {
+test('idioma: t() interpola y nunca queda vacío', () => {
   const i18n = require('../agent/i18n');
   i18n.configurar('es');
   eq(i18n.t('comun.error'), 'Error');
+  eq(i18n.t('comun.detenido.motivo', { motivo: 'cupo' }), 'Ejecución detenida: cupo', 'interpola {motivo}');
   i18n.configurar('en');
-  ok(/Error/.test(i18n.t('comun.error')), 'el prefijo de error es el mismo en inglés');
+  ok(i18n.err('comun.detenido').startsWith('Error: '), 'err lleva el prefijo del contrato');
+  eq(i18n.t('comun.detenido.motivo', { motivo: 'budget' }), 'Run stopped: budget', 'interpola también en inglés');
   eq(i18n.t('no.existe.esta.clave'), '⟦no.existe.esta.clave⟧', 'una clave desconocida se ve, no se vacía');
+  i18n.configurar('es');
 });
 
 test('idioma: los dos diccionarios del motor tienen exactamente las mismas claves', () => {
