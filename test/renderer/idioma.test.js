@@ -36,9 +36,22 @@ check('idioma: aplicarDOM rellena texto y atributos, y no toca lo que no lleva m
   const ph = w.document.createElement('input');
   ph.setAttribute('data-i18n-ph', 'prueba.ph');
   w.document.body.appendChild(ph);
+  const tt = w.document.createElement('button');
+  tt.setAttribute('data-i18n-title', 'prueba.title');
+  w.document.body.appendChild(tt);
+  const aria = w.document.createElement('button');
+  aria.setAttribute('data-i18n-aria', 'prueba.aria');
+  w.document.body.appendChild(aria);
+  // Un nodo sin marcas: la pasada no puede reescribir texto que no le pertenece.
+  const libre = w.document.createElement('span');
+  libre.textContent = 'sin marca';
+  w.document.body.appendChild(libre);
   w.I18N.aplicarDOM();
   eq(el.textContent, 'Hola', 'el texto sale del diccionario');
   eq(ph.getAttribute('placeholder'), 'Escribe aquí', 'y el atributo también');
+  eq(tt.getAttribute('title'), 'Título de prueba', 'el title se traduce');
+  eq(aria.getAttribute('aria-label'), 'Etiqueta de prueba', 'y el aria-label');
+  eq(libre.textContent, 'sin marca', 'lo que no lleva marca se queda igual');
 });
 
 check('idioma: con inglés el mismo marcado queda en inglés', () => {

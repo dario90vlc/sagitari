@@ -10,9 +10,9 @@
   const TABLA = idioma === 'en' ? EN : ES;
 
   function t(clave, vars) {
-    // Cascada en inglés; en español no hay a dónde caer. Nunca vacío: la clave visible
-    // avisa del fallo en vez de dejar un hueco que parezca intencionado.
-    const texto = TABLA[clave] ?? ES[clave] ?? '⟦' + clave + '⟧';
+    /* `||` y no `??`: una entrada vacía en el diccionario también tiene que caer al
+       español; con `??` pasaría el '' y el nodo se quedaría en blanco. */
+    const texto = TABLA[clave] || ES[clave] || '⟦' + clave + '⟧';
     return String(texto).replace(/\{(\w+)\}/g, function (m, k) {
       return vars && vars[k] !== undefined ? String(vars[k]) : m;
     });

@@ -133,6 +133,9 @@ module.exports = [
         // por separado y no los ve; aquí se documentan para que no dé falsos
         // positivos. Si un script deja de usarlos, se quitan de esta lista.
         // Los que se asignan (estado vivo del renderer) van como writable
+        /* Motor de idioma de la interfaz (renderer/i18n.js): lo publica un script y lo
+           llaman las vistas (I18N.t) y el arranque (aplicarDOM). */
+        I18N: 'readonly',
         CFG: 'writable',
         busy: 'writable',
         listening: 'writable',

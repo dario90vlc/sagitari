@@ -3,4 +3,6 @@
 window.I18N_ES = {
   'prueba.texto': 'Hola',
   'prueba.ph': 'Escribe aquí',
+  'prueba.title': 'Título de prueba',
+  'prueba.aria': 'Etiqueta de prueba',
 };
