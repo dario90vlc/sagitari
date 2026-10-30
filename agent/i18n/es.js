@@ -31,6 +31,11 @@ module.exports = {
   'aviso.tarea.pausada': 'pausada',
   'aviso.tarea.actualizada': 'actualizada',
   'error.remitente': 'remitente no autorizado',
+  'error.interno.titulo': 'SAGITARI — fallo interno',
+  'error.interno.aviso': 'Fallo interno ({tipo}): {mensaje}\nSe ha guardado en logs\\crash.log',
+  'error.interno.detalle': '{mensaje}\n\nDetalle completo en logs\\crash.log',
+  'skills.previa': '«{repo}» trae {n} skill(s): {nombres}{mas}. Son instrucciones que el agente obedecerá: pulsa Importar otra vez para confirmar.',
+  'skills.previa.mas': '… (y más)',
 
   /* ---- conversaciones ---- */
   'conv.nueva': 'Nueva conversación',
@@ -43,6 +48,8 @@ module.exports = {
   'conv.aviso.ilegible.cero': 'Se empieza de cero.',
   'conv.aviso.ilegible.conservado': ' El fichero ilegible se conserva como «{archivo}».',
   'conv.aviso.disco': 'La conversación no se pudo escribir en disco ({motivo}). Los mensajes nuevos pueden perderse al cerrar la app.',
+  'conv.forma.fichero': 'el fichero no contiene una lista de conversaciones',
+  'conv.forma.bak': 'el .bak no contiene una lista',
   'conv.ruta.no.carpeta': 'La ruta no es una carpeta',
   'conv.rebobinar.fuera': 'Punto de rebobinado fuera del hilo',
   'conv.trabajando.rebobinar': 'SAGITARI está trabajando ahora mismo: detén la tarea antes de rebobinar',
@@ -70,7 +77,7 @@ module.exports = {
   'chat.sin.agente': 'sin agente',
   'chat.turno.en.curso': 'hay un turno en curso; deténlo antes de regenerar',
   'chat.conv.no.lista': 'la conversación todavía no está lista',
-  'chat.trabajando': 'SAGISTARI está trabajando ahora mismo: espera a que termine o detén la tarea',
+  'chat.trabajando': 'SAGITARI está trabajando ahora mismo: espera a que termine o detén la tarea',
   'chat.no.compacto': 'no se pudo compactar: {motivo}',
   'chat.compacto.fallo': 'no se pudo compactar',
   'chat.orden.desconocida': 'orden desconocida: /{cmd}',
@@ -82,6 +89,10 @@ module.exports = {
   'chat.compacto.hecho': 'Contexto compactado: {antes} mensajes → {despues}. El resumen queda como punto de partida.',
   'chat.adjunto.binario': 'parece binario',
   'chat.adjunto.binario.generico': 'binario',
+  'chat.marca.imagen': '(análisis de imagen)',
+  'chat.marca.adjunto': '(adjunto sin texto)',
+  'chat.skill.aplicar': 'Aplica la skill {nombre}.',
+  'chat.skill.aplicada': 'Skill {nombre} aplicada',
 
   /* ---- proveedores ---- */
   'config.prov.invalido': 'proveedor inválido',
@@ -100,6 +111,7 @@ module.exports = {
   'prov.err.http': '{motivo} (HTTP {estado})',
   'prov.err.http.detalle': '{motivo} (HTTP {estado}) — «{detalle}»',
   'prov.err.quien': '{quien}: {mensaje}',
+  'prov.err.quien.proveedor': 'el proveedor',
   'prov.grande': 'respuesta demasiado grande (máx. 2 MB)',
   'prov.clave.cifrada':
     'la clave guardada no se puede descifrar en este equipo (el config llegó de otro perfil o de otro equipo): vuelve a escribirla en Ajustes ▸ Proveedores',
@@ -179,6 +191,8 @@ module.exports = {
   'upd.verificacion.fallo': 'la verificación sha512 falló: el archivo se ha descartado',
   'upd.descartado.manual': '{motivo}: descartado por seguridad. Puedes instalarlo a mano desde {url}',
   'upd.asistente.fallo': 'el asistente no llegó a arrancar (vía {via}: sin PowerShell, tarea bloqueada o política del equipo)',
+  'upd.via.tarea': 'tarea programada',
+  'upd.via.clasica': 'clásica',
   'upd.asistente.error': 'no se pudo arrancar el asistente de instalación: {motivo}. Puedes instalar a mano: {ruta}',
   'upd.instalador.preparar': 'no se pudo preparar el instalador: {motivo}',
   'upd.sin.descarga': 'todavía no hay ninguna actualización descargada',

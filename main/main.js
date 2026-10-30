@@ -442,7 +442,11 @@ let avisoDiscoAt = 0;
    sueltan en cuanto la ventana está cargada. Antes se enviaban a una ventana que aún no
    existía y el usuario no se enteraba de nada (en la app empaquetada no hay consola). */
 const avisosPendientes = [];
+/* `titulo`/`mensaje` pueden llegar como FUNCIÓN: un router se monta antes de que se fije
+   el idioma, así que el texto se resuelve aquí, cuando de verdad se pinta. */
 function enviarAviso(titulo, mensaje) {
+  if (typeof titulo === 'function') ({ titulo, mensaje } = titulo());
+  else if (typeof mensaje === 'function') mensaje = mensaje();
   const w = getWin();
   if (!w || w.isDestroyed()) {
     if (avisosPendientes.length < 5) avisosPendientes.push({ titulo, mensaje });
@@ -519,9 +523,13 @@ function registrarFallo(kind, err) {
       if (getWin() && !getWin().isDestroyed())
         getWin().webContents.send('agent:event', {
           type: 'error',
-          message: 'Fallo interno (' + kind + '): ' + message.slice(0, 200) + '\nSe ha guardado en logs\\crash.log',
+          message: i18n.t('error.interno.aviso', { tipo: kind, mensaje: message.slice(0, 200) }),
         });
-      else dialog.showErrorBox('SAGITARI — fallo interno', message.slice(0, 400) + '\n\nDetalle completo en logs\\crash.log');
+      else
+        dialog.showErrorBox(
+          i18n.t('error.interno.titulo'),
+          i18n.t('error.interno.detalle', { mensaje: message.slice(0, 400) }),
+        );
     } catch {}
   }
   return message;

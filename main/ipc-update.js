@@ -298,14 +298,16 @@ function registerUpdateIpc(ipcMain, ctx) {
     // Vía principal (3.3.4): el Programador de tareas ejecuta al ayudante en el
     // servicio del sistema, no como hijo de la app —sobrevive a su cierre por
     // construcción, que es justo lo que el cmd desligado no garantizaba—.
-    let via = 'tarea programada';
+    /* La vía se guarda como CLAVE y se traduce al pintarla: el error que la usa se
+       envía a pantalla y en inglés no puede llevar «tarea programada». */
+    let via = 'upd.via.tarea';
     try {
       await updater.programarInstalacion({ dir: path.dirname(d.path), ...comun });
     } catch (e) {
       // Plan B: el cmd desligado de siempre. En las máquinas donde el árbol
       // sobrevive funciona (3/3 medido); donde no, el diario con latido dirá
       // hasta dónde llegó. Mejor intentarlo que dejar al usuario sin nada.
-      via = 'clásica';
+      via = 'upd.via.clasica';
       runlog.log({ agent: 'sagitari', event: 'update_install_fallback', version: d.version, reason: e.message });
       const plan = updater.afterExitCommand(comun);
       let hijo;
@@ -344,7 +346,7 @@ function registerUpdateIpc(ipcMain, ctx) {
       setTimeout(mirar, 150);
     });
     if (!arrancado) {
-      const reason = i18n.t('upd.asistente.fallo', { via });
+      const reason = i18n.t('upd.asistente.fallo', { via: i18n.t(via) });
       // La tarea se programó con `/sc once /st <+5 min>` ADEMÁS del `/run`: si el
       // ayudante no llegó a arrancar, esa tarea sigue viva y se dispararía sola
       // cinco minutos después, sin la app delante y sin nadie esperando su rastro.
@@ -372,7 +374,7 @@ function registerUpdateIpc(ipcMain, ctx) {
       at: new Date().toISOString(),
     });
     const pendiente = pendingInfo();
-    runlog.log({ agent: 'sagitari', event: 'update_install', version: d.version, log: logPath, via });
+    runlog.log({ agent: 'sagitari', event: 'update_install', version: d.version, log: logPath, via: i18n.t(via) });
     // cierre ordenado (cierra Chrome, tareas). El ayudante espera
     // a que la app desaparezca de verdad, así que no hace falta adivinar un margen.
     setTimeout(() => {

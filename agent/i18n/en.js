@@ -30,6 +30,11 @@ module.exports = {
   'aviso.tarea.pausada': 'paused',
   'aviso.tarea.actualizada': 'updated',
   'error.remitente': 'unauthorized sender',
+  'error.interno.titulo': 'SAGITARI — internal error',
+  'error.interno.aviso': 'Internal error ({tipo}): {mensaje}\nSaved to logs\\crash.log',
+  'error.interno.detalle': '{mensaje}\n\nFull details in logs\\crash.log',
+  'skills.previa': '«{repo}» brings {n} skill(s): {nombres}{mas}. They are instructions the agent will obey: press Import again to confirm.',
+  'skills.previa.mas': '… (and more)',
 
   /* ---- conversations ---- */
   'conv.nueva': 'New conversation',
@@ -42,6 +47,8 @@ module.exports = {
   'conv.aviso.ilegible.cero': 'Starting from scratch.',
   'conv.aviso.ilegible.conservado': ' The unreadable file is kept as «{archivo}».',
   'conv.aviso.disco': 'The conversation could not be written to disk ({motivo}). New messages may be lost when the app closes.',
+  'conv.forma.fichero': 'the file does not contain a list of conversations',
+  'conv.forma.bak': 'the .bak does not contain a list',
   'conv.ruta.no.carpeta': 'The path is not a folder',
   'conv.rebobinar.fuera': 'Rewind point outside the thread',
   'conv.trabajando.rebobinar': 'SAGITARI is working right now: stop the task before rewinding',
@@ -81,6 +88,10 @@ module.exports = {
   'chat.compacto.hecho': 'Context compacted: {antes} messages → {despues}. The summary remains as the starting point.',
   'chat.adjunto.binario': 'looks binary',
   'chat.adjunto.binario.generico': 'binary',
+  'chat.marca.imagen': '(image analysis)',
+  'chat.marca.adjunto': '(attachment without text)',
+  'chat.skill.aplicar': 'Apply the {nombre} skill.',
+  'chat.skill.aplicada': 'Skill {nombre} applied',
 
   /* ---- providers ---- */
   'config.prov.invalido': 'invalid provider',
@@ -99,6 +110,7 @@ module.exports = {
   'prov.err.http': '{motivo} (HTTP {estado})',
   'prov.err.http.detalle': '{motivo} (HTTP {estado}) — «{detalle}»',
   'prov.err.quien': '{quien}: {mensaje}',
+  'prov.err.quien.proveedor': 'the provider',
   'prov.grande': 'response too large (max. 2 MB)',
   'prov.clave.cifrada':
     'the saved key cannot be decrypted on this machine (the config came from another profile or computer): type it again in Settings ▸ Providers',
@@ -179,6 +191,8 @@ module.exports = {
   'upd.verificacion.fallo': 'sha512 verification failed: the file has been discarded',
   'upd.descartado.manual': '{motivo}: discarded for safety. You can install it manually from {url}',
   'upd.asistente.fallo': 'the helper never started (via {via}: no PowerShell, blocked task or machine policy)',
+  'upd.via.tarea': 'scheduled task',
+  'upd.via.clasica': 'classic',
   'upd.asistente.error': 'could not start the install helper: {motivo}. You can install manually: {ruta}',
   'upd.instalador.preparar': 'could not prepare the installer: {motivo}',
   'upd.sin.descarga': 'there is no downloaded update yet',

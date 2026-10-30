@@ -9,6 +9,7 @@
  */
 
 function registerSkillsIpc(ipcMain, { skills, runlog }) {
+  const i18n = require('../agent/i18n');
   ipcMain.handle('skills:list', () => skills.listSkills());
   ipcMain.handle('skills:toggle', async (e, { id, enabled }) => {
     await skills.setEnabled(id, enabled);
@@ -28,11 +29,12 @@ function registerSkillsIpc(ipcMain, { skills, runlog }) {
         ok: false,
         needsConfirm: true,
         preview,
-        error:
-          `«${preview.repo}» trae ${preview.total} skill(s): ` +
-          preview.items.map((s) => s.name).join(', ') +
-          (preview.truncated ? `… (y más)` : '') +
-          `. Son instrucciones que el agente obedecerá: pulsa Importar otra vez para confirmar.`,
+        error: i18n.t('skills.previa', {
+          repo: preview.repo,
+          n: preview.total,
+          nombres: preview.items.map((s) => s.name).join(', '),
+          mas: preview.truncated ? i18n.t('skills.previa.mas') : '',
+        }),
       };
     }
     return skills.importFromGitHub(repo);

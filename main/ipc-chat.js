@@ -223,8 +223,8 @@ function registerChatIpc(ipcMain, ctx) {
     // `attach.MAX_ADJUNTOS_CHARS` caracteres en conversations.json —un fichero que se lee
     // completo al arrancar y se reescribe en cada turno, con copia `.bak`— y el renderer
     // tenía que recortarlos con una expresión regular al repintar.
-    let frase = text || (imgAtts.length && !txtAtts.length ? '(análisis de imagen)' : '');
-    if (!frase && !txtAtts.length) frase = '(adjunto sin texto)';
+    let frase = text || (imgAtts.length && !txtAtts.length ? i18n.t('chat.marca.imagen') : '');
+    if (!frase && !txtAtts.length) frase = i18n.t('chat.marca.adjunto');
     // Este marcador lo recorta el renderer al repintar (renderer/40-vistas.js): la ficha
     // guardada tiene que empezar por el mismo texto o la burbuja al reabrir enseñaría la
     // ficha como si fuera prosa del usuario.
@@ -234,7 +234,7 @@ function registerChatIpc(ipcMain, ctx) {
     if (txtAtts.length) {
       body = (body ? body + '\n\n' : '') + marcaAdj + attach.blocksFor(txtAtts);
     }
-    if (!body) body = '(adjunto sin texto)';
+    if (!body) body = i18n.t('chat.marca.adjunto');
     // comando manual de skill: "/skill <resto>" — el usuario fuerza la skill
     const sm = String(text || '').match(/^\/([\w-]+)\s*([\s\S]*)$/);
     if (sm) {
@@ -244,10 +244,14 @@ function registerChatIpc(ipcMain, ctx) {
         a.history.push({ role: 'system', content: `SKILL ACTIVADA POR EL USUARIO: ${s.name}\n\n${s.body}` });
         // la skill manda: su texto sustituye al de la frase (y sigue siendo lo único que
         // se envía y lo único que se guarda, igual que antes)
-        frase = (sm[2] || '').trim() || `Aplica la skill ${s.name}.`;
+        frase = (sm[2] || '').trim() || i18n.t('chat.skill.aplicar', { nombre: s.name });
         body = frase;
         if (getWin() && !getWin().isDestroyed())
-          getWin().webContents.send('agent:event', { type: 'status', convId: c.id, text: `Skill ${s.name} aplicada` });
+          getWin().webContents.send('agent:event', {
+            type: 'status',
+            convId: c.id,
+            text: i18n.t('chat.skill.aplicada', { nombre: s.name }),
+          });
       }
     }
     trazaNueva(c.id); // cada conversación estrena su rastro; el anterior ya está guardado con su mensaje

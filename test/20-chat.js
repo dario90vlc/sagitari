@@ -858,8 +858,13 @@ test('adjuntos: main delega en el módulo de adjuntos y conserva los metadatos',
   );
   // el mensaje guardado conserva metadatos de adjuntos (miniaturas al recargar)
   ok(/attachments: attMeta/.test(main), 'los metadatos de adjuntos deben guardarse en la conversación');
-  // el body por defecto con imagen pero sin texto sigue funcionando
-  ok(/\(análisis de imagen\)/.test(main), 'imagen sola debe tener texto por defecto');
+  // el body por defecto con imagen pero sin texto sigue funcionando (el texto vive en
+  // el diccionario del motor: se comprueba la clave y que la frase siga siendo la misma)
+  ok(
+    /i18n\.t\('chat\.marca\.imagen'\)/.test(main) &&
+      /\(análisis de imagen\)/.test(require('../agent/i18n/es')['chat.marca.imagen']),
+    'imagen sola debe tener texto por defecto',
+  );
 });
 
 test('adjuntos: el agente acepta varias imágenes y retry las conserva', () => {

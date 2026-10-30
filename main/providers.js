@@ -237,7 +237,9 @@ function errorDeProveedor(status, cuerpo, quien) {
     : conocido;
   const detalle = detalleDeError(cuerpo);
   const mensaje = i18n.t(detalle ? 'prov.err.http.detalle' : 'prov.err.http', { motivo: base, estado: status, detalle });
-  return new Error(quien ? i18n.t('prov.err.quien', { quien, mensaje }) : mensaje);
+  return new Error(
+    i18n.t('prov.err.quien', { quien: quien || i18n.t('prov.err.quien.proveedor'), mensaje }),
+  );
 }
 
 /** Lee el cuerpo con tope, abortando al pasarse (ver agent/skills.js:readCapped). */

@@ -47,7 +47,14 @@ function registerConvsIpc(ipcMain, ctx) {
     const parsed = JSON.parse(fs.readFileSync(CONV_FILE, 'utf8'));
     // un JSON válido con otra forma (`{}`, un número…) es igual de ilegible que uno roto:
     // antes se descartaba en silencio y el primer guardado pisaba el fichero y el .bak
-    if (!Array.isArray(parsed)) throw new Error('el fichero no contiene una lista de conversaciones');
+    if (!Array.isArray(parsed)) {
+      /* El motivo viaja al aviso, que se pinta DESPUÉS de fijar el idioma: se guarda la
+         CLAVE en el error y se traduce al construir el aviso (aquí el idioma aún no
+         está decidido). El mensaje queda para el log. */
+      const malo = new Error(i18n.t('conv.forma.fichero'));
+      malo.clave = 'conv.forma.fichero';
+      throw malo;
+    }
     convs = parsed;
   } catch (err) {
     // Antes este fallo se silenciaba y el historial «desaparecía» sin decir nada.
@@ -68,7 +75,7 @@ function registerConvsIpc(ipcMain, ctx) {
       let desdeBak = false;
       try {
         convs = JSON.parse(fs.readFileSync(CONV_FILE + '.bak', 'utf8'));
-        if (!Array.isArray(convs)) throw new Error('el .bak no contiene una lista');
+        if (!Array.isArray(convs)) throw new Error(i18n.t('conv.forma.bak'));
         desdeBak = true;
       } catch {
         convs = [];
@@ -76,12 +83,18 @@ function registerConvsIpc(ipcMain, ctx) {
       console.error('conversations.json ilegible (' + err.message + '): ' + (desdeBak ? 'recuperado desde el .bak' : 'se empieza de cero'));
       // El aviso tiene que llegar a la ventana: en la app empaquetada no hay consola y el
       // toast se suelta cuando la ventana está lista (main.js encola si aún no existe).
-      const aviso = i18n.t('conv.aviso.ilegible', {
-        motivo: err.message,
-        estado: i18n.t(desdeBak ? 'conv.aviso.ilegible.bak' : 'conv.aviso.ilegible.cero'),
-        conservado: conservado ? i18n.t('conv.aviso.ilegible.conservado', { archivo: path.basename(cuarentena) }) : '',
+      /* Se pasa como FUNCIÓN: este router se monta antes de que main.js lea config.json y
+         fije el idioma, así que traducir aquí congelaría el idioma por defecto y el aviso
+         saldría siempre en español. `enviarAviso` la resuelve en el momento de mandarlo. */
+      const aviso = () => ({
+        titulo: i18n.t('conv.aviso.titulo'),
+        mensaje: i18n.t('conv.aviso.ilegible', {
+          motivo: err.clave ? i18n.t(err.clave) : err.message,
+          estado: i18n.t(desdeBak ? 'conv.aviso.ilegible.bak' : 'conv.aviso.ilegible.cero'),
+          conservado: conservado ? i18n.t('conv.aviso.ilegible.conservado', { archivo: path.basename(cuarentena) }) : '',
+        }),
       });
-      if (typeof ctx.avisar === 'function') ctx.avisar(i18n.t('conv.aviso.titulo'), aviso);
+      if (typeof ctx.avisar === 'function') ctx.avisar(aviso);
       else ctx.onSaveError(aviso);
     }
   }
