@@ -86,6 +86,7 @@ const { TaskManager } = require('../agent/tasks');
 const { PRESETS, listModels } = require('./providers');
 const updater = require('./updater');
 const skills = require('../agent/skills');
+const i18n = require('../agent/i18n');
 const { registerSkillsIpc } = require('./ipc-skills');
 registerSkillsIpc(ipcMain, { skills, runlog: require('../agent/runlog') });
 
@@ -216,6 +217,11 @@ let config = {
   mcp: { enabled: true, servers: [] }, // servidores MCP del usuario (ver main/mcp-config.js)
 };
 
+/* Idioma de la interfaz resuelto al arrancar. Se declara con el español puesto porque el
+   factory de la ventana se monta ANTES de leer config.json; cuando la ventana se abre de
+   verdad (siempre después de loadConfig) ya lleva el valor definitivo. */
+let idiomaActivo = 'es';
+
 // Ventana principal: se crea aquí con dependencias lazy (agentes y config se asignan más tarde)
 const ventana = crearVentana({
   HIDDEN,
@@ -230,6 +236,8 @@ const ventana = crearVentana({
   /* La ventana ya está cargada: es el momento de soltar los avisos que llegaron antes de
      que existiera (el historial ilegible se detecta al cargar conversations.json). */
   onListo: () => soltarAvisos(),
+  /* Función, no valor: config.json no se ha leído todavía al montar el factory. */
+  idioma: () => idiomaActivo,
 });
 const { createChatWindow, showWindow, glow, getWin } = ventana;
 
@@ -1023,6 +1031,11 @@ app.whenReady().then(() => {
     log.warn('[permisos] no se pudo fijar el manejador: ' + ((e && e.message) || e));
   }
   loadConfig();
+  /* Idioma: UNA lectura al arrancar, con la configuración ya cargada y antes de crear la
+     ventana. Lo elegido en Ajustes manda; si está en «auto» decide el locale del sistema.
+     El motor queda configurado aquí para todos sus mensajes. */
+  idiomaActivo = i18n.resolverIdioma(config.settings && config.settings.uiLang, app.getLocale());
+  i18n.configurar(idiomaActivo);
   if (BANCO) {
     correrBancoYsalir().catch((e) => {
       console.error('[banco] ' + ((e && e.message) || e));

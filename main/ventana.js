@@ -13,7 +13,12 @@ const { BrowserWindow, screen, shell, dialog, app } = require('electron');
 const { pathToFileURL } = require('url');
 const path = require('path');
 
-function crearVentana({ HIDDEN, DEV, INDEX_HTML, getAgent, getConfig, saveConfig, onListo = null }) {
+function crearVentana({ HIDDEN, DEV, INDEX_HTML, getAgent, getConfig, saveConfig, onListo = null, idioma = 'es' }) {
+  /* El idioma se lee al ABRIR la ventana, no al montar el factory: main.js monta este
+     factory antes de leer config.json, así que en ese momento todavía no se conoce lo
+     que el usuario eligió. Por eso `idioma` puede venir como valor o como función. */
+  const idiomaDeVentana = () => (typeof idioma === 'function' ? idioma() : idioma);
+
   let win = null; // chat
   let boundsTimer = null;
   let recuperacionTimer = null; // reintento de carga tras caerse el renderer
@@ -98,6 +103,10 @@ function crearVentana({ HIDDEN, DEV, INDEX_HTML, getAgent, getConfig, saveConfig
         nodeIntegration: false,
         sandbox: true, // el preload solo usa contextBridge + ipcRenderer
         spellcheck: false,
+        /* Único canal del idioma hacia el renderer: el preload lo lee de process.argv.
+           Se comprueba al crear la ventana para que una recreación tras una caída
+           reciba el mismo idioma. */
+        additionalArguments: ['--sag-idioma=' + (idiomaDeVentana() === 'en' ? 'en' : 'es')],
       },
       icon: path.join(__dirname, '..', 'renderer', 'assets', 'sagitari.ico'),
       show: !HIDDEN,

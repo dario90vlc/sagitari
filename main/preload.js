@@ -1,5 +1,9 @@
 const { contextBridge, ipcRenderer, webUtils } = require('electron');
 
+/* Idioma resuelto por main y pasado como argumento del renderer: sin canal IPC nuevo y
+   disponible antes de que el renderer cargue (window.sagitari.idioma). */
+const idiomaUI = (process.argv.find((a) => a.startsWith('--sag-idioma=')) || '').split('=')[1] === 'en' ? 'en' : 'es';
+
 /* Suscripción con baja. Cada on* devuelve la función que la cancela: sin ella,
    volver a llamar a un on* (reinit del renderer, recableado de estado) dejaba
    dos listeners vivos y el mismo evento se atendía dos veces. */
@@ -10,6 +14,8 @@ const on = (channel, make) => (cb) => {
 };
 
 contextBridge.exposeInMainWorld('sagitari', {
+  // Idioma de la interfaz ('es'|'en') tal como lo resolvió main al arrancar.
+  idioma: idiomaUI,
   // Electron ≥32 eliminó File.path: la ruta real de un archivo soltado/pegado
   // sólo se obtiene por aquí (compatible con sandbox: true)
   filePath: (file) => webUtils.getPathForFile(file),

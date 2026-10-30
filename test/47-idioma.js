@@ -26,6 +26,16 @@ test('idioma: t() interpola y nunca queda vacío', () => {
   i18n.configurar('es');
 });
 
+test('idioma: el renderer lee el idioma de argv (canal único, sin IPC)', () => {
+  const fs = require('fs');
+  const path = require('path');
+  const src = fs.readFileSync(path.join(__dirname, '..', 'main', 'preload.js'), 'utf8');
+  ok(/--sag-idioma=/.test(src), 'el preload tiene que leer el argumento');
+  ok(/idioma:/.test(src), 'y exponerlo como idioma');
+  const ventana = fs.readFileSync(path.join(__dirname, '..', 'main', 'ventana.js'), 'utf8');
+  ok(/additionalArguments:\s*\[/.test(ventana), 'la ventana tiene que pasar el argumento');
+});
+
 test('idioma: los dos diccionarios del motor tienen exactamente las mismas claves', () => {
   const i18n = require('../agent/i18n');
   const es = i18n.claves('es').sort();
