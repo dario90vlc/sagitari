@@ -435,7 +435,9 @@ const MEM_GRUPOS = [
 function memTituloCategoria(clave) {
   if (clave === 'todo') return I18N.t('memoria.cat.todo');
   const g = MEM_GRUPOS.find((x) => x.olvidar === clave);
-  return g ? I18N.t(g.titulo) : clave;
+  /* En una frase el nombre de la categoría va en minúscula («en webs»); el rótulo del
+     grupo (hgr-t) sí va capitalizado. */
+  return g ? I18N.t(g.titulo).toLowerCase() : clave;
 }
 
 function memFilas(area, valor) {
@@ -473,7 +475,7 @@ async function pintarHabitos() {
     const total = filas.reduce((n, f) => n + f.count, 0);
     const titulo = I18N.t(g.titulo);
     const usos = I18N.t(total === 1 ? 'ajustes.habitos.usos.uno' : 'ajustes.habitos.usos.varios');
-    const olvidar = I18N.t('ajustes.habitos.olvidar', { titulo });
+    const olvidar = I18N.t('ajustes.habitos.olvidar', { titulo: titulo.toLowerCase() });
     bloques.push(
       `<div class="hgrupo" data-cat="${esc(g.cat)}"><span class="hgr-t">${ic(g.icono)} ${esc(titulo)}</span>` +
         `<span class="hgr-n">${total} ${esc(usos)}</span>` +

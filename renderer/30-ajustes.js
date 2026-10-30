@@ -1923,7 +1923,7 @@ async function renderHabitsPreview() {
     const total = filas.reduce((n, f) => n + f.count, 0);
     const usos = I18N.t(total === 1 ? 'ajustes.habitos.usos.uno' : 'ajustes.habitos.usos.varios');
     const titulo = I18N.t(g.titulo); // el rótulo del grupo es una clave: se resuelve aquí
-    const olvidar = I18N.t('ajustes.habitos.olvidar', { titulo });
+    const olvidar = I18N.t('ajustes.habitos.olvidar', { titulo: titulo.toLowerCase() });
     bloques.push(
       `<div class="hgrupo" data-cat="${esc(g.cat)}"><span class="hgr-t">${ic(g.icono)} ${esc(titulo)}</span>` +
         `<span class="hgr-n">${total} ${esc(usos)}</span>` +

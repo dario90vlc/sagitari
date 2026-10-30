@@ -110,7 +110,7 @@ async function renderHistory() {
     it.setAttribute('aria-label', I18N.t('vistas.hist.abrir', { titulo: c.title }));
     it.title = c.title;
     const d = new Date(c.updatedAt);
-    const when = d.toLocaleDateString('es') + ' · ' + d.toLocaleTimeString('es', { hour: '2-digit', minute: '2-digit' });
+    const when = d.toLocaleDateString(I18N.idioma) + ' · ' + d.toLocaleTimeString(I18N.idioma, { hour: '2-digit', minute: '2-digit' });
     it.innerHTML = `<div class="hic">${ic('chat')}</div>
       <div class="hmain"><b>${esc(c.title)}</b><small>${c.busy ? '<span class="hbusy">' + esc(I18N.t('vistas.hist.trabajando')) + '</span> ' : ''}${esc(I18N.t(c.count === 1 ? 'vistas.hist.mensajes.uno' : 'vistas.hist.mensajes.varios', { n: c.count }))} · ${when}</small></div>
       <button class="btn ghost sq hfork" data-fork="${esc(c.id)}" title="${esc(I18N.t('vistas.hist.duplicar'))}" aria-label="${esc(I18N.t('vistas.hist.duplicar.aria', { titulo: c.title }))}">${ic('copy')}</button>
@@ -1273,7 +1273,7 @@ async function renderTasks() {
     const it = document.createElement('div');
     it.className = 'hitem';
     const d = new Date(t.updatedAt);
-    const when = d.toLocaleDateString('es') + ' · ' + d.toLocaleTimeString('es', { hour: '2-digit', minute: '2-digit' });
+    const when = d.toLocaleDateString(I18N.idioma) + ' · ' + d.toLocaleTimeString(I18N.idioma, { hour: '2-digit', minute: '2-digit' });
     const err = t.lastError
       ? `<small class="md" style="color:var(--danger)">✗ ${esc(t.lastError.step || '')}${t.lastError.tool ? ' · ' + esc(t.lastError.tool) : ''}: ${esc(K.clip(t.lastError.message, 120))}</small><br>`
       : '';
@@ -1281,7 +1281,7 @@ async function renderTasks() {
       ? `<small class="md">${esc(I18N.t('vistas.tarea.herramientas', { n: t.live.toolCalls || 0 }))} · ${(t.live.tokensIn || 0) + (t.live.tokensOut || 0)} tok${t.live.costUsd ? ' · $' + t.live.costUsd.toFixed(4) : ''}${t.live.toolsFired && t.live.toolsFired.length ? ' · ' + esc(I18N.t('vistas.tarea.ultima', { herramienta: t.live.toolsFired[t.live.toolsFired.length - 1].name })) : ''}</small><br>`
       : '';
     const sched =
-      t.status === 'scheduled' && t.scheduledAt ? `<small class="md">→ ${new Date(t.scheduledAt).toLocaleString('es')}</small><br>` : '';
+      t.status === 'scheduled' && t.scheduledAt ? `<small class="md">→ ${new Date(t.scheduledAt).toLocaleString(I18N.idioma)}</small><br>` : '';
     // sin role=button: la fila lleva botones propios (pausar, reanudar, borrar…)
     const objetivo = t.goal || I18N.t('vistas.tarea.sinObjetivo');
     it.setAttribute('aria-label', I18N.t('vistas.tarea.aria', { objetivo, estado: st.label }));
