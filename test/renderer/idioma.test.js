@@ -115,27 +115,39 @@ check('idioma: toda clave que usa el JS del renderer existe en los dos diccionar
   const ficheros = fs
     .readdirSync(RAIZ_JS)
     .filter((f) => f.endsWith('.js') && !f.startsWith('i18n') && !f.endsWith('.min.js'));
-  /* Cualquier literal con FORMA de clave (área.en minúsculas), no solo los que van
-     pegados a un `I18N.t(`: las claves también viajan en mapas que se pintan después
-     (`PERM_INFO`, `PERM_GROUPS[].titulo`, `PERM_LABEL`, `NIVEL_CLAVE`) y en las ramas de
-     un ternario dentro de `I18N.t(cond ? 'a' : 'b')`. Con el prefijo `I18N.t(` delante se
-     quedaban sin vigilar 66 de las 246 claves de `30-ajustes.js` —quitar una de los DOS
-     diccionarios no rompía nada y el panel pintaba `⟦clave⟧`—.
-     El literal entero tiene que encajar (comillas incluidas), así que `'sagi.setTab'` o
-     `'sagi.adv.'`, que no son claves, no entran: la mayúscula o el punto final no cuadran. */
-  const CLAVE = /(['"])((?:[a-z][a-z0-9_]*\.)+[a-z0-9_]+)\1/g;
+  /* Dos barridos, unidos en el mismo conjunto:
+     - **`I18N.t('literal')`**: cualquier cadena que se le pase a `t`, sin adivinar su
+       forma. Es el que cubre una clave de un área que todavía no existe en el diccionario
+       (si solo mirásemos áreas conocidas, un `ajustes.nuevaCosa` recién escrito pasaría
+       sin ver).
+     - **Literal con forma de clave cuya PRIMERA parte es un área real del diccionario**:
+       las claves también viajan en mapas que se pintan después (`PERM_INFO`,
+       `PERM_GROUPS[].titulo`, `PERM_LABEL`, `NIVEL_CLAVE`) y en las ramas de un ternario
+       dentro de `I18N.t(cond ? 'a' : 'b')`, donde no hay `I18N.t(` delante. La decisión
+       es por ÁREA, no por la escritura: este repo escribe las claves en camelCase
+       (`ajustes.upd.buscandoCorto`), así que una forma «todo minúsculas» dejaba fuera
+       medio diccionario y `'sagi.setTab'` (área `sagi`, que no existe) entra por el otro
+       lado. */
+  const areas = new Set(Object.keys(es).map((k) => k.split('.')[0]));
+  const CLAVE = /(['"])([A-Za-z][A-Za-z0-9_]*(?:\.[A-Za-z0-9_]+)+)\1/g;
+  const LLAMADA = /I18N\.t\(\s*(['"])([^'"]+)\1/g;
   const usadas = new Set();
   for (const f of ficheros) {
     const src = fs.readFileSync(path.join(RAIZ_JS, f), 'utf8');
-    for (const m of src.matchAll(CLAVE)) usadas.add(m[2]);
+    for (const m of src.matchAll(LLAMADA)) usadas.add(m[2]);
+    for (const m of src.matchAll(CLAVE)) {
+      if (areas.has(m[2].split('.')[0])) usadas.add(m[2]);
+    }
   }
   const faltanEs = [...usadas].filter((k) => !(k in es));
   const faltanEn = [...usadas].filter((k) => !(k in en));
   eq(faltanEs.join(', '), '', 'claves que el JS usa y faltan en español');
   eq(faltanEn.join(', '), '', 'claves que el JS usa y faltan en inglés');
   /* El barrido tiene que estar mirando algo: si el detector se volviera ciego (o alguien
-     le cambiara la forma), las dos líneas de arriba saldrían verdes sin vigilar nada. */
-  eq(usadas.size > 400, true, 'el barrido de claves tiene que ver cientos, no ' + usadas.size);
+     le cambiara la forma), las dos líneas de arriba saldrían verdes sin vigilar nada.
+     Hoy ve 493; el umbral deja sitio a que se borren claves sin que la prueba se
+     convierta en un cepo, pero no a que el detector se quede a medias. */
+  eq(usadas.size >= 490, true, 'el barrido de claves tiene que ver cientos, no ' + usadas.size);
 });
 
 check('idioma: los rótulos que pinta el CSS se traducen por data-i18n-label', () => {
