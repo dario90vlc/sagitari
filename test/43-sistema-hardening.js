@@ -1115,10 +1115,14 @@ test('idioma: el renderer no lleva textos fijos fuera de los diccionarios', () =
   const PENDIENTES = ['30-ajustes.js', '40-vistas.js', 'memoria-ui.js', 'chatkit.js'];
   /* Dónde acaba un texto: nodos, atributos que se leen, avisos y registro. */
   const SINKS = /\btextContent\b|\binnerHTML\b|\.title\b|\baria-label\b|\bplaceholder\b|showToast\(|feed\(/;
-  /* Los literales se leen EMPAREJADOS: con un `'([^']*…)'` suelto el cierre de una clave
-     hacía de apertura y la «frase» se comía el comentario de tres líneas más abajo, así
-     que la prueba no podía ponerse verde ni con todo traducido. */
-  const LITERAL = /'(?:[^'\\\n]|\\.)*'/g;
+  /* Los literales se leen EMPAREJADOS y en las tres formas que pinta este renderer:
+     comillas simples, dobles y plantillas de UNA línea (el HTML se escribe con
+     backticks). Con un `'([^']*…)'` suelto el cierre de una clave hacía de apertura y la
+     «frase» se comía el comentario de tres líneas más abajo, así que la prueba no podía
+     ponerse verde ni con todo traducido.
+     LÍMITE: las plantillas de VARIAS líneas no se revisan (no hay cierre en su línea); si
+     aparecen con texto dentro, se revisan a mano en el barrido de T11. */
+  const LITERAL = /'(?:[^'\\\n]|\\.)*'|"(?:[^"\\\n]|\\.)*"|`(?:[^`\\\n]|\\.)*`/g;
   /* Una sentencia puede seguir en la línea siguiente: si la de arriba acaba en un
      operador, la frase que se pinta está abajo y también cuenta. */
   const CONTINUA = /[=+(,:?|&]$/;
@@ -1131,16 +1135,41 @@ test('idioma: el renderer no lleva textos fijos fuera de los diccionarios', () =
   // marcado puro: etiquetas y atributos, sin una sola letra de texto entre ellas
   const ETIQUETA = /<\/?[a-zA-Z][a-zA-Z0-9-]*(?:\s+[a-zA-Z-]+(?:="[^"]*")?)*\s*\/?>/g;
   const esMarcado = (s) => /[<>]/.test(s) && s.replace(ETIQUETA, '').trim() === '';
-  const permitido = (s) =>
-    s === '' || // cadena vacía
-    s.trim().length <= 2 || // separadores y unidades: ' · ', '%', 'x', ' KB'
-    /^(?:\\[nrt"'\\]|\s)*$/.test(s) || // solo escapes ('\n\n')
-    TOKEN.test(s) ||
-    CONSTANTE.test(s) ||
-    /^[.#]/.test(s) || // clase CSS o id
-    /^[a-z][a-z0-9+.-]*:\/\//i.test(s) || // URL
-    /^sagitari$/i.test(s) || // el nombre del producto
-    esMarcado(s); // una etiqueta con sus atributos, sin texto dentro
+  /* Lo que va dentro de `${…}` es código, no texto: se quita antes de clasificar (con
+     conteo de llaves, que una interpolación puede llevar un objeto dentro). */
+  const sinInterpolar = (s) => {
+    let fuera = '';
+    for (let i = 0; i < s.length; i++) {
+      if (s[i] !== '$' || s[i + 1] !== '{') {
+        fuera += s[i];
+        continue;
+      }
+      let hondo = 1;
+      i += 2;
+      while (i < s.length && hondo > 0) {
+        if (s[i] === '{') hondo++;
+        else if (s[i] === '}') hondo--;
+        i++;
+      }
+      i--; // el bucle vuelve a avanzar: el `}` que cierra no entra
+    }
+    return fuera;
+  };
+  const permitido = (crudo) => {
+    // se recorta antes de clasificar: `"aic ${look.cls}"` es la clase `aic`, no una frase
+    const s = sinInterpolar(crudo).trim();
+    return (
+      s === '' || // cadena vacía
+      s.length <= 2 || // separadores y unidades: ' · ', '%', 'x', ' KB'
+      /^(?:\\[nrt"'\\]|\s)*$/.test(s) || // solo escapes ('\n\n')
+      TOKEN.test(s) ||
+      CONSTANTE.test(s) ||
+      /^[.#]/.test(s) || // clase CSS o id
+      /^[a-z][a-z0-9+.-]*:\/\//i.test(s) || // URL
+      /^sagitari$/i.test(s) || // el nombre del producto
+      esMarcado(s) // una etiqueta con sus atributos, sin texto dentro
+    );
+  };
 
   /* Devuelve los literales sospechosos de un trozo de código. */
   const sospechososDe = (lineas) => {
@@ -1179,12 +1208,36 @@ test('idioma: el renderer no lleva textos fijos fuera de los diccionarios', () =
     '',
     'y dejar pasar una clave del diccionario',
   );
+  eq(
+    sospechososDe(['el.textContent = "No se pudo copiar";']).join(' | '),
+    'No se pudo copiar',
+    'también con comillas dobles',
+  );
+  eq(
+    sospechososDe(['tray.innerHTML = `<div class="subnote">Sin resultados.</div>`;']).join(' | '),
+    '<div class="subnote">Sin resultados.</div>',
+    'y dentro de una plantilla de una línea',
+  );
+  eq(
+    sospechososDe(['d.innerHTML = `<div class="aic ${a.cls || "a-p2"}">${ic(a.icon)}</div>`;']).join(' | '),
+    '',
+    'sin confundir el marcado con una frase (las interpolaciones no cuentan)',
+  );
 
   const sospechosos = [];
-  for (const f of fs.readdirSync(RAIZ).filter((x) => x.endsWith('.js') && !x.startsWith('i18n'))) {
+  /* `.min.js` fuera: `marked.min.js` es un paquete de terceros, no código de la casa. */
+  for (const f of fs.readdirSync(RAIZ).filter((x) => x.endsWith('.js') && !x.startsWith('i18n') && !x.endsWith('.min.js'))) {
     if (PENDIENTES.includes(f)) continue;
     const src = fs.readFileSync(path.join(RAIZ, f), 'utf8');
     for (const s of sospechososDe(src.split(/\r?\n/))) sospechosos.push(f + ': ' + s.slice(0, 40));
   }
   eq(sospechosos.slice(0, 5).join(' | '), '', 'textos sin clave');
+});
+
+test('idioma: el motor sigue emitiendo el código del aviso de ocupado', () => {
+  /* El renderer decide por `code` (el texto se traduce) y de eso depende que un envío
+     duplicado NO cierre el turno vivo. Si alguien quita el código del evento, el fallo
+     original vuelve sin que nada chille: se vigila por los dos lados. */
+  const agentSrc = fs.readFileSync(path.join(__dirname, '..', 'agent', 'agent.js'), 'utf8');
+  ok(/code:\s*'busy'/.test(agentSrc), 'el motor tiene que seguir emitiendo el código del aviso de ocupado');
 });
