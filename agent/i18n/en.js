@@ -48,7 +48,6 @@ module.exports = {
   'conv.aviso.ilegible.conservado': ' The unreadable file is kept as «{archivo}».',
   'conv.aviso.disco': 'The conversation could not be written to disk ({motivo}). New messages may be lost when the app closes.',
   'conv.forma.fichero': 'the file does not contain a list of conversations',
-  'conv.forma.bak': 'the .bak does not contain a list',
   'conv.ruta.no.carpeta': 'The path is not a folder',
   'conv.rebobinar.fuera': 'Rewind point outside the thread',
   'conv.trabajando.rebobinar': 'SAGITARI is working right now: stop the task before rewinding',

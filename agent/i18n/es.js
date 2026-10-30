@@ -49,7 +49,6 @@ module.exports = {
   'conv.aviso.ilegible.conservado': ' El fichero ilegible se conserva como «{archivo}».',
   'conv.aviso.disco': 'La conversación no se pudo escribir en disco ({motivo}). Los mensajes nuevos pueden perderse al cerrar la app.',
   'conv.forma.fichero': 'el fichero no contiene una lista de conversaciones',
-  'conv.forma.bak': 'el .bak no contiene una lista',
   'conv.ruta.no.carpeta': 'La ruta no es una carpeta',
   'conv.rebobinar.fuera': 'Punto de rebobinado fuera del hilo',
   'conv.trabajando.rebobinar': 'SAGITARI está trabajando ahora mismo: detén la tarea antes de rebobinar',

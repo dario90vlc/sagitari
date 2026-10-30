@@ -278,7 +278,7 @@ function registerChatIpc(ipcMain, ctx) {
     const guardado = [frase, fichaAdj].filter(Boolean).join('\n\n');
     c.messages.push({
       role: 'user',
-      content: guardado || '(adjunto sin texto)',
+      content: guardado || i18n.t('chat.marca.adjunto'),
       ts: Date.now(),
       mode: sentMode,
       attachments: attMeta.length ? attMeta : undefined,

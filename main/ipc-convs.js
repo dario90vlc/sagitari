@@ -75,7 +75,9 @@ function registerConvsIpc(ipcMain, ctx) {
       let desdeBak = false;
       try {
         convs = JSON.parse(fs.readFileSync(CONV_FILE + '.bak', 'utf8'));
-        if (!Array.isArray(convs)) throw new Error(i18n.t('conv.forma.bak'));
+        /* Solo diagnóstico: este error cae en el `catch {}` de abajo y su mensaje se
+           descarta, así que no lleva clave de diccionario (nunca se pinta). */
+        if (!Array.isArray(convs)) throw new Error('el .bak no contiene una lista');
         desdeBak = true;
       } catch {
         convs = [];
@@ -95,7 +97,9 @@ function registerConvsIpc(ipcMain, ctx) {
         }),
       });
       if (typeof ctx.avisar === 'function') ctx.avisar(aviso);
-      else ctx.onSaveError(aviso);
+      // onSaveError espera el TEXTO: se le pasa una función que lo produce (sigue siendo
+      // diferido) para no romper el contrato del toast con un objeto.
+      else ctx.onSaveError(() => aviso().mensaje);
     }
   }
   function saveConvs() {

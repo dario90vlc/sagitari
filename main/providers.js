@@ -302,7 +302,7 @@ async function listModels(baseUrl, apiKey, fetchFn = fetch, opts = {}) {
   });
   if (!resp.ok) {
     const t = await readCappedText(resp, 64 * 1024).catch(() => '');
-    throw errorDeProveedor(resp.status, t, (opts && opts.nombre) || 'el proveedor');
+    throw errorDeProveedor(resp.status, t, (opts && opts.nombre) || i18n.t('prov.err.quien.proveedor'));
   }
   const data = JSON.parse(await readCappedText(resp, MAX_MODELS_BYTES));
   const models = (data.data || data.models || []).map((m) => m.id || m.name).filter(Boolean);

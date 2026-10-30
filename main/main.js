@@ -443,15 +443,17 @@ let avisoDiscoAt = 0;
    existía y el usuario no se enteraba de nada (en la app empaquetada no hay consola). */
 const avisosPendientes = [];
 /* `titulo`/`mensaje` pueden llegar como FUNCIÓN: un router se monta antes de que se fije
-   el idioma, así que el texto se resuelve aquí, cuando de verdad se pinta. */
+   el idioma. Se encola la función TAL CUAL y se resuelve aquí, con la ventana ya delante
+   y el idioma fijado: resolver antes del chequeo de ventana congelaría el idioma por
+   defecto en el aviso encolado (era el fallo del historial ilegible). */
 function enviarAviso(titulo, mensaje) {
-  if (typeof titulo === 'function') ({ titulo, mensaje } = titulo());
-  else if (typeof mensaje === 'function') mensaje = mensaje();
   const w = getWin();
   if (!w || w.isDestroyed()) {
     if (avisosPendientes.length < 5) avisosPendientes.push({ titulo, mensaje });
     return;
   }
+  if (typeof titulo === 'function') ({ titulo, mensaje } = titulo());
+  else if (typeof mensaje === 'function') mensaje = mensaje();
   try {
     w.webContents.send('agent:event', { type: 'toast', title: titulo, message: mensaje });
   } catch {}

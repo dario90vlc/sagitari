@@ -166,8 +166,18 @@ const ctxConv = (dir, avisos) => ({
     } catch {}
     fs.renameSync(tmp, file);
   },
-  onSaveError: (m) => avisos.push('saveError: ' + m),
-  avisar: (titulo, m) => avisos.push(titulo + ': ' + m),
+  /* Los avisos pueden llegar diferidos (función) para resolverse con el idioma ya fijado:
+     el arnés guarda un resolutor y lo INVOCA al leer, igual que main al enviarlos.
+     Resolverlos al recibirlos congelaría el idioma y volvería a esconder el fallo. */
+  onSaveError: (m) => avisos.push(() => 'saveError: ' + (typeof m === 'function' ? m() : m)),
+  avisar: (titulo, m) =>
+    avisos.push(() => {
+      if (typeof titulo === 'function') {
+        const a = titulo();
+        return a.titulo + ': ' + a.mensaje;
+      }
+      return titulo + ': ' + (typeof m === 'function' ? m() : m);
+    }),
   getWin: () => null,
   runtimes: { agentFor: () => null, peek: () => null, isBusy: () => false, liveIds: () => [], dispose: () => {} },
   dialog: {},
@@ -239,6 +249,28 @@ test('conv: un JSON válido con otra forma (no una lista) es tan ilegible como u
   eq(cuarentenasEn(dir).length, 1, 'y el fichero con la forma rara se conserva, no se pisa');
   ok(avisos.length >= 1, 'avisando al usuario');
   eq(fs.readFileSync(path.join(dir, cuarentenasEn(dir)[0]), 'utf8'), '{"algo":1}');
+});
+
+test('conv: el aviso del historial ilegible sale en el idioma que se fija DESPUÉS de montar el router', () => {
+  /* El router se monta a nivel de módulo y el idioma se fija en whenReady: si el aviso se
+     traducía al construirlo, se quedaba con el idioma por defecto y salía en español con
+     la app en inglés. Esta prueba fija `en` DESPUÉS de registrar el router y exige inglés. */
+  const i18n = require('../agent/i18n');
+  const { registerConvsIpc } = require('../main/ipc-convs');
+  const dir = tmpDir('sagi-conv-idioma-');
+  fs.writeFileSync(path.join(dir, 'conversations.json'), '{"algo":1}');
+  const avisos = [];
+  registerConvsIpc({ handle: () => {} }, ctxConv(dir, avisos));
+  i18n.configurar('en');
+  try {
+    eq(avisos.length, 1, 'el aviso está pendiente, sin traducir todavía');
+    const texto = avisos[0]();
+    ok(/^Conversation history: /.test(texto), 'el título va en inglés: ' + texto);
+    ok(/The conversation history could not be read/.test(texto), 'y el cuerpo también: ' + texto);
+    ok(!/historial de conversaciones/i.test(texto), 'nada de español en el aviso');
+  } finally {
+    i18n.configurar('es');
+  }
 });
 
 /* ---------- espacio de trabajo: alias de las carpetas del sistema ---------- */
