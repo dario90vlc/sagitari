@@ -1104,32 +1104,87 @@ test('aviso: el color del registro usa el ok del evento, no el texto del resulta
 });
 
 test('idioma: el renderer no lleva textos fijos fuera de los diccionarios', () => {
-  /* Barrido del JS de la interfaz: un literal en español que llega a un nodo, a un aviso
-     o al registro es una frase que se queda sin traducir. La lista blanca son los ficheros
-     que aún no se han pasado, y se vacía tarea a tarea. */
+  /* Barrido del JS de la interfaz: un literal que llega a un nodo, a un aviso, a un
+     `title` o al registro de actividad es una frase que se queda sin traducir — con
+     acentos o sin ellos. La lista blanca son los ficheros que aún no se han pasado, y se
+     vacía tarea a tarea. */
   const fs = require('fs');
   const path = require('path');
   const RAIZ = path.join(__dirname, '..', 'renderer');
   /* Lista blanca: ficheros que aún no se han pasado, que se vacía tarea a tarea. */
   const PENDIENTES = ['30-ajustes.js', '40-vistas.js', 'memoria-ui.js', 'chatkit.js'];
-  /* Dónde acaba un texto: nodos, avisos y registro de actividad. */
-  const SINKS = /textContent|innerHTML|showToast\(|feed\(/;
-  /* Los literales se leen de UNA línea y EMPAREJADOS: con un `[^']*` suelto el cierre de
-     una clave hacía de apertura y la «frase» se comía el comentario de tres líneas más
-     abajo, así que la prueba no podía ponerse verde ni con todo traducido. */
+  /* Dónde acaba un texto: nodos, atributos que se leen, avisos y registro. */
+  const SINKS = /\btextContent\b|\binnerHTML\b|\.title\b|\baria-label\b|\bplaceholder\b|showToast\(|feed\(/;
+  /* Los literales se leen EMPAREJADOS: con un `'([^']*…)'` suelto el cierre de una clave
+     hacía de apertura y la «frase» se comía el comentario de tres líneas más abajo, así
+     que la prueba no podía ponerse verde ni con todo traducido. */
   const LITERAL = /'(?:[^'\\\n]|\\.)*'/g;
-  const ESPANOL = /[áéíóúüñ¿¡]/i;
-  const sospechosos = [];
-  for (const f of fs.readdirSync(RAIZ).filter((x) => x.endsWith('.js') && !x.startsWith('i18n'))) {
-    if (PENDIENTES.includes(f)) continue;
-    for (const linea of fs.readFileSync(path.join(RAIZ, f), 'utf8').split(/\r?\n/)) {
+  /* Una sentencia puede seguir en la línea siguiente: si la de arriba acaba en un
+     operador, la frase que se pinta está abajo y también cuenta. */
+  const CONTINUA = /[=+(,:?|&]$/;
+
+  /* --- qué NO es una frase: la lista de lo que se permite dentro de un sink --- */
+  // clave del diccionario, id, clase suelta, opción de API o mime: minúsculas sin espacios
+  const TOKEN = /^[a-z0-9][a-zA-Z0-9._/-]*$/;
+  // constante del motor ('FAILED', 'OK')
+  const CONSTANTE = /^[A-Z][A-Z0-9_]*$/;
+  // marcado puro: etiquetas y atributos, sin una sola letra de texto entre ellas
+  const ETIQUETA = /<\/?[a-zA-Z][a-zA-Z0-9-]*(?:\s+[a-zA-Z-]+(?:="[^"]*")?)*\s*\/?>/g;
+  const esMarcado = (s) => /[<>]/.test(s) && s.replace(ETIQUETA, '').trim() === '';
+  const permitido = (s) =>
+    s === '' || // cadena vacía
+    s.trim().length <= 2 || // separadores y unidades: ' · ', '%', 'x', ' KB'
+    /^(?:\\[nrt"'\\]|\s)*$/.test(s) || // solo escapes ('\n\n')
+    TOKEN.test(s) ||
+    CONSTANTE.test(s) ||
+    /^[.#]/.test(s) || // clase CSS o id
+    /^[a-z][a-z0-9+.-]*:\/\//i.test(s) || // URL
+    /^sagitari$/i.test(s) || // el nombre del producto
+    esMarcado(s); // una etiqueta con sus atributos, sin texto dentro
+
+  /* Devuelve los literales sospechosos de un trozo de código. */
+  const sospechososDe = (lineas) => {
+    const fuera = [];
+    for (let i = 0; i < lineas.length; i++) {
+      const linea = lineas[i];
       // la prosa de un comentario no se pinta: solo cuentan las líneas de código
       if (/^\s*(\/\/|\*|\/\*)/.test(linea)) continue;
       if (!SINKS.test(linea)) continue;
-      for (const m of linea.matchAll(LITERAL)) {
-        if (ESPANOL.test(m[0])) sospechosos.push(f + ': ' + m[0].slice(1, 41));
+      const tramos = [linea];
+      if (CONTINUA.test(linea.trim())) tramos.push(lineas[i + 1] || '');
+      for (const tramo of tramos) {
+        for (const m of tramo.matchAll(LITERAL)) {
+          const s = m[0].slice(1, -1);
+          if (!permitido(s)) fuera.push(s);
+        }
       }
     }
+    return fuera;
+  };
+
+  /* La prueba se comprueba a sí misma: si el detector se volviera ciego, el barrido del
+     árbol saldría verde sin vigilar nada. */
+  eq(
+    sospechososDe(["el.textContent = 'No se pudo copiar';"]).join(' | '),
+    'No se pudo copiar',
+    'el barrido tiene que cazar una frase sin acentos',
+  );
+  eq(
+    sospechososDe(["el.textContent =", "  'No se pudo copiar';"]).join(' | '),
+    'No se pudo copiar',
+    'y también la que se escribe en la línea siguiente al sink',
+  );
+  eq(
+    sospechososDe(["el.textContent = I18N.t('chat.copiar.fallo');"]).join(' | '),
+    '',
+    'y dejar pasar una clave del diccionario',
+  );
+
+  const sospechosos = [];
+  for (const f of fs.readdirSync(RAIZ).filter((x) => x.endsWith('.js') && !x.startsWith('i18n'))) {
+    if (PENDIENTES.includes(f)) continue;
+    const src = fs.readFileSync(path.join(RAIZ, f), 'utf8');
+    for (const s of sospechososDe(src.split(/\r?\n/))) sospechosos.push(f + ': ' + s.slice(0, 40));
   }
-  eq(sospechosos.slice(0, 5).join(' | '), '', 'textos en español sin clave');
+  eq(sospechosos.slice(0, 5).join(' | '), '', 'textos sin clave');
 });

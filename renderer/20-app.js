@@ -844,7 +844,8 @@ window.sagitari.onAgentEvent((ev) => {
     case 'error': {
       // «SAGITARI está ocupado» lo emite una ejecución que sigue VIVA: es un envío
       // duplicado, así que no se cierra el turno ni se devuelve el botón a «Enviar».
-      const ocupado = /ocupad/i.test(String(ev.message || ''));
+      // Se decide por el código del evento, no por su texto: el mensaje se traduce.
+      const ocupado = ev.code === 'busy';
       if (ocupado) {
         showToast(ev.message);
         feed(I18N.t('chat.envioIgnorado'), 'err');

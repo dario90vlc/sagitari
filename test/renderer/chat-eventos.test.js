@@ -277,6 +277,30 @@ async function main() {
     assertOk(/Conversación nueva/.test(m.$('#messages').textContent), 'dejando su línea en el hilo:');
   });
 
+  await test('un envío duplicado se reconoce por el código del error, no por su texto', async () => {
+    const m = montarChat();
+    await m.listo();
+    m.w.recordarHilo('c1');
+    await m.listo();
+    // un turno vivo, que es lo que el aviso de «ocupado» NO puede cerrar
+    handler({ type: 'busy', convId: 'c1', busy: true, mode: 'act' });
+    await m.listo();
+
+    /* El mensaje llega en otro idioma a propósito: si el renderer volviera a mirar el
+       texto («ocupad»), esta rama caería por la normal y cerraría el turno VIVO. */
+    handler({ type: 'error', convId: 'c1', code: 'busy', message: 'SAGITARI is busy finishing the previous task.' });
+    await m.listo();
+    assertOk(m.w.busy, 'el turno sigue vivo (no se devuelve el botón a «Enviar»):');
+    assertOk(!m.$('#messages .errmsg'), 'y el error no se pinta como un turno cortado:');
+    assertOk(/ignorado/i.test(m.$('#activityFeed').textContent), 'el aviso de envío ignorado sí sale: ' + m.$('#activityFeed').textContent);
+
+    // un error de verdad (sin código) sí cierra el turno
+    handler({ type: 'error', convId: 'c1', message: 'ECONNRESET' });
+    await m.listo();
+    assertOk(!m.w.busy, 'un error sin código cierra el turno:');
+    assertOk(m.$('#messages .errmsg'), 'y deja su causa en el hilo:');
+  });
+
   console.log(`\n${passed} pasaron, ${failed} fallaron`);
   process.exit(failed ? 1 : 0);
 }

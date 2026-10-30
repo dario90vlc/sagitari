@@ -574,7 +574,9 @@ class Agent {
 
   async chat(userText, settings, imageDataUrl, opts = {}) {
     if (this.busy && !opts.background) {
-      this.emit({ type: 'error', message: 'SAGITARI está ocupado terminando la tarea anterior.' });
+      /* El código viaja con el aviso: el renderer decide si el envío era un duplicado
+         (y NO debe cerrar el turno vivo) por el código, no por el texto — que se traduce. */
+      this.emit({ type: 'error', code: 'busy', message: 'SAGITARI está ocupado terminando la tarea anterior.' });
       return;
     }
     this.busy = true;
