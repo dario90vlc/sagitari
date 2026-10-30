@@ -39,10 +39,18 @@ function globals(w, avisos, copiados) {
   w.openConversation = () => {};
 }
 
+const IDIOMA = ['i18n-es.js', 'i18n-en.js', 'i18n.js'].map((f) => fs.readFileSync(path.join(RAIZ, 'renderer', f), 'utf8'));
+/** El renderer carga los diccionarios y i18n.js antes que cualquier vista: sin ellos la
+    ventana no tiene idioma y las claves no se resuelven. */
+function idioma(w) {
+  for (const src of IDIOMA) w.eval(src);
+}
+
 /** Carga solo los constructores (DOM vacío): la parte pura del módulo. */
 function cargarConstructores() {
   const dom = new JSDOM('<!DOCTYPE html><html><body></body></html>', { url: 'http://localhost/', runScripts: 'outside-only' });
   globals(dom.window, [], []);
+  idioma(dom.window);
   dom.window.eval(SRC);
   return dom.window.MemoriaUI;
 }
@@ -150,6 +158,7 @@ function montar(opts = {}) {
   w.sagitari = api;
   w.CFG = { settings: { memoryLearn: true, memoryAutoSave: false, ...(opts.settings || {}) } };
   globals(w, avisos, copiados);
+  idioma(w);
   w.eval(SRC);
 
   return {

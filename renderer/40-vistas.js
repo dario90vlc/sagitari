@@ -28,7 +28,7 @@
    cuál está abierta y repintar el strip). */
 /* global abrirRuntime, pintarHiloActivo, hiloActual, rtActual, reflejarTurno, pintarPestanas */
 // ============ conversation history ============
-let convTitle = 'Nueva conversación';
+let convTitle = I18N.t('hist.nueva');
 /* Último `conv:list` leído (el Historial lo refresca): de aquí sale el nombre de una
    conversación que se abre por su id, para poder ponerlo en su pestaña. */
 let listaConvs = [];
@@ -37,7 +37,7 @@ function tituloDeConv(id) {
   return c ? c.title : '';
 }
 function setChatTitle(t, guardar) {
-  convTitle = t || 'Nueva conversación';
+  convTitle = t || I18N.t('hist.nueva');
   rtActual().titulo = convTitle; // la pestaña enseña el mismo nombre que la cabecera
   pintarPestanas();
   const h = $('#chatTitle');
@@ -53,9 +53,9 @@ function setChatTitle(t, guardar) {
     // acabar como promesa sin manejar (burbuja roja en el chat)
     try {
       const p = window.sagitari.convRename && window.sagitari.convRename(t);
-      if (p && p.catch) p.catch(() => showToast('No se pudo guardar el nombre de la conversación'));
+      if (p && p.catch) p.catch(() => showToast(I18N.t('vistas.conv.guardar.fallo')));
     } catch {
-      showToast('No se pudo guardar el nombre de la conversación');
+      showToast(I18N.t('vistas.conv.guardar.fallo'));
     }
   }
 }
@@ -73,7 +73,7 @@ async function renderHistory() {
   box.innerHTML = '';
   // una lista vacía por un IPC caído no es «no hay conversaciones»: se dice el error
   if (err) {
-    box.innerHTML = `<div class="subnote">No se pudieron cargar las conversaciones: ${esc((err && err.message) || err)}</div>`;
+    box.innerHTML = `<div class="subnote">${esc(I18N.t('vistas.hist.fallo', { motivo: (err && err.message) || err }))}</div>`;
     return;
   }
   /* La lista se recuerda (títulos y cuáles trabajan): con su id se puede abrir una
@@ -92,11 +92,11 @@ async function renderHistory() {
     );
   if (!list.length) {
     box.innerHTML = q
-      ? `<div class="subnote">Ninguna conversación coincide con «${esc(q)}».</div>`
+      ? `<div class="subnote">${esc(I18N.t('vistas.hist.sinCoincidencias', { q }))}</div>`
       : vListEmpty(
           'history',
-          'Nada en el historial aún',
-          'Cuando hables con Sagitari, cada conversación se guarda aquí: podrás retomarla donde la dejaste o borrarla cuando quieras.',
+          I18N.t('vistas.hist.vacio.titulo'),
+          I18N.t('vistas.hist.vacio.texto'),
         );
     return;
   }
@@ -107,14 +107,14 @@ async function renderHistory() {
     it.setAttribute('tabindex', '0');
     // sin role=button: la fila CONTIENE un botón (eliminar) y un solo rol
     // anunciaría un botón que en realidad tiene dos acciones
-    it.setAttribute('aria-label', 'Abrir la conversación «' + c.title + '»');
+    it.setAttribute('aria-label', I18N.t('vistas.hist.abrir', { titulo: c.title }));
     it.title = c.title;
     const d = new Date(c.updatedAt);
     const when = d.toLocaleDateString('es') + ' · ' + d.toLocaleTimeString('es', { hour: '2-digit', minute: '2-digit' });
     it.innerHTML = `<div class="hic">${ic('chat')}</div>
-      <div class="hmain"><b>${esc(c.title)}</b><small>${c.busy ? '<span class="hbusy">trabajando</span> ' : ''}${c.count} mensajes · ${when}</small></div>
-      <button class="btn ghost sq hfork" data-fork="${esc(c.id)}" title="Duplicar" aria-label="Duplicar la conversación «${esc(c.title)}»">${ic('copy')}</button>
-      <button class="btn ghost sq danger hdel" title="Eliminar">${ic('trash')}</button>`;
+      <div class="hmain"><b>${esc(c.title)}</b><small>${c.busy ? '<span class="hbusy">' + esc(I18N.t('vistas.hist.trabajando')) + '</span> ' : ''}${esc(I18N.t(c.count === 1 ? 'vistas.hist.mensajes.uno' : 'vistas.hist.mensajes.varios', { n: c.count }))} · ${when}</small></div>
+      <button class="btn ghost sq hfork" data-fork="${esc(c.id)}" title="${esc(I18N.t('vistas.hist.duplicar'))}" aria-label="${esc(I18N.t('vistas.hist.duplicar.aria', { titulo: c.title }))}">${ic('copy')}</button>
+      <button class="btn ghost sq danger hdel" title="${esc(I18N.t('vistas.hist.eliminar'))}">${ic('trash')}</button>`;
     it.addEventListener('click', (ev) => {
       if (ev.target.closest('.hdel') || ev.target.closest('[data-fork]')) return;
       openConversation(c.id, c.title);
@@ -128,7 +128,7 @@ async function renderHistory() {
       ev.stopPropagation();
       const r = await window.sagitari.convFork(c.id);
       if (!r || !r.ok) {
-        showToast('No se pudo duplicar la conversación');
+        showToast(I18N.t('vistas.hist.duplicar.fallo'));
         return;
       }
       /* main ya ha cambiado de hilo: la copia es la conversación en curso. Se refresca
@@ -139,7 +139,7 @@ async function renderHistory() {
     };
     it.querySelector('.hdel').onclick = async (ev) => {
       ev.stopPropagation();
-      if (!(await askConfirm(it, '¿Eliminar la conversación «' + c.title + '»?', 'Se borrará el hilo completo y sus mensajes.'))) return;
+      if (!(await askConfirm(it, I18N.t('vistas.hist.eliminar.confirmar', { titulo: c.title }), I18N.t('vistas.hist.eliminar.detalle')))) return;
       await window.sagitari.convDel(c.id);
       renderHistory();
     };
@@ -169,7 +169,7 @@ function recordarHilo(id, titulo) {
 async function openConversation(id, titulo) {
   const r = await window.sagitari.convOpen(id);
   if (!r || !r.ok) {
-    showToast('No se pudo abrir la conversación');
+    showToast(I18N.t('vistas.conv.abrir.fallo'));
     return;
   }
   // el hilo en curso pasa a ser éste (main ya lo hizo en `conv:open`): pestaña + runtime
@@ -183,10 +183,10 @@ async function openConversation(id, titulo) {
   /* Con su turno en vuelo NO se repinta: su nodo ya tiene lo pintado hasta ahora (la
      respuesta en curso incluida) y rehacerlo desde el historial guardado lo borraría. */
   const mensajes = r.messages || [];
-  setChatTitle((mensajes.find((m) => m.role === 'user') || {}).content || titulo || rt.titulo || 'Nueva conversación');
+  setChatTitle((mensajes.find((m) => m.role === 'user') || {}).content || titulo || rt.titulo || I18N.t('hist.nueva'));
   pintarHiloActivo(); // título, estado, contexto y deshacer: los de ESTA conversación
   goto('chat');
-  feed('Conversación restaurada', 'blu');
+  feed(I18N.t('vistas.conv.restaurada'), 'blu');
 }
 
 /** Vuelve el chat a cero y, si hay historial, lo pinta con su modo por turno. */
@@ -196,7 +196,7 @@ function resetChatView(messages) {
      no pasa por aquí —cada pestaña tiene su nodo y su estado—, así que esto sólo salta en
      los repintados internos (rebobinar, /compact). */
   if (busy) {
-    showToast('Espera a que termine el turno de esta conversación para repintarla');
+    showToast(I18N.t('vistas.conv.ocupada'));
     return false;
   }
   cancelStreamRender();
@@ -253,7 +253,7 @@ async function newConversation() {
   // (null sólo si el IPC no trajo id, que degrada sin romper)
   recordarHilo(r && r.ok && r.id);
   resetChatView([]);
-  setChatTitle('Nueva conversación');
+  setChatTitle(I18N.t('hist.nueva'));
   pintarHiloActivo();
   goto('chat');
   $('#chatInput').focus();
@@ -274,7 +274,7 @@ if ($('#histSearch')) {
 $('#btnCopyConv').onclick = () => {
   const parts = [];
   msgs.querySelectorAll('.msg').forEach((m) => {
-    const who = m.classList.contains('me') ? CFG.settings.userName || 'Tú' : 'Sagitari';
+    const who = m.classList.contains('me') ? CFG.settings.userName || I18N.t('chat.tu') : 'Sagitari';
     const badge = m.querySelector('.msg-mode');
     const t = m.querySelector('.bubble');
     if (!t) return;
@@ -283,11 +283,13 @@ $('#btnCopyConv').onclick = () => {
     copia.querySelectorAll('.thinkblock').forEach((x) => x.remove());
     parts.push(`## ${who}${badge ? ' · ' + badge.textContent.trim() : ''}\n${copia.innerText.trim()}`);
   });
-  copyText(parts.join('\n\n'), 'Conversación copiada');
+  copyText(parts.join('\n\n'), I18N.t('vistas.conv.copiada'));
 };
 
 // ============ mode switcher: segmented en chat + pill en inicio + Alt+M ============
 const MODE_ORDER = K.MODE_ORDER;
+/* La tecla de cambio de modo se pinta en su cápsula: es un nombre de tecla, no una frase. */
+const TECLA_MODO = 'Alt+M';
 async function setMode(m) {
   if (m === mode) return;
   const anterior = mode;
@@ -309,23 +311,23 @@ async function setMode(m) {
     const crudo = String((r && r.error) || '');
     const motivo = crudo
       ? /EPERM|EACCES|EBUSY/.test(crudo)
-        ? 'el archivo está en uso o sin permisos — ' + crudo
+        ? I18N.t('vistas.modo.motivo.bloqueo', { crudo })
         : crudo
-      : 'no se pudo escribir la configuración';
-    showToast('No se pudo guardar el modo: ' + motivo);
+      : I18N.t('vistas.modo.motivo.generico');
+    showToast(I18N.t('vistas.modo.guardar.fallo', { motivo }));
     return;
   }
   mode = r;
   updateModeUI();
   const M = K.mode(mode);
-  showToast('Modo ' + M.label + ' — ' + M.tagline);
+  showToast(I18N.t('vistas.modo.cambiado', { modo: M.label, lema: M.tagline }));
 }
 function renderModeSeg() {
   // el MISMO segmento vive en el chat y en la home: idéntico aspecto y comportamiento
   for (const seg of [$('#modeSeg'), $('#modeSegHome')]) {
     if (!seg) continue;
     seg.innerHTML = MODE_ORDER.map((k) => {
-      const M = K.MODES[k];
+      const M = K.mode(k);
       return `<button data-m="${k}" class="${k === mode ? 'on ' + k : ''}" title="${esc(M.name)} — ${esc(M.tagline)}" aria-pressed="${k === mode}">${ic(M.icon)}<span>${M.label}</span></button>`;
     }).join('');
     seg.querySelectorAll('button').forEach((b) => (b.onclick = () => setMode(b.dataset.m)));
@@ -340,7 +342,7 @@ function renderEmptyModes() {
   const box = $('#ceModes');
   if (!box) return;
   box.innerHTML = MODE_ORDER.map((k) => {
-    const M = K.MODES[k];
+    const M = K.mode(k);
     return `<button class="ce-mode${k === mode ? ' on' : ''}" style="--mr:${M.rgb}" data-m="${k}" aria-pressed="${k === mode}">
       <span class="cm-top">${ic(M.icon)}<b>${esc(M.name)}</b></span>
       <span class="cm-tag">${esc(M.label)} · ${esc(M.tagline)}</span>
@@ -349,7 +351,7 @@ function renderEmptyModes() {
   box.querySelectorAll('[data-m]').forEach((b) => (b.onclick = () => setMode(b.dataset.m)));
 }
 function updateModeUI() {
-  $('#modeLabel').innerHTML = `<span class="hint-key">Alt+M</span> cambiar de modo`;
+  $('#modeLabel').innerHTML = '<span class="hint-key">' + TECLA_MODO + '</span> ' + esc(I18N.t('vistas.modo.atajo'));
   applyModeTheme(busy ? currentRunMode : mode);
   renderModeSeg();
   renderEmptyModes();
@@ -381,7 +383,7 @@ async function fillMemorySens() {
     const v = Math.max(0, Math.min(3, Number(el.value) || 0));
     el.value = v;
     await window.sagitari.setSettings({ memSensitivity: v });
-    showToast('Sensibilidad de memoria: ' + v);
+    showToast(I18N.t('vistas.memoria.sensibilidad', { n: v }));
   };
 }
 // se llama desde init(), después de fillSettings() (antes CFG.settings iba vacío)
@@ -399,14 +401,14 @@ async function renderSkills() {
   }
   box.innerHTML = '';
   if (err) {
-    box.innerHTML = `<div class="subnote">No se pudieron cargar las skills: ${esc((err && err.message) || err)}</div>`;
+    box.innerHTML = `<div class="subnote">${esc(I18N.t('vistas.skills.fallo', { motivo: (err && err.message) || err }))}</div>`;
     return;
   }
   if (!list.length) {
     box.innerHTML = vListEmpty(
       'zap',
-      'Sin skills todavía',
-      'Las skills son instrucciones especializadas que Sagitari carga solo cuando la tarea lo necesita. Importa un pack desde GitHub o crea la tuya abajo.',
+      I18N.t('vistas.skills.vacio.titulo'),
+      I18N.t('vistas.skills.vacio.texto'),
     );
     return;
   }
@@ -416,10 +418,10 @@ async function renderSkills() {
     /* Una sola línea de meta (autor, herramientas, deps, repo, coste): la ficha se
        escanea de arriba abajo y los controles quedan alineados a la derecha. */
     const partes = [];
-    if (s.author) partes.push('por ' + s.author);
-    if (s.allowTools) partes.push('herramientas: ' + s.allowTools);
-    if (s.dependencies && s.dependencies.length) partes.push('deps: ' + s.dependencies.join(', '));
-    if (s.source) partes.push('de ' + s.source.repo);
+    if (s.author) partes.push(I18N.t('vistas.skills.autor', { autor: s.author }));
+    if (s.allowTools) partes.push(I18N.t('vistas.skills.tools', { lista: s.allowTools }));
+    if (s.dependencies && s.dependencies.length) partes.push(I18N.t('vistas.skills.deps', { lista: s.dependencies.join(', ') }));
+    if (s.source) partes.push(I18N.t('vistas.skills.origen', { repo: s.source.repo }));
     partes.push('~' + Math.ceil(s.bodyChars / 4) + ' tok');
     it.innerHTML = `
       <span class="tc-mark">${ic('zap')}</span>
@@ -427,17 +429,17 @@ async function renderSkills() {
         <small class="md sdesc">${esc(s.description)}</small>
         <small class="md smeta">${esc(partes.join(' · '))}</small></span>
       <span class="mrow-ctl">
-        ${s.source ? `<button class="btn ghost sq" data-update title="Actualizar desde su repo">${ic('history')}</button>` : ''}
-        <button class="btn ghost sq" data-view title="Ver skill">${ic('search')}</button>
-        <label class="sw ${s.enabled ? 'on' : ''}" data-sw title="Activar/desactivar" aria-label="Activar o desactivar ${esc(s.name)}"></label>
-        <button class="btn ghost sq danger" data-del title="Eliminar">${ic('trash')}</button>
+        ${s.source ? `<button class="btn ghost sq" data-update title="${esc(I18N.t('vistas.skills.actualizar.title'))}">${ic('history')}</button>` : ''}
+        <button class="btn ghost sq" data-view title="${esc(I18N.t('vistas.skills.ver.title'))}">${ic('search')}</button>
+        <label class="sw ${s.enabled ? 'on' : ''}" data-sw title="${esc(I18N.t('vistas.skills.activar.title'))}" aria-label="${esc(I18N.t('vistas.skills.activar.aria', { nombre: s.name }))}"></label>
+        <button class="btn ghost sq danger" data-del title="${esc(I18N.t('vistas.skills.eliminar.title'))}">${ic('trash')}</button>
       </span>`;
     it.querySelector('[data-sw]').onclick = async (e) => {
       await window.sagitari.skillsToggle(s.id, !s.enabled);
       renderSkills();
     };
     it.querySelector('[data-del]').onclick = async () => {
-      if (!(await askConfirm(it, '¿Eliminar la skill «' + s.name + '»?', 'Se borra su carpeta y no se puede deshacer.'))) return;
+      if (!(await askConfirm(it, I18N.t('vistas.skills.eliminar.confirmar', { nombre: s.name }), I18N.t('vistas.skills.eliminar.detalle')))) return;
       await window.sagitari.skillsDelete(s.id);
       renderSkills();
     };
@@ -448,9 +450,9 @@ async function renderSkills() {
         ub.disabled = true;
         try {
           const r = await window.sagitari.skillsUpdate(s.id);
-          showToast(r.changed ? 'Skill actualizada' : 'Ya estaba actualizada');
+          showToast(r.changed ? I18N.t('vistas.skills.actualizada') : I18N.t('vistas.skills.alDia'));
         } catch (err) {
-          showToast('Error: ' + (err.message || err));
+          showToast(I18N.t('ajustes.error', { motivo: err.message || err }));
         }
         renderSkills();
       };
@@ -473,10 +475,10 @@ $('#skillImportBtn').onclick = async () => {
     msg = $('#skillMsg');
   const repo = inp.value.trim();
   if (!repo) {
-    msg.textContent = 'Escribe owner/repo (ej. anthropics/skills).';
+    msg.textContent = I18N.t('vistas.skills.importar.falta');
     return;
   }
-  msg.textContent = 'Importando desde ' + repo + '…';
+  msg.textContent = I18N.t('vistas.skills.importando', { repo });
   btn.disabled = true;
   try {
     const inst = await skillsImportConfirmed(repo, (t) => {
@@ -487,7 +489,7 @@ $('#skillImportBtn').onclick = async () => {
     inp.value = '';
     renderSkills();
   } catch (err) {
-    msg.textContent = 'Error: ' + (err.message || err);
+    msg.textContent = I18N.t('ajustes.error', { motivo: err.message || err });
   } finally {
     btn.disabled = false;
   }
@@ -496,7 +498,7 @@ $('#skillsFolderBtn').onclick = async () => {
   try {
     await window.sagitari.skillsOpenFolder();
   } catch (e) {
-    showToast('No se pudo abrir la carpeta de skills: ' + ((e && e.message) || e));
+    showToast(I18N.t('vistas.skills.carpeta.fallo', { motivo: (e && e.message) || e }));
   }
 };
 $('#skillCreateBtn').onclick = async () => {
@@ -507,17 +509,17 @@ $('#skillCreateBtn').onclick = async () => {
     desc = $('#skillNewDesc').value.trim(),
     body = $('#skillNewBody').value.trim();
   if (!name || !desc) {
-    msg.textContent = 'Nombre y descripción son obligatorios.';
+    msg.textContent = I18N.t('vistas.skills.crear.falta');
     return;
   }
   btn.disabled = true;
   try {
     await window.sagitari.skillsCreate({ name, description: desc, body });
     $('#skillNewName').value = $('#skillNewDesc').value = $('#skillNewBody').value = '';
-    msg.textContent = 'Skill "' + name + '" creada.';
+    msg.textContent = I18N.t('vistas.skills.creada', { nombre: name });
     renderSkills();
   } catch (err) {
-    msg.textContent = 'Error: ' + (err.message || err);
+    msg.textContent = I18N.t('ajustes.error', { motivo: err.message || err });
   } finally {
     btn.disabled = false;
   }
@@ -545,8 +547,9 @@ const AGENT_LOOK_FALLBACK = { icon: 'agents', cls: 'a-p2' };
 function origenAgente(origen) {
   const s = String(origen || '').trim();
   if (!s) return { label: '', cls: '' };
-  if (/disco|disk|custom|usuario|user|extern|fichero|cargad/i.test(s)) return { label: 'Cargado de disco', cls: 'custom' };
-  if (/integ|built|sistema|nativ|default|predefinid/i.test(s)) return { label: 'Integrado', cls: '' };
+  if (/disco|disk|custom|usuario|user|extern|fichero|cargad/i.test(s))
+    return { label: I18N.t('vistas.agentes.disco'), cls: 'custom' };
+  if (/integ|built|sistema|nativ|default|predefinid/i.test(s)) return { label: I18N.t('vistas.agentes.integrado'), cls: '' };
   return { label: s, cls: '' };
 }
 
@@ -561,18 +564,20 @@ function toolsAgente(tools) {
 function agentCard(a) {
   const id = String((a && a.id) || '');
   const look = AGENT_LOOK[id] || AGENT_LOOK_FALLBACK;
-  const nombre = String((a && a.nombre) || id || 'Agente');
+  const nombre = String((a && a.nombre) || id || I18N.t('vistas.agentes.sinNombre'));
   const desc = String((a && a.descripcion) || '');
   const ori = origenAgente(a && a.origen);
   const tools = toolsAgente(a && a.tools);
   const meta = [];
-  if (a && a.modelo) meta.push('modelo ' + String(a.modelo));
-  if (a && a.maxSteps) meta.push(String(a.maxSteps) + ' pasos');
-  if (tools.length) meta.push(tools.length + (tools.length === 1 ? ' herramienta' : ' herramientas'));
+  if (a && a.modelo) meta.push(I18N.t('vistas.agentes.modelo', { modelo: String(a.modelo) }));
+  if (a && a.maxSteps)
+    meta.push(I18N.t(a.maxSteps === 1 ? 'vistas.agentes.pasos.uno' : 'vistas.agentes.pasos.varios', { n: a.maxSteps }));
+  if (tools.length)
+    meta.push(I18N.t(tools.length === 1 ? 'vistas.agentes.herramientas.uno' : 'vistas.agentes.herramientas.varios', { n: tools.length }));
   /* Los nombres de las herramientas son referencia, no la tarjeta: van en el
      tooltip y aquí queda el recuento para que la ficha se lea de un vistazo. */
   const metaTxt = meta.join(' · ');
-  const toolsTxt = tools.length ? 'Herramientas: ' + tools.join(', ') : '';
+  const toolsTxt = tools.length ? I18N.t('vistas.agentes.tools', { lista: tools.join(', ') }) : '';
   return `<div class="acard" id="agentCard-${esc(id)}" title="${esc(toolsTxt)}">
     <div class="aic ${look.cls}">${ic(look.icon)}</div>
     <div class="amain">
@@ -598,17 +603,21 @@ async function renderAgents() {
   }
   const agentes = r && r.ok && Array.isArray(r.agentes) ? r.agentes : [];
   if (!r || !r.ok) {
-    box.innerHTML = `<div class="subnote">No se pudieron cargar los agentes: ${esc((r && r.error) || 'error desconocido')}</div>`;
+    box.innerHTML = `<div class="subnote">${esc(I18N.t('vistas.agentes.fallo', { motivo: (r && r.error) || I18N.t('chat.error.desconocido') }))}</div>`;
     if (cuenta) cuenta.textContent = '';
     box.setAttribute('aria-busy', 'false');
     return;
   }
   if (!agentes.length) {
-    box.innerHTML = vListEmpty('agents', 'Sin agentes', 'El registro de agentes está vacío: no hay ninguno que listar.');
+    box.innerHTML = vListEmpty('agents', I18N.t('vistas.agentes.vacio.titulo'), I18N.t('vistas.agentes.vacio.texto'));
   } else {
     box.innerHTML = agentes.map(agentCard).join('');
   }
-  if (cuenta) cuenta.textContent = agentes.length + (agentes.length === 1 ? ' agente' : ' agentes');
+  if (cuenta)
+    cuenta.textContent = I18N.t(
+      agentes.length === 1 ? 'vistas.agentes.cuenta.uno' : 'vistas.agentes.cuenta.varios',
+      { n: agentes.length },
+    );
   box.setAttribute('aria-busy', 'false');
 }
 
@@ -619,7 +628,7 @@ $('#agentsReload').onclick = async () => {
   try {
     await window.sagitari.agentsCustomRecargar();
   } catch (e) {
-    showToast('No se pudieron recargar los agentes: ' + ((e && e.message) || e));
+    showToast(I18N.t('vistas.agentes.recargar.fallo', { motivo: (e && e.message) || e }));
   } finally {
     btn.disabled = false;
   }
@@ -651,25 +660,32 @@ $('#agentsReload').onclick = async () => {
    donde viene la forma de sus ítems. Lo que no esté en la tabla se enseña tal cual. */
 const EQUIPO_BUZON_MAX = 200; // el buzón es un feed vivo, no un archivo: se queda lo último
 
-const EQUIPO_ESTADOS = {
-  trabajando: { label: 'trabajando', cls: 'eq-trabajando' },
-  // «esperando» es del motor: un permiso pendiente O una pregunta al usuario (el motivo
-  // llega aparte, en `atencion`). Por eso la etiqueta no dice «permiso»: quien lo dice es
-  // la insignia de permisos pendientes, que sí cuenta los que piden autorización.
-  esperando: { label: 'esperando', cls: 'eq-esperando' },
-  terminado: { label: 'terminado', cls: 'eq-terminado' },
-  fallo: { label: 'falló', cls: 'eq-fallo' },
-  interrumpido: { label: 'interrumpido', cls: 'eq-interrumpido' },
-  pending: { label: 'pendiente', cls: '' },
-  in_progress: { label: 'en curso', cls: 'eq-trabajando' },
-  completed: { label: 'hecho', cls: 'eq-terminado' },
-  failed: { label: 'falló', cls: 'eq-fallo' },
-};
+/* Vocabulario de estado: la etiqueta es una CLAVE del diccionario y el estilo, una clase. */
+const ESTADO_CLAVE = 'vistas.estado.';
+const EQUIPO_ESTADOS = {};
+for (const [clave, cls] of [
+  ['trabajando', 'eq-trabajando'],
+  ['esperando', 'eq-esperando'],
+  ['terminado', 'eq-terminado'],
+  ['fallo', 'eq-fallo'],
+  ['interrumpido', 'eq-interrumpido'],
+  ['pending', ''],
+  ['in_progress', 'eq-trabajando'],
+  ['completed', 'eq-terminado'],
+  ['failed', 'eq-fallo'],
+]) {
+  EQUIPO_ESTADOS[clave] = {
+    cls,
+    get label() {
+      return I18N.t(ESTADO_CLAVE + clave);
+    },
+  };
+}
 
 /** Cómo se llama y se pinta un estado. Un valor que no conocemos se dice sin inventarlo. */
 function estadoEquipo(v) {
   const k = String(v || '').toLowerCase();
-  return EQUIPO_ESTADOS[k] || { label: k || 'sin estado', cls: '' };
+  return EQUIPO_ESTADOS[k] || { label: k || I18N.t('vistas.estado.sin'), cls: '' };
 }
 
 const equipos = new Map(); // convId -> estado acumulado del equipo de ESA conversación
@@ -724,8 +740,8 @@ function equipoMiembro(e, ev) {
 /** Nombre de un extremo del buzón: id de compañero, «lider» o «todos». */
 function nombreEquipo(e, id) {
   const k = String(id || '');
-  if (k === 'lider' || k === 'líder') return 'Líder';
-  if (k === 'todos') return 'Todos';
+  if (k === 'lider' || k === 'líder') return I18N.t('vistas.equipo.lider');
+  if (k === 'todos') return I18N.t('vistas.equipo.todos');
   const m = e && e.miembros.get(k);
   return (m && (m.name || m.id)) || k || '—';
 }
@@ -735,8 +751,8 @@ function nombreEquipo(e, id) {
 function badgeEquipoPermisos(m) {
   const n = Number(m && m.permisos) || 0;
   if (!n) return '';
-  const txt = n === 1 ? '1 permiso pendiente' : n + ' permisos pendientes';
-  return `<span class="abadge eqperm" title="${esc(txt)} de ${esc((m && m.name) || 'este compañero')}"><span class="dot a-y"></span>${esc(n === 1 ? '1 permiso' : n + ' permisos')}</span>`;
+  const txt = I18N.t(n === 1 ? 'vistas.equipo.permisos.uno' : 'vistas.equipo.permisos.varios', { n });
+  return `<span class="abadge eqperm" title="${esc(I18N.t('vistas.equipo.permisos.de', { texto: txt, nombre: (m && m.name) || I18N.t('vistas.equipo.companero') }))}"><span class="dot a-y"></span>${esc(I18N.t(n === 1 ? 'vistas.equipo.permisos.corto.uno' : 'vistas.equipo.permisos.corto.varios', { n }))}</span>`;
 }
 
 /** Entra un evento del equipo. Los team_* llegan ANTES de la tarjeta del chat: aquí se
@@ -905,12 +921,8 @@ async function cargarLimiteEquipo() {
 }
 
 function notaEquipo() {
-  const tope = equipoLimiteMiembros ? ` Caben como máximo ${equipoLimiteMiembros} compañeros a la vez, además del líder.` : '';
-  return (
-    'En modo EQUIPO el agente pasa a líder: reparte tu encargo entre compañeros vivos, ellos se escriben por un buzón y apuntan lo que hacen en un tablero compartido.' +
-    tope +
-    ' Aquí se ve el encargo de cada uno, el buzón y el tablero de ESTA conversación.'
-  );
+  const base = I18N.t('vistas.equipo.nota');
+  return equipoLimiteMiembros ? base + ' ' + I18N.t('vistas.equipo.tope', { n: equipoLimiteMiembros }) : base;
 }
 
 /** Una tarjeta de miembro: la misma piel que las de la vista Agentes (.acard). */
@@ -921,9 +933,9 @@ function equipoCard(m) {
     <div class="aic ${look.cls}">${ic(look.icon)}</div>
     <div class="amain">
       <div class="ahead"><b>${esc(m.name || m.id)}</b><span class="abadge ${est.cls}">${esc(est.label)}</span>${badgeEquipoPermisos(m)}</div>
-      <small>${esc(m.tarea || 'Sin encargo todavía')}</small>
-      ${m.spec ? `<span class="amd">especialista: ${esc(m.spec)}${m.expect ? ' · criterio: ' + esc(K.clip(m.expect, 120)) : ''}</span>` : ''}
-      ${m.atencion ? `<span class="amd">te necesita: ${esc(K.clip(m.atencion, 200))}</span>` : ''}
+      <small>${esc(m.tarea || I18N.t('vistas.equipo.sinEncargo'))}</small>
+      ${m.spec ? `<span class="amd">${esc(I18N.t('vistas.equipo.especialista', { spec: m.spec }))}${m.expect ? ' · ' + esc(I18N.t('vistas.equipo.criterio', { texto: K.clip(m.expect, 120) })) : ''}</span>` : ''}
+      ${m.atencion ? `<span class="amd">${esc(I18N.t('vistas.equipo.teNecesita', { texto: K.clip(m.atencion, 200) }))}</span>` : ''}
       ${m.resumen ? `<span class="amd">${esc(K.clip(m.resumen, 240))}</span>` : ''}
     </div>
     <span class="adot"></span>
@@ -931,7 +943,7 @@ function equipoCard(m) {
 }
 
 function equipoFilaBuzon(e, msg) {
-  const hora = new Date(msg.ts).toLocaleTimeString('es', { hour: '2-digit', minute: '2-digit' });
+  const hora = new Date(msg.ts).toLocaleTimeString(I18N.idioma, { hour: '2-digit', minute: '2-digit' });
   return `<div class="eqfila">
     <span class="eqde">${esc(nombreEquipo(e, msg.de))}</span><span class="eqfl">→</span
     ><span class="eqpara">${esc(nombreEquipo(e, msg.para))}</span
@@ -959,12 +971,12 @@ function resumenEquipo(e) {
   const fallidos = [...e.miembros.values()].filter((m) => m.estado === 'fallo' || m.estado === 'interrumpido');
   if (fallidos.length) {
     // el título del bloque ya dice que se detuvo: aquí sólo se explica quién no llegó
-    return (
-      (fallidos.length === 1 ? 'Un compañero no terminó' : fallidos.length + ' compañeros no terminaron') +
-      ' su parte: el detalle está en el buzón y en el tablero.'
+    return I18N.t(
+      fallidos.length === 1 ? 'vistas.equipo.resumen.parte.uno' : 'vistas.equipo.resumen.parte.varios',
+      { n: fallidos.length },
     );
   }
-  return e.ok === false ? 'No llegó un resumen del cierre.' : 'El equipo terminó sin resumen.';
+  return e.ok === false ? I18N.t('vistas.equipo.resumen.sinCierre') : I18N.t('vistas.equipo.resumen.sinResumen');
 }
 
 /** El cierre del encargo: resumen agregado y gasto del equipo. Con `ok:false` el bloque
@@ -973,12 +985,12 @@ function equipoCierre(e) {
   const mal = e.ok === false;
   const g = e.gasto || {};
   const gasto = [];
-  if (Number.isFinite(Number(g.tokens)) && Number(g.tokens) > 0) gasto.push(K.thousands(g.tokens) + ' tokens');
+  if (Number.isFinite(Number(g.tokens)) && Number(g.tokens) > 0) gasto.push(I18N.t('vistas.equipo.tokens', { n: K.thousands(g.tokens) }));
   if (Number.isFinite(Number(g.costUsd)) && Number(g.costUsd) > 0) gasto.push('$' + Number(g.costUsd).toFixed(4));
   return `<div class="eqresumen${mal ? ' err' : ''}">
-    <b>${mal ? 'El equipo se detuvo' : 'Encargo cerrado'}</b>
+    <b>${esc(I18N.t(mal ? 'vistas.equipo.detenido' : 'vistas.equipo.cerrado'))}</b>
     ${esc(resumenEquipo(e))}
-    ${gasto.length ? `\nGasto del equipo: ${esc(gasto.join(' · '))}` : ''}
+    ${gasto.length ? `\n${esc(I18N.t('vistas.equipo.gasto', { gasto: gasto.join(' · ') }))}` : ''}
   </div>`;
 }
 
@@ -1000,22 +1012,20 @@ function renderEquipo() {
     const esperandoLider = busy && currentRunMode === 'equipo';
     box.setAttribute('aria-busy', esperandoLider ? 'true' : 'false');
     if (estadoEl) estadoEl.textContent = '';
-    if (buzon) buzon.innerHTML = '<div class="subnote">Ningún mensaje todavía.</div>';
-    if (tablero) tablero.innerHTML = '<div class="subnote">Nada apuntado todavía.</div>';
+    if (buzon) buzon.innerHTML = '<div class="subnote">' + esc(I18N.t('vistas.equipo.sinMensajes')) + '</div>';
+    if (tablero) tablero.innerHTML = '<div class="subnote">' + esc(I18N.t('vistas.equipo.sinApuntes')) + '</div>';
     if (cierre) cierre.innerHTML = '';
     if (esperandoLider) {
       // estado de CARGA: el turno va en modo EQUIPO y aún no ha llegado ningún team_*
-      box.innerHTML = '<div class="subnote">El líder está repartiendo el encargo entre los compañeros…</div>';
+      box.innerHTML = '<div class="subnote">' + esc(I18N.t('vistas.equipo.repartiendo')) + '</div>';
       return;
     }
     const otro = equipoEnOtroHilo();
     box.innerHTML = vListEmpty(
       'agents',
-      'Sin equipo en esta conversación',
-      otro
-        ? 'El equipo de esta conversación todavía no ha empezado. Hay uno en marcha en otra conversación: puedes ir a ella para seguirlo.'
-        : 'Escribe una orden en modo EQUIPO (el cuarto modo del compositor, Alt+M para llegar) y el agente pasará a líder: repartirá el trabajo entre compañeros, se verá lo que se escriben y lo que apuntan en el tablero. Aquí no hay nada aún porque esta conversación no ha levantado ningún equipo.',
-      otro ? '<button class="btn ghost" data-eqir>Ir a esa conversación</button>' : '',
+      I18N.t('vistas.equipo.vacio.titulo'),
+      otro ? I18N.t('vistas.equipo.vacio.otro') : I18N.t('vistas.equipo.vacio.sin'),
+      otro ? '<button class="btn ghost" data-eqir>' + esc(I18N.t('vistas.equipo.ir')) + '</button>' : '',
     );
     if (otro) {
       const b = box.querySelector('[data-eqir]');
@@ -1030,25 +1040,25 @@ function renderEquipo() {
   const esperan = miembros.filter((m) => m.estado === 'esperando').length;
   const permisos = miembros.reduce((s, m) => s + (Number(m.permisos) || 0), 0);
   if (estadoEl) {
-    const partes = [miembros.length === 1 ? '1 compañero' : miembros.length + ' compañeros'];
+    const partes = [I18N.t(miembros.length === 1 ? 'vistas.equipo.cuenta.uno' : 'vistas.equipo.cuenta.varios', { n: miembros.length })];
     if (e.estado === 'vivo') {
-      partes.push(enMarcha ? enMarcha + ' en marcha' : 'ninguno trabajando');
-      if (esperan) partes.push(esperan + ' esperando permiso');
-    } else partes.push(e.ok === false ? 'se detuvo' : 'terminado');
-    if (permisos) partes.push(permisos === 1 ? '1 permiso pendiente' : permisos + ' permisos pendientes');
+      partes.push(enMarcha ? I18N.t('vistas.equipo.enMarcha', { n: enMarcha }) : I18N.t('vistas.equipo.nadie'));
+      if (esperan) partes.push(I18N.t('vistas.equipo.esperando', { n: esperan }));
+    } else partes.push(I18N.t(e.ok === false ? 'vistas.equipo.detenido.corto' : 'vistas.equipo.terminado'));
+    if (permisos) partes.push(I18N.t(permisos === 1 ? 'vistas.equipo.permisos.uno' : 'vistas.equipo.permisos.varios', { n: permisos }));
     estadoEl.textContent = partes.join(' · ');
   }
   box.innerHTML = miembros.length
     ? miembros.map(equipoCard).join('')
-    : '<div class="subnote">El equipo no ha levantado ningún compañero.</div>';
+    : '<div class="subnote">' + esc(I18N.t('vistas.equipo.sinCompaneros')) + '</div>';
   if (buzon)
     buzon.innerHTML = e.mensajes.length
       ? e.mensajes.map((m) => equipoFilaBuzon(e, m)).join('')
-      : '<div class="subnote">Ningún mensaje todavía: el buzón se llena cuando el líder o los compañeros se escriben.</div>';
+      : '<div class="subnote">' + esc(I18N.t('vistas.equipo.sinMensajes.largo')) + '</div>';
   if (tablero)
     tablero.innerHTML = e.tablero.length
       ? e.tablero.map((i, n) => equipoFilaTablero(e, i, n)).join('')
-      : '<div class="subnote">Nada apuntado todavía: el tablero es donde el equipo deja el progreso.</div>';
+      : '<div class="subnote">' + esc(I18N.t('vistas.equipo.sinApuntes.largo')) + '</div>';
   if (cierre) cierre.innerHTML = e.estado === 'fin' ? equipoCierre(e) : '';
   // el buzón vive de lo último: el feed se lee por el final, como el del rail
   if (buzon) buzon.scrollTop = buzon.scrollHeight;
@@ -1056,27 +1066,28 @@ function renderEquipo() {
 
 // ============ tools view ============
 const TOOL_INFO = [
-  ['run_command', 'terminal', 'Terminal de Windows: comandos, scripts, git…'],
-  ['read_file', 'file', 'Leer archivos de texto'],
-  ['write_file', 'doc', 'Crear o sobrescribir archivos'],
-  ['list_dir', 'folder', 'Explorar carpetas'],
-  ['search_files', 'search', 'Buscar texto dentro de archivos'],
-  ['open_app', 'zap', 'Abrir aplicaciones'],
-  ['open_url', 'globe', 'Abrir URLs en el navegador'],
-  ['browser_control', 'compass', 'Controlar Chrome y Edge: clic, escribir, leer, capturar'],
-  ['screenshot', 'camera', 'Capturar y analizar la pantalla'],
-  ['clipboard', 'clipboard', 'Leer y escribir el portapapeles'],
-  ['notify', 'bell', 'Notificaciones nativas de Windows'],
-  ['media_control', 'music', 'Reproducir, pausar, volumen'],
-  ['window_manage', 'window', 'Minimizar todo, mostrar escritorio'],
-  ['system_info', 'monitor', 'CPU, RAM, red y tiempo encendido'],
+  ['run_command', 'terminal', 'vistas.tools.run_command'],
+  ['read_file', 'file', 'vistas.tools.read_file'],
+  ['write_file', 'doc', 'vistas.tools.write_file'],
+  ['list_dir', 'folder', 'vistas.tools.list_dir'],
+  ['search_files', 'search', 'vistas.tools.search_files'],
+  ['open_app', 'zap', 'vistas.tools.open_app'],
+  ['open_url', 'globe', 'vistas.tools.open_url'],
+  ['browser_control', 'compass', 'vistas.tools.browser_control'],
+  ['screenshot', 'camera', 'vistas.tools.screenshot'],
+  ['clipboard', 'clipboard', 'vistas.tools.clipboard'],
+  ['notify', 'bell', 'vistas.tools.notify'],
+  ['media_control', 'music', 'vistas.tools.media_control'],
+  ['window_manage', 'window', 'vistas.tools.window_manage'],
+  ['system_info', 'monitor', 'vistas.tools.system_info'],
 ];
 /* El catálogo se agrupa por lo que de verdad decide el usuario: qué herramientas
-   piden permiso. Antes eran 14 tarjetas idénticas donde ese dato no aparecía. */
+   piden permiso. Antes eran 14 tarjetas idénticas donde ese dato no aparecía. El título
+   de cada grupo es una clave del diccionario. */
 const TOOL_GROUPS = [
-  { key: 'confirmar', titulo: 'Piden tu permiso antes de actuar' },
-  { key: 'safe', titulo: 'Se ejecutan sin preguntar' },
-  { key: 'restricted', titulo: 'Bloqueadas' },
+  { key: 'confirmar', titulo: 'vistas.tools.grupo.confirmar' },
+  { key: 'safe', titulo: 'vistas.tools.grupo.safe' },
+  { key: 'restricted', titulo: 'vistas.tools.grupo.restricted' },
 ];
 async function renderTools() {
   const g = $('#toolsGrid');
@@ -1088,14 +1099,14 @@ async function renderTools() {
     allowAll.onclick = async () => {
       if (!(await permitirTodoPermisos(allowAll))) return; // pide confirmación
       await renderTools();
-      mostrarAvisoConDeshacer('Todas las herramientas permitidas sin preguntar');
+      mostrarAvisoConDeshacer(I18N.t('vistas.tools.todas'));
     };
   const resetAll = $('#toolsResetPerms');
   if (resetAll)
     resetAll.onclick = async () => {
       if (!(await restablecerPermisos())) return;
       await renderTools();
-      mostrarAvisoConDeshacer('Permisos restablecidos a los recomendados');
+      mostrarAvisoConDeshacer(I18N.t('vistas.tools.reset'));
     };
   let rec = {};
   let perm = {};
@@ -1119,20 +1130,20 @@ async function renderTools() {
   const head = document.createElement('div');
   head.style.cssText = 'grid-column:1/-1;margin-bottom:6px';
   head.innerHTML =
-    '<div class="subnote" style="margin:0">Lo que Sagitari puede hacer por ti, agrupado por el nivel que <b>gobierna ahora</b>. El nivel se cambia aquí mismo (la misma tabla está en Ajustes → Seguridad). En los servidores MCP el nivel es <b>del servidor</b>: sus herramientas lo comparten.</div>';
+    '<div class="subnote" style="margin:0">' + I18N.t('vistas.tools.nota') + '</div>';
   g.appendChild(head);
   const NIVELES = [
-    ['default', 'Por defecto'],
-    ['safe', 'Permitir siempre'],
-    ['confirm', 'Preguntar antes'],
-    ['restricted', 'Bloqueado'],
+    ['default', I18N.t('ajustes.perm.defecto')],
+    ['safe', I18N.t('ajustes.perm.siempre')],
+    ['confirm', I18N.t('ajustes.perm.preguntar')],
+    ['restricted', I18N.t('ajustes.perm.bloqueado')],
   ];
   for (const gr of TOOL_GROUPS) {
     const items = TOOL_INFO.filter(([n]) => grupoDe(n) === gr.key);
     if (!items.length) continue;
     const h = document.createElement('div');
     h.className = 'toolsgroup';
-    h.textContent = gr.titulo + ' · ' + items.length;
+    h.textContent = I18N.t(gr.titulo) + ' · ' + items.length;
     g.appendChild(h);
     for (const [n, i, d] of items) {
       /* El desplegable enseña lo GUARDADO («Por defecto» si no hay override), igual
@@ -1142,17 +1153,19 @@ async function renderTools() {
          «recomendado: …» explica por qué la tarjeta cae donde cae. */
       const lvl = perm[n] && perm[n] !== 'default' ? perm[n] : 'default';
       const nombre = K.tool(n).label;
-      const recTxt = RISK_LABEL[rec[n] || 'confirm'] || 'confirmar';
+      const recTxt = RISK_LABEL[rec[n] || 'confirm'] || I18N.t('nivel.confirm');
       const c = document.createElement('div');
       c.className = 'toolcard';
-      c.innerHTML = `<div class="tctop"><div class="tic">${ic(i)}</div><div class="tc-body"><b>${esc(nombre)}</b> <small class="md">${esc(n)}</small><br><small>${d}</small><br><small class="md">recomendado: ${esc(recTxt)}</small></div></div>
-        <select class="toolperm" data-tool="${esc(n)}" aria-label="Permiso de ${esc(nombre)}">
+      c.innerHTML = `<div class="tctop"><div class="tic">${ic(i)}</div><div class="tc-body"><b>${esc(nombre)}</b> <small class="md">${esc(n)}</small><br><small>${esc(I18N.t(d))}</small><br><small class="md">${esc(I18N.t('ajustes.perm.recomendado', { nivel: recTxt }))}</small></div></div>
+        <select class="toolperm" data-tool="${esc(n)}" aria-label="${esc(I18N.t('ajustes.perm.aria', { nombre }))}">
           ${NIVELES.map(([v, t]) => `<option value="${v}"${lvl === v ? ' selected' : ''}>${t}</option>`).join('')}
         </select>`;
       // cambiar el nivel aquí es el permiso real: la misma llamada que Ajustes ▸ Seguridad
       c.querySelector('select').onchange = async (e) => {
         await window.sagitari.secSetToolPerm(n, e.target.value);
-        showToast(`${nombre}: ${e.target.selectedOptions[0].textContent.toLowerCase()}`);
+        showToast(
+          I18N.t('ajustes.perm.guardado', { nombre, nivel: e.target.selectedOptions[0].textContent.toLowerCase() }),
+        );
         renderTools(); // cambia de grupo: se repinta para que la tarjeta caiga donde toca
       };
       g.appendChild(c);
@@ -1170,7 +1183,7 @@ async function renderTools() {
     const total = conHerramientas.reduce((n, s) => n + s.discovered.length, 0);
     const h = document.createElement('div');
     h.className = 'toolsgroup';
-    h.textContent = 'Servidores MCP · ' + total;
+    h.textContent = I18N.t('vistas.mcp.grupo', { n: total });
     g.appendChild(h);
     for (const s of conHerramientas) {
       /* El permiso de MCP se guarda por SERVIDOR (comodín), no por herramienta: las
@@ -1182,12 +1195,14 @@ async function renderTools() {
         const c = document.createElement('div');
         c.className = 'toolcard';
         c.innerHTML = `<div class="tctop"><div class="tic">${ic('bolt')}</div><div class="tc-body"><b>${esc(t.tool)}</b> <small class="md">${esc(s.name)}</small><br><small>${esc(t.description || '')}</small></div></div>
-          <select class="toolperm" data-tool="${esc(wildcard)}" aria-label="Permiso del servidor MCP ${esc(s.name)}">
+          <select class="toolperm" data-tool="${esc(wildcard)}" aria-label="${esc(I18N.t('ajustes.perm.mcp.aria', { nombre: s.name }))}">
             ${NIVELES.map(([v, tx]) => `<option value="${v}"${lvlMcp === v ? ' selected' : ''}>${tx}</option>`).join('')}
           </select>`;
         c.querySelector('select').onchange = async (e) => {
           await window.sagitari.secSetToolPerm(wildcard, e.target.value);
-          showToast(`MCP ${s.name}: ${e.target.selectedOptions[0].textContent.toLowerCase()} (todo el servidor)`);
+          showToast(
+            I18N.t('vistas.mcp.guardado', { nombre: s.name, nivel: e.target.selectedOptions[0].textContent.toLowerCase() }),
+          );
           renderTools();
         };
         g.appendChild(c);
@@ -1200,16 +1215,26 @@ async function renderTools() {
 }
 
 // ============ v1.2: tasks view (puntos de control, pausa, reanudación) ============
-const TASK_STATUS = {
-  pending: { label: 'En cola', cls: 'blu' },
-  scheduled: { label: 'Programada', cls: 'blu' },
-  running: { label: 'En curso', cls: 'cy' },
-  paused: { label: 'Pausada', cls: 'pur' },
-  interrupted: { label: 'Interrumpida — recuperable', cls: 'pur' },
-  failed: { label: 'Falló', cls: 'mag' },
-  completed: { label: 'Completada', cls: 'ok' },
-  cancelled: { label: 'Cancelada', cls: 'mag' },
-};
+/* El estado de una tarea: la etiqueta es una CLAVE del diccionario. */
+const TAREA_ESTADO_CLAVE = 'vistas.tarea.estado.';
+const TASK_STATUS = {};
+for (const [clave, cls] of [
+  ['pending', 'blu'],
+  ['scheduled', 'blu'],
+  ['running', 'cy'],
+  ['paused', 'pur'],
+  ['interrupted', 'pur'],
+  ['failed', 'mag'],
+  ['completed', 'ok'],
+  ['cancelled', 'mag'],
+]) {
+  TASK_STATUS[clave] = {
+    cls,
+    get label() {
+      return I18N.t(TAREA_ESTADO_CLAVE + clave);
+    },
+  };
+}
 /** v4.2: estado vacío ilustrado, reutilizable por todas las vistas de lista.
     Icono + título + explicación con la acción del usuario dentro del texto. */
 function vListEmpty(icon, titulo, texto, accion) {
@@ -1232,14 +1257,14 @@ async function renderTasks() {
   }
   box.innerHTML = '';
   if (err) {
-    box.innerHTML = `<div class="subnote">No se pudieron cargar las tareas: ${esc((err && err.message) || err)}</div>`;
+    box.innerHTML = `<div class="subnote">${esc(I18N.t('vistas.tarea.fallo', { motivo: (err && err.message) || err }))}</div>`;
     return;
   }
   if (!list.length) {
     box.innerHTML = vListEmpty(
       'list',
-      'Ninguna tarea todavía',
-      'Lanza una arriba con un objetivo y un modo, o deja que el chat cree puntos de control solo cuando un trabajo se alarga. Podrás pausarlas y retomarlas donde quedaron.',
+      I18N.t('vistas.tarea.vacio.titulo'),
+      I18N.t('vistas.tarea.vacio.texto'),
     );
     return;
   }
@@ -1253,24 +1278,25 @@ async function renderTasks() {
       ? `<small class="md" style="color:var(--danger)">✗ ${esc(t.lastError.step || '')}${t.lastError.tool ? ' · ' + esc(t.lastError.tool) : ''}: ${esc(K.clip(t.lastError.message, 120))}</small><br>`
       : '';
     const live = t.live
-      ? `<small class="md">${t.live.toolCalls || 0} herramientas · ${(t.live.tokensIn || 0) + (t.live.tokensOut || 0)} tok${t.live.costUsd ? ' · $' + t.live.costUsd.toFixed(4) : ''}${t.live.toolsFired && t.live.toolsFired.length ? ' · última: ' + esc(t.live.toolsFired[t.live.toolsFired.length - 1].name) : ''}</small><br>`
+      ? `<small class="md">${esc(I18N.t('vistas.tarea.herramientas', { n: t.live.toolCalls || 0 }))} · ${(t.live.tokensIn || 0) + (t.live.tokensOut || 0)} tok${t.live.costUsd ? ' · $' + t.live.costUsd.toFixed(4) : ''}${t.live.toolsFired && t.live.toolsFired.length ? ' · ' + esc(I18N.t('vistas.tarea.ultima', { herramienta: t.live.toolsFired[t.live.toolsFired.length - 1].name })) : ''}</small><br>`
       : '';
     const sched =
       t.status === 'scheduled' && t.scheduledAt ? `<small class="md">→ ${new Date(t.scheduledAt).toLocaleString('es')}</small><br>` : '';
     // sin role=button: la fila lleva botones propios (pausar, reanudar, borrar…)
-    it.setAttribute('aria-label', 'Tarea: ' + (t.goal || 'sin objetivo') + ' — ' + st.label);
-    it.title = t.goal || '(sin objetivo)';
+    const objetivo = t.goal || I18N.t('vistas.tarea.sinObjetivo');
+    it.setAttribute('aria-label', I18N.t('vistas.tarea.aria', { objetivo, estado: st.label }));
+    it.title = objetivo;
     it.innerHTML = `<div class="hic">${ic('history')}</div>
-      <div class="hmain"><b>${esc(t.goal || '(sin objetivo)')}</b>
-        <small><span class="dot ${st.cls}"></span> ${st.label} · paso ${esc(t.step || '—')} · ${t.steps || 0} pasos · ${when}</small><br>
+      <div class="hmain"><b>${esc(objetivo)}</b>
+        <small><span class="dot ${st.cls}"></span> ${esc(st.label)} · ${esc(I18N.t('vistas.tarea.paso', { n: t.step || '—' }))} · ${esc(I18N.t(t.steps === 1 ? 'chat.pasos.uno' : 'chat.pasos.varios', { n: t.steps || 0 }))} · ${when}</small><br>
         ${sched}${live}${err}
         ${t.result ? `<small class="md">${esc(K.clip(t.result, 140))}</small>` : ''}
       </div>
-      ${t.status === 'running' ? `<button class="btn ghost sq" data-pause title="Pausar">${ic('pause')}</button>` : ''}
-      ${t.status === 'paused' || t.status === 'interrupted' || t.status === 'failed' || t.status === 'pending' ? `<button class="btn primary sq" data-resume title="Reanudar">${ic('zap')}</button>` : ''}
-      ${t.status === 'scheduled' ? `<button class="btn primary sq" data-runnow title="Ejecutar ahora">${ic('zap')}</button>` : ''}
-      ${!['completed', 'failed', 'cancelled'].includes(t.status) ? `<button class="btn ghost sq danger" data-cancel title="Cancelar">${ic('close')}</button>` : ''}
-      ${t.status === 'running' ? '' : `<button class="btn ghost sq danger" data-del title="Eliminar">${ic('trash')}</button>`}`;
+      ${t.status === 'running' ? `<button class="btn ghost sq" data-pause title="${esc(I18N.t('vistas.tarea.pausar'))}">${ic('pause')}</button>` : ''}
+      ${t.status === 'paused' || t.status === 'interrupted' || t.status === 'failed' || t.status === 'pending' ? `<button class="btn primary sq" data-resume title="${esc(I18N.t('vistas.tarea.reanudar'))}">${ic('zap')}</button>` : ''}
+      ${t.status === 'scheduled' ? `<button class="btn primary sq" data-runnow title="${esc(I18N.t('vistas.tarea.ejecutar'))}">${ic('zap')}</button>` : ''}
+      ${!['completed', 'failed', 'cancelled'].includes(t.status) ? `<button class="btn ghost sq danger" data-cancel title="${esc(I18N.t('vistas.tarea.cancelar'))}">${ic('close')}</button>` : ''}
+      ${t.status === 'running' ? '' : `<button class="btn ghost sq danger" data-del title="${esc(I18N.t('vistas.tarea.eliminar'))}">${ic('trash')}</button>`}`;
     // fila operable con teclado SOLO si tiene una acción principal: completed y
     // cancelled únicamente traen el borrado, y una fila enfocable que no responde
     // a Enter es una trampa para quien navega con el teclado.
@@ -1293,11 +1319,11 @@ async function renderTasks() {
         try {
           const r = await window.sagitari.taskResume(t.runId);
           if (r && r.ok === false) {
-            showToast(r.error || 'No se pudo reanudar');
+            showToast(r.error || I18N.t('vistas.tarea.reanudar.fallo'));
             rb.disabled = false;
           }
         } catch (e) {
-          showToast('No se pudo reanudar: ' + ((e && e.message) || e));
+          showToast(I18N.t('vistas.tarea.reanudar.fallo') + ': ' + ((e && e.message) || e));
           rb.disabled = false;
         }
         renderTasks();
@@ -1311,7 +1337,7 @@ async function renderTasks() {
         try {
           await window.sagitari.taskPause(t.runId);
         } catch (e) {
-          showToast('No se pudo pausar: ' + ((e && e.message) || e));
+          showToast(I18N.t('vistas.tarea.pausar.fallo', { motivo: (e && e.message) || e }));
           pb.disabled = false;
         }
         renderTasks();
@@ -1325,7 +1351,7 @@ async function renderTasks() {
         try {
           await window.sagitari.taskResume(t.runId);
         } catch (e) {
-          showToast('No se pudo ejecutar: ' + ((e && e.message) || e));
+          showToast(I18N.t('vistas.tarea.ejecutar.fallo', { motivo: (e && e.message) || e }));
           sb.disabled = false;
         }
         renderTasks();
@@ -1334,7 +1360,7 @@ async function renderTasks() {
     if (cb)
       cb.onclick = async (ev) => {
         ev.stopPropagation();
-        if (!(await askConfirm(it, '¿Cancelar esta tarea?', K.clip(t.goal, 160)))) return;
+        if (!(await askConfirm(it, I18N.t('vistas.tarea.cancelar.confirmar'), K.clip(t.goal, 160)))) return;
         cb.disabled = true;
         await window.sagitari.taskCancel(t.runId);
         renderTasks();
@@ -1343,7 +1369,7 @@ async function renderTasks() {
     if (db)
       db.onclick = async (ev) => {
         ev.stopPropagation();
-        if (!(await askConfirm(it, '¿Eliminar esta tarea del historial?', K.clip(t.goal, 160)))) return;
+        if (!(await askConfirm(it, I18N.t('vistas.tarea.borrar.confirmar'), K.clip(t.goal, 160)))) return;
         await window.sagitari.taskRemove(t.runId);
         renderTasks();
       };
@@ -1359,20 +1385,20 @@ $('#taskCreate').onclick = async () => {
   const goal = $('#taskGoal').value.trim();
   const msg = $('#taskMsg');
   if (!goal) {
-    msg.textContent = 'Escribe el objetivo de la tarea.';
+    msg.textContent = I18N.t('vistas.tarea.objetivo.falta');
     return;
   }
   btn.disabled = true;
   try {
     const r = await window.sagitari.taskEnqueue({ goal, mode: $('#taskMode').value, scheduledAt: null });
     if (r && r.ok) {
-      msg.textContent = 'Tarea en cola (' + r.runId + ').';
+      msg.textContent = I18N.t('vistas.tarea.enCola', { id: r.runId });
       $('#taskGoal').value = '';
-      feed('Tarea lanzada en segundo plano', 'blu');
+      feed(I18N.t('vistas.tarea.lanzada'), 'blu');
       renderTasks();
-    } else msg.textContent = (r && r.error) || 'No se pudo crear la tarea.';
+    } else msg.textContent = (r && r.error) || I18N.t('vistas.tarea.crear.fallo');
   } catch (e) {
-    msg.textContent = 'Error: ' + ((e && e.message) || e);
+    msg.textContent = I18N.t('ajustes.error', { motivo: (e && e.message) || e });
   } finally {
     btn.disabled = false;
   }
@@ -1387,24 +1413,24 @@ $('#taskSchedule').onclick = async () => {
   const when = $('#taskWhen').value;
   const msg = $('#taskMsg');
   if (!goal) {
-    msg.textContent = 'Escribe el objetivo de la tarea.';
+    msg.textContent = I18N.t('vistas.tarea.objetivo.falta');
     return;
   }
   if (!when) {
-    msg.textContent = 'Elige fecha y hora.';
+    msg.textContent = I18N.t('vistas.tarea.cuando.falta');
     return;
   }
   btn.disabled = true;
   try {
     const r = await window.sagitari.taskEnqueue({ goal, mode: $('#taskMode').value, scheduledAt: new Date(when).toISOString() });
     if (r && r.ok) {
-      msg.textContent = 'Tarea programada para ' + new Date(when).toLocaleString('es');
+      msg.textContent = I18N.t('vistas.tarea.programada', { cuando: new Date(when).toLocaleString(I18N.idioma) });
       $('#taskGoal').value = '';
       $('#taskWhen').value = '';
       renderTasks();
-    } else msg.textContent = (r && r.error) || 'No se pudo programar.';
+    } else msg.textContent = (r && r.error) || I18N.t('vistas.tarea.programar.fallo');
   } catch (e) {
-    msg.textContent = 'Error: ' + ((e && e.message) || e);
+    msg.textContent = I18N.t('ajustes.error', { motivo: (e && e.message) || e });
   } finally {
     btn.disabled = false;
   }
@@ -1414,24 +1440,24 @@ $('#taskSchedule').onclick = async () => {
 };
 $('#chatPause').onclick = async () => {
   const r = await window.sagitari.pauseChat(hiloActual());
-  if (r && r.ok === false) showToast(r.error || 'No se pudo pausar la tarea');
+  if (r && r.ok === false) showToast(r.error || I18N.t('vistas.tarea.pausarTarea.fallo'));
 };
 
 // ============ projects ============
 $('#projOpen').onclick = async () => {
   const btn = $('#projOpen');
   btn.disabled = true;
-  $('#projMsg').textContent = 'Abriendo…';
+  $('#projMsg').textContent = I18N.t('vistas.espacio.abriendo');
   try {
     const r = await window.sagitari.openPath($('#projPath').value);
     if (r && r.ok) {
-      $('#projMsg').textContent = 'Espacio de trabajo activo: ' + (r.workspace || r.path);
-      feed('Espacio de trabajo: ' + (r.workspace || r.path), 'ok');
+      $('#projMsg').textContent = I18N.t('vistas.espacio.activo', { ruta: r.workspace || r.path });
+      feed(I18N.t('vistas.espacio.feed', { ruta: r.workspace || r.path }), 'ok');
     } else {
-      $('#projMsg').textContent = (r && r.error) || 'No se pudo abrir la ruta.';
+      $('#projMsg').textContent = (r && r.error) || I18N.t('vistas.espacio.abrir.fallo');
     }
   } catch (e) {
-    $('#projMsg').textContent = (e && e.message) || 'No se pudo abrir la ruta.';
+    $('#projMsg').textContent = (e && e.message) || I18N.t('vistas.espacio.abrir.fallo');
   } finally {
     btn.disabled = false;
     setTimeout(() => {
@@ -1445,9 +1471,9 @@ $('#projPick').onclick = async () => {
     const s = await window.sagitari.workspaceSet(r.path);
     if (s && s.ok) {
       $('#projPath').value = s.path;
-      $('#projMsg').textContent = 'Espacio de trabajo activo: ' + s.path;
-      feed('Espacio de trabajo: ' + s.path, 'ok');
-    } else $('#projMsg').textContent = (s && s.error) || 'No se pudo fijar la carpeta.';
+      $('#projMsg').textContent = I18N.t('vistas.espacio.activo', { ruta: s.path });
+      feed(I18N.t('vistas.espacio.feed', { ruta: s.path }), 'ok');
+    } else $('#projMsg').textContent = (s && s.error) || I18N.t('vistas.espacio.fijar.fallo');
     setTimeout(() => {
       $('#projMsg').textContent = '';
     }, 4000);
@@ -1498,11 +1524,9 @@ function showToast(text, accion) {
     píldora enseña la selección y abre la lista para cambiarla. */
 function updateStatusLabels() {
   const a = CFG.active;
-  $('#stModel').textContent = a ? a.model : 'sin modelo';
-  $('#stProv').textContent = a ? a.name || 'proveedor' : 'configura tu API';
-  $('#sideStatusBtn').title = a
-    ? `Modelo: ${a.model} — pulsa para cambiar entre los modelos de tu API`
-    : 'Configura un proveedor y un modelo';
+  $('#stModel').textContent = a ? a.model : I18N.t('vistas.modelo.sin');
+  $('#stProv').textContent = a ? a.name || I18N.t('vistas.modelo.proveedor') : I18N.t('vistas.modelo.configurar');
+  $('#sideStatusBtn').title = a ? a.model + ' — ' + I18N.t('barra.modelo.title') : I18N.t('vistas.modelo.configurar.titulo');
   $('#chatModelLabel').textContent = a ? a.name + ' · ' + a.model : '';
   // tarjeta de estado de Ajustes
   const name = $('#activeModelName');
@@ -1510,21 +1534,21 @@ function updateStatusLabels() {
   const meta = $('#activeModelMeta'),
     badge = $('#activeModelBadge');
   if (!a) {
-    name.textContent = 'Sin modelo activo';
-    meta.textContent = 'Elige un proveedor y activa un modelo para empezar.';
-    badge.textContent = 'sin activar';
+    name.textContent = I18N.t('vistas.modelo.sinActivo');
+    meta.textContent = I18N.t('vistas.modelo.empezar');
+    badge.textContent = I18N.t('vistas.modelo.sinActivar');
     badge.classList.add('off');
     return;
   }
   name.textContent = a.model;
-  const bits = [a.name || 'Proveedor'];
+  const bits = [a.name || I18N.t('vistas.modelo.proveedor')];
   try {
     bits.push(new URL(a.baseUrl).host);
   } catch {}
-  if (a.format && a.format !== 'auto') bits.push('formato: ' + a.format);
-  if (a.vision) bits.push('visión');
+  if (a.format && a.format !== 'auto') bits.push(I18N.t('vistas.modelo.formato', { formato: a.format }));
+  if (a.vision) bits.push(I18N.t('vistas.modelo.vision'));
   meta.textContent = bits.join(' · ');
-  badge.textContent = 'activo';
+  badge.textContent = I18N.t('vistas.modelo.activo');
   badge.classList.remove('off');
   // si la lista está abierta (p. ej. acabas de activar algo en Ajustes), se repinta
   const mm = document.getElementById('modelMenu');
@@ -1557,8 +1581,8 @@ function cselPintar(sel) {
   btn.querySelector('.csel-label').textContent = et || '—';
   btn.disabled = !!sel.disabled;
   const lab = sel.id && document.querySelector('label[for="' + sel.id + '"]');
-  const nombre = (lab && lab.textContent.trim()) || sel.getAttribute('aria-label') || 'Desplegable';
-  btn.setAttribute('aria-label', nombre + ': ' + (et || 'sin selección'));
+  const nombre = (lab && lab.textContent.trim()) || sel.getAttribute('aria-label') || I18N.t('vistas.csel.nombre');
+  btn.setAttribute('aria-label', nombre + ': ' + (et || I18N.t('vistas.csel.sinSeleccion')));
 }
 
 function cselCerrar() {
@@ -1587,7 +1611,7 @@ function cselAbrir(sel) {
           `<span class="sm-name">${esc(o.textContent.trim())}</span>${on ? '<span class="mm-mark" aria-hidden="true">✓</span>' : ''}</div>`
         );
       })
-      .join('') || '<div class="mm-hint">Sin opciones.</div>';
+      .join('') || '<div class="mm-hint">' + esc(I18N.t('vistas.csel.sinOpciones')) + '</div>';
   // Coordenadas propias: el menú es position:fixed, así que escapa del overflow del
   // contenedor (antes .main lo recortaba). Se mide con la lista ya pintada, se ancla
   // al botón, se voltea hacia arriba si abajo no cabe y se mantiene dentro de la vista.
@@ -1802,11 +1826,13 @@ function openModelMenu() {
   if (!modelMenu.hidden) return closeModelMenu();
   const c = K.modelChoices(CFG.active, CFG.providers);
   if (!c.current && !c.provider) {
-    modelMenu.innerHTML = `<div class="sm-head">SIN MODELO</div>
-      <div class="mm-hint">Activa un proveedor y un modelo en Ajustes › Modelo.</div>
-      <div class="sm-item" data-act="settings"><span class="sm-name">Abrir Ajustes</span></div>`;
+    modelMenu.innerHTML = `<div class="sm-head">${esc(I18N.t('vistas.modelo.menu.sinModelo'))}</div>
+      <div class="mm-hint">${esc(I18N.t('vistas.modelo.menu.activar'))}</div>
+      <div class="sm-item" data-act="settings"><span class="sm-name">${esc(I18N.t('vistas.modelo.menu.abrirAjustes'))}</span></div>`;
   } else {
-    const head = c.provider ? `MODELOS · ${esc(c.provider.name)}` : 'MODELOS';
+    const head = c.provider
+      ? esc(I18N.t('vistas.modelo.menu.tituloProv', { nombre: c.provider.name }))
+      : esc(I18N.t('vistas.modelo.menu.titulo'));
     const items = c.models
       .map((m) => {
         const on = m === c.current;
@@ -1815,12 +1841,16 @@ function openModelMenu() {
       })
       .join('');
     const nota = c.known
-      ? `<div class="mm-hint">${c.models.length} modelos de tu API${c.provider ? ' (' + esc(c.provider.name) + ')' : ''}.</div>`
-      : `<div class="mm-hint">Tu proveedor no tiene lista guardada: detecta los modelos para poder cambiar.</div>`;
+      ? `<div class="mm-hint">${esc(
+          c.provider
+            ? I18N.t('vistas.modelo.menu.listaProv', { n: c.models.length, nombre: c.provider.name })
+            : I18N.t('vistas.modelo.menu.lista', { n: c.models.length }),
+        )}</div>`
+      : `<div class="mm-hint">${esc(I18N.t('vistas.modelo.menu.sinLista'))}</div>`;
     modelMenu.innerHTML = `<div class="sm-head">${head}</div>${items}${nota}
       <div class="mm-foot">
-        <div class="sm-item" data-act="detect"><span class="sm-name">Detectar modelos de nuevo</span></div>
-        <div class="sm-item" data-act="settings"><span class="sm-name">Ajustes de proveedores…</span></div>
+        <div class="sm-item" data-act="detect"><span class="sm-name">${esc(I18N.t('vistas.modelo.menu.detectar'))}</span></div>
+        <div class="sm-item" data-act="settings"><span class="sm-name">${esc(I18N.t('vistas.modelo.menu.proveedores'))}</span></div>
       </div>`;
   }
   modelMenu.hidden = false;
@@ -1888,7 +1918,7 @@ if (modelMenu)
       const cfg = (CFG.providers || []).find((p) => prov && p.id === prov.id) || CFG.active;
       if (!cfg || !cfg.baseUrl) return closeModelMenu();
       row.classList.add('on');
-      row.querySelector('.sm-name').textContent = 'Detectando…';
+      row.querySelector('.sm-name').textContent = I18N.t('vistas.modelo.detectando');
       // Sin decir el protocolo, una base Anthropic/Responses de terceros cuya ruta no
       // lo delata se sondeaba con Bearer y la detección fallaba (401/404) justo donde la
       // pestaña Modelo sí acierta. Se manda el `format`/`providerId` del proveedor activo
@@ -1898,7 +1928,7 @@ if (modelMenu)
         providerId: cfg.id,
       });
       if (!r.ok) {
-        showToast('No se pudieron detectar: ' + r.error);
+        showToast(I18N.t('vistas.modelo.detectar.fallo', { motivo: r.error }));
         closeModelMenu();
         return;
       }
@@ -1912,7 +1942,7 @@ if (modelMenu)
         models: r.models,
       });
       if (saved && saved.ok === false) {
-        showToast('Error guardando la lista: ' + saved.error);
+        showToast(I18N.t('vistas.modelo.guardar.fallo', { motivo: saved.error }));
         closeModelMenu();
         return;
       }
@@ -1920,7 +1950,7 @@ if (modelMenu)
       renderProviderList();
       closeModelMenu();
       openModelMenu();
-      showToast(r.models.length + ' modelos detectados');
+      showToast(I18N.t('vistas.modelo.detectados', { n: r.models.length }));
       return;
     }
     const model = row.dataset.model;
@@ -1936,14 +1966,14 @@ if (modelMenu)
       format: (CFG.active && CFG.active.format) || 'auto',
     });
     if (r && r.ok === false) {
-      showToast('No se pudo cambiar: ' + r.error);
+      showToast(I18N.t('vistas.modelo.cambiar.fallo', { motivo: r.error }));
       return;
     }
     CFG = await window.sagitari.getConfig();
     closeModelMenu();
     renderProviderList();
     updateStatusLabels();
-    showToast('Modelo: ' + model);
+    showToast(I18N.t('vistas.modelo.cambiado', { modelo: model }));
   };
 
 // ============ borde vivo: estados del agente en el filo de las superficies ============
@@ -2148,10 +2178,18 @@ function applyTheme() {
   });
 }
 function glowStrengthLabel(v) {
-  return v < 0.8 ? 'Suave' : v <= 1.15 ? 'Equilibrado' : 'Intenso';
+  return v < 0.8
+    ? I18N.t('vistas.apariencia.suave')
+    : v <= 1.15
+      ? I18N.t('vistas.apariencia.equilibrado')
+      : I18N.t('vistas.apariencia.intenso');
 }
 function glassTintLabel(v) {
-  return v < 0.7 ? 'Ultra claro' : v <= 1.1 ? 'Equilibrado' : 'Tintado';
+  return v < 0.7
+    ? I18N.t('vistas.apariencia.ultraClaro')
+    : v <= 1.1
+      ? I18N.t('vistas.apariencia.equilibrado')
+      : I18N.t('vistas.apariencia.tintado');
 }
 // cambios hechos desde Ajustes se aplican al vuelo (y desde main, p.ej. relanzar glow)
 window.sagitari.onThemeChanged && window.sagitari.onThemeChanged(() => applyTheme());
@@ -2195,7 +2233,7 @@ function pintarDiff(archivos, contenedor) {
   if (!box) return;
   const lista = Array.isArray(archivos) ? archivos : [];
   if (!lista.length) {
-    box.innerHTML = '<div class="subnote">No hay cambios que revisar en este turno.</div>';
+    box.innerHTML = '<div class="subnote">' + esc(I18N.t('vistas.diff.sinCambios')) + '</div>';
     return;
   }
   box.innerHTML = lista
@@ -2211,8 +2249,8 @@ function pintarDiff(archivos, contenedor) {
         <div class="df-head">
           <span class="df-path" title="${esc(rel)}">${esc(rel)}</span>
           <span class="df-counts"><span class="df-add">+${adds}</span><span class="df-del">−${dels}</span></span>
-          ${noRev ? '<span class="df-norev">No se puede revertir solo este archivo</span>' : ''}
-          <button class="btn ghost sq" data-revert="${esc(ruta)}" title="Revertir este archivo" aria-label="Revertir los cambios de ${esc(rel)}"${noRev ? ' disabled' : ''}>${ic('history')}</button>
+          ${noRev ? '<span class="df-norev">' + esc(I18N.t('vistas.diff.noRevertible')) + '</span>' : ''}
+          <button class="btn ghost sq" data-revert="${esc(ruta)}" title="${esc(I18N.t('vistas.diff.revertir'))}" aria-label="${esc(I18N.t('vistas.diff.revertir.aria', { ruta: rel }))}"${noRev ? ' disabled' : ''}>${ic('history')}</button>
         </div>
         <div class="df-hunks">${hunks.map(diffHunk).join('')}</div>
       </div>`;
@@ -2251,9 +2289,7 @@ function pintarDiff(archivos, contenedor) {
     // pendingAssistant/pendingTurn y el primer mensaje real se escribía dentro
     // de esta misma burbuja, heredando el modo del arranque
     const b = bubble('ai');
-    b.innerHTML = fmt(
-      '**Sagitari online.** Antes de escribirme, ve a **Ajustes** y activa un proveedor y modelo (OpenCode Go, OpenRouter, Ollama…).',
-    );
+    b.innerHTML = fmt(I18N.t('vistas.bienvenida'));
   }
   // recupera la conversación activa si la app se cerró a medias
   try {

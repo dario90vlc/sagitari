@@ -11,7 +11,12 @@ const { JSDOM } = require('jsdom');
 const CHATKIT_SRC = fs.readFileSync(path.join(__dirname, '..', '..', 'renderer', 'chatkit.js'), 'utf8');
 
 function cargarChatKit() {
-  const dom = new JSDOM('<!DOCTYPE html><html><body></body></html>', { url: 'http://localhost/' });
+  const dom = new JSDOM('<!DOCTYPE html><html><body></body></html>', { url: 'http://localhost/', runScripts: 'outside-only' });
+  /* El renderer carga los diccionarios y i18n.js ANTES que chatkit.js: sus etiquetas
+     son claves que se resuelven al leerlas. Sin ellos, la ventana no tendría idioma. */
+  dom.window.eval(fs.readFileSync(path.join(__dirname, '..', '..', 'renderer', 'i18n-es.js'), 'utf8'));
+  dom.window.eval(fs.readFileSync(path.join(__dirname, '..', '..', 'renderer', 'i18n-en.js'), 'utf8'));
+  dom.window.eval(fs.readFileSync(path.join(__dirname, '..', '..', 'renderer', 'i18n.js'), 'utf8'));
   const fn = new Function('window', 'console', CHATKIT_SRC);
   fn(dom.window, console);
   return dom.window.ChatKit;

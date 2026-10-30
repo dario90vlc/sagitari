@@ -1111,8 +1111,9 @@ test('idioma: el renderer no lleva textos fijos fuera de los diccionarios', () =
   const fs = require('fs');
   const path = require('path');
   const RAIZ = path.join(__dirname, '..', 'renderer');
-  /* Lista blanca: ficheros que aún no se han pasado, que se vacía tarea a tarea. */
-  const PENDIENTES = ['40-vistas.js', 'memoria-ui.js', 'chatkit.js'];
+  /* Lista blanca: ficheros que aún no se han pasado. Vacía: todo el renderer habla por
+     claves (la tarea 9 pasó las vistas y el catálogo del chat). */
+  const PENDIENTES = [];
   /* Dónde acaba un texto: nodos, atributos que se leen, avisos y registro. */
   const SINKS = /\btextContent\b|\binnerHTML\b|\.title\b|\baria-label\b|\bplaceholder\b|showToast\(|feed\(/;
   /* Los literales se leen EMPAREJADOS y en las tres formas que pinta este renderer:

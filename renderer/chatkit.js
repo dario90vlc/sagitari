@@ -20,6 +20,25 @@
    ============================================================================ */
 const ChatKit = (function () {
   /* -------------------------------------------------------------------------
+     0. IDIOMA — lo que se lee en pantalla son CLAVES del diccionario
+     Las etiquetas de modos, herramientas, subagentes y órdenes son claves
+     (`modo.*`, `herramienta.*`, `subagente.*`, `orden.*`) que se resuelven al
+     LEERLAS, no al cargar: en index.html este fichero va ANTES que los
+     diccionarios, así que se pregunta por el idioma en cada lectura. En Node (la
+     suite del renderer) cae al diccionario español, que es el de casa.
+     ------------------------------------------------------------------------- */
+  function i18n() {
+    return (typeof window !== 'undefined' && window.I18N) || null;
+  }
+  function t(clave, vars) {
+    const motor = i18n();
+    if (motor) return motor.t(clave, vars);
+    /* Node sin I18N: el diccionario español se lee de su fichero. */
+    const tabla = (typeof window !== 'undefined' && window.I18N_ES) || (typeof require === 'function' ? require('./i18n-es') : null) || {};
+    return String(tabla[clave] || clave).replace(/\{(\w+)\}/g, (m, k) => (vars && vars[k] !== undefined ? String(vars[k]) : m));
+  }
+
+  /* -------------------------------------------------------------------------
      1. MODOS — cada uno con identidad propia y real
      Los CUATRO perfiles existen ya en el backend (agent/agent.js: MODE_PROFILES):
      distinta temperatura y distinto prompt (el presupuesto de pasos NO es del modo:
@@ -34,51 +53,75 @@ const ChatKit = (function () {
     act: {
       key: 'act',
       label: 'ACT',
-      name: 'Actuar',
+      get name() {
+        return t('modo.act.nombre');
+      },
       icon: 'zap',
       dot: 'ok',
       color: '#34d399',
       rgb: '52,211,153',
       cls: 'act',
-      tagline: 'Ejecuta y reporta, sin plan previo',
-      bullets: ['Va directo a la acción', 'Mínima explicación', 'Para tareas claras y cortas'],
+      get tagline() {
+        return t('modo.act.lema');
+      },
+      get bullets() {
+        return [t('modo.act.p1'), t('modo.act.p2'), t('modo.act.p3')];
+      },
     },
     plan: {
       key: 'plan',
       label: 'PLAN',
-      name: 'Planificar',
+      get name() {
+        return t('modo.plan.nombre');
+      },
       icon: 'map',
       dot: 'pur',
       color: '#a78bfa',
       rgb: '167,139,250',
       cls: 'plan',
-      tagline: 'Propón un plan y aplícalo en ACT',
-      bullets: ['Plan numerado antes de tocar nada', 'Solo lectura: no modifica el sistema', 'Pide cambiar a ACT para aplicarlo'],
+      get tagline() {
+        return t('modo.plan.lema');
+      },
+      get bullets() {
+        return [t('modo.plan.p1'), t('modo.plan.p2'), t('modo.plan.p3')];
+      },
     },
     think: {
       key: 'think',
       label: 'THINK',
-      name: 'Razonar',
+      get name() {
+        return t('modo.think.nombre');
+      },
       icon: 'brain',
       dot: 'blu',
       color: '#7db4ff',
       rgb: '125,180,255',
       cls: 'think',
-      tagline: 'Razona en profundidad antes de responder',
-      bullets: ['Explora alternativas', 'Explica su razonamiento', 'Para decisiones y análisis'],
+      get tagline() {
+        return t('modo.think.lema');
+      },
+      get bullets() {
+        return [t('modo.think.p1'), t('modo.think.p2'), t('modo.think.p3')];
+      },
     },
     equipo: {
       key: 'equipo',
       label: 'EQUIPO',
-      name: 'Equipo',
+      get name() {
+        return t('modo.equipo.nombre');
+      },
       icon: 'team',
       // el punto ámbar de siempre (.dot.a-y): el modo no estrena vocabulario visual
       dot: 'a-y',
       color: '#f59e42',
       rgb: '245,158,66',
       cls: 'equipo',
-      tagline: 'Reparte el encargo entre varios compañeros y agrega lo que devuelven',
-      bullets: ['Varios especialistas a la vez', 'Se hablan por un buzón y apuntan en el tablero', 'Para encargos que se pueden partir'],
+      get tagline() {
+        return t('modo.equipo.lema');
+      },
+      get bullets() {
+        return [t('modo.equipo.p1'), t('modo.equipo.p2'), t('modo.equipo.p3')];
+      },
     },
   };
 
@@ -98,47 +141,70 @@ const ChatKit = (function () {
   /* -------------------------------------------------------------------------
      2. HERRAMIENTAS — nombre técnico → cómo se lo contamos al usuario
      ------------------------------------------------------------------------- */
-  const TOOLS = {
-    run_command: { label: 'Terminal', icon: 'terminal', verb: 'Ejecutando' },
-    read_file: { label: 'Leer archivo', icon: 'file', verb: 'Leyendo' },
-    write_file: { label: 'Escribir archivo', icon: 'save', verb: 'Escribiendo' },
-    edit_file: { label: 'Editar archivo', icon: 'save', verb: 'Editando' },
-    list_dir: { label: 'Explorar carpeta', icon: 'folder', verb: 'Explorando' },
-    search_files: { label: 'Buscar en archivos', icon: 'search', verb: 'Buscando' },
-    open_app: { label: 'Abrir aplicación', icon: 'window', verb: 'Abriendo' },
-    open_url: { label: 'Abrir web', icon: 'globe', verb: 'Abriendo' },
-    browser_control: { label: 'Navegador', icon: 'compass', verb: 'Controlando el navegador' },
-    screenshot: { label: 'Captura de pantalla', icon: 'camera', verb: 'Capturando' },
-    view_image: { label: 'Ver imagen', icon: 'eye', verb: 'Mirando la imagen' },
-    clipboard: { label: 'Portapapeles', icon: 'clipboard', verb: 'Usando el portapapeles' },
-    notify: { label: 'Notificación', icon: 'bell', verb: 'Notificando' },
-    media_control: { label: 'Multimedia', icon: 'music', verb: 'Controlando multimedia' },
-    window_manage: { label: 'Ventanas', icon: 'window', verb: 'Gestionando ventanas' },
-    system_info: { label: 'Sistema', icon: 'monitor', verb: 'Consultando el sistema' },
-    remember: { label: 'Recordar', icon: 'memory', verb: 'Guardando en memoria' },
-    use_skill: { label: 'Skill', icon: 'spark', verb: 'Aplicando skill' },
-    repo_map: { label: 'Mapa del proyecto', icon: 'map', verb: 'Mapeando el proyecto' },
-    find_symbol: { label: 'Buscar símbolo', icon: 'search', verb: 'Buscando dónde se define' },
-    search_code: { label: 'Buscar en el proyecto', icon: 'search', verb: 'Buscando en el código' },
-    apply_patch: { label: 'Cambios en varios archivos', icon: 'save', verb: 'Aplicando cambios' },
-    todo_write: { label: 'Lista de tareas', icon: 'list', verb: 'Actualizando la lista de tareas' },
-    delegate: { label: 'Subagente', icon: 'agents', verb: 'Delegando' },
-    /* v4.4 — modo EQUIPO. Las cinco llevan ficha para que su tarjeta se lea en castellano
-       como las demás (el arnés falla si una herramienta nace sin etiqueta ni icono). */
-    team_spawn: { label: 'Compañero de equipo', icon: 'agents', verb: 'Levantando un compañero' },
-    team_send: { label: 'Mensaje al equipo', icon: 'send', verb: 'Mandando un mensaje' },
-    team_wait: { label: 'Esperar al equipo', icon: 'clock', verb: 'Esperando al equipo' },
-    team_board: { label: 'Tablero del equipo', icon: 'list', verb: 'Actualizando el tablero' },
-    team_done: { label: 'Encargo terminado', icon: 'check', verb: 'Cerrando su encargo' },
-    web_fetch: { label: 'Leer una web', icon: 'globe', verb: 'Leyendo la web' },
-    git_status: { label: 'Estado de git', icon: 'list', verb: 'Consultando git' },
-    git_diff: { label: 'Cambios de git', icon: 'file', verb: 'Mirando los cambios' },
-    git_log: { label: 'Historial de git', icon: 'history', verb: 'Revisando el historial' },
-    git_branch: { label: 'Ramas de git', icon: 'map', verb: 'Mirando las ramas' },
-    git_commit: { label: 'Commit de git', icon: 'save', verb: 'Guardando el commit' },
+  /* Icono de cada herramienta. Etiqueta y verbo son claves del diccionario
+     (herramienta.<nombre> y herramienta.<nombre>.verbo): se resuelven al leerlas. */
+  const TOOL_ICONS = {
+    run_command: 'terminal',
+    read_file: 'file',
+    write_file: 'save',
+    edit_file: 'save',
+    list_dir: 'folder',
+    search_files: 'search',
+    open_app: 'window',
+    open_url: 'globe',
+    browser_control: 'compass',
+    screenshot: 'camera',
+    view_image: 'eye',
+    clipboard: 'clipboard',
+    notify: 'bell',
+    media_control: 'music',
+    window_manage: 'window',
+    system_info: 'monitor',
+    remember: 'memory',
+    use_skill: 'spark',
+    repo_map: 'map',
+    find_symbol: 'search',
+    search_code: 'search',
+    apply_patch: 'save',
+    todo_write: 'list',
+    delegate: 'agents',
+    /* v4.4 — modo EQUIPO. También llevan ficha para que su tarjeta se lea como las
+       demás (el arnés falla si una herramienta nace sin etiqueta ni icono). */
+    team_spawn: 'agents',
+    team_send: 'send',
+    team_wait: 'clock',
+    team_board: 'list',
+    team_done: 'check',
+    web_fetch: 'globe',
+    git_status: 'list',
+    git_diff: 'file',
+    git_log: 'history',
+    git_branch: 'map',
+    git_commit: 'save',
   };
 
-  const FALLBACK_TOOL = { label: 'Herramienta', icon: 'tools', verb: 'Ejecutando' };
+  const TOOLS = {};
+  for (const [nombre, icon] of Object.entries(TOOL_ICONS)) {
+    TOOLS[nombre] = {
+      icon,
+      get label() {
+        return t('herramienta.' + nombre);
+      },
+      get verb() {
+        return t('herramienta.' + nombre + '.verbo');
+      },
+    };
+  }
+
+  const FALLBACK_TOOL = {
+    icon: 'tools',
+    get label() {
+      return t('herramienta.generica');
+    },
+    get verb() {
+      return t('herramienta.generica.verbo');
+    },
+  };
 
   /** Metadatos de una herramienta; si es desconocida, intenta humanizar el nombre. */
   function tool(name) {
@@ -213,7 +279,11 @@ const ChatKit = (function () {
       const l = a.todos;
       const enCurso = l.filter((t) => t && t.status === 'in_progress').length;
       const hechas = l.filter((t) => t && t.status === 'completed').length;
-      return l.length + ' tareas' + (enCurso ? ' · ' + enCurso + ' en curso' : '') + (hechas ? ' · ' + hechas + ' hechas' : '');
+      return (
+        t('herramienta.tareas', { n: l.length }) +
+        (enCurso ? ' · ' + t('chat.enCurso', { n: enCurso }) : '') +
+        (hechas ? ' · ' + t('herramienta.tareas.hechas', { n: hechas }) : '')
+      );
     }
     // hasOwnProperty: el modelo puede emitir una herramienta llamada `constructor`
     // (o `toString`, `__proto__`…); leerlas del prototipo daba un valor no iterable
@@ -266,7 +336,7 @@ const ChatKit = (function () {
       // sub-minuto: se conservan las décimas (1,4 s); si el redondeo llega a 60,0
       // (59,96 s) se lee mejor como 1 min que como «60,0 s»
       const dec = (n / 1000).toFixed(1);
-      return dec === '60.0' ? '1 min' : dec.replace('.', ',') + ' s';
+      return dec === '60.0' ? '1 min' : dec.replace('.', i18n() && i18n().idioma === 'en' ? '.' : ',') + ' s';
     }
     // los segundos se redondean y PUEDEN valer 60 (1 min 59,6 s): hay que acarrearlos
     const m = Math.floor(n / 60000),
@@ -278,12 +348,12 @@ const ChatKit = (function () {
 
   /** "3 herramientas" / "1 herramienta". */
   function toolCount(n) {
-    return n + (n === 1 ? ' herramienta' : ' herramientas');
+    return n === 1 ? t('herramienta.cuenta.una') : t('herramienta.cuenta.varias', { n });
   }
 
-  /** Conteo con separador de miles castellano (punto). */
+  /** Conteo con separador de miles del idioma (punto en español, coma en inglés). */
   function thousands(n) {
-    return Number(n || 0).toLocaleString('es-ES');
+    return Number(n || 0).toLocaleString(i18n() && i18n().idioma === 'en' ? 'en-US' : 'es-ES');
   }
 
   /* -------------------------------------------------------------------------
@@ -370,29 +440,37 @@ const ChatKit = (function () {
 
   /** Primera línea útil de un resultado, para la cabecera de la tarjeta. */
   function resultSummary(result, max) {
-    const t = String(result === null || result === undefined ? '' : result).replace(/\r/g, '');
-    const lines = t
+    const crudo = String(result === null || result === undefined ? '' : result).replace(/\r/g, '');
+    const lines = crudo
       .split('\n')
       .map((l) => l.trim())
       .filter(Boolean);
     const first = lines[0] || '';
-    const extra = lines.length > 1 ? ` · ${lines.length} líneas` : '';
+    const extra = lines.length > 1 ? ' · ' + t('herramienta.lineas', { n: lines.length }) : '';
     return clip(first, max || 120) + extra;
   }
 
-  /** Nombre corto de un subagente para etiquetar sus pasos.
-      Las claves son EXACTAMENTE las del registro del agente (agent/subagents.js): una
-      clave que no case deja la tarjeta sin etiqueta —y antes rompía el render (ver
-      `subagent`)—, así que `verify` se mantiene como alias del verdadero. */
-  const SUBAGENTS = {
-    research: { label: 'Investigador', icon: 'search', cls: 'a-b' },
-    browser: { label: 'Navegador', icon: 'compass', cls: 'a-c' },
-    coding: { label: 'Programador', icon: 'code', cls: 'a-p2' },
-    file: { label: 'Archivador', icon: 'folder', cls: 'a-y' },
-    vision: { label: 'Analista visual', icon: 'eye', cls: 'a-b2' },
-    verification: { label: 'Verificador', icon: 'check', cls: 'a-p' },
-    review: { label: 'Revisor', icon: 'list', cls: 'a-y2' },
+  /* Aspecto de cada subagente. La etiqueta es la clave `subagente.<clave>`: las claves
+     son EXACTAMENTE las del registro del agente (agent/subagents.js) y `verify` sigue
+     siendo alias del verificador. */
+  const SUBAGENT_LOOK = {
+    research: { icon: 'search', cls: 'a-b' },
+    browser: { icon: 'compass', cls: 'a-c' },
+    coding: { icon: 'code', cls: 'a-p2' },
+    file: { icon: 'folder', cls: 'a-y' },
+    vision: { icon: 'eye', cls: 'a-b2' },
+    verification: { icon: 'check', cls: 'a-p' },
+    review: { icon: 'list', cls: 'a-y2' },
   };
+  const SUBAGENTS = {};
+  for (const [k, look] of Object.entries(SUBAGENT_LOOK)) {
+    SUBAGENTS[k] = {
+      ...look,
+      get label() {
+        return t('subagente.' + k);
+      },
+    };
+  }
   SUBAGENTS.verify = SUBAGENTS.verification;
 
   /**
@@ -414,48 +492,26 @@ const ChatKit = (function () {
    */
   function explainError(raw) {
     const m = String(raw || '').toLowerCase();
-    if (/fetch failed|enotfound|econnrefused|network|socket hang up/.test(m)) {
-      return { texto: 'No se pudo conectar con el proveedor', pista: 'Comprueba tu conexión y la URL/clave en Ajustes › Modelo.' };
-    }
-    if (/401|403|unauthorized|invalid api key|incorrect api key/.test(m)) {
-      return { texto: 'El proveedor rechazó la credencial', pista: 'Revisa la clave de API en Ajustes › Modelo.' };
-    }
-    if (/429|rate limit|too many requests/.test(m)) {
-      return { texto: 'El proveedor está limitando las peticiones', pista: 'Espera un momento o cambia de modelo en Ajustes.' };
-    }
+    const par = (clave) => ({ texto: t('chat.error.' + clave + '.texto'), pista: t('chat.error.' + clave + '.pista') });
+    if (/fetch failed|enotfound|econnrefused|network|socket hang up/.test(m)) return par('red');
+    if (/401|403|unauthorized|invalid api key|incorrect api key/.test(m)) return par('credencial');
+    if (/429|rate limit|too many requests/.test(m)) return par('limite');
     /* 402 en OpenCode Go no significa «paga»: llega con «Endpoint is unavailable» cuando
        el modelo se ha caído arriba. Caía en «El turno falló — revisa Ajustes», que manda
        a mirar la clave cuando no hay nada que arreglar aquí: solo cambiar de modelo o
        esperar. Medido con longcat-2.5-preview-free: 4 llamadas, 4 fallos, todos 402. */
-    if (/402|endpoint is unavailable/.test(m)) {
-      return {
-        texto: 'Ese modelo no está disponible ahora mismo',
-        pista: 'Es del proveedor, no de tu clave: prueba otro modelo o espera a que vuelva.',
-      };
-    }
-    if (/timeout|timed out|aborted|tardó demasiado/.test(m)) {
-      return { texto: 'El proveedor dejó de responder', pista: 'Reintenta; si se repite, prueba otro modelo.' };
-    }
-    if (/context|token|maximum/.test(m)) {
-      return { texto: 'La conversación no cabe en el modelo', pista: 'Empieza una conversación nueva o usa un modelo con más contexto.' };
-    }
+    if (/402|endpoint is unavailable/.test(m)) return par('noDisponible');
+    if (/timeout|timed out|aborted|tardó demasiado/.test(m)) return par('sinRespuesta');
+    if (/context|token|maximum/.test(m)) return par('contexto');
     /* Los dos fallos que ve el usuario cuando el modelo no respeta el protocolo de
        herramientas: el texto en vez de la llamada (nuestro aviso) y el rechazo del
        proveedor por argumentos rotos. Antes caían en «El turno falló», que no dice nada
        ni deja salida. */
-    if (/formato de herramientas|llamadas a herramientas como texto|invalid.{0,20}tool|tool.{0,20}arguments/.test(m)) {
-      return {
-        texto: 'El modelo no respetó el formato de herramientas',
-        pista: 'Cambia de modelo en Ajustes › Modelo: este está escribiendo las llamadas como texto.',
-      };
-    }
-    if (/400|bad request|invalid.{0,20}(json|request|argument)/.test(m)) {
-      return { texto: 'El proveedor rechazó la petición por su formato', pista: 'Reintenta; si se repite, cambia de modelo en Ajustes › Modelo.' };
-    }
-    if (/404|not found|model/.test(m)) {
-      return { texto: 'El proveedor no reconoce ese modelo', pista: 'Elige otro en Ajustes › Modelo.' };
-    }
-    return { texto: 'El turno falló', pista: 'Vuelve a intentarlo; si sigue, revisa Ajustes › Modelo.' };
+    if (/formato de herramientas|llamadas a herramientas como texto|invalid.{0,20}tool|tool.{0,20}arguments/.test(m))
+      return par('formato');
+    if (/400|bad request|invalid.{0,20}(json|request|argument)/.test(m)) return par('peticion');
+    if (/404|not found|model/.test(m)) return par('modelo');
+    return par('generico');
   }
 
   /**
@@ -482,7 +538,7 @@ const ChatKit = (function () {
     }
     // el activo siempre aparece, aunque se activara a mano y no esté en la lista
     if (current && !seen.has(current)) models.unshift(current);
-    return { provider: prov ? { id: prov.id, name: prov.name || 'Proveedor' } : null, models, current, known: !!(prov && seen.size) };
+    return { provider: prov ? { id: prov.id, name: prov.name || t('vistas.modelo.proveedor') } : null, models, current, known: !!(prov && seen.size) };
   }
 
   /* -------------------------------------------------------------------------
@@ -500,10 +556,10 @@ const ChatKit = (function () {
        detrás —`/clear` era además lo mismo que `/new`— y el usuario recibía «orden
        desconocida» después de escribirla: la paleta no puede prometer lo que no hay. Si
        algún día se implementan, vuelven a esta lista y ya está. */
-    { name: 'new', args: '', descripcion: 'Empieza una conversación nueva (la anterior se guarda)' },
-    { name: 'compact', args: '', descripcion: 'Resume la conversación para liberar contexto' },
-    { name: 'cost', args: '', descripcion: 'Gasto y tokens de esta conversación' },
-    { name: 'help', args: '', descripcion: 'Lista las órdenes disponibles' },
+    { name: 'new', args: '', get descripcion() { return t('orden.new'); } },
+    { name: 'compact', args: '', get descripcion() { return t('orden.compact'); } },
+    { name: 'cost', args: '', get descripcion() { return t('orden.cost'); } },
+    { name: 'help', args: '', get descripcion() { return t('orden.help'); } },
   ];
 
   /**
