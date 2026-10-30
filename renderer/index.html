@@ -25,7 +25,7 @@
       <div class="titlebar">
         <div class="winstrip">
           <button class="wb" id="btnMin" data-i18n-title="barra.ventana.minimizar" title="Minimizar"><i data-i="minimize"></i></button>
-          <button class="wb" id="btnMax" data-i18n-title="barra.ventana.maximizar" title="Maximizar"><i data-i="maximize"></i></button>
+          <button class="wb" id="btnMax" title="Maximizar"><i data-i="maximize"></i></button>
           <button class="wb wb-close" id="btnClose" data-i18n-title="barra.ventana.cerrar" title="Cerrar Sagitari"><i data-i="close"></i></button>
         </div>
       </div>
@@ -99,7 +99,7 @@
              qué modelo está en uso y abre la lista de los que ofrece tu API, para
              cambiar sin pasar por Ajustes. -->
             <div class="ssel">
-              <button class="side-status" id="sideStatusBtn" data-i18n-title="barra.modelo.title" title="Cambiar de modelo" aria-haspopup="listbox" aria-expanded="false">
+              <button class="side-status" id="sideStatusBtn" title="Cambiar de modelo" aria-haspopup="listbox" aria-expanded="false">
                 <span class="ss-col">
                   <b id="stModel">sin modelo</b>
                   <small id="stProv">sin proveedor</small>
@@ -676,7 +676,8 @@
                 </div>
                 <div class="memwipe" id="memWipeBox" hidden>
                   <p>
-                    <span data-i18n="memoria.wipe.antes">Esto borra</span> <b>todos</b>
+                    <span data-i18n="memoria.wipe.antes">Esto borra</span>
+                    <b data-i18n="memoria.wipe.todos">todos</b>
                     <span data-i18n="memoria.wipe.medio"
                       >los hechos, la papelera, la bandeja y tus hábitos, y no se puede deshacer. Escribe</span
                     >
@@ -748,6 +749,7 @@
                   id="skillNewName"
                   data-i18n-aria="skills.nombre.aria"
                   aria-label="Nombre de la skill"
+                  data-i18n-ph="skills.nombre.ph"
                   placeholder="nombre-ejemplo"
                   style="flex: 1; min-width: 160px"
                 />

@@ -201,6 +201,7 @@ window.I18N_EN = {
   'memoria.olvidar.observado': 'Forget everything observed',
   'memoria.olvidar.todo': 'Forget it all',
   'memoria.wipe.antes': 'This deletes',
+  'memoria.wipe.todos': 'all',
   'memoria.wipe.medio': 'the facts, the trash, the inbox and your habits, and it cannot be undone. Type',
   'memoria.wipe.despues': 'to confirm.',
   'memoria.wipe.confirmar': 'Type OLVIDAR to confirm',
@@ -222,6 +223,7 @@ window.I18N_EN = {
   'skills.actualizarTodas': 'Update all',
   'skills.crear.titulo': 'CREATE SKILL',
   'skills.nombre.aria': 'Skill name',
+  'skills.nombre.ph': 'your-skill-name',
   'skills.desc.aria': 'What the skill does and when to use it',
   'skills.desc.ph': 'What it does and when to use it',
   'skills.cuerpo.aria': 'Instructions Sagitari will follow (markdown)',
@@ -283,7 +285,7 @@ window.I18N_EN = {
   'ajustes.aspecto': 'Look',
   'ajustes.aspecto.aria': 'Interface look',
   'ajustes.aspecto.nota':
-    'Holo is the house glass. Console and Canvas are flat: no blur and no light on the frame.',
+    'Holo is the signature glass. Console and Canvas are flat: no blur and no light on the frame.',
   'ajustes.aspecto.holo': 'Holo',
   'ajustes.aspecto.consola': 'Console',
   'ajustes.aspecto.lienzo': 'Canvas',
@@ -385,7 +387,7 @@ window.I18N_EN = {
     'Before handing the turn back, SAGITARI runs the project’s test command —or its build if there are no tests— and really looks at the output. If it fails, the failure goes back and gets fixed: the turn does not close green with something broken.',
   'ajustes.agente.arboles': 'Isolate subagents that write',
   'ajustes.agente.arboles.nota':
-    'Specialists that write code work in their own git tree and their changes come back to the project as a checked patch before being applied: two agents at once stop stepping on each other. If something does not fit, nothing is applied and it tells you. It needs the project to be a git repository; without git it works as always. Turn it off so they write straight into your files.',
+    'Specialists that write code work in their own git tree and their changes come back to the project as a checked patch before being applied: two agents at once stop stepping on each other. If something does not fit, nothing is applied and it tells you. It needs the project to be a git repository; without git it works the same as always. Turn it off so they write straight into your files.',
   'ajustes.agente.cache': 'Use the prompt cache',
   'ajustes.agente.cache.nota':
     'Each step’s prompt (tools, project map, rules and conversation) is stored at the provider and re-read at a fraction of the price, with the same answer. It turns itself off if you use a compatible provider that does not understand the field and rejects your requests.',
@@ -418,7 +420,7 @@ window.I18N_EN = {
   'ajustes.agente.hook.editar.nota.uno':
     'It runs after writing and its output is shown to the model. Placeholders:',
   'ajustes.agente.hook.editar.nota.dos': '(the file),',
-  'ajustes.agente.hook.editar.nota.tres': '(all of that step),',
+  'ajustes.agente.hook.editar.nota.tres': '(all the files of that step),',
   'ajustes.agente.hook.editar.nota.cuatro':
     '(the workspace); they are quoted on their own.',
   'ajustes.agente.hook.cerrar': 'Hook before closing the turn (optional)',
