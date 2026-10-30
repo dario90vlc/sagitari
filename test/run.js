@@ -16,5 +16,6 @@
   require('./43-sistema-hardening');
   require('./45-todos');
   require('./46-publicacion');
+  require('./47-idioma');
   await runAll();
 })();
