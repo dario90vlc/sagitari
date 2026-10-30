@@ -21,8 +21,16 @@
   /* Una sola pasada sobre el marcado. Idempotente: volver a llamarla no cambia nada. */
   function aplicarDOM(raiz) {
     const doc = raiz || document;
+    /* El `<html lang="es">` del marcado no puede quedarse mintiendo cuando la
+       interfaz habla inglés. */
+    document.documentElement.lang = idioma;
     doc.querySelectorAll('[data-i18n]').forEach(function (el) {
       el.textContent = t(el.getAttribute('data-i18n'));
+    });
+    /* Rótulos que pinta el CSS (`content: attr(data-label)`), fuera del alcance de
+       textContent. */
+    doc.querySelectorAll('[data-i18n-label]').forEach(function (el) {
+      el.setAttribute('data-label', t(el.getAttribute('data-i18n-label')));
     });
     doc.querySelectorAll('[data-i18n-ph]').forEach(function (el) {
       el.setAttribute('placeholder', t(el.getAttribute('data-i18n-ph')));

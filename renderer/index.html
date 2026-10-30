@@ -24,9 +24,9 @@
        del área drag, por lo que su no-drag sí anula la región (regla Electron). -->
       <div class="titlebar">
         <div class="winstrip">
-          <button class="wb" id="btnMin" title="Minimizar"><i data-i="minimize"></i></button>
-          <button class="wb" id="btnMax" title="Maximizar"><i data-i="maximize"></i></button>
-          <button class="wb wb-close" id="btnClose" title="Cerrar Sagitari"><i data-i="close"></i></button>
+          <button class="wb" id="btnMin" data-i18n-title="barra.ventana.minimizar" title="Minimizar"><i data-i="minimize"></i></button>
+          <button class="wb" id="btnMax" data-i18n-title="barra.ventana.maximizar" title="Maximizar"><i data-i="maximize"></i></button>
+          <button class="wb wb-close" id="btnClose" data-i18n-title="barra.ventana.cerrar" title="Cerrar Sagitari"><i data-i="close"></i></button>
         </div>
       </div>
 
@@ -37,58 +37,58 @@
           <span class="filo" aria-hidden="true"></span>
           <div class="brand drag">
             <div class="brandlogo"><img src="assets/sagitari-sidebar.png" alt="SAGITARI" draggable="false" /></div>
-            <button class="sidecollapse" id="sideToggle" title="Compactar la barra lateral (Alt+B)" aria-label="Compactar barra lateral">
+            <button class="sidecollapse" id="sideToggle" data-i18n-title="barra.compactar.title" data-i18n-aria="barra.compactar.aria" title="Compactar la barra lateral (Alt+B)" aria-label="Compactar barra lateral">
               <i data-i="panel"></i>
             </button>
           </div>
 
           <nav class="nav" id="sideNav">
-            <div class="navgroup" data-label="Principal">
-              <button class="navitem on" data-view="chat" title="Chat (Alt+1)">
-                <span class="ni"><i data-i="chat"></i></span><span class="nl">Chat</span><span class="nb live" id="nbChat" hidden></span>
+            <div class="navgroup" data-label="Principal" data-i18n-label="barra.grupo.principal">
+              <button class="navitem on" data-view="chat" data-i18n-title="barra.nav.chat.title" title="Chat (Alt+1)">
+                <span class="ni"><i data-i="chat"></i></span><span class="nl" data-i18n="barra.nav.chat">Chat</span><span class="nb live" id="nbChat" hidden></span>
               </button>
             </div>
 
-            <div class="navgroup" data-label="Trabajo">
-              <button class="navitem" data-view="tasks" title="Tareas (Alt+2)">
-                <span class="ni"><i data-i="list"></i></span><span class="nl">Tareas</span><span class="nb" id="nbTasks" hidden>0</span>
+            <div class="navgroup" data-label="Trabajo" data-i18n-label="barra.grupo.trabajo">
+              <button class="navitem" data-view="tasks" data-i18n-title="barra.nav.tareas.title" title="Tareas (Alt+2)">
+                <span class="ni"><i data-i="list"></i></span><span class="nl" data-i18n="barra.nav.tareas">Tareas</span><span class="nb" id="nbTasks" hidden>0</span>
               </button>
-              <button class="navitem" data-view="projects" title="Espacio de trabajo (Alt+3)">
-                <span class="ni"><i data-i="projects"></i></span><span class="nl">Espacio de trabajo</span>
+              <button class="navitem" data-view="projects" data-i18n-title="barra.nav.espacio.title" title="Espacio de trabajo (Alt+3)">
+                <span class="ni"><i data-i="projects"></i></span><span class="nl" data-i18n="barra.nav.espacio">Espacio de trabajo</span>
               </button>
-              <button class="navitem" data-view="agents" title="Agentes (Alt+4)">
-                <span class="ni"><i data-i="agents"></i></span><span class="nl">Agentes</span>
+              <button class="navitem" data-view="agents" data-i18n-title="barra.nav.agentes.title" title="Agentes (Alt+4)">
+                <span class="ni"><i data-i="agents"></i></span><span class="nl" data-i18n="barra.nav.agentes">Agentes</span>
               </button>
               <!-- el equipo (modo EQUIPO) tiene su propia vista: compañeros vivos, buzón y
                    tablero. Sin atajo propio (los Alt+N llegan hasta Alt+9 y Alt+0 se queda
                    sin vista): se abre desde su sección, como MCP. -->
-              <button class="navitem" data-view="equipo" title="Equipo">
-                <span class="ni"><i data-i="team"></i></span><span class="nl">Equipo</span>
+              <button class="navitem" data-view="equipo" data-i18n-title="barra.nav.equipo.title" title="Equipo">
+                <span class="ni"><i data-i="team"></i></span><span class="nl" data-i18n="barra.nav.equipo">Equipo</span>
                 <span class="nb" id="nbEquipo" hidden></span>
               </button>
             </div>
 
-            <div class="navgroup" data-label="Conocimiento">
-              <button class="navitem" data-view="memory" title="Memoria (Alt+5)">
-                <span class="ni"><i data-i="memory"></i></span><span class="nl">Memoria</span><span class="nb" id="nbMemory" hidden>0</span>
+            <div class="navgroup" data-label="Conocimiento" data-i18n-label="barra.grupo.conocimiento">
+              <button class="navitem" data-view="memory" data-i18n-title="barra.nav.memoria.title" title="Memoria (Alt+5)">
+                <span class="ni"><i data-i="memory"></i></span><span class="nl" data-i18n="barra.nav.memoria">Memoria</span><span class="nb" id="nbMemory" hidden>0</span>
               </button>
               <button class="navitem" data-view="skills" title="Skills (Alt+6)">
                 <span class="ni"><i data-i="zap"></i></span><span class="nl">Skills</span><span class="nb" id="nbSkills" hidden>0</span>
               </button>
-              <button class="navitem" data-view="mcp" title="Servidores MCP">
+              <button class="navitem" data-view="mcp" data-i18n-title="barra.nav.mcp.title" title="Servidores MCP">
                 <span class="ni"><i data-i="bolt"></i></span><span class="nl">MCP</span>
               </button>
-              <button class="navitem" data-view="tools" title="Herramientas (Alt+7)">
-                <span class="ni"><i data-i="tools"></i></span><span class="nl">Herramientas</span>
+              <button class="navitem" data-view="tools" data-i18n-title="barra.nav.herramientas.title" title="Herramientas (Alt+7)">
+                <span class="ni"><i data-i="tools"></i></span><span class="nl" data-i18n="barra.nav.herramientas">Herramientas</span>
               </button>
             </div>
 
-            <div class="navgroup" data-label="Sistema">
-              <button class="navitem" data-view="history" title="Historial (Alt+8)">
-                <span class="ni"><i data-i="history"></i></span><span class="nl">Historial</span>
+            <div class="navgroup" data-label="Sistema" data-i18n-label="barra.grupo.sistema">
+              <button class="navitem" data-view="history" data-i18n-title="barra.nav.historial.title" title="Historial (Alt+8)">
+                <span class="ni"><i data-i="history"></i></span><span class="nl" data-i18n="barra.nav.historial">Historial</span>
               </button>
-              <button class="navitem" data-view="settings" title="Ajustes (Alt+9)">
-                <span class="ni"><i data-i="settings"></i></span><span class="nl">Ajustes</span
+              <button class="navitem" data-view="settings" data-i18n-title="barra.nav.ajustes.title" title="Ajustes (Alt+9)">
+                <span class="ni"><i data-i="settings"></i></span><span class="nl" data-i18n="barra.nav.ajustes">Ajustes</span
                 ><span class="nb" id="nbUpdate" hidden>1</span>
               </button>
             </div>
@@ -99,16 +99,16 @@
              qué modelo está en uso y abre la lista de los que ofrece tu API, para
              cambiar sin pasar por Ajustes. -->
             <div class="ssel">
-              <button class="side-status" id="sideStatusBtn" title="Cambiar de modelo" aria-haspopup="listbox" aria-expanded="false">
+              <button class="side-status" id="sideStatusBtn" data-i18n-title="barra.modelo.title" title="Cambiar de modelo" aria-haspopup="listbox" aria-expanded="false">
                 <span class="ss-col">
                   <b id="stModel">sin modelo</b>
                   <small id="stProv">sin proveedor</small>
                 </span>
                 <span class="ss-caret" aria-hidden="true">▾</span>
               </button>
-              <div class="modelmenu" id="modelMenu" role="listbox" aria-label="Modelos disponibles" hidden></div>
+              <div class="modelmenu" id="modelMenu" role="listbox" data-i18n-aria="barra.modelos.aria" aria-label="Modelos disponibles" hidden></div>
             </div>
-            <button class="side-mode act" id="sideModeBtn" title="Cambiar de modo (Alt+M)">
+            <button class="side-mode act" id="sideModeBtn" data-i18n-title="barra.modo.title" title="Cambiar de modo (Alt+M)">
               <span class="dot ok"></span><span id="sideModeLabel">ACT</span>
             </button>
           </div>
@@ -132,46 +132,46 @@
                    de mensajes y su propio turno, así que una puede seguir trabajando
                    mientras se usa la otra. El strip se pinta desde el renderer
                    (10-chat.js): aquí sólo vive el contenedor con el rol de tablist. -->
-              <div class="ctabs" id="convTabs" role="tablist" aria-label="Conversaciones abiertas"></div>
+              <div class="ctabs" id="convTabs" role="tablist" data-i18n-aria="chat.pestanas.aria" aria-label="Conversaciones abiertas"></div>
               <div class="vh-actions">
-                <button class="btn" id="btnClear" title="Nueva conversación">Nueva</button>
-                <button class="btn ghost" id="btnGoHistory">Historial</button>
-                <button class="btn ghost sq" id="btnCopyConv" title="Copiar toda la conversación"><i data-i="copy"></i></button>
+                <button class="btn" id="btnClear" data-i18n-title="chat.nueva.title" data-i18n="chat.nueva" title="Nueva conversación">Nueva</button>
+                <button class="btn ghost" id="btnGoHistory" data-i18n="chat.historial">Historial</button>
+                <button class="btn ghost sq" id="btnCopyConv" data-i18n-title="chat.copiar.title" title="Copiar toda la conversación"><i data-i="copy"></i></button>
               </div>
             </div>
             <div id="chatWrap">
               <!-- el estado vacío va FUERA de #messages: esa capa se vacía con
                innerHTML en cada conversación nueva y se lo llevaría por delante -->
               <div class="msgs-area" id="msgsArea">
-                <div id="messages" role="log" aria-live="polite" aria-relevant="additions text" aria-label="Conversación"></div>
+                <div id="messages" role="log" aria-live="polite" aria-relevant="additions text" data-i18n-aria="chat.mensajes.aria" aria-label="Conversación"></div>
                 <div class="chat-empty" id="chatEmpty">
                   <div class="ce-inner">
                     <div class="ce-mark"><i data-i="spark"></i></div>
-                    <b class="ce-title">¿Por dónde empezamos?</b>
-                    <div class="ce-sub">Escribe abajo, adjunta una captura con el clip, o empieza por una idea:</div>
+                    <b class="ce-title" data-i18n="chat.vacio.titulo">¿Por dónde empezamos?</b>
+                    <div class="ce-sub" data-i18n="chat.vacio.sub">Escribe abajo, adjunta una captura con el clip, o empieza por una idea:</div>
                     <div class="ce-hints">
-                      <button class="ce-hint" data-fill="Organiza los archivos de mi escritorio por tipo y fecha">
+                      <button class="ce-hint" data-fill="Organiza los archivos de mi escritorio por tipo y fecha" data-i18n="chat.sugerencia.escritorio">
                         Organiza mi escritorio
                       </button>
-                      <button class="ce-hint" data-fill="Investiga esto en la web, compara las opciones y prepárame un informe">
+                      <button class="ce-hint" data-fill="Investiga esto en la web, compara las opciones y prepárame un informe" data-i18n="chat.sugerencia.investiga">
                         Investiga y compara
                       </button>
-                      <button class="ce-hint" data-fill="Revisa este proyecto y dime qué se puede mejorar">Revisa un proyecto</button>
+                      <button class="ce-hint" data-fill="Revisa este proyecto y dime qué se puede mejorar" data-i18n="chat.sugerencia.revisa">Revisa un proyecto</button>
                     </div>
                     <div class="ce-modes" id="ceModes"></div>
                   </div>
                 </div>
               </div>
-              <button class="jumpdown" id="jumpDown" hidden title="Ir al final de la conversación" aria-label="Ir al final">
+              <button class="jumpdown" id="jumpDown" hidden data-i18n-title="chat.irFinal.title" data-i18n-aria="chat.irFinal.aria" title="Ir al final de la conversación" aria-label="Ir al final">
                 <i data-i="arrowDown"></i>
               </button>
               <footer class="chatfoot">
                 <div id="skillMenu" class="skillmenu" hidden></div>
                 <!-- revisión del cambio: panel NO modal (no bloquea el chat) -->
-                <div id="diffPanel" class="diffpanel" role="region" aria-label="Cambios del turno" hidden>
+                <div id="diffPanel" class="diffpanel" role="region" data-i18n-aria="chat.diff.aria" aria-label="Cambios del turno" hidden>
                   <div class="dp-head">
-                    <b id="diffCount">Cambios del turno</b>
-                    <button class="btn ghost sq" id="diffClose" title="Cerrar" aria-label="Cerrar la revisión de cambios">
+                    <b id="diffCount" data-i18n="chat.diff.cambios">Cambios del turno</b>
+                    <button class="btn ghost sq" id="diffClose" data-i18n-title="chat.diff.cerrar.title" data-i18n-aria="chat.diff.cerrar.aria" title="Cerrar" aria-label="Cerrar la revisión de cambios">
                       <i data-i="close"></i>
                     </button>
                   </div>
@@ -182,39 +182,43 @@
                   <span class="filo" aria-hidden="true"></span>
                   <div id="undoBar" class="btnrow" hidden style="align-items: center; gap: 10px">
                     <span class="subnote" id="undoText" style="margin: 0"></span>
-                    <button class="btn ghost" id="undoBtn">Deshacer el cambio</button>
+                    <button class="btn ghost" id="undoBtn" data-i18n="chat.deshacer">Deshacer el cambio</button>
                   </div>
                   <!-- revisión del turno: se enseña sólo cuando hay algo que revisar -->
                   <button class="btn ghost" id="btnDiff" hidden>
-                    <span class="bi"><i data-i="file"></i></span> Revisar los cambios
+                    <span class="bi"><i data-i="file"></i></span> <span data-i18n="chat.revisar">Revisar los cambios</span>
                   </button>
                   <div id="attachStrip" class="attachstrip" hidden></div>
                   <div class="compline">
-                    <div class="modeseg" id="modeSeg" title="Modo del agente (Alt+M para cambiar)"></div>
+                    <div class="modeseg" id="modeSeg" data-i18n-title="chat.modo.title" title="Modo del agente (Alt+M para cambiar)"></div>
                     <textarea
                       id="chatInput"
+                      data-i18n-aria="chat.entrada.aria"
                       aria-label="Mensaje para Sagitari"
                       rows="1"
+                      data-i18n-ph="chat.entrada.ph"
                       placeholder="Escribe a Sagitari…"
                     ></textarea>
                     <button
                       class="cbtn"
                       id="chatAttach"
+                      data-i18n-title="chat.adjuntar.title"
                       title="Adjuntar archivos, documentos o imágenes"
+                      data-i18n-aria="chat.adjuntar.aria"
                       aria-label="Adjuntar archivos, documentos o imágenes"
                     >
                       <i data-i="clip"></i>
                     </button>
-                    <button class="cbtn" id="chatPause" title="Pausar la tarea (guarda el punto de control)" aria-label="Pausar tarea" hidden>
+                    <button class="cbtn" id="chatPause" data-i18n-title="chat.pausar.title" title="Pausar la tarea (guarda el punto de control)" data-i18n-aria="chat.pausar.aria" aria-label="Pausar tarea" hidden>
                       <i data-i="pause"></i>
                     </button>
-                    <button class="cbtn send" id="chatSend" title="Enviar" aria-label="Enviar"><i data-i="send"></i></button>
+                    <button class="cbtn send" id="chatSend" data-i18n-title="chat.enviar" title="Enviar" data-i18n-aria="chat.enviar" aria-label="Enviar"><i data-i="send"></i></button>
                   </div>
                 </div>
                 <div id="devMeta" class="devmeta" hidden></div>
                 <div class="hintbar">
                   <span id="modeLabel">Modo Act</span>
-                  <span id="ctxMeter" class="ctxmeter" role="status" aria-label="Contexto de la conversación" data-estado="hola" hidden>
+                  <span id="ctxMeter" class="ctxmeter" role="status" data-i18n-aria="chat.contexto.aria" aria-label="Contexto de la conversación" data-estado="hola" hidden>
                     <span class="ctxbar" aria-hidden="true"><i></i></span>
                     <span class="ctxval">0%</span>
                   </span>
@@ -226,12 +230,12 @@
 
           <!-- HISTORY -->
           <section class="view" id="view-history">
-            <h1 class="sr-only">Historial</h1>
+            <h1 class="sr-only" data-i18n="hist.titulo">Historial</h1>
             <div class="viewhead">
-              <h2>Historial</h2>
+              <h2 data-i18n="hist.titulo">Historial</h2>
               <div class="vh-actions">
-                <input type="search" id="histSearch" aria-label="Buscar en el historial" placeholder="Buscar conversaciones…" />
-                <button class="btn" id="histNew">Nueva conversación</button>
+                <input type="search" id="histSearch" data-i18n-aria="hist.buscar.aria" aria-label="Buscar en el historial" data-i18n-ph="hist.buscar.ph" placeholder="Buscar conversaciones…" />
+                <button class="btn" id="histNew" data-i18n="hist.nueva">Nueva conversación</button>
               </div>
             </div>
             <div id="histList" class="histlist"></div>
@@ -239,28 +243,28 @@
 
           <!-- AGENTS -->
           <section class="view" id="view-agents">
-            <h1 class="sr-only">Agentes</h1>
+            <h1 class="sr-only" data-i18n="agentes.titulo">Agentes</h1>
             <div class="viewhead">
-              <h2>Agentes</h2>
+              <h2 data-i18n="agentes.titulo">Agentes</h2>
               <div class="vh-actions">
                 <span id="agentsCount" class="md"></span>
                 <button class="btn ghost" id="agentsReload">
-                  <span class="bi"><i data-i="refresh"></i></span> Recargar
+                  <span class="bi"><i data-i="refresh"></i></span> <span data-i18n="agentes.recargar">Recargar</span>
                 </button>
               </div>
             </div>
             <!-- la lista sale del registro real (agentsCustom): nada de escaparate -->
             <div id="agentsList" class="agents-grid" aria-busy="false"></div>
             <div class="tooltray">
-              <div class="tt-head">ACTIVIDAD DE HERRAMIENTAS · SESIÓN ACTUAL</div>
+              <div class="tt-head" data-i18n="agentes.actividad">ACTIVIDAD DE HERRAMIENTAS · SESIÓN ACTUAL</div>
               <div id="toolTrayList" class="tt-list"></div>
             </div>
             <div class="tooltray">
-              <div class="tt-head">SALUD DE LOS MODELOS</div>
+              <div class="tt-head" data-i18n="agentes.salud">SALUD DE LOS MODELOS</div>
               <div id="healthList" class="tt-list"></div>
             </div>
             <div class="tooltray">
-              <div class="tt-head">HÁBITOS OBSERVADOS · v2.0 APRENDIZAJE</div>
+              <div class="tt-head" data-i18n="agentes.habitos">HÁBITOS OBSERVADOS · v2.0 APRENDIZAJE</div>
               <div id="habitsList" class="tt-list"></div>
             </div>
           </section>
@@ -270,20 +274,20 @@
                conversación: no hay canal de lectura, así que sin eventos no hay equipo que
                enseñar (esa es la verdad, no una carga que se quedó colgada). -->
           <section class="view" id="view-equipo">
-            <h1 class="sr-only">Equipo</h1>
+            <h1 class="sr-only" data-i18n="equipo.titulo">Equipo</h1>
             <div class="viewhead">
-              <h2>Equipo</h2>
+              <h2 data-i18n="equipo.titulo">Equipo</h2>
               <div class="vh-actions"><span id="equipoEstado" class="md"></span></div>
             </div>
             <p class="subnote" id="equipoNota" style="margin-top: 0"></p>
             <div id="equipoMiembros" class="agents-grid" aria-busy="false"></div>
             <div class="equipowrap">
               <div class="tooltray">
-                <div class="tt-head">BUZÓN · QUIÉN ESCRIBE A QUIÉN</div>
+                <div class="tt-head" data-i18n="equipo.buzon">BUZÓN · QUIÉN ESCRIBE A QUIÉN</div>
                 <div id="equipoBuzon" class="eqfeed"></div>
               </div>
               <div class="tooltray">
-                <div class="tt-head">TABLERO COMPARTIDO</div>
+                <div class="tt-head" data-i18n="equipo.tablero">TABLERO COMPARTIDO</div>
                 <div id="equipoTablero" class="eqboard"></div>
               </div>
             </div>
@@ -292,42 +296,44 @@
 
           <!-- TASKS (v1.3: cola en segundo plano, programadas, pausa/cancelar) -->
           <section class="view" id="view-tasks">
-            <h1 class="sr-only">Tareas</h1>
+            <h1 class="sr-only" data-i18n="tareas.titulo">Tareas</h1>
             <div class="viewhead">
-              <h2>Tareas</h2>
-              <div class="vh-actions"><button class="btn ghost" id="tasksRefresh">Actualizar</button></div>
+              <h2 data-i18n="tareas.titulo">Tareas</h2>
+              <div class="vh-actions"><button class="btn ghost" id="tasksRefresh" data-i18n="tareas.actualizar">Actualizar</button></div>
             </div>
             <div class="tooltray tasknew">
-              <div class="tt-head">NUEVA TAREA EN SEGUNDO PLANO</div>
+              <div class="tt-head" data-i18n="tareas.nueva">NUEVA TAREA EN SEGUNDO PLANO</div>
               <div class="tasknew-row">
                 <input
                   type="text"
                   id="taskGoal"
+                  data-i18n-aria="tareas.objetivo.aria"
                   aria-label="Objetivo de la tarea"
+                  data-i18n-ph="tareas.objetivo.ph"
                   placeholder="Objetivo: busca esto y compara precios…"
                 />
-                <select id="taskMode" aria-label="Modo de la tarea">
+                <select id="taskMode" data-i18n-aria="tareas.modo.aria" aria-label="Modo de la tarea">
                   <option value="act">Act</option>
                   <option value="plan">Plan</option>
                   <option value="think">Think</option>
                 </select>
                 <button class="btn primary" id="taskCreate">
-                  <span class="bi"><i data-i="zap"></i></span> Lanzar
+                  <span class="bi"><i data-i="zap"></i></span> <span data-i18n="tareas.lanzar">Lanzar</span>
                 </button>
               </div>
               <div class="tasknew-row">
-                <input type="datetime-local" id="taskWhen" aria-label="Fecha y hora de la tarea" />
+                <input type="datetime-local" id="taskWhen" data-i18n-aria="tareas.fecha.aria" aria-label="Fecha y hora de la tarea" />
                 <button class="btn ghost" id="taskSchedule">
-                  <span class="bi"><i data-i="history"></i></span> Programar
+                  <span class="bi"><i data-i="history"></i></span> <span data-i18n="tareas.programar">Programar</span>
                 </button>
                 <span class="saving" id="taskMsg"></span>
               </div>
-              <div class="subnote tn-hint">
+              <div class="subnote tn-hint" data-i18n="tareas.ayuda">
                 Las tareas en segundo plano usan su propio agente: puedes seguir chateando mientras trabajan. Se te notificará al terminar.
                 Máx. simultáneas configurable en Ajustes.
               </div>
             </div>
-            <p class="subnote tasks-note">
+            <p class="subnote tasks-note" data-i18n="tareas.nota">
               Cada tarea larga guarda un punto de control con su último paso completado. Puedes pausar, reanudar donde se quedó (también
               tras cerrar la app) y ver qué paso falló y por qué.
             </p>
@@ -336,51 +342,51 @@
 
           <!-- PROJECTS -->
           <section class="view" id="view-projects">
-            <h1 class="sr-only">Espacio de trabajo</h1>
-            <div class="viewhead"><h2>Espacio de trabajo</h2></div>
+            <h1 class="sr-only" data-i18n="espacio.titulo">Espacio de trabajo</h1>
+            <div class="viewhead"><h2 data-i18n="espacio.titulo">Espacio de trabajo</h2></div>
             <div class="projwrap">
               <div class="sc-head">
-                <b>Carpeta de trabajo</b
-                ><span class="sc-hint">Donde Sagitari crea y modifica archivos. Pídele «crea un script» sin rutas: aterriza aquí.</span>
+                <b data-i18n="espacio.carpeta">Carpeta de trabajo</b
+                ><span class="sc-hint" data-i18n="espacio.carpeta.nota">Donde Sagitari crea y modifica archivos. Pídele «crea un script» sin rutas: aterriza aquí.</span>
               </div>
               <div class="field">
-                <label for="projPath">Espacio de trabajo activo</label>
-                <input type="text" id="projPath" placeholder="C:\Users\tu-usuario\Desktop\mi-proyecto" />
+                <label for="projPath" data-i18n="espacio.activo">Espacio de trabajo activo</label>
+                <input type="text" id="projPath" data-i18n-ph="espacio.activo.ph" placeholder="C:\Users\tu-usuario\Desktop\mi-proyecto" />
               </div>
               <div class="btnrow">
                 <button class="btn" id="projOpen">
-                  <span class="bi"><i data-i="external"></i></span> Abrir y trabajar aquí
+                  <span class="bi"><i data-i="external"></i></span> <span data-i18n="espacio.abrir">Abrir y trabajar aquí</span>
                 </button>
-                <button class="btn ghost" id="projPick">Elegir carpeta…</button>
+                <button class="btn ghost" id="projPick" data-i18n="espacio.elegir">Elegir carpeta…</button>
                 <span class="saving" id="projMsg"></span>
               </div>
-              <div class="subnote">Elegir o abrir una carpeta la convierte en el espacio activo.</div>
+              <div class="subnote" data-i18n="espacio.nota">Elegir o abrir una carpeta la convierte en el espacio activo.</div>
             </div>
           </section>
 
           <!-- MCP (sección propia: los servidores son las herramientas «de fuera», al lado de las nativas) -->
           <section class="view" id="view-mcp">
-            <h1 class="sr-only">Servidores MCP</h1>
-            <div class="viewhead"><h2>Servidores MCP</h2></div>
+            <h1 class="sr-only" data-i18n="mcp.titulo">Servidores MCP</h1>
+            <div class="viewhead"><h2 data-i18n="mcp.titulo">Servidores MCP</h2></div>
             <div class="setcard">
               <div class="sc-head">
-                <b>Servidores</b
-                ><span class="sc-hint"
+                <b data-i18n="mcp.servidores">Servidores</b
+                ><span class="sc-hint" data-i18n="mcp.servidores.nota"
                   >Conecta herramientas externas (GitHub, Notion, tu propio servidor…) y el agente las usará como las de casa.</span
                 >
               </div>
               <div class="swrow srow" data-keys="mcp servidores activar conectar herramientas externas apagar">
-                <span class="st"><b>Activar servidores MCP</b><small>Apagado, el agente no ve ninguna herramienta MCP.</small></span>
-                <div class="sw on" id="mcpGlobal" role="switch" tabindex="0" aria-checked="true" aria-label="Activar servidores MCP"></div>
+                <span class="st"><b data-i18n="mcp.activar">Activar servidores MCP</b><small data-i18n="mcp.activar.nota">Apagado, el agente no ve ninguna herramienta MCP.</small></span>
+                <div class="sw on" id="mcpGlobal" role="switch" tabindex="0" aria-checked="true" data-i18n-aria="mcp.activar" aria-label="Activar servidores MCP"></div>
               </div>
               <div id="mcpList" class="mcplist"></div>
               <div class="srow" data-keys="mcp anadir servidor pegar json exportar mcpServers">
                 <div class="btnrow">
                   <button class="btn" id="mcpNew">
-                    <span class="bi"><i data-i="plus"></i></span> Añadir servidor
+                    <span class="bi"><i data-i="plus"></i></span> <span data-i18n="mcp.anadir">Añadir servidor</span>
                   </button>
-                  <button class="btn ghost" id="mcpPaste">Pegar JSON de mcpServers</button>
-                  <button class="btn ghost" id="mcpExportBtn">Exportar</button>
+                  <button class="btn ghost" id="mcpPaste" data-i18n="mcp.pegar">Pegar JSON de mcpServers</button>
+                  <button class="btn ghost" id="mcpExportBtn" data-i18n="mcp.exportar">Exportar</button>
                 </div>
                 <div id="mcpPasteBox" hidden>
                   <textarea
@@ -390,8 +396,8 @@
                     spellcheck="false"
                   ></textarea>
                   <div class="btnrow">
-                    <button class="btn" id="mcpPasteGo">Importar</button>
-                    <button class="btn ghost" id="mcpPasteCancel">Cancelar</button>
+                    <button class="btn" id="mcpPasteGo" data-i18n="mcp.importar">Importar</button>
+                    <button class="btn ghost" id="mcpPasteCancel" data-i18n="mcp.cancelar">Cancelar</button>
                   </div>
                 </div>
               </div>
@@ -401,68 +407,68 @@
             <div class="setcard" id="mcpFormCard">
               <div class="sc-head">
                 <b id="mcpFormTitle">Nuevo servidor</b
-                ><span class="sc-hint">Las variables de entorno y las cabeceras se guardan cifradas con el almacén de Windows.</span>
+                ><span class="sc-hint" data-i18n="mcp.form.nota">Las variables de entorno y las cabeceras se guardan cifradas con el almacén de Windows.</span>
               </div>
               <div class="field srow" data-keys="mcp identificador nombre id">
-                <label for="mcpId">Identificador</label><input type="text" id="mcpId" placeholder="github" spellcheck="false" />
+                <label for="mcpId" data-i18n="mcp.id">Identificador</label><input type="text" id="mcpId" placeholder="github" spellcheck="false" />
               </div>
               <div class="field srow" data-keys="mcp nombre visible etiqueta">
-                <label for="mcpName">Nombre</label><input type="text" id="mcpName" placeholder="GitHub" />
+                <label for="mcpName" data-i18n="mcp.nombre">Nombre</label><input type="text" id="mcpName" placeholder="GitHub" />
               </div>
               <div class="field srow" data-keys="mcp tipo transporte local remoto comando url">
-                <label for="mcpTransport">Tipo</label>
+                <label for="mcpTransport" data-i18n="mcp.tipo">Tipo</label>
                 <select id="mcpTransport">
-                  <option value="stdio">Comando local</option>
-                  <option value="http">URL remota</option>
+                  <option value="stdio" data-i18n="mcp.tipo.local">Comando local</option>
+                  <option value="http" data-i18n="mcp.tipo.remota">URL remota</option>
                 </select>
               </div>
               <div id="mcpStdioRows">
                 <div class="field srow" data-keys="mcp comando ejecutable npx node">
-                  <label for="mcpCommand">Comando</label><input type="text" id="mcpCommand" placeholder="npx" spellcheck="false" />
+                  <label for="mcpCommand" data-i18n="mcp.comando">Comando</label><input type="text" id="mcpCommand" placeholder="npx" spellcheck="false" />
                 </div>
                 <div class="field srow" data-keys="mcp argumentos args">
-                  <label for="mcpArgs">ARGUMENTOS</label
+                  <label for="mcpArgs" data-i18n="mcp.args">ARGUMENTOS</label
                   ><input type="text" id="mcpArgs" placeholder="-y @modelcontextprotocol/server-github" spellcheck="false" />
                 </div>
                 <div class="field srow" data-keys="mcp variables entorno env token secreto">
-                  <label for="mcpEnv">VARIABLES DE ENTORNO</label
-                  ><textarea id="mcpEnv" rows="3" placeholder="GITHUB_TOKEN=ghp_… (una por línea)"></textarea>
+                  <label for="mcpEnv" data-i18n="mcp.env">VARIABLES DE ENTORNO</label
+                  ><textarea id="mcpEnv" rows="3" data-i18n-ph="mcp.env.ph" placeholder="GITHUB_TOKEN=ghp_… (una por línea)"></textarea>
                 </div>
               </div>
               <div id="mcpHttpRows" hidden>
                 <div class="field srow" data-keys="mcp url direccion remota endpoint">
-                  <label for="mcpUrl">URL</label
+                  <label for="mcpUrl" data-i18n="mcp.url">URL</label
                   ><input type="text" id="mcpUrl" placeholder="https://mcp.ejemplo.com/mcp" spellcheck="false" />
                 </div>
                 <div class="field srow" data-keys="mcp cabeceras headers autorizacion token">
-                  <label for="mcpHeaders">CABECERAS</label
-                  ><textarea id="mcpHeaders" rows="3" placeholder="Authorization=Bearer … (una por línea)"></textarea>
+                  <label for="mcpHeaders" data-i18n="mcp.cabeceras">CABECERAS</label
+                  ><textarea id="mcpHeaders" rows="3" data-i18n-ph="mcp.cabeceras.ph" placeholder="Authorization=Bearer … (una por línea)"></textarea>
                 </div>
               </div>
               <div class="field srow" data-keys="mcp permiso nivel bloquear permitir preguntar servidor">
-                <label for="mcpLevel">Permiso del servidor</label>
+                <label for="mcpLevel" data-i18n="mcp.permiso">Permiso del servidor</label>
                 <select id="mcpLevel">
-                  <option value="default">Por defecto (preguntar antes)</option>
-                  <option value="safe">Permitir siempre</option>
-                  <option value="confirm">Preguntar antes</option>
-                  <option value="restricted">Bloqueado</option>
+                  <option value="default" data-i18n="mcp.permiso.defecto">Por defecto (preguntar antes)</option>
+                  <option value="safe" data-i18n="mcp.permiso.siempre">Permitir siempre</option>
+                  <option value="confirm" data-i18n="mcp.permiso.preguntar">Preguntar antes</option>
+                  <option value="restricted" data-i18n="mcp.permiso.bloqueado">Bloqueado</option>
                 </select>
               </div>
               <div class="field srow" data-keys="mcp herramientas permitir allow lista">
-                <label for="mcpAllow">HERRAMIENTAS A PERMITIR (vacío = todas)</label
+                <label for="mcpAllow" data-i18n="mcp.permitir">HERRAMIENTAS A PERMITIR (vacío = todas)</label
                 ><input type="text" id="mcpAllow" placeholder="create_issue, list_issues" spellcheck="false" />
               </div>
               <div class="field srow" data-keys="mcp herramientas bloquear deny lista">
-                <label for="mcpDeny">HERRAMIENTAS A BLOQUEAR</label
+                <label for="mcpDeny" data-i18n="mcp.bloquear">HERRAMIENTAS A BLOQUEAR</label
                 ><input type="text" id="mcpDeny" placeholder="delete_repository" spellcheck="false" />
               </div>
               <div class="srow" data-keys="mcp guardar probar cancelar eliminar">
                 <div class="btnrow">
                   <button class="btn" id="mcpSave">
-                    <span class="bi"><i data-i="check"></i></span> Guardar y probar
+                    <span class="bi"><i data-i="check"></i></span> <span data-i18n="mcp.guardar">Guardar y probar</span>
                   </button>
-                  <button class="btn ghost" id="mcpCancel">Cancelar</button>
-                  <button class="btn ghost" id="mcpFormDelete" hidden>Eliminar</button>
+                  <button class="btn ghost" id="mcpCancel" data-i18n="mcp.cancelar">Cancelar</button>
+                  <button class="btn ghost" id="mcpFormDelete" hidden data-i18n="mcp.eliminar">Eliminar</button>
                 </div>
               </div>
             </div>
