@@ -1132,9 +1132,12 @@ test('idioma: el renderer no lleva textos fijos fuera de los diccionarios', () =
   const TOKEN = /^[a-z0-9][a-zA-Z0-9._/-]*$/;
   // constante del motor ('FAILED', 'OK')
   const CONSTANTE = /^[A-Z][A-Z0-9_]*$/;
-  // marcado puro: etiquetas y atributos, sin una sola letra de texto entre ellas
+  // una etiqueta con sus atributos
   const ETIQUETA = /<\/?[a-zA-Z][a-zA-Z0-9-]*(?:\s+[a-zA-Z-]+(?:="[^"]*")?)*\s*\/?>/g;
-  const esMarcado = (s) => /[<>]/.test(s) && s.replace(ETIQUETA, '').trim() === '';
+  /* Marcado puro: etiquetas y atributos, y entre ellas NADA QUE SE LEA. Se exige que no
+     queden LETRAS, no que no quede nada: los adornos (`✓`, `▾`, un espacio) no se traducen,
+     y `<b>Tú</b>` sí cae porque «Tú» es texto. */
+  const esMarcado = (s) => /[<>]/.test(s) && !/\p{L}/u.test(s.replace(ETIQUETA, ''));
   /* Lo que va dentro de `${…}` es código, no texto: se quita antes de clasificar (con
      conteo de llaves, que una interpolación puede llevar un objeto dentro). */
   const sinInterpolar = (s) => {
@@ -1250,6 +1253,18 @@ test('idioma: el renderer no lleva textos fijos fuera de los diccionarios', () =
     sospechososDe(['box.innerHTML = `<button class="btn ghost sq">${esc(x)}</button>`;']).join(' | '),
     '',
     'sin confundir una lista de clases con una frase',
+  );
+  eq(
+    // la lista de clases pasa por la rama `class=` (no por la de marcado) y el `aria-label`
+    // de al lado sí cae: es el caso que deja clavada esa rama
+    sospechososDe(['  <button class="btn ghost sq" aria-label="Duplicar">']).join(' | '),
+    'Duplicar',
+    'una lista de clases de varias palabras no es una frase, pero el rótulo de al lado sí',
+  );
+  eq(
+    sospechososDe(["box.innerHTML = '<span class=\"mm-mark\" aria-hidden=\"true\">✓</span>';"]).join(' | '),
+    '',
+    'y un adorno sin letras (✓, ▾) tampoco se marca',
   );
   eq(
     sospechososDe(["el.textContent = 'error desconocido';"]).join(' | '),
