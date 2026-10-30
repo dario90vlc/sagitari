@@ -560,6 +560,14 @@ const RISK_LABEL = {
     return I18N.t('nivel.restricted');
   },
 };
+/* La clave del nivel elegido, escrita ENTERA: el barrido de claves del arnés lee
+   literales completos y `'nivel.' + valor` no le enseña ninguna de las cuatro. */
+const NIVEL_CLAVE = {
+  default: 'nivel.default',
+  safe: 'nivel.safe',
+  confirm: 'nivel.confirm',
+  restricted: 'nivel.restricted',
+};
 /* Claves reales de la tabla del agente, rellenadas al pintar Seguridad (ver
    _renderSecurity): las usa «Restablecer permisos recomendados».
    `PERM_LABEL`: nombres bonitos que no están en el catálogo del chat (browser_eval no
@@ -650,7 +658,9 @@ async function _renderSecurity() {
         /* El nivel se dice por clave (`nivel.*`), no leyendo el texto del desplegable:
            con el idioma en inglés, `toLowerCase()` de una etiqueta traducida no es una
            frase que quepa en el aviso. */
-        showToast(I18N.t('ajustes.perm.guardado', { nombre, nivel: I18N.t('nivel.' + e.target.value) }));
+        showToast(
+          I18N.t('ajustes.perm.guardado', { nombre, nivel: I18N.t(NIVEL_CLAVE[e.target.value] || 'nivel.default') }),
+        );
       };
       permBox.appendChild(row);
     }
@@ -699,7 +709,12 @@ async function _renderSecurity() {
         );
         return;
       }
-      showToast(I18N.t('ajustes.perm.mcp.guardado', { nombre: s.name, nivel: I18N.t('nivel.' + e.target.value) }));
+      showToast(
+        I18N.t('ajustes.perm.mcp.guardado', {
+          nombre: s.name,
+          nivel: I18N.t(NIVEL_CLAVE[e.target.value] || 'nivel.default'),
+        }),
+      );
     };
     permBox.appendChild(row);
   }
