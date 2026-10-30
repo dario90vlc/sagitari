@@ -826,6 +826,8 @@ window.I18N_EN = {
   'ajustes.perm.error': 'Could not save the permission for {nombre}: {motivo}',
   'ajustes.perm.mcp.guardado': 'MCP {nombre}: {nivel}',
   'ajustes.perm.mcp.error': 'Could not save the permission of the MCP server {nombre}: {motivo}',
+  /* the four levels as said inside a sentence (lower case, mid-phrase) */
+  'nivel.default': 'default',
   'nivel.safe': 'always allow',
   'nivel.confirm': 'ask first',
   'nivel.restricted': 'blocked',
@@ -935,7 +937,7 @@ window.I18N_EN = {
   'ajustes.permisos.nada': 'No permissions to change',
   'ajustes.permisos.todos.confirmar': 'Allow the {n} tools without asking?',
   'ajustes.permisos.todos.detalle':
-    'The agent will be able to run commands, write and delete files, open programs and browse without asking you. It is undone with «Volver a lo recomendado».',
+    'The agent will be able to run commands, write and delete files, open programs and browse without asking you. It is undone with «Back to recommended».',
   'ajustes.permisos.guardar.error': 'Could not save the permissions: {motivo}',
   'ajustes.permisos.guardar.fallo': 'the permissions could not be saved',
 

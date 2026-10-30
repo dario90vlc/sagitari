@@ -828,7 +828,8 @@ window.I18N_ES = {
   'ajustes.perm.error': 'No se pudo guardar el permiso de {nombre}: {motivo}',
   'ajustes.perm.mcp.guardado': 'MCP {nombre}: {nivel}',
   'ajustes.perm.mcp.error': 'No se pudo guardar el permiso del servidor MCP {nombre}: {motivo}',
-  /* los tres niveles tal y como se dicen en un aviso (minúsculas, dentro de una frase) */
+  /* los cuatro niveles tal y como se dicen en un aviso (minúsculas, dentro de una frase) */
+  'nivel.default': 'por defecto',
   'nivel.safe': 'permitir siempre',
   'nivel.confirm': 'preguntar antes',
   'nivel.restricted': 'bloqueado',
