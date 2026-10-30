@@ -473,6 +473,49 @@ async function leerCuerpoAcotado(res, maxBytes) {
   return Buffer.concat(trozos).toString('utf8');
 }
 
+/* Lee un flujo SSE y despacha cada evento EN CUANTO llega. La spec permite que el servidor
+   deje el stream abierto (notificaciones posteriores); esperar al cierre daba por timeout
+   una respuesta que ya estaba en el búfer. Se corta en cuanto llega la respuesta a nuestra
+   petición (un mensaje sin `method`), o al agotar el tope de bytes. */
+async function despacharSse(res, maxBytes, onMensaje) {
+  const motivo = `el cuerpo del servidor MCP pasó de ${Math.round(maxBytes / (1024 * 1024))} MB; se cortó la conexión.`;
+  if (!res.body || typeof res.body.getReader !== 'function') {
+    const texto = await leerCuerpoAcotado(res, maxBytes);
+    for (const m of parseSseText(texto)) if (onMensaje(m) === false) break;
+    return;
+  }
+  const lector = res.body.getReader();
+  const dec = new TextDecoder();
+  let buf = '';
+  let total = 0;
+  const despachar = (bloque) => parseSseText(bloque).every((m) => onMensaje(m) !== false);
+  try {
+    for (;;) {
+      const { done, value } = await lector.read();
+      if (done) break;
+      total += value.byteLength;
+      if (total > maxBytes) throw new Error(motivo);
+      buf += dec.decode(value, { stream: true });
+      let corte;
+      while ((corte = buf.search(/\r?\n\r?\n/)) !== -1) {
+        const bloque = buf.slice(0, corte);
+        buf = buf.slice(corte).replace(/^\r?\n\r?\n/, '');
+        if (!despachar(bloque)) return;
+      }
+    }
+    buf += dec.decode();
+    if (buf.trim()) despachar(buf);
+  } finally {
+    // el servidor puede no cerrar nunca: se corta el stream al salir, con o sin respuesta
+    try {
+      await lector.cancel();
+    } catch {}
+    try {
+      lector.releaseLock();
+    } catch {}
+  }
+}
+
 /**
  * Servidor MCP remoto: POST con JSON-RPC; la respuesta puede ser JSON directo o
  * un flujo SSE (streamable HTTP). El id de sesión que devuelva `initialize` se
@@ -532,12 +575,20 @@ function createHttpTransport({ url, headers = {}, defaultTimeoutMs, fetchFn = fe
         return;
       }
       const tipo = String(res.headers.get('content-type') || '');
+      /* Un flujo SSE se lee EN VIVO: según la spec el servidor puede dejarlo abierto y aun
+         así haber respondido. Se corta en cuanto llega la respuesta a nuestra petición. */
+      if (tipo.includes('text/event-stream')) {
+        await despacharSse(res, MAX_MESSAGE_BYTES, (m) => {
+          rpc.handleMessage(m);
+          return !(m && m.method === undefined && ('result' in m || 'error' in m));
+        });
+        return;
+      }
       const body = await leerCuerpoAcotado(res, MAX_MESSAGE_BYTES);
       // 202 sin cuerpo: es lo que la spec manda para notificaciones y respuestas, así
       // que no hay nada que interpretar (y no puede contar como caída del servidor)
       if (!body.trim()) return;
-      const mensajes = tipo.includes('text/event-stream') ? parseSseText(body) : [JSON.parse(body)];
-      for (const m of mensajes) rpc.handleMessage(m);
+      rpc.handleMessage(JSON.parse(body));
     } catch (e) {
       // Un abort causado por nuestro propio tope no significa que el servidor esté
       // caído: el Rpc ya rechazó la petición con su mensaje de timeout, así que no

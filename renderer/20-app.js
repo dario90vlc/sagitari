@@ -160,10 +160,19 @@ function refreshAgentsPanels() {
   renderHabits();
 }
 
+/* Un panel de diagnóstico sin datos se marca `vacio`: pierde la caja y queda como
+   nota con su rótulo (ver .tooltray.vacio). En cuanto hay algo dentro vuelve a ser
+   panel, así que la caja significa «aquí hay datos que mirar». */
+function marcarTrayVacio(el, vacio) {
+  const tray = el && el.closest ? el.closest('.tooltray') : null;
+  if (tray) tray.classList.toggle('vacio', !!vacio);
+}
+
 /** «Actividad de herramientas» = lo realmente usado en la sesión, no el catálogo. */
 async function renderToolTray() {
   const tray = $('#toolTrayList');
   if (!tray) return;
+  marcarTrayVacio(tray, false);
   let fired = [];
   try {
     fired = ((await window.sagitari.getAgentsLive()) || {}).toolsFired || [];
@@ -173,6 +182,7 @@ async function renderToolTray() {
   }
   if (!fired.length) {
     tray.innerHTML = '<div class="subnote">Todavía no se ha usado ninguna herramienta en esta sesión.</div>';
+    marcarTrayVacio(tray, true);
     return;
   }
   tray.innerHTML = fired
@@ -187,6 +197,7 @@ async function renderToolTray() {
 async function renderHealth() {
   const box = $('#healthList');
   if (!box) return;
+  marcarTrayVacio(box, false);
   let rows = [],
     err = null;
   try {
@@ -200,6 +211,7 @@ async function renderHealth() {
   }
   if (!rows.length) {
     box.innerHTML = '<div class="subnote">Sin datos todavía. Cada llamada al modelo registrará latencia, errores y tokens aquí.</div>';
+    marcarTrayVacio(box, true);
     return;
   }
   /* Una fila de datos por modelo: las cifras no se recortan y las columnas
@@ -227,6 +239,7 @@ async function renderHealth() {
 async function renderHabits() {
   const box = $('#habitsList');
   if (!box) return;
+  marcarTrayVacio(box, false);
   let s = {};
   try {
     s = await window.sagitari.habitsGet();
@@ -244,9 +257,11 @@ async function renderHabits() {
     parts.push(
       `<div class="toolchip"><span class="tc-mark">${ic('check')}</span><span class="tc-txt" title="Confirmaciones aceptadas y denegadas">confirmaciones: ${c.approved || 0} aceptadas · ${c.denied || 0} denegadas</span></div>`,
     );
+  const hayHabitos = parts.filter(Boolean).length > 0;
   box.innerHTML =
     parts.filter(Boolean).join('') ||
     '<div class="subnote">Aún no hay hábitos observados. Se aprenden solo de lo que SAGITARI hace por ti.</div>';
+  marcarTrayVacio(box, !hayHabitos);
 }
 
 /** Resumen legible de una importación: instaladas y omitidas (con el motivo). */
@@ -332,7 +347,7 @@ $('#marketSearchBtn').onclick = async () => {
           (r) => `
       <div class="memitem">
         <span class="tc-mark">${ic('search')}</span>
-        <span class="mt"><b>${esc(r.repo)}</b> <span class="md">★ ${r.stars}</span><br><small class="md">${esc(r.description)}</small></span>
+        <span class="mt"><b>${esc(r.repo)}</b> <span class="md">★ ${esc(r.stars)}</span><br><small class="md">${esc(r.description)}</small></span>
         <button class="btn primary sq" data-install="${esc(r.repo)}" title="Instalar">${ic('download')}</button>
       </div>`,
         )
@@ -417,7 +432,9 @@ function scheduleStreamRender(holder) {
     let s = h._openEl && h._openEl.isConnected ? h._openEl : null;
     if (!s) {
       s = document.createElement('div');
-      s.className = 'stream';
+      // `seg`: el tramo de narración es un BLOQUE con piel propia dentro de la traza del
+      // turno, no texto suelto dentro de una burbuja única
+      s.className = 'stream seg';
       h.appendChild(s);
       h._openEl = s;
     }
@@ -441,7 +458,7 @@ function freezeStream() {
     s = document.createElement('div');
     h.appendChild(s);
   }
-  s.className = 'stream-done';
+  s.className = 'stream-done seg';
   s.innerHTML = fmt(h._openText);
   h._frozenText = (h._frozenText || '') + (h._frozenText ? '\n\n' : '') + h._openText;
   h._openText = '';

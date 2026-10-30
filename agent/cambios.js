@@ -38,6 +38,12 @@ const noRestaurables = new Map();
    subcarpeta (`<repo>/proyecto`) queda por encima: sin esta raíz, esas rutas caían fuera
    de `dentroDelEspacio` y «Deshacer» las descartaba en silencio. */
 const raices = new Map();
+/* Rutas escritas en el turno, SIN el tope del diff (`MAX_ARCHIVOS * 4`): la puerta que
+   impide ejecutar un comprobador que el propio modelo acaba de escribir consulta esta
+   lista, y con el tope del diff el archivo 49 dejaba de estar «tocado» y se ejecutaba sin
+   tarjeta. Se acota aparte para que una sesión eterna no crezca sin freno. */
+const tocados = new Map(); // clave -> Set de rutas absolutas
+const MAX_TOCADOS = 5000;
 
 /** El contenido de un archivo tal y como estaba, o null si no existía / no es texto. */
 function leerAntes(absPath) {
@@ -69,6 +75,11 @@ function recordar(workspace, absPath, contenidoAnterior, owner = '', raiz = null
   if (!guardados.has(k)) guardados.set(k, new Map());
   const mapa = guardados.get(k);
   if (mapa.has(absPath)) return;
+  /* El registro de «tocado» va ANTES del tope del diff: es el que consulta la puerta de
+     los comprobadores, y un turno que pasa de 48 archivos no puede abrirla. */
+  if (!tocados.has(k)) tocados.set(k, new Set());
+  const vistas = tocados.get(k);
+  if (vistas.size < MAX_TOCADOS) vistas.add(absPath);
   if (mapa.size >= MAX_ARCHIVOS * 4) return; // un turno que toca cien archivos no se revisa así
   /* La raíz bajo la que esta ruta es legítima: el espacio de trabajo, salvo que el
      llamante declare otra (la fusión de un árbol aislado pasa la raíz del repositorio y
@@ -114,16 +125,33 @@ function normalRuta(s) {
     .toLowerCase();
 }
 
+/* Camino REAL de una ruta (resuelve junctions y enlaces). Se delega en executors.js —el
+   mismo criterio que el confinamiento de rutas, en un solo sitio— y el require es perezoso
+   porque executors carga este módulo al arrancar. */
+let caminoRealFn = null;
+function caminoReal(p) {
+  if (!caminoRealFn) caminoRealFn = require('./executors').caminoReal;
+  return caminoRealFn(p);
+}
+
 /** ¿`abs` cae DENTRO del espacio de trabajo? La comparación es por CARPETA (`<raíz>/`),
     nunca por prefijo de texto: `C:\proj-viejo` no está dentro de `C:\proj`. Lo usan las
     dos vías de deshacer (el turno entero y el panel de revisión), que antes daban
-    respuestas OPUESTAS para el mismo archivo. */
+    respuestas OPUESTAS para el mismo archivo. El texto tampoco basta: un junction dentro
+    del espacio que apunta fuera se llama «de dentro» y escribe fuera, así que se comparan
+    los caminos REALES y, si no se pueden resolver, la duda es tarjeta (`false`). */
 function dentroDelEspacio(workspace, abs) {
   const w = String(workspace || '');
   if (!w) return false;
   const raiz = normalRuta(w);
   const a = normalRuta(abs);
-  return a === raiz || a.startsWith(raiz + '/');
+  if (!(a === raiz || a.startsWith(raiz + '/'))) return false;
+  const raizReal = caminoReal(raiz);
+  const absReal = caminoReal(a);
+  if (raizReal == null || absReal == null) return false;
+  const r = normalRuta(raizReal);
+  const ar = normalRuta(absReal);
+  return ar === r || ar.startsWith(r + '/');
 }
 
 /** Raíz por la que una ruta registrada en este turno es legítima (ver `raices`). */
@@ -494,8 +522,9 @@ function planDeshacer(workspace, owner = '') {
  * o la raíz del repositorio con la que la registró la fusión de un árbol aislado) y solo
  * los archivos que este turno tocó (la lista sale de la pre-imagen, no de adivinar). Una
  * ruta fuera de su raíz no se toca Y se cuenta como fallo: no se puede decir «deshecho»
- * de algo que sigue ahí. Después se olvida el turno: no se puede deshacer dos veces ni
- * «deshacer» un deshacer que ya no aplica.
+ * de algo que sigue ahí. Lo que no se pudo aplicar conserva su pre-imagen para reintentar;
+ * lo demás se olvida: no se puede deshacer dos veces ni «deshacer» un deshacer que ya no
+ * aplica.
  *
  * @returns {{archivos: Array<{ruta, accion}>, restaurados: number, borrados: number, fallos: number}}
  */
@@ -513,20 +542,28 @@ function deshacer(workspace, { soloRel = null } = {}, owner = '') {
   let restaurados = 0,
     borrados = 0,
     fallos = 0;
+  /* Lo que no se pudo aplicar se queda en el mapa: es la única copia de la pre-imagen y
+     sin ella el reintento sería imposible (y la interfaz seguiría diciendo «deshecho»). */
+  const pendientes = new Map();
   for (const [abs, antes] of mapa) {
     const raiz = raizDe(k, abs, workspace);
     if (!dentroDelEspacio(raiz, abs)) {
       /* Ni siquiera su raíz declarada lo cubre: no se toca, y se cuenta como fallo para
-         que la interfaz NO pueda decir «deshechos» cuando no lo está. */
+         que la interfaz NO pueda decir «deshechos» cuando no lo está. No se guarda: no
+         hay reintento que arregle un junction. */
       archivos.push({ ruta: nombreRel(raiz, abs), accion: 'fuera-del-espacio' });
       fallos++;
       continue;
     }
-    if (soloRel && nombreRel(raiz, abs) !== soloRel) continue;
+    if (soloRel && nombreRel(raiz, abs) !== soloRel) {
+      pendientes.set(abs, antes);
+      continue;
+    }
     const rel = nombreRel(raiz, abs);
     if (no.has(abs)) {
       archivos.push({ ruta: rel, accion: 'no-restaurable' });
       fallos++;
+      pendientes.set(abs, antes);
       continue;
     }
     try {
@@ -542,30 +579,44 @@ function deshacer(workspace, { soloRel = null } = {}, owner = '') {
     } catch (e) {
       archivos.push({ ruta: rel, accion: 'fallo', error: String((e && e.message) || e) });
       fallos++;
+      pendientes.set(abs, antes);
     }
   }
-  // lo deshecho ya no está pendiente de revisión ni de deshacer
-  olvidar(workspace, owner);
-  noRestaurables.delete(k);
+  /* Lo deshecho del todo se olvida; si algo quedó pendiente, se conserva SÓLO eso (con su
+     raíz) y el aviso de «no restaurable», para poder reintentar sin perder la pre-imagen. */
+  if (pendientes.size) {
+    const rr = new Map();
+    for (const abs of pendientes.keys()) rr.set(abs, raizDe(k, abs, workspace));
+    guardados.set(k, pendientes);
+    raices.set(k, rr);
+  } else {
+    // lo deshecho ya no está pendiente de revisión ni de deshacer
+    olvidar(workspace, owner);
+    noRestaurables.delete(k);
+  }
   return { archivos, restaurados, borrados, fallos };
 }
 
 /** Rutas absolutas que este turno ha tocado (para hooks, resúmenes y avisos). */
 function archivosTocados(workspace, owner = '') {
-  return planDeshacer(workspace, owner)
-    .map((x) => x.rutaAbs)
-    .filter(Boolean);
+  /* La lista del turno sale del registro SIN tope (y del plan, por si algo se registró
+     antes de esta versión): el tope de 48 es del DIFF, no de «qué se ha tocado». */
+  const k = claveDueno(workspace, owner);
+  const vistas = [...(tocados.get(k) || [])];
+  return [...new Set([...planDeshacer(workspace, owner).map((x) => x.rutaAbs).filter(Boolean), ...vistas])];
 }
 
 function olvidar(workspace, owner = '') {
   const k = claveDueno(workspace, owner);
   guardados.delete(k);
   raices.delete(k);
+  tocados.delete(k);
 }
 function limpiar() {
   guardados.clear();
   noRestaurables.clear();
   raices.clear();
+  tocados.clear();
 }
 
 module.exports = {

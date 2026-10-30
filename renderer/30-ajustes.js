@@ -39,8 +39,8 @@ async function fillSettings() {
   initDataPanel(); // hábitos + carpeta de datos
   $('#swGlow').classList.toggle('on', !!CFG.settings.glowEnabled);
   $('#setUserName').value = CFG.settings.userName || '';
-  // apariencia: color de interfaz, color del glow e intensidad
-  $('#uiColor').value = PALETTES[CFG.settings.uiColor] ? CFG.settings.uiColor : 'aurora';
+  // apariencia: aspecto, color de interfaz, color del glow e intensidad
+  $('#uiSkin').value = skinActual(CFG.settings);
   $('#glowColor').value =
     !CFG.settings.glowColor || CFG.settings.glowColor === 'match'
       ? 'match'
@@ -357,10 +357,13 @@ function syncGlowTiles() {
 function paintTiles() {
   const ui = document.getElementById('uiColor');
   const gl = document.getElementById('glowColor');
+  const skin = document.getElementById('uiSkin');
   if (ui)
     document.querySelectorAll('#uiColorTiles .pal').forEach((b) => b.classList.toggle('on', b.dataset.pal === ui.value));
   if (gl)
     document.querySelectorAll('#glowColorTiles .pal').forEach((b) => b.classList.toggle('on', b.dataset.pal === gl.value));
+  if (skin)
+    document.querySelectorAll('#uiSkinTiles .pal').forEach((b) => b.classList.toggle('on', b.dataset.pal === skin.value));
 }
 document.querySelectorAll('.pals .pal').forEach((b) => {
   b.addEventListener('click', () => {
@@ -389,6 +392,15 @@ if (btnChangeModel)
     if (t) t.click();
   });
 
+/* El aspecto se aplica AL MOMENTO: no recarga nada y no toca el color elegido. Los dos
+   planos conservan tu paleta como acento; lo que cambia es la materia (ver skins.css). */
+$('#uiSkin').onchange = async (e) => {
+  const valor = SKINS.includes(e.target.value) ? e.target.value : 'holo';
+  CFG.settings.uiSkin = valor;
+  applyTheme();
+  paintTiles();
+  await window.sagitari.setSettings({ uiSkin: valor });
+};
 $('#uiColor').onchange = async (e) => {
   CFG.settings.uiColor = e.target.value;
   applyTheme();
@@ -571,8 +583,17 @@ async function _renderSecurity() {
         <option value="confirm"${lvl === 'confirm' ? ' selected' : ''}>Preguntar antes</option>
         <option value="restricted"${lvl === 'restricted' ? ' selected' : ''}>Bloqueado</option>
       </select>`;
+      const previo = lvl;
       row.querySelector('select').onchange = async (e) => {
-        await window.sagitari.secSetToolPerm(n, e.target.value);
+        const r = await window.sagitari.secSetToolPerm(n, e.target.value);
+        /* main restaura su copia si el disco falló: la interfaz no puede quedarse con un
+           nivel que no se guardó (mismo criterio que workspace:set / mode:set). */
+        if (r && r.ok === false) {
+          e.target.value = previo;
+          if (typeof cselPintar === 'function') cselPintar(e.target);
+          showToast('No se pudo guardar el permiso de ' + nombre + ': ' + (r.error || 'error desconocido'));
+          return;
+        }
         showToast(`${nombre}: ${e.target.selectedOptions[0].textContent.toLowerCase()}`);
       };
       permBox.appendChild(row);
@@ -607,8 +628,15 @@ async function _renderSecurity() {
         <option value="confirm"${lvl === 'confirm' ? ' selected' : ''}>Preguntar antes</option>
         <option value="restricted"${lvl === 'restricted' ? ' selected' : ''}>Bloqueado</option>
       </select>`;
+    const previo = lvl;
     row.querySelector('select').onchange = async (e) => {
-      await window.sagitari.secSetToolPerm(wildcard, e.target.value);
+      const r = await window.sagitari.secSetToolPerm(wildcard, e.target.value);
+      if (r && r.ok === false) {
+        e.target.value = previo;
+        if (typeof cselPintar === 'function') cselPintar(e.target);
+        showToast('No se pudo guardar el permiso del servidor MCP ' + s.name + ': ' + (r.error || 'error desconocido'));
+        return;
+      }
       showToast('MCP ' + s.name + ': ' + e.target.selectedOptions[0].textContent.toLowerCase());
     };
     permBox.appendChild(row);
@@ -683,24 +711,42 @@ function clampGuardrail(el, fallback) {
   el.value = v;
   return v;
 }
-$('#grSteps').onchange = (e) => window.sagitari.secSetGuardrail({ maxSteps: clampGuardrail(e.target, 0) });
-$('#grToolCalls').onchange = (e) => window.sagitari.secSetGuardrail({ maxToolCalls: clampGuardrail(e.target, 0) });
-$('#grMinutes').onchange = (e) => window.sagitari.secSetGuardrail({ maxDurationMs: clampGuardrail(e.target, 0) * 60000 });
-$('#grTokens').onchange = (e) => window.sagitari.secSetGuardrail({ maxTokens: clampGuardrail(e.target, 0) });
-$('#grLoop').onchange = (e) => window.sagitari.secSetGuardrail({ loopThreshold: clampGuardrail(e.target, 3) });
-if ($('#grCost')) $('#grCost').onchange = (e) => window.sagitari.secSetGuardrail({ maxCostUsd: clampGuardrail(e.target, 0) });
-if ($('#grStall')) $('#grStall').onchange = (e) => window.sagitari.secSetGuardrail({ stallThreshold: clampGuardrail(e.target, 0) });
+/** Guarda un guardarraíl y, si main no pudo escribirlo, repinta los campos desde
+    `meta:get`: main ya restauró su copia y la interfaz no puede quedarse con otro valor
+    (mismo criterio que workspace:set / mode:set). */
+function guardarGuardrail(patch) {
+  return window.sagitari.secSetGuardrail(patch).then(async (r) => {
+    if (r && r.ok === false) {
+      showToast('No se pudo guardar el límite: ' + (r.error || 'error desconocido'));
+      try {
+        await initSecurity();
+      } catch {}
+    }
+  });
+}
+$('#grSteps').onchange = (e) => guardarGuardrail({ maxSteps: clampGuardrail(e.target, 0) });
+$('#grToolCalls').onchange = (e) => guardarGuardrail({ maxToolCalls: clampGuardrail(e.target, 0) });
+$('#grMinutes').onchange = (e) => guardarGuardrail({ maxDurationMs: clampGuardrail(e.target, 0) * 60000 });
+$('#grTokens').onchange = (e) => guardarGuardrail({ maxTokens: clampGuardrail(e.target, 0) });
+$('#grLoop').onchange = (e) => guardarGuardrail({ loopThreshold: clampGuardrail(e.target, 3) });
+if ($('#grCost')) $('#grCost').onchange = (e) => guardarGuardrail({ maxCostUsd: clampGuardrail(e.target, 0) });
+if ($('#grStall')) $('#grStall').onchange = (e) => guardarGuardrail({ stallThreshold: clampGuardrail(e.target, 0) });
 if ($('#grDelegations'))
-  $('#grDelegations').onchange = (e) => window.sagitari.secSetGuardrail({ maxDelegations: clampGuardrail(e.target, 8) });
+  $('#grDelegations').onchange = (e) => guardarGuardrail({ maxDelegations: clampGuardrail(e.target, 8) });
 /* v4.4: el presupuesto del equipo se guarda como ajuste (equipoPresupuestoUsd) y admite
    decimales —es dinero, no un número de pasos—, así que no pasa por clampGuardrail. */
 if ($('#eqPresupuesto'))
   $('#eqPresupuesto').onchange = async (e) => {
     const v = Number(String(e.target.value).replace(',', '.'));
     const usd = Number.isFinite(v) && v > 0 ? Math.round(v * 100) / 100 : 0; // 0 = sin tope propio
-    e.target.value = usd;
-    await window.sagitari.setSettings({ equipoPresupuestoUsd: usd });
-    showToast(usd ? 'Presupuesto del equipo: ' + usd.toFixed(2) + ' $ por encargo' : 'El equipo trabajará sin tope de gasto propio');
+    /* main descarta el valor que supera su tope: el campo y el aviso se pintan con el que
+       quedó guardado de verdad, no con el que se tecleó. */
+    const r = await window.sagitari.setSettings({ equipoPresupuestoUsd: usd });
+    const guardado = Number((r && r.equipoPresupuestoUsd) || 0);
+    e.target.value = guardado;
+    showToast(
+      guardado ? 'Presupuesto del equipo: ' + guardado.toFixed(2) + ' $ por encargo' : 'El equipo trabajará sin tope de gasto propio',
+    );
   };
 if ($('#parTools'))
   $('#parTools').onchange = async (e) => {
@@ -1247,13 +1293,18 @@ function filterSettings(query) {
   // (display:none) daba por buena una búsqueda cuyo único resultado no se veía
   // y, además, ocultaba el aviso «Ningún ajuste coincide».
   const buscando = wrap.classList.contains('searching');
+  /* En un aspecto PLANO las filas de luz y vidrio no existen (las retira applyTheme):
+     una búsqueda no puede resucitarlas, o buscar «glow» en Consola ofrecería controles
+     que no hacen nada sobre un aspecto que no tiene ni filo ni cristal. */
+  const plano = skinActual(CFG.settings) !== 'holo';
   let shown = 0;
   wrap.querySelectorAll(SET_ROWS).forEach((row) => {
     const hay = ((row.dataset.keys || '') + ' ' + row.textContent).toLowerCase();
     const hit = !q || hay.includes(q);
-    row.hidden = !hit;
+    const oculta = plano && row.hasAttribute('data-solo-holo');
+    row.hidden = !hit || oculta;
     const panel = row.closest('.setpanel');
-    if (hit && (buscando || !panel || panel.classList.contains('on'))) shown++;
+    if (hit && !oculta && (buscando || !panel || panel.classList.contains('on'))) shown++;
   });
   wrap.querySelectorAll('.setcard').forEach((card) => {
     card.hidden = !!q && ![...card.querySelectorAll(SET_ROWS)].some((r) => !r.hidden);

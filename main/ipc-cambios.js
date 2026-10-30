@@ -54,6 +54,16 @@ function registerCambiosIpc(ipcMain, ctx) {
       borrados: r.borrados,
       fallos: r.fallos,
     });
+    /* Con algún archivo sin deshacer la respuesta NO puede ser «ok»: el renderer cantaría
+       «deshechos» y la pre-imagen de ese archivo sigue en el mapa para reintentar. Una
+       ruta que quedó fuera de su espacio no se puede reintentar, y se dice. */
+    if (r.fallos > 0) {
+      const reintentables = (r.archivos || []).filter((a) => a && a.accion !== 'fuera-del-espacio').length;
+      const error = reintentables
+        ? `no se pudieron deshacer ${reintentables} archivo(s) de este turno: se puede reintentar`
+        : `no se pudieron deshacer ${r.fallos} archivo(s): su ruta queda fuera del espacio de trabajo de este turno`;
+      return { ok: false, error, ...r, plan: plan.length };
+    }
     return { ok: true, ...r, plan: plan.length };
   });
 

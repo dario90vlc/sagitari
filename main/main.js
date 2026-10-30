@@ -813,7 +813,8 @@ function mcpState() {
         enabled: v.enabled !== undefined ? v.enabled : s.enabled,
         state: v.state || 'idle',
         error: v.error || null,
-        logTail: v.logTail || '',
+        // el stderr de un servidor puede traer su token en un error: misma máscara que env/headers
+        logTail: runlog.redactText(v.logTail || ''),
         discovered: v.tools || [],
       };
     }),

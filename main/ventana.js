@@ -17,6 +17,10 @@ function crearVentana({ HIDDEN, DEV, INDEX_HTML, getAgent, getConfig, saveConfig
   let win = null; // chat
   let boundsTimer = null;
   let recuperacionTimer = null; // reintento de carga tras caerse el renderer
+  /* Caídas seguidas sin llegar a cargar. Un fallo reproducible en el arranque (GPU, OOM)
+     recargaba en bucle: cada caída reiniciaba el temporizador de 8 s y el diálogo de
+     «la interfaz no ha vuelto» no llegaba nunca. Con el contador se deja de recargar. */
+  let caidasSeguidas = 0;
 
   /* Geometría de arranque: la GUARDADA (si cae dentro de algún monitor conectado) o la
      centrada por defecto. Persistir sin validar dejaría la ventana fuera de todo al
@@ -169,11 +173,19 @@ function crearVentana({ HIDDEN, DEV, INDEX_HTML, getAgent, getConfig, saveConfig
      ofrece reiniciar la interfaz (o cerrar la app). */
   function recuperarRenderer(detalles) {
     console.error('[SAGITARI] el proceso de render se cayó:', (detalles && detalles.reason) || 'motivo desconocido');
+    caidasSeguidas++;
     const w = win;
     if (!w || w.isDestroyed()) return recrearVentana();
+    /* Tres recargas seguidas sin llegar a cargar ya no son mala suerte: recargar otra vez
+       repite el bucle infinito. Se ofrece reiniciar la interfaz (o cerrar la app). */
+    if (caidasSeguidas > 3) {
+      preguntarReiniciarInterfaz();
+      return;
+    }
     let volvio = false;
     const alCargar = () => {
       volvio = true;
+      caidasSeguidas = 0;
     };
     try {
       w.webContents.once('did-finish-load', alCargar);
@@ -192,6 +204,7 @@ function crearVentana({ HIDDEN, DEV, INDEX_HTML, getAgent, getConfig, saveConfig
   /** Crea una ventana nueva (la actual puede estar destruida o en blanco). */
   function recrearVentana() {
     const previa = win;
+    caidasSeguidas = 0; // ventana nueva, presupuesto nuevo
     try {
       if (previa && !previa.isDestroyed()) previa.destroy();
     } catch {}

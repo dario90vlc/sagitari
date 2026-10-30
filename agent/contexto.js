@@ -121,6 +121,20 @@ function enBloques(messages) {
   return bloques;
 }
 
+/* Marca del mensaje que trae la petición del turno EN CURSO. Es un Symbol y no una
+   propiedad normal: no viaja al proveedor ni aparece en el JSON del historial, y el
+   mensaje sigue siendo el MISMO objeto que se manda. Sin ella la frontera era «el último
+   mensaje de usuario», y la puerta de cierre (que empuja sus instrucciones al final)
+   convertía la pregunta del turno en un turno viejo y la soltaba. */
+const TURNO = Symbol('turno');
+function marcarTurno(msg) {
+  if (msg && typeof msg === 'object') Object.defineProperty(msg, TURNO, { value: true, configurable: true });
+  return msg;
+}
+function esTurno(msg) {
+  return !!(msg && msg[TURNO]);
+}
+
 /**
  * Suelta los bloques MÁS ANTIGUOS del request hasta que quepa.
  *
@@ -142,8 +156,13 @@ function recortarMensajes(messages = [], tools = [], cfg = {}, { objetivo = 0.75
      recalcula en cada vuelta porque al soltar turnos antiguos todos los índices bajan:
      con el índice calculado una sola vez al principio, una conversación de varios turnos
      acababa enviando SOLO el prompt del sistema (el mensaje del usuario se iba con los
-     turnos viejos). */
-  const turnoEnCurso = () => bloques.reduce((acc, b, idx) => (b.some((m) => m.role === 'user') ? idx : acc), 0);
+     turnos viejos). Manda la marca si la hay; sin marca (historiales viejos) se mantiene
+     el último mensaje de usuario, que es lo que hacía antes. */
+  const turnoEnCurso = () => {
+    const marcado = bloques.reduce((acc, b, idx) => (b.some((m) => esTurno(m)) ? idx : acc), -1);
+    if (marcado >= 0) return marcado;
+    return bloques.reduce((acc, b, idx) => (b.some((m) => m.role === 'user') ? idx : acc), 0);
+  };
   while (medir(bloques.flat(), []).total > tope && bloques.length - i > minimo) {
     const enCurso = turnoEnCurso();
     if (i < enCurso) {
@@ -170,4 +189,4 @@ function recortarMensajes(messages = [], tools = [], cfg = {}, { objetivo = 0.75
   return { messages: bloques.flat(), quitados, tokensLiberados: Math.max(0, antes - medir(bloques.flat(), tools).total) };
 }
 
-module.exports = { estimarTokens, medir, ventanaDe, presupuesto, notaPresupuesto, recortarMensajes, enBloques, CHARS_POR_TOKEN, VENTANAS };
+module.exports = { estimarTokens, medir, ventanaDe, presupuesto, notaPresupuesto, recortarMensajes, enBloques, marcarTurno, esTurno, CHARS_POR_TOKEN, VENTANAS };

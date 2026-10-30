@@ -188,3 +188,72 @@ test('árboles: lo que el subagente escribe dentro de una ruta ignorada por git 
   await arbolesMod.descartar(arbol);
   eq(arbolesMod.vivos().length, 0, 'no debe quedar ningún árbol en pie');
 });
+
+/* ---------- La barrera de comandos no depende de CÓMO se escriba la orden ---------- */
+/* La auditoría encontró tres evasiones reales: la bandera delante (`format /q c:`),
+   los acentos de cmd.exe (`^f^o^r^m^a^t`) y una segunda orden en otra línea. Además,
+   el comodín dejaba fuera `del /s /q C:\*`, que borra la raíz igual que `C:\`. */
+const comandos = require('../agent/comandos');
+
+test('comandos: las evasiones de cmd no esquivan los prohibidos', () => {
+  const casos = [
+    'format /q c:',
+    '^f^o^r^m^a^t c: /q',
+    'echo hola\nformat c: /q',
+    'del /s /q C:\\*',
+    'rd /s /q C:\\*',
+  ];
+  for (const c of casos) eq(comandos.clasificar(c).nivel, 'prohibido', JSON.stringify(c));
+});
+
+test('comandos: lo inocente sigue siendo inocente', () => {
+  for (const c of ['echo 2^2', 'echo "format c: /q"', 'echo format c: /q', 'start notepad', 'echo "^f^o^r^m^a^t"', 'del *.txt']) {
+    eq(comandos.clasificar(c).nivel, 'normal', JSON.stringify(c));
+  }
+});
+
+/* ---------- La tarjeta enseña lo que se va a ejecutar ---------- */
+const { Guardrails, summarizeArgs } = require('../agent/guardrails');
+
+test('tarjeta: run_command enseña la carpeta y las MCP sus argumentos', () => {
+  const rc = summarizeArgs('run_command', { command: 'del *.txt', cwd: 'C:\\Users\\x\\Documents' });
+  ok(rc.includes('del *.txt'), 'el comando sigue en el resumen');
+  ok(rc.includes('C:\\Users\\x\\Documents'), 'y se ve dónde se ejecuta: ' + rc);
+
+  const mcp = summarizeArgs('mcp__filesystem__write_file', {
+    _mcp: { serverName: 'filesystem', toolName: 'write_file' },
+    path: 'C:\\Windows\\System32\\drivers\\etc\\hosts',
+    content: 'x',
+  });
+  ok(mcp.includes('hosts'), 'se ve la ruta que toca: ' + mcp);
+  ok(mcp.includes('filesystem'), 'y de qué servidor viene');
+  eq(mcp.includes('_mcp'), false, 'el campo interno no se enseña');
+});
+
+/* ---------- El estancamiento se mide por firma, no por nombre ---------- */
+/* Seis lecturas de archivos DISTINTOS son seis pasos que avanzan; contar el nombre de
+   la herramienta mataba turnos legítimos (leer seis archivos, rellenar seis pasos de un
+   formulario). La misma firma repetida sí es un estancamiento. */
+test('estancamiento: seis llamadas con argumentos distintos no se detienen', () => {
+  const g = new Guardrails({ guardrails: { stallThreshold: 3 } });
+  for (let i = 0; i < 6; i++) {
+    ok(g.checkStall({ toolName: 'read_file', toolArgs: { path: `archivo-${i}.txt` } }).ok, 'la lectura #' + i + ' avanza');
+  }
+});
+
+test('estancamiento: la misma firma repetida sí se detiene', () => {
+  const g = new Guardrails({ guardrails: { stallThreshold: 3 } });
+  const paso = () => g.checkStall({ toolName: 'read_file', toolArgs: { path: 'mismo.txt' } });
+  ok(paso().ok, 'primera: progreso');
+  ok(paso().ok, 'segunda: 1 sin progreso');
+  ok(paso().ok, 'tercera: 2 sin progreso');
+  ok(!paso().ok, 'cuarta: 3 sin progreso = estancamiento');
+});
+
+test('estancamiento: sin argumentos sigue valiendo el nombre (compatibilidad)', () => {
+  const g = new Guardrails({ guardrails: { stallThreshold: 3 } });
+  ok(g.checkStall({ toolName: 'read_file' }).ok);
+  ok(g.checkStall({ toolName: 'read_file' }).ok);
+  ok(g.checkStall({ toolName: 'read_file' }).ok);
+  ok(!g.checkStall({ toolName: 'read_file' }).ok, 'tres repeticiones por nombre = estancamiento');
+});

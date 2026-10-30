@@ -116,16 +116,35 @@ function registerTareasIpc(ipcMain, ctx) {
   const NIVELES_PERMISO = ['safe', 'confirm', 'restricted'];
   const CLAVES_HERRAMIENTA = new Set([...Object.keys(DEFAULT_RISK || {}), 'browser_eval']);
   const COMODIN_MCP_RX = /^mcp__[a-z0-9_]+__\*$/;
+  /* Los tres canales de seguridad mutan `cfg().security` y la política viva ANTES de
+     guardar. Si el disco falla, sin esto la memoria y los agentes quedan con el cambio y el
+     panel canta «guardado»: se toma la foto de antes, se restaura y se reaplica. */
+  const fotoSeguridad = () => {
+    const s = cfg().security || {};
+    return { permissions: { ...(s.permissions || {}) }, guardrails: { ...(s.guardrails || {}) } };
+  };
+  const guardarSeguridad = (previo, extra) => {
+    const r = persistConfig();
+    if (r && r.ok === false) {
+      const s = cfg().security || (cfg().security = {});
+      s.permissions = previo.permissions;
+      s.guardrails = previo.guardrails;
+      for (const a of runtimes.allAgents()) a.setPolicy(cfg().security);
+      return { ok: false, error: 'no se pudo guardar la seguridad: ' + ((r.error && String(r.error)) || 'error desconocido') };
+    }
+    return { ...r, ...extra() };
+  };
   ipcMain.handle('sec:setToolPerm', (e, { tool, level } = {}) => {
     const t = String(tool || '');
     if (!CLAVES_HERRAMIENTA.has(t) && !COMODIN_MCP_RX.test(t)) return { ok: false, error: 'herramienta desconocida: ' + t };
     if (level !== 'default' && !NIVELES_PERMISO.includes(level)) return { ok: false, error: 'nivel no válido: ' + level };
+    const previo = fotoSeguridad();
     if (!cfg().security) cfg().security = { permissions: {}, guardrails: securityDefaults.guardrails };
     if (level === 'default') delete cfg().security.permissions[t];
     else cfg().security.permissions[t] = level;
     // la política es GLOBAL: la llevan todas las conversaciones vivas, no solo una
     for (const a of runtimes.allAgents()) a.setPolicy(cfg().security);
-    return { ...persistConfig(), permissions: cfg().security.permissions };
+    return guardarSeguridad(previo, () => ({ permissions: cfg().security.permissions }));
   });
   /* Mismo control que arriba, pero para el atajo «permitir todo» / «volver a lo
      recomendado»: se VALIDAN todas las claves antes de tocar nada y se persiste una
@@ -138,6 +157,7 @@ function registerTareasIpc(ipcMain, ctx) {
     for (const t of lista) {
       if (!CLAVES_HERRAMIENTA.has(t) && !COMODIN_MCP_RX.test(t)) return { ok: false, error: 'herramienta desconocida: ' + t };
     }
+    const previo = fotoSeguridad();
     if (!cfg().security) cfg().security = { permissions: {}, guardrails: securityDefaults.guardrails };
     for (const t of lista) {
       if (level === 'default') delete cfg().security.permissions[t];
@@ -145,9 +165,10 @@ function registerTareasIpc(ipcMain, ctx) {
     }
     // la política es GLOBAL: la llevan todas las conversaciones vivas, no solo una
     for (const a of runtimes.allAgents()) a.setPolicy(cfg().security);
-    return { ...persistConfig(), permissions: cfg().security.permissions };
+    return guardarSeguridad(previo, () => ({ permissions: cfg().security.permissions }));
   });
   ipcMain.handle('sec:setGuardrail', (e, patch) => {
+    const previo = fotoSeguridad();
     if (!cfg().security) cfg().security = { permissions: {}, guardrails: securityDefaults.guardrails };
     const g = cfg().security.guardrails;
     // Con un umbral de bucle 0 o 1 la detección salta en la PRIMERA herramienta
@@ -168,7 +189,7 @@ function registerTareasIpc(ipcMain, ctx) {
     }
     // la política es GLOBAL: la llevan todas las conversaciones vivas, no solo una
     for (const a of runtimes.allAgents()) a.setPolicy(cfg().security);
-    return { ...persistConfig(), guardrails: g };
+    return guardarSeguridad(previo, () => ({ guardrails: cfg().security.guardrails }));
   });
   ipcMain.handle('meta:get', (e, convId) => {
     const g = (cfg().security && cfg().security.guardrails) || {};

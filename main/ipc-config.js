@@ -178,6 +178,7 @@ function registerConfigIpc(ipcMain, ctx) {
     // apariencia
     'theme',
     'uiColor',
+    'uiSkin',
     'glowColor',
     'glowStrength',
     'glassTint',
@@ -220,6 +221,10 @@ function registerConfigIpc(ipcMain, ctx) {
     const clean = { ...(patch || {}) };
     // Allowlist ANTES de validar: lo que no sea un ajuste conocido se descarta aquí.
     for (const k of Object.keys(clean)) if (!CLAVES_AJUSTES_PERMITIDAS.has(k)) delete clean[k];
+    /* Aspecto (Holo / Consola / Lienzo): solo los tres que existen. Un valor inventado
+       dejaría `data-skin` con un nombre que ninguna hoja conoce, o sea el aspecto base sin
+       que la interfaz lo sepa; se descarta y se conserva el que había. */
+    if ('uiSkin' in clean && !['holo', 'console', 'canvas'].includes(clean.uiSkin)) delete clean.uiSkin;
     /* Razonamiento visible (v2.3): booleano estricto. Un «true»/«false» en texto significaría
        verdadero siempre, y el ajuste no se podría apagar. */
     if ('showThinking' in clean && typeof clean.showThinking !== 'boolean') delete clean.showThinking;

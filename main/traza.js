@@ -26,6 +26,21 @@ const { enmascararArgs, redactText } = require('../agent/runlog'); // máscara d
    rastro no puede crecer sin freno (el argumento de un write_file es un archivo completo,
    y un resultado de run_command puede traer miles de líneas). */
 const MAX_TRAZA = 80; // herramientas por turno que se conservan
+/* PARTES: el turno como secuencia (texto, razonamiento, herramienta, lista de tareas) para
+   que el hilo se pueda repintar INTERCALADO, no como un muro de prosa con las herramientas
+   aparte. El usuario lo pidió así: «que vaya mostrando las herramientas que va usando,
+   thinking, respuestas». El texto del turno ya se guardaba entero en `content`; esto guarda
+   ADEMÁS en qué orden ocurrió cada cosa.
+   Dos topes, por el mismo motivo que MAX_TRAZA: conversations.json se lee entero al arrancar.
+   Un tramo de texto se corta a 6000 caracteres —lo que se lee al reabrir, no lo que se
+   envía al modelo— y el turno no guarda más de 120 partes. */
+const MAX_PARTES = 120;
+const MAX_TEXTO_PARTE = 6000;
+const MAX_TEXTO_TURNO = 24000; // presupuesto de texto de TODO el turno: un turno largo no
+// convierte una conversación en megabytes, y el texto completo sigue estando en `content`.
+/* El contador vive en una clave SÍMBOLO: `JSON.stringify` la ignora, así que no viaja al
+   historial guardado (sería un campo más que nadie lee). */
+const TXT = Symbol('textoDelTurno');
 /* TODO el texto libre del rastro pasa por aquí, así que la máscara del log vive en este
    único sitio: se enmascaran los patrones ANTES de recortar —al revés, un secreto que
    cayera justo en el corte quedaría medio escrito— y así un resultado de `run_command`
@@ -64,7 +79,40 @@ function argsTraza(name, args) {
 const turnTraces = new Map(); // convId -> rastro del turno en curso
 const claveTraza = (convId) => String(convId == null ? '' : convId);
 function trazaNueva(convId) {
-  turnTraces.set(claveTraza(convId), { tools: [], think: null, todos: null });
+  turnTraces.set(claveTraza(convId), { tools: [], think: null, todos: null, parts: [] });
+}
+
+/* ---- partes: la secuencia real del turno ------------------------------------------
+   La parte ABIERTA es siempre la última: un tramo de texto se sigue escribiendo mientras
+   lleguen deltas, y se cierra solo cuando llega una herramienta (la siguiente parte ya no
+   es de texto). Así el orden de `parts` es el orden en que ocurrió todo. */
+function abrirParte(t, parte) {
+  if (!t.parts) t.parts = [];
+  if (t.parts.length >= MAX_PARTES) return null;
+  t.parts.push(parte);
+  return parte;
+}
+function ultimaParte(t, k) {
+  if (!t.parts || !t.parts.length) return null;
+  const p = t.parts[t.parts.length - 1];
+  return p && p.k === k ? p : null;
+}
+/* Añade texto a una parte sin pasarse de los dos topes (por parte y por turno). */
+function anexaTexto(t, p, s) {
+  if (!s) return;
+  if (!p) {
+    // ni una parte más: lo que llegue ya no se puede repintar desde `parts`
+    t.cortado = true;
+    return;
+  }
+  const texto = String(s);
+  const cabe = Math.min(MAX_TEXTO_PARTE - String(p.text).length, MAX_TEXTO_TURNO - (t[TXT] || 0));
+  // el texto que no cabe se pierde: se marca el turno para que al reabrir mande `content`
+  if (texto.length > cabe) t.cortado = true;
+  if (cabe <= 0) return;
+  const trozo = texto.slice(0, cabe);
+  p.text = String(p.text) + trozo;
+  t[TXT] = (t[TXT] || 0) + trozo.length;
 }
 function trazaApunta(convId, e) {
   const turnTrace = turnTraces.get(claveTraza(convId));
@@ -73,9 +121,27 @@ function trazaApunta(convId, e) {
     if (turnTrace.tools.length < MAX_TRAZA) {
       turnTrace.tools.push({ name: e.name, args: argsTraza(e.name, e.args), subagent: e.subagent || null });
     }
+    abrirParte(turnTrace, {
+      k: 'tool',
+      name: e.name,
+      args: argsTraza(e.name, e.args),
+      subagent: e.subagent || null,
+      member: e.member || null,
+    });
     return;
   }
   if (e.type === 'tool_result') {
+    if (turnTrace.parts) {
+      for (let i = turnTrace.parts.length - 1; i >= 0; i--) {
+        const p = turnTrace.parts[i];
+        if (p.k === 'tool' && p.name === e.name && p.ok === undefined) {
+          p.ok = e.ok === undefined || e.ok === null ? null : !!e.ok;
+          p.ms = Number(e.durationMs) || 0;
+          p.result = clipTraza(e.result, 1200);
+          break;
+        }
+      }
+    }
     // cierra la ÚLTIMA llamada de ese nombre que siga abierta: dos llamadas a la misma
     // herramienta en un turno tienen que cerrarse en orden, no todas a la vez
     for (let i = turnTrace.tools.length - 1; i >= 0; i--) {
@@ -98,10 +164,46 @@ function trazaApunta(convId, e) {
         result: clipTraza(e.result, 900),
       });
     }
+    abrirParte(turnTrace, {
+      k: 'delegate',
+      subagent: String(e.subagent || ''),
+      status: String(e.status || 'OK'),
+      ms: Number(e.durationMs) || 0,
+      result: clipTraza(e.result, 900),
+    });
     return;
   }
   if (e.type === 'thinking_done') {
     turnTrace.think = { text: clipTraza(e.text, 4000), ms: Number(e.durationMs) || 0 };
+    // la parte de razonamiento abierta se cierra con el texto definitivo del motor
+    const p = ultimaParte(turnTrace, 'think');
+    if (p && !p.fin) {
+      if (e.text) p.text = clipTraza(e.text, MAX_TEXTO_PARTE);
+      p.ms = Number(e.durationMs) || 0;
+      p.fin = true;
+    }
+    return;
+  }
+  /* ---- y la secuencia, que es lo que pinta el hilo intercalado ---- */
+  if (e.type === 'delta') {
+    if (e.subagent || !e.text) return; // el de un subagente vive en su tarjeta
+    let p = ultimaParte(turnTrace, 'text');
+    if (!p) p = abrirParte(turnTrace, { k: 'text', text: '' });
+    anexaTexto(turnTrace, p, e.text);
+    return;
+  }
+  if (e.type === 'thinking_delta') {
+    if (e.subagent || !e.text) return;
+    let p = ultimaParte(turnTrace, 'think');
+    if (!p || p.fin) p = abrirParte(turnTrace, { k: 'think', text: '', ms: 0 });
+    anexaTexto(turnTrace, p, e.text);
+    return;
+  }
+  if (e.type === 'thinking_reset') {
+    // un reintento en otro modelo empieza a pensar de nuevo: el tramo anterior ya no es
+    // parte de lo que se lee, y dejarlo suelto en el historial lo haría pasar por trabajo
+    const p = ultimaParte(turnTrace, 'think');
+    if (p && !p.fin) turnTrace.parts.pop();
     return;
   }
   /* v2.6: la ÚLTIMA lista de tareas del turno se guarda con el mensaje: al reabrir la
@@ -115,6 +217,11 @@ function trazaApunta(convId, e) {
           activeForm: clipTraza(t && t.activeForm, 240),
         }))
       : [];
+    /* La lista se actualiza varias veces por turno: en la secuencia va UNA tarjeta, la de
+       su último estado, no una por actualización. */
+    const p = ultimaParte(turnTrace, 'todos');
+    if (p) p.todos = turnTrace.todos;
+    else abrirParte(turnTrace, { k: 'todos', todos: turnTrace.todos });
   }
 }
 function trazaActual(convId) {
@@ -124,4 +231,15 @@ function trazaCerrar(convId) {
   turnTraces.delete(claveTraza(convId));
 }
 
-module.exports = { MAX_TRAZA, clipTraza, argsTraza, trazaNueva, trazaApunta, trazaActual, trazaCerrar };
+module.exports = {
+  MAX_TRAZA,
+  MAX_PARTES,
+  MAX_TEXTO_PARTE,
+  MAX_TEXTO_TURNO,
+  clipTraza,
+  argsTraza,
+  trazaNueva,
+  trazaApunta,
+  trazaActual,
+  trazaCerrar,
+};

@@ -46,6 +46,9 @@ let TRAY_FILE = TRAY_FILE_INICIAL;
 
 let cache = null;
 let trayCache = null;
+/* La última lectura de la bandeja falló (E/S o JSON ilegible): no se memoiza el vacío
+   ni se escribe encima, porque lo que hay en disco no se ha podido ver. */
+let trayFallo = false;
 /* Resultado de la última lectura del almacén. `ok:false` = no se pudo leer (tipo 'io') o
    no se pudo interpretar (tipo 'ilegible'): la vista lo dice y ofrece «Restaurar copia»
    en vez de enseñar una memoria vacía que no es cierta. */
@@ -194,6 +197,19 @@ function bloqueo() {
   return lectura.tipo === 'io' || lectura.bloqueado ? { ok: false, error: lectura.error } : null;
 }
 
+/* El almacén EN MEMORIA no puede quedarse con un cambio que el disco rechazó: la vista
+   enseñaría un hecho que no existe (o una memoria vacía que sigue en el fichero) y el
+   siguiente guardado con disco sano lo escribiría sin que el usuario lo haya pedido otra
+   vez. Se relee el fichero, que es la verdad. */
+function guardar() {
+  if (save()) return true;
+  cache = null;
+  trayCache = null;
+  trayFallo = false;
+  load();
+  return false;
+}
+
 /* El esquema y la tokenización viven en el módulo puro: aquí solo se reexportan para no
    tener dos listas de stopwords ni dos formas de normalizar un hecho. */
 const normalize = v2.normalizarHecho;
@@ -301,7 +317,8 @@ function list() {
  * @returns el hecho creado o, si se consolidó con uno parecido,
  *          `{ ...hecho, fusionado: true, antes: <hecho previo> }` (para poder deshacer).
  *          Si sustituyó a uno viejo: `{ ...hecho, sustituido: true, antes }`.
- *          `null` si no hay nada que guardar o si el almacén no se puede leer.
+ *          `null` si no hay nada que guardar, si el almacén no se puede leer o si el
+ *          guardado en disco falla.
  */
 function add({ text, source = 'user', origen, importance = 0.5, confidence = 0.8, etiquetas, origenTexto } = {}) {
   const bloqueado = bloqueo();
@@ -317,7 +334,7 @@ function add({ text, source = 'user', origen, importance = 0.5, confidence = 0.8
     dup.importance = v2.normalizarHecho({ ...dup, importance: Math.max(dup.importance, importance) }).importance;
     dup.uses++;
     dup.lastUsed = new Date().toISOString();
-    save();
+    if (!guardar()) return null; // sin disco no hay hecho que prometer
     return { ...dup };
   }
   // 2) El mismo dato (o uno parecido) ya está en la memoria.
@@ -345,7 +362,7 @@ function add({ text, source = 'user', origen, importance = 0.5, confidence = 0.8
   }
   /* Sin clave reconocible no hay valor con el que decidir, así que decide `mismoHecho`
      por VALOR: huella igual o el dato que solo un lado declara («El usuario se llama
-     Darío» / «Recuerda que me llamo Dario»). Comparar solo la huella dejaba vivos esos
+     Darío» / «Mi nombre: Darío»). Comparar solo la huella dejaba vivos esos
      dos; comparar el parecido léxico fusionaba «usa siempre pnpm» con «usa siempre npm»
      y dejaba uno solo. */
   if (i < 0) i = list0.findIndex((m) => !m.papelera && v2.mismoHecho(m.text, t));
@@ -361,7 +378,7 @@ function add({ text, source = 'user', origen, importance = 0.5, confidence = 0.8
       const m = creado();
       list0.splice(i, 0, m); // ocupa el sitio del viejo: la lista sigue ordenada por llegada
       cache = recortar(list0);
-      save();
+      if (!guardar()) return null;
       return { ...m, sustituido: true, antes };
     }
     if (relacion === 'cambia' || relacion === 'otro') {
@@ -371,20 +388,20 @@ function add({ text, source = 'user', origen, importance = 0.5, confidence = 0.8
       const m = creado();
       list0.unshift(m);
       cache = recortar(list0);
-      save();
+      if (!guardar()) return null;
       return { ...m };
     }
     const fusionado = v2.fusionarPar(antes, creado());
     // fusionarPar conserva el texto más reciente: aquí el recién llegado es el nuevo
     list0[i] = { ...fusionado, text: t };
     cache = recortar(list0);
-    save();
+    if (!guardar()) return null;
     return { ...list0[i], fusionado: true, antes };
   }
   const m = v2.normalizarHecho({ text: t, origen, source, importance, confidence, etiquetas, origenTexto });
   list0.unshift(m);
   cache = recortar(list0);
-  save();
+  if (!guardar()) return null;
   return { ...m };
 }
 
@@ -409,7 +426,7 @@ function remove(id) {
   const m = load().find((x) => x.id === id);
   if (!m) return { ok: false, error: 'recuerdo no encontrado' };
   m.papelera = new Date().toISOString();
-  save();
+  if (!guardar()) return { ok: false, error: 'no se pudo guardar el borrado' };
   return { ok: true };
 }
 
@@ -427,7 +444,7 @@ function update(id, patch = {}) {
     m.hash = v2.hashTexto(t); // la huella es del texto: si cambia el texto, cambia la huella
   }
   if (Array.isArray(patch.etiquetas)) m.etiquetas = [...new Set(patch.etiquetas.map(String).filter(Boolean))];
-  save();
+  if (!guardar()) return { ok: false, error: 'no se pudo guardar el cambio' };
   return { ok: true, memory: { ...m } };
 }
 
@@ -476,7 +493,7 @@ function restore(id) {
   if (!m) return { ok: false, error: 'recuerdo no encontrado' };
   m.papelera = null;
   m.lastUsed = new Date().toISOString();
-  save();
+  if (!guardar()) return { ok: false, error: 'no se pudo guardar la restauración' };
   return { ok: true, memory: { ...m } };
 }
 
@@ -487,7 +504,7 @@ function trashEmpty() {
   const l = load();
   const borradas = l.filter((m) => m.papelera).length;
   cache = l.filter((m) => !m.papelera);
-  save();
+  if (!guardar()) return { ok: false, error: 'no se pudo vaciar la papelera' };
   return { ok: true, borradas };
 }
 
@@ -509,11 +526,22 @@ function wipe() {
   const bloqueado = bloqueo();
   if (bloqueado) return bloqueado;
   const borrados = load().length;
+  /* Primero la bandeja y después el almacén: si el disco rechaza el primero, no se ha
+     borrado nada. El borrado es deliberado, así que no se espera a poder leer la bandeja
+     (una lectura caída no puede impedir «olvídalo todo»). */
+  const bandejaAntes = trayCache;
+  trayCache = [];
+  trayFallo = false;
+  if (!traySave()) {
+    trayCache = bandejaAntes;
+    return { ok: false, error: 'no se pudo guardar el borrado; el almacén sigue en disco' };
+  }
   cache = [];
   lectura = { ok: true, tipo: 'ok', error: '' };
-  trayCache = [];
-  save();
-  traySave();
+  /* Si el disco no aceptó el borrado, decir «borrado» es mentir: `guardar` relee el
+     fichero y la memoria vuelve a lo que de verdad hay. La vista y el router (que además
+     borra los hábitos) tienen que poder parar. */
+  if (!guardar()) return { ok: false, error: 'no se pudo guardar el borrado; el almacén sigue en disco' };
   return { ok: true, borrados };
 }
 
@@ -582,23 +610,62 @@ function restaurarCopia() {
 
 /* ---------- bandeja de aprobación («Recién aprendido») ---------- */
 
-function trayLoad() {
-  if (trayCache) return trayCache;
+/** Conserva una bandeja ilegible como memory-tray.json.corrupt-<ts>.json en vez de perderla.
+    @returns true si el original quedó a salvo (o ya no estaba). */
+function quarantineTray(reason) {
+  const dest = TRAY_FILE.replace(/\.json$/i, '') + '.corrupt-' + Date.now() + '.json';
   try {
-    const raw = JSON.parse(fs.readFileSync(TRAY_FILE, 'utf8'));
-    trayCache = Array.isArray(raw) ? raw : Array.isArray(raw && raw.propuestas) ? raw.propuestas : [];
+    fs.renameSync(TRAY_FILE, dest);
+    console.error('memory.tray: ' + reason + ' — conservado en ' + dest);
+    return true;
+  } catch (e2) {
+    console.error(
+      'memory.tray: ' +
+        reason +
+        (e2.code === 'ENOENT' ? ' — no había fichero que conservar' : ' y no se pudo conservar el original: ' + e2.message),
+    );
+    return e2.code === 'ENOENT';
+  }
+}
+
+function trayLoad() {
+  if (trayCache && !trayFallo) return trayCache;
+  let raw;
+  try {
+    raw = fs.readFileSync(TRAY_FILE, 'utf8');
   } catch (e) {
-    if (e.code !== 'ENOENT') console.error('memory.tray: no se pudo leer ' + TRAY_FILE + ': ' + e.message);
-    trayCache = [];
+    if (e.code === 'ENOENT') {
+      trayCache = [];
+      trayFallo = false;
+      return trayCache;
+    }
+    /* Error de E/S transitorio (EBUSY/EPERM): NO es «bandeja vacía». Sin memoizar, la
+       siguiente llamada reintenta y `traySave` no pisa lo que no se ha podido leer. */
+    trayFallo = true;
+    console.error('memory.tray: no se pudo leer ' + TRAY_FILE + ': ' + e.message);
+    return [];
+  }
+  try {
+    const parsed = JSON.parse(raw);
+    trayCache = Array.isArray(parsed) ? parsed : Array.isArray(parsed && parsed.propuestas) ? parsed.propuestas : [];
+    trayFallo = false;
+  } catch (e) {
+    /* JSON ilegible: a cuarentena (como habits) para no perderlo; nada se memoiza, así
+       que la siguiente llamada vuelve a leer (de la cuarentena o de un fichero nuevo). */
+    trayFallo = !quarantineTray(e.message);
+    return [];
   }
   return trayCache;
 }
 
 function traySave() {
+  if (trayFallo) return false; // la lectura falló: escribir ahora perdería las propuestas que no se han visto
   try {
     atomicWrite(TRAY_FILE, JSON.stringify({ version: v2.ESQUEMA, propuestas: trayCache || [] }, null, 2));
+    return true;
   } catch (e) {
     console.error('memory.tray.save', e.message);
+    return false;
   }
 }
 
@@ -642,8 +709,11 @@ function trayProponer(props) {
     nuevas.push(prop);
   }
   if (nuevas.length) {
-    trayCache = lista;
-    traySave();
+    /* Con la lectura caída no se escribe: se perderían las propuestas que ya había. */
+    if (!trayFallo) {
+      trayCache = lista;
+      traySave();
+    }
     // Un aviso por propuesta NUEVA: las repetidas no vuelven a avisar (nadie quiere
     // que el contador de «Recién aprendido» baile sin motivo).
     for (const prop of nuevas) emisor.emit('propuesta', prop);
@@ -706,6 +776,7 @@ function _resetForTests(file) {
 /** Para tests: aísla la bandeja en otro archivo. */
 function _resetTray(file) {
   trayCache = null;
+  trayFallo = false;
   TRAY_FILE = file || TRAY_FILE_INICIAL;
 }
 

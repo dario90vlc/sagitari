@@ -2076,9 +2076,25 @@ function rampaDeSuperficies(acento) {
   }
   return (_rampas[clave] = out);
 }
+/* ============ ASPECTOS ============
+   Holo es la identidad de la casa (vidrio, filo, aura). Los otros dos aspectos comparten
+   la MISMA base —vistas, componentes, medidas— y cambian la materia: Consola y Lienzo son
+   planos, sin desenfoque y sin glow (ver renderer/skins.css). El aspecto viaja como
+   atributo en <html>, así que el CSS decide y aquí solo se elige. */
+const SKINS = ['holo', 'console', 'canvas'];
+function skinActual(s) {
+  const k = s && s.uiSkin;
+  return SKINS.includes(k) ? k : 'holo';
+}
 function applyTheme() {
   const s = CFG.settings || {};
   const pal = PALETTES[s.uiColor] || PALETTES.aurora;
+  /* El aspecto ANTES de todo lo demás: skins.css lee los tokens de aquí (paleta, vidrio)
+     y los suyos propios llegan después. `holo` quita el atributo: la identidad de la casa
+     es la hoja de siempre, sin ninguna capa encima. */
+  const skin = skinActual(s);
+  if (skin === 'holo') document.documentElement.removeAttribute('data-skin');
+  else document.documentElement.setAttribute('data-skin', skin);
   const gpal = s.glowColor && s.glowColor !== 'match' && PALETTES[s.glowColor] ? PALETTES[s.glowColor] : pal;
   const r = document.documentElement.style;
   r.setProperty('--acc-rgb', pal.acc.join(','));
@@ -2099,10 +2115,26 @@ function applyTheme() {
   r.setProperty('--glow-c-rgb', gc.join(', '));
   // Sin valor guardado, el glow viene SUAVE (0.7): que acaricie el marco, no que lo
   // invada. El deslizador enseña ESTE mismo respaldo (fillSettings), no otro.
-  r.setProperty('--glow-str', String(Math.min(2, Math.max(0.4, Number(s.glowStrength) || 0.7))));
-  r.setProperty('--glass', String(Math.min(1.3, Math.max(0.4, Number(s.glassTint) || 1))));
-  // los fondos también son del tema: si no, el color cambia solo en los acentos
-  for (const [token, valor] of Object.entries(rampaDeSuperficies(pal.acc))) r.setProperty(token, valor);
+  /* Los aspectos planos no tienen filo ni atmósfera: la intensidad del glow se guarda (se
+     recupera al volver a Holo) pero aquí vale 0, porque el brillo del marco contradice la
+     materia plana. Lo mismo con el vidrio: sin desenfoque, el tinte no pinta nada. */
+  const plano = skin !== 'holo';
+  r.setProperty('--glow-str', plano ? '0' : String(Math.min(2, Math.max(0.4, Number(s.glowStrength) || 0.7))));
+  r.setProperty('--glass', plano ? '1' : String(Math.min(1.3, Math.max(0.4, Number(s.glassTint) || 1))));
+  /* Los fondos también son del tema: si no, el color cambia solo en los acentos.
+     ENAJENACIÓN: en un aspecto plano los fondos NO los deriva la paleta —Consola es negro
+     neutro y Lienzo es gris plano— así que la rampa se SUELTA (removeProperty) y la fija
+     skins.css. Dejarla puesta sería teñir de violeta una interfaz que se llama Consola. */
+  for (const [token, valor] of Object.entries(rampaDeSuperficies(pal.acc))) {
+    if (plano) r.removeProperty(token);
+    else r.setProperty(token, valor);
+  }
+  /* Las filas de luz y vidrio no tienen sentido en un aspecto plano (no hay filo que
+     iluminar ni cristal que teñir): se retiran de la vista en vez de ofrecer controles
+     que no hacen nada. Vuelven al elegir Holo. */
+  document.querySelectorAll('[data-solo-holo]').forEach((el) => {
+    el.hidden = plano;
+  });
   /* Apagar el glow tiene que apagarlo AQUÍ: main deja de mandar estados, pero el filo
      de reposo y la atmósfera del marco los pinta el CSS con --glow-str. Con 0, todos
      los filos (y el recorrido) quedan a cero; la hairline neutra de la ventana se
@@ -2210,8 +2242,10 @@ function pintarDiff(archivos, contenedor) {
       b.classList.toggle('on', active);
       if (active) b.setAttribute('aria-current', 'page');
     });
-  feed('Sagitari iniciado', 'ok');
-  feed('Esperando peticiones', 'blu');
+  // El monitor abre VACÍO: «Sagitari iniciado» y «Esperando peticiones» no eran
+  // trabajo del agente, eran dos formas de decir lo que ya dice «En reposo» en la
+  // cabecera del rail. El primer evento real (una herramienta, un aviso) estrena
+  // la línea de tiempo; mientras no haya ninguno, el panel dice para qué está.
   if (!CFG.active) {
     // bienvenida SIN abrir turno: con ensureAssistantBubble quedaban vivos
     // pendingAssistant/pendingTurn y el primer mensaje real se escribía dentro

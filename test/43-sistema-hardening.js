@@ -920,3 +920,136 @@ test('config: un EPERM pasajero al escribir se reintenta y no deja temporales', 
     'sin temporales sueltos junto a la configuración',
   );
 });
+
+/* ---------- deshacer: un fallo no es «hecho» (hallazgos 4 y 5) ----------
+   El handler contestaba `ok:true` siempre y `deshacer` tiraba la pre-imagen aunque no la
+   hubiera aplicado: el renderer cantaba «deshechos», el botón desaparecía y lo que no se
+   restauró ya no se podía reintentar. */
+
+function ctxCambios(cambios, ws) {
+  return {
+    cambios,
+    repomap: { invalidar: () => {} },
+    instrucciones: {},
+    runlog: { log: () => {} },
+    fs,
+    path,
+    runtimes: { ownerOf: () => '', peek: () => null },
+    getWorkspace: () => ws,
+  };
+}
+
+test('deshacer: un archivo que no se puede restaurar cuenta como fallo y conserva su pre-imagen', async () => {
+  const { registerCambiosIpc } = require('../main/ipc-cambios');
+  const cambios = require('../agent/cambios');
+  cambios.limpiar();
+  const ws = tmpDir('sagi-deshacer-fallo-');
+  const archivo = path.join(ws, 'nota.txt');
+  fs.writeFileSync(archivo, 'despues');
+  cambios.recordar(ws, archivo, 'antes');
+  const handlers = new Map();
+  registerCambiosIpc({ handle: (c, fn) => handlers.set(c, fn) }, ctxCambios(cambios, ws));
+  const deshacer = handlers.get('cambios:deshacer');
+  const orig = fs.writeFileSync;
+  fs.writeFileSync = (p, ...resto) => {
+    if (String(p) === archivo) throw new Error('EPERM: no se puede escribir');
+    return orig.call(fs, p, ...resto);
+  };
+  let r;
+  try {
+    r = await deshacer(null, '');
+  } finally {
+    fs.writeFileSync = orig;
+  }
+  eq(r.fallos, 1, 'el archivo que no se pudo restaurar cuenta como fallo:');
+  eq(r.ok, false, 'el handler NO puede decir «hecho» con fallos:');
+  ok(/no se pudieron deshacer/.test(String(r.error)), 'con un motivo que se pueda leer:');
+  eq(fs.readFileSync(archivo, 'utf8'), 'despues', 'y el archivo se queda como estaba:');
+  ok(cambios.puedeDeshacer(ws), 'la pre-imagen del que falló sigue guardada para reintentar:');
+  const r2 = await deshacer(null, '');
+  eq(r2.ok, true, 'el reintento sin el fallo sí se puede dar por hecho:');
+  eq(r2.restaurados, 1, 'y restaura lo pendiente:');
+  eq(fs.readFileSync(archivo, 'utf8'), 'antes', 'con la pre-imagen de verdad:');
+  eq(cambios.puedeDeshacer(ws), false, 'y ya no queda nada pendiente:');
+  cambios.limpiar();
+});
+
+test('deshacer: un junction que sale del espacio no escribe fuera y se cuenta como fallo', () => {
+  const cambios = require('../agent/cambios');
+  cambios.limpiar();
+  const ws = tmpDir('sagi-deshacer-junction-');
+  const fuera = tmpDir('sagi-deshacer-fuera-');
+  const victima = path.join(fuera, 'victima.txt');
+  fs.writeFileSync(victima, 'intacto');
+  fs.symlinkSync(fuera, path.join(ws, 'datos'), 'junction');
+  const dentro = path.join(ws, 'datos', 'victima.txt');
+  cambios.recordar(ws, dentro, 'pre-imagen');
+  const r = cambios.deshacer(ws);
+  eq(r.fallos, 1, 'la ruta que acaba fuera cuenta como fallo:');
+  eq(r.restaurados, 0, 'y no se da por restaurada:');
+  eq(fs.readFileSync(victima, 'utf8'), 'intacto', 'el archivo de fuera NO se toca:');
+  cambios.limpiar();
+});
+
+/* ---------- seguridad: un guardado fallido no puede quedar aplicado ----------
+   Los canales `sec:*` mutaban `cfg().security` y la política viva antes de persistir; con
+   el disco en error, la memoria y los agentes quedaban cambiados y el panel cantaba
+   «guardado». */
+
+test('sec:setToolPerm / setGuardrail / setToolPermMany: si el guardado falla, se restaura todo', () => {
+  const { registerTareasIpc } = require('../main/ipc-tareas');
+  const dir = tmpDir('sagi-sec-fallo-');
+  const config = { security: { permissions: { read_file: 'safe' }, guardrails: { maxSteps: 60, maxCostUsd: 0 } } };
+  const politicas = [];
+  const agente = { setPolicy: (p) => politicas.push(JSON.parse(JSON.stringify(p))) };
+  const handlers = new Map();
+  registerTareasIpc(
+    { handle: (c, fn) => handlers.set(c, fn) },
+    {
+      config: () => config,
+      persistConfig: () => ({ ok: false, error: 'ENOSPC' }),
+      getTaskManager: () => null,
+      peekTaskManager: () => null,
+      checkpoints: { list: () => [], safeRunId: require('../agent/checkpoints').safeRunId },
+      runtimes: { liveIds: () => [], allAgents: () => [agente] },
+      securityDefaults: { guardrails: { maxSteps: 60, maxCostUsd: 0 } },
+      DEFAULT_RISK: { read_file: 'safe', write_file: 'confirm' },
+      CONFIG_DIR: dir,
+      runlog: { readRecent: () => [] },
+      getWin: () => null,
+    },
+  );
+  const r = handlers.get('sec:setToolPerm')(null, { tool: 'write_file', level: 'safe' });
+  eq(r.ok, false, 'el canal no puede decir que guardó:');
+  eq(config.security.permissions.write_file, undefined, 'el permiso no queda aplicado en memoria:');
+  eq(config.security.permissions.read_file, 'safe', 'y el que había sigue igual:');
+  eq(politicas[politicas.length - 1].permissions.write_file, undefined, 'la política viva vuelve a la de antes:');
+
+  const r2 = handlers.get('sec:setGuardrail')(null, { maxSteps: 5 });
+  eq(r2.ok, false, 'el guardarraíl tampoco:');
+  eq(config.security.guardrails.maxSteps, 60, 'el umbral queda como estaba:');
+
+  const r3 = handlers.get('sec:setToolPermMany')(null, { tools: ['read_file'], level: 'restricted' });
+  eq(r3.ok, false, 'el atajo «permitir todo» tampoco:');
+  eq(config.security.permissions.read_file, 'safe', 'y no deja media tabla aplicada:');
+  const ultima = politicas[politicas.length - 1];
+  eq(ultima.permissions.read_file, 'safe', 'la política viva también se restaura en el atajo:');
+});
+
+test('cambios: el registro de «tocado» no se corta a las 48 escrituras del diff', () => {
+  /* La puerta que impide ejecutar un comprobador que el propio modelo acaba de escribir
+     consultaba el mapa del diff, con tope de 48: la escritura 49 dejaba de contar y el
+     comprobador se ejecutaba sin tarjeta. */
+  const cambios = require('../agent/cambios');
+  const ws = tmpDir('sagi-tocados-');
+  cambios.limpiar();
+  try {
+    for (let i = 0; i < 60; i++) cambios.recordar(ws, path.join(ws, `f${i}.txt`), 'x', 'dueno');
+    const tocados = cambios.archivosTocados(ws, 'dueno');
+    ok(tocados.length >= 60, 'las 60 escrituras quedan registradas: ' + tocados.length);
+    ok(tocados.some((p) => /f59\.txt$/.test(p)), 'y la última también');
+    ok(cambios.planDeshacer(ws, 'dueno').length <= 48, 'el diff sí sigue acotado');
+  } finally {
+    cambios.limpiar();
+  }
+});

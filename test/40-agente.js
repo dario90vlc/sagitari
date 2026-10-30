@@ -1657,7 +1657,7 @@ test('renderer: la narración se intercala con las herramientas y sobrevive al c
     /case 'tool':\s*\{?\s*freezeStream\(\);[\s\S]{0,80}?toolCard\(ev\);/.test(app),
     'cada herramienta congela antes la narración: queda encima de su tarjeta',
   );
-  ok(/className = 'stream-done'/.test(app), 'el tramo congelado es estático (sin caret de "sigue escribiendo")');
+  ok(/className = 'stream-done seg'/.test(app), 'el tramo congelado es estático (sin caret de "sigue escribiendo") y su propio bloque');
   ok(
     /solo[\s\S]*?se añade el cierre si aporta algo nuevo/.test(app),
     'al cerrar no se borra la narración para pintar solo el último párrafo',
@@ -1668,8 +1668,16 @@ test('renderer: la narración se intercala con las herramientas y sobrevive al c
      vacío, así que una respuesta «pintada a medias» (ventana sin foco) quedaba cortada en
      pantalla mientras el mensaje guardado estaba entero. */
   ok(
-    /if \(holder\._openText\) \{\s*stream\.className = 'stream-done';[\s\S]{0,900}?stream\.innerHTML = fmt\(holder\._openText\);/.test(app),
+    /if \(holder\._openText\) \{\s*stream\.className = 'stream-done seg';[\s\S]{0,900}?stream\.innerHTML = fmt\(holder\._openText\);/.test(app),
     'y el tramo abierto se reescribe entero al cerrar, sin fiarse del frame',
+  );
+  /* El turno ya no es UNA burbuja: es una columna de bloques. Los tramos de texto llevan
+     `.seg` (su piel) y la burbuja contenedora pierde fondo y relleno. Sin esto, el turno
+     volvía a leerse como un muro: era la queja literal del usuario. */
+  ok(/pendingAssistant\.classList\.add\('blocks'\)/.test(app), 'el turno en vivo nace como columna de bloques');
+  ok(
+    /if \(!pendingTurn\.group \|\| !pendingTurn\.group\.el\.isConnected \|\| b\.lastElementChild !== pendingTurn\.group\.el\)/.test(app),
+    'cada tanda de herramientas abre su grupo DONDE ocurrió (no todo al final del turno)',
   );
 });
 
@@ -1708,13 +1716,19 @@ test('renderer: el razonamiento va en su bloque, fuera de la respuesta', () => {
   const bloque = app.match(/function buildThinkBlock[\s\S]*?\n\}/)[0];
   ok(/th-copy/.test(bloque) && /ic\('brain'\)/.test(bloque), 'con su icono y su botón de copiar');
   const pone = app.match(/function ensureThinkBlock[\s\S]*?\n\}/)[0];
-  ok(/b\.insertBefore\(d, b\.firstChild\)/.test(pone), 'el bloque va el PRIMERO de la burbuja: se piensa antes de actuar');
+  /* Una ráfaga por bloque: el primero abre el turno y los siguientes van donde ocurrieron.
+     Antes había UN bloque al principio y el razonamiento del paso 6 se pintaba encima de
+     las herramientas del paso 1. */
+  ok(/actual\._terminado/.test(pone) && /b\.appendChild\(d\)/.test(pone), 'cada ráfaga abre su bloque, en su sitio');
   ok(/buildThinkBlock/.test(pone), 'y el del turno vivo es ese mismo bloque');
   const cierre = app.match(/function cerrarRazonamiento[\s\S]*?\n\}/)[0];
   ok(/_tocado/.test(cierre), 'si el usuario lo abre a mano, no se le cierra');
   ok(/cerrarRazonamiento\(\);/.test(desde("case 'delta': {", "case 'thinking_delta':")), 'se pliega cuando empieza a responder');
-  const cierreTurno = app.match(/if \(finalText\) \{[\s\S]*?cerrarHerramientas\(\);\s*\}/)[0];
-  ok(/cerrarRazonamiento\(\);/.test(cierreTurno), 'y al cerrar el turno quedan plegados razonamiento y herramientas');
+  const cierreTurno = app.match(/if \(finalText\) \{[\s\S]*?cerrarRazonamiento\(\);[\s\S]{0,700}?\n {2}\}/)[0];
+  ok(/cerrarRazonamiento\(\);/.test(cierreTurno), 'al cerrar el turno el razonamiento queda plegado');
+  /* Las HERRAMIENTAS no: esconder lo que hizo el agente es justo lo que había que dejar de
+     hacer. Siguen a la vista, y la cabecera del grupo las pliega si el usuario quiere. */
+  ok(!/cerrarHerramientas/.test(app), 'y las herramientas se quedan a la vista (el turno es una traza)');
 
   eq(
     (app.match(/thinkblock'\)\.forEach\(\(?x\)?\s*=>\s*x\.remove\(\)\)/g) || []).length,
@@ -1757,7 +1771,7 @@ test('renderer: el grupo de herramientas dice cuántas van y si algo falló', ()
   ok(/const fallos = pendingTurn\.fails \|\| 0;/.test(refresh), 'con el conteo real del turno');
   ok(/if \(!ok\) pendingTurn\.fails = \(pendingTurn\.fails \|\| 0\) \+ 1;/.test(app), 'cada herramienta fallida suma uno');
   ok(/tg-fails/.test(app.match(/function buildToolGroup[\s\S]*?\n\}/)[0]), 'la píldora existe desde el principio (oculta)');
-  ok(/function cerrarHerramientas[\s\S]*?_tocado[\s\S]*?\n\}/.test(app), 'el cierre automático respeta que el usuario lo haya abierto');
+  ok(!/cerrarHerramientas/.test(app), 'el grupo ya no se pliega solo al terminar el turno');
   ok(/\.tg-fails/.test(css) && /\.tgroup\.has-fails/.test(css), 'con su estilo de aviso');
 });
 
@@ -1790,17 +1804,56 @@ test('conversación: al reabrir la app se repinta el turno con sus tarjetas', ()
   const app = readRenderer();
   ok(/function restaurarTraza/.test(app), 'existe el repintado del turno guardado');
   ok(/if \(tieneTraza\)\s*restaurarTraza\(b, m\.trace, html\);/.test(app), 'y el chat lo usa al restaurar la conversación');
-  const fn = app.match(/function restaurarTraza[\s\S]*?\n\}/)[0];
+  /* El repintado usa las PARTES del turno (texto, razonamiento, herramienta en orden):
+     reabrir la conversación enseña lo mismo que se vio en vivo, no un muro de prosa con
+     las herramientas aparte. Los mensajes guardados antes de las partes caen al rastro
+     compacto de siempre. */
+  ok(/Array\.isArray\(trace\.parts\)/.test(app), 'el repintado conoce la secuencia guardada');
+  const partes = app.match(/function restaurarPartes[\s\S]*?\n\}/)[0];
+  ok(/huboTexto/.test(partes) && /cerrarGrupoTraza/.test(partes), 'y la recorre pintando bloques en orden');
+  ok(/buildToolGroup\(\)/.test(partes) && /cardDeTraza\(/.test(partes), 'reutiliza el MISMO marcado del turno en vivo');
+  const seg = app.match(/function segTexto[\s\S]*?\n\}/)[0];
+  ok(/className = 'seg'/.test(seg), 'el tramo de texto es su propio bloque (la piel la pone .seg)');
+  const card = app.match(/function cardDeTraza[\s\S]*?\n\}/)[0];
   ok(
-    /buildToolGroup\(\)/.test(fn) && /buildToolCard\(/.test(fn) && /pintarResultadoTarjeta\(/.test(fn) && /buildThinkBlock\(\)/.test(fn),
-    'reutiliza el MISMO marcado del turno en vivo: un arreglo vale para los dos',
-  );
-  ok(/K\.fmtDuration/.test(fn) && !/setInterval/.test(fn), 'con los tiempos que se guardaron, y sin arrancar ningún reloj');
-  ok(
-    /t\.ok === undefined[\s\S]*?no llegó a devolver su resultado/.test(fn),
+    /t\.ok === undefined[\s\S]*?no llegó a devolver su resultado/.test(card),
     'una herramienta que no llegó a terminar se dice tal cual, no se pinta en verde',
   );
-  ok(/grp\.el\.classList\.remove\('open'\)/.test(fn), 'y el bloque queda plegado, como al cerrar un turno');
+  ok(/K\.fmtDuration/.test(app) && !/setInterval\(.*restaurar/.test(app), 'con los tiempos que se guardaron, y sin arrancar ningún reloj');
+  ok(/grp\.el\.classList\.add\('open'\)/.test(app), 'y el grupo se queda abierto: la traza se lee');
+});
+
+test('conversación: el turno guarda la SECUENCIA (texto, razonamiento, herramienta) en orden', () => {
+  const traza = require('../main/traza');
+  const conv = 'conv-secuencia';
+  traza.trazaNueva(conv);
+  try {
+    traza.trazaApunta(conv, { type: 'delta', text: 'Empiezo por el inventario.' });
+    traza.trazaApunta(conv, { type: 'thinking_delta', text: 'Tengo que mirar el disco.' });
+    traza.trazaApunta(conv, { type: 'thinking_done', text: 'Tengo que mirar el disco.', durationMs: 900 });
+    traza.trazaApunta(conv, { type: 'tool', name: 'run_command', args: { command: 'df -h' } });
+    traza.trazaApunta(conv, { type: 'tool_result', name: 'run_command', ok: true, durationMs: 120, result: '/ 40G' });
+    traza.trazaApunta(conv, { type: 'delta', text: 'El disco está lleno.' });
+    const tt = traza.trazaActual(conv);
+    eq(tt.parts.map((p) => p.k).join(','), 'text,think,tool,text', 'las partes van en el orden en que ocurrió todo');
+    eq(tt.parts[0].text, 'Empiezo por el inventario.', 'el primer tramo de narración');
+    eq(tt.parts[1].text, 'Tengo que mirar el disco.', 'el razonamiento, con su texto definitivo');
+    eq(tt.parts[1].ms, 900, 'y su duración');
+    eq(tt.parts[2].command || tt.parts[2].args.command, 'df -h', 'la herramienta lleva sus argumentos');
+    eq(tt.parts[2].ok, true, 'y se cierra con su resultado');
+    eq(tt.parts[2].result, '/ 40G');
+    eq(tt.parts[3].text, 'El disco está lleno.', 'el texto DESPUÉS de la herramienta abre un tramo nuevo');
+    // lo de un subagente vive en su tarjeta, no en la secuencia del turno
+    traza.trazaApunta(conv, { type: 'delta', subagent: 'research', text: 'interno' });
+    eq(tt.parts.length, 4, 'el texto de un subagente no entra en la secuencia');
+    // topes: conversations.json se lee entero al arrancar
+    for (let i = 0; i < 40; i++) traza.trazaApunta(conv, { type: 'delta', text: 'x'.repeat(2000) });
+    const largo = tt.parts.filter((p) => p.k === 'text').reduce((n, p) => n + p.text.length, 0);
+    ok(largo <= traza.MAX_TEXTO_TURNO, 'el texto del turno tiene presupuesto: ' + largo);
+    ok(!JSON.stringify(tt).includes('textoDelTurno'), 'y el contador interno no viaja al historial guardado');
+  } finally {
+    traza.trazaCerrar(conv);
+  }
 });
 
 test('agent: los cortes explican qué pasó en vez de dejar un telegrama', () => {
@@ -3857,6 +3910,15 @@ test('edición: el anclaje con saltos normales encuentra un archivo CRLF', () =>
   eq(r.texto, 'let a = 9;\r\n', 'no debe duplicar el \\r ni comerse el salto');
 });
 
+test('edición: una sustitución de varias líneas respeta el fin de línea CRLF del archivo', () => {
+  /* En la vía tolerante el bloque se reindenta y se unía con `\n`: un `.cmd` quedaba con
+     líneas CRLF y líneas LF mezcladas (rompe `call x` y ensucia el diff de todo el archivo). */
+  const r = edicionMod.aplicar('echo a\r\ncall b.bat\r\n', 'echo a\ncall b.bat', 'echo a\ncall c.bat', { tolerar: true });
+  eq(r.ok, true);
+  ok(!/[^\r]\n/.test(r.texto), 'ninguna línea puede quedarse en LF: ' + JSON.stringify(r.texto));
+  eq(r.texto, 'echo a\r\ncall c.bat\r\n', 'y el contenido es el esperado');
+});
+
 test('edición: un anclaje ambiguo sin sangría avisa en cuántos sitios aparece', () => {
   // con tabulador en el anclaje, que es como llega muchas veces
   const r = edicionMod.aplicar('  uno();\n  uno();\n', '\tuno();', '\tdos();', { tolerar: true });
@@ -4874,4 +4936,152 @@ test('agent: si el modelo insiste en escribir la llamada como texto, el turno se
   const dicho = agent.history.filter((m) => m.role === 'assistant').map((m) => String(m.content)).join('\n');
   ok(/No he podido hacer el trabajo/.test(dicho), 'se dice por qué, en el hilo: ' + dicho.slice(0, 90));
   ok(/Cambia de modelo/.test(dicho), 'y qué hacer (cambiar de modelo)');
+});
+
+/* ---------- Fase 1c: regresiones de la segunda auditoría ---------- */
+
+test('auditoría: la skill puede leer sus referencias, pero no el resto de los datos', async () => {
+  /* `use_skill` anuncia DIRECTORIO DE LA SKILL y la skill de serie manda leer
+     references/*.md: con todo el directorio de datos cerrado, el agente no podía
+     seguir sus propias instrucciones. Se abre SOLO lectura y SOLO dentro de skills. */
+  const datos = process.env.SAGITARI_DATA_DIR;
+  const id = 'refs-' + Date.now().toString(36);
+  const dir = tmpDir('sagi-skillrefs-');
+  const almacen = path.join(datos, 'skills');
+  const carpeta = path.join(almacen, id);
+  fs.mkdirSync(path.join(carpeta, 'references'), { recursive: true });
+  fs.writeFileSync(path.join(carpeta, 'SKILL.md'), `---\nname: ${id}\ndescription: prueba de lectura\n---\nlee references/x.md\n`, 'utf8');
+  fs.writeFileSync(path.join(carpeta, 'references', 'x.md'), 'CONTENIDO-DE-LA-REFERENCIA', 'utf8');
+  skills.__test._resetForTests(almacen);
+  try {
+    const anuncio = await executeTool('use_skill', { name: id }, { workspace: dir });
+    ok(/DIRECTORIO DE LA SKILL/.test(String(anuncio)), 'use_skill anuncia la carpeta: ' + String(anuncio).slice(0, 120));
+    const leido = await executeTool('read_file', { path: path.join(carpeta, 'references', 'x.md') }, { workspace: dir });
+    eq(String(leido), 'CONTENIDO-DE-LA-REFERENCIA', 'la referencia de la skill se lee: ' + String(leido).slice(0, 120));
+    // lo que el bloqueo protege de verdad sigue cerrado: los datos y la ESCRITURA
+    const cfg = await executeTool('read_file', { path: path.join(datos, 'config.json') }, { workspace: dir });
+    ok(/datos de la app/.test(String(cfg)), 'config.json sigue sin leerse: ' + String(cfg).slice(0, 120));
+    const esc = await executeTool('write_file', { path: path.join(carpeta, 'references', 'y.md'), content: 'x' }, { workspace: dir });
+    ok(/datos de la app/.test(String(esc)), 'escribir en skills sigue bloqueado: ' + String(esc).slice(0, 120));
+    eq(fs.existsSync(path.join(carpeta, 'references', 'y.md')), false, 'y no ha escrito nada');
+    // manda el camino REAL: un puente dentro de la skill hacia los datos no abre nada
+    const puente = path.join(carpeta, 'puente');
+    let hayJunction = true;
+    try {
+      fs.symlinkSync(datos, puente, 'junction');
+    } catch (e) {
+      hayJunction = false;
+      console.log('  (junction no disponible aquí: ' + e.message + ')');
+    }
+    if (hayJunction) {
+      const porPuente = await executeTool('read_file', { path: path.join(puente, 'config.json') }, { workspace: dir });
+      ok(/datos de la app/.test(String(porPuente)), 'por un junction dentro de skills tampoco: ' + String(porPuente).slice(0, 140));
+    }
+  } finally {
+    skills.__test._resetForTests(SKILLS_TMP);
+  }
+});
+
+test('auditoría: un junction creado tras la escritura no se cuela por la caché', async () => {
+  /* El caché de caminos reales decía «fuera» de una ruta ya cacheada aunque un mklink
+     posterior la hubiera convertido en un puente a los datos: la escritura caía dentro
+     sin tarjeta. Se vacía tras escribir y tras cada comando.
+     El espacio de trabajo va DENTRO del repo porque `rmdir` sobre %TEMP% se clasifica
+     como borrado en carpetas del sistema y run_command no lo ejecuta. */
+  const datos = process.env.SAGITARI_DATA_DIR;
+  const dir = fs.mkdtempSync(path.join(__dirname, '..', '.tmp-cache-'));
+  const carpeta = path.join(dir, 'carpeta');
+  const nota = path.join(carpeta, 'nota.txt');
+  try {
+    const primera = await executeTool('write_file', { path: nota, content: 'hola' }, { workspace: dir });
+    ok(!/^Error/.test(String(primera)), 'la primera escritura entra: ' + String(primera).slice(0, 120));
+    // el agente sustituye su carpeta por un puente a los datos, con run_command.
+    // El destino va por %SAGITARI_DATA_DIR% para que el comando no lleve escrita la
+    // ruta de %TEMP%, que la guarda de comandos clasificaría como carpeta del sistema.
+    const puente = await executeTool(
+      'run_command',
+      { command: `rmdir /s /q "${carpeta}" && mklink /J "${carpeta}" "%SAGITARI_DATA_DIR%"` },
+      { workspace: dir },
+    );
+    if (puente && puente.failed) {
+      console.log('  (junction no disponible aquí: ' + String(puente.text).slice(0, 160) + ')');
+      return;
+    }
+    const segunda = await executeTool('write_file', { path: nota, content: 'FUERA' }, { workspace: dir });
+    ok(/datos de la app/.test(String(segunda)), 'la segunda escritura se rechaza: ' + String(segunda).slice(0, 140));
+    eq(fs.existsSync(path.join(datos, 'nota.txt')), false, 'y no ha escrito dentro de los datos');
+    eq(fs.existsSync(path.join(datos, 'nota.txt.sagi-tmp')), false, 'ni el temporal');
+  } finally {
+    // el puente se quita ANTES del rm del árbol: si no, se borraría su destino
+    try {
+      fs.rmdirSync(carpeta);
+    } catch {}
+    fs.rmSync(dir, { recursive: true, force: true });
+  }
+});
+
+test('auditoría: apply_patch no parte el mismo archivo por mayúsculas', async () => {
+  /* En NTFS `Readme.md` y `readme.md` son el mismo archivo: los dos planes salían del
+     texto original y el segundo rename ganaba, respondiendo «2 archivo(s) actualizados»
+     con un cambio perdido por el camino. */
+  const dir = tmpDir('sagi-patchcaja-');
+  const readme = path.join(dir, 'Readme.md');
+  fs.writeFileSync(readme, 'AAA\nBBB\n', 'utf8');
+  const out = await executeTool(
+    'apply_patch',
+    {
+      changes: [
+        { path: 'Readme.md', old_string: 'AAA', new_string: '111' },
+        { path: 'readme.md', old_string: 'BBB', new_string: '222' },
+      ],
+    },
+    { workspace: dir },
+  );
+  ok(/mismo archivo/.test(String(out)), 'se avisa del archivo repetido: ' + String(out).slice(0, 200));
+  eq(fs.readFileSync(readme, 'utf8'), 'AAA\nBBB\n', 'y no se aplica ninguno de los dos');
+});
+
+test('auditoría: search_files rechaza un patrón desmedido antes de compilarlo', async () => {
+  const dir = tmpDir('sagi-patron-');
+  fs.writeFileSync(path.join(dir, 'a.txt'), 'hola\n', 'utf8');
+  const out = await executeTool('search_files', { path: dir, pattern: 'a'.repeat(10000) }, { workspace: dir });
+  ok(/demasiado largo/.test(String(out)), 'se explica el tope del patrón: ' + String(out).slice(0, 160));
+});
+
+test('auditoría: search_files rechaza el patrón con cuantificadores anidados', async () => {
+  /* `(a+)+$` contra una línea de 100 000 a's que NO termina en 'a': el retroceso es
+     exponencial y congela el hilo principal de Electron. Se rechaza ANTES de compilarlo,
+     así que el turno recibe una explicación en vez de una app colgada. */
+  const dir = tmpDir('sagi-redos-');
+  fs.writeFileSync(path.join(dir, 'largo.txt'), 'a'.repeat(100000) + ' b\n', 'utf8');
+  const t0 = Date.now();
+  const out = await executeTool('search_files', { path: dir, pattern: '(a+)+$' }, { workspace: dir });
+  ok(/repite sin tope/.test(String(out)), 'se explica por qué no se busca: ' + String(out).slice(0, 200));
+  ok(Date.now() - t0 < 1000, 'y se decide al instante, sin llegar a evaluar el patrón');
+  const sano = await executeTool('search_files', { path: dir, pattern: 'a{2,3} b' }, { workspace: dir });
+  ok(/largo\.txt/.test(String(sano)), 'una expresión acotada sigue buscando: ' + String(sano).slice(0, 120));
+});
+
+test('auditoría: search_files encuentra una coincidencia pasada la columna 1000', async () => {
+  /* Recortar la línea a 1000 caracteres escondía en silencio lo que hubiera más allá
+     (un minificado, un JSON de una línea): ahora se busca la línea entera. */
+  const dir = tmpDir('sagi-linea-');
+  fs.writeFileSync(path.join(dir, 'min.js'), 'x'.repeat(1500) + 'AGUJA' + 'y'.repeat(200) + '\n', 'utf8');
+  const out = await executeTool('search_files', { path: dir, pattern: 'AGUJA' }, { workspace: dir });
+  ok(/min\.js/.test(String(out)), 'la coincidencia tardía tiene que salir: ' + String(out).slice(0, 160));
+});
+
+test('auditoría: un flujo alternativo NTFS (archivo:flujo) no se escribe ni se lee', async () => {
+  /* `nota.txt:oculto` cae «dentro» del espacio de trabajo y su contenido no se ve en el
+     Explorador, en git ni en el diff: era una escritura sin tarjeta que nadie revisa. */
+  const { executeTool } = require('../agent/executors');
+  const dir = tmpDir('sagi-ads-');
+  fs.writeFileSync(path.join(dir, 'nota.txt'), 'hola\n', 'utf8');
+  const escrito = await executeTool('write_file', { path: 'nota.txt:oculto', content: 'x' }, { workspace: dir });
+  ok(/flujo alternativo/.test(String(escrito)), 'se rechaza y se explica: ' + String(escrito).slice(0, 200));
+  eq(fs.readFileSync(path.join(dir, 'nota.txt'), 'utf8'), 'hola\n', 'el archivo original no cambia');
+  const leido = await executeTool('read_file', { path: 'nota.txt:oculto' }, { workspace: dir });
+  ok(/flujo alternativo/.test(String(leido)), 'ni se lee: ' + String(leido).slice(0, 160));
+  const normal = await executeTool('write_file', { path: 'otra.txt', content: 'x' }, { workspace: dir });
+  ok(/escritos/.test(String(normal)), 'una ruta normal sigue escribiéndose: ' + String(normal).slice(0, 120));
 });

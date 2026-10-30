@@ -132,8 +132,13 @@ function buscar(texto, busca, opts = {}) {
  * que tiene esa misma línea en el archivo; las líneas que el modelo añada (más
  * sangradas, típicamente un bloque anidado) conservan su sangría RELATIVA.
  */
-function reindentar(nuevo, ancla, sangrArchivo) {
-  const nl = String(nuevo).split('\n');
+function reindentar(nuevo, ancla, sangrArchivo, eol = '\n') {
+  /* El bloque nuevo se normaliza a `\n` y se vuelve a unir con el fin de línea del
+     archivo: insertar `\n` en un `.cmd`/`.bat` con CRLF rompe su ejecución (`call x` con
+     `\n`) y ensucia el diff de todo el archivo. */
+  const nl = String(nuevo)
+    .replace(/\r\n/g, '\n')
+    .split('\n');
   const al = String(ancla).split('\n');
   const f = Array.isArray(sangrArchivo) && sangrArchivo.length ? sangrArchivo : [''];
   return nl
@@ -144,7 +149,7 @@ function reindentar(nuevo, ancla, sangrArchivo) {
       const sin = l.startsWith(a) ? l.slice(a.length) : l;
       return destino + sin;
     })
-    .join('\n');
+    .join(eol);
 }
 
 /**
@@ -180,7 +185,7 @@ function aplicar(texto, busca, nuevo, opts = {}) {
   }
   // se reajusta la sangría al anclaje que se ha encontrado de verdad, para que el
   // bloque nuevo herede la indentación del archivo y no la del modelo
-  const txt = t.slice(0, c.inicio) + reindentar(n, b, c.sangrias || [c.sangria]) + t.slice(c.fin);
+  const txt = t.slice(0, c.inicio) + reindentar(n, b, c.sangrias || [c.sangria], t.includes('\r\n') ? '\r\n' : '\n') + t.slice(c.fin);
   return { ok: true, texto: txt, veces: 1, modo: 'tolerante', linea: c.linea, lineas: c.lineas };
 }
 

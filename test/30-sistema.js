@@ -1582,3 +1582,133 @@ test('runlog: escribe, se lee y rota por bytes reales', async () => {
   ok(/^run-\d+(-\d+)?\.jsonl$/.test(path.basename(runlog.currentLogFile() || '')), 'el fichero de sesión se nombra run-<ts>.jsonl');
   runlog.__test._resetForTests({});
 });
+
+/* ---------- .gitignore anclado, adjuntos cortos, stderr de MCP y traza cortada ---------- */
+
+test('índice: un patrón anclado del .gitignore («/secrets») sí ignora', () => {
+  const indice = require('../agent/indice');
+  const ws = tmpDir('sagi-ignore-');
+  fs.writeFileSync(path.join(ws, '.gitignore'), '/secrets\nnode_modules\n*.log\n');
+  fs.mkdirSync(path.join(ws, 'secrets'));
+  fs.writeFileSync(path.join(ws, 'secrets', 'key.env'), 'TOKEN=1');
+  fs.mkdirSync(path.join(ws, 'node_modules'));
+  fs.writeFileSync(path.join(ws, 'node_modules', 'x.js'), 'x');
+  fs.writeFileSync(path.join(ws, 'debug.log'), 'x');
+  fs.writeFileSync(path.join(ws, 'main.js'), 'x');
+  const reglas = indice.reglasIgnoradas(ws);
+  ok(indice.ignoradoPorRegla('secrets/key.env', reglas), 'la barra inicial no puede dejar el patrón inerte: ' + reglas.join(','));
+  const rutas = indice.recorrer(ws).archivos.map((a) => a.ruta);
+  ok(!rutas.includes('secrets/key.env'), 'y el recorrido no indexa el secreto: ' + rutas.join(','));
+  ok(rutas.includes('main.js'), 'sin pasarse: el archivo normal sigue en el índice');
+});
+
+/* El ancla es de la RAÍZ (como en git): «/secrets» no tapa «sub/secrets», y un patrón con
+   carpeta («src/build») tampoco casa a mitad de camino. Antes ambos se ignoraban de más. */
+test('índice: el ancla del .gitignore vale para la raíz, no para cualquier profundidad', () => {
+  const indice = require('../agent/indice');
+  const ws = tmpDir('sagi-ignore-ancla-');
+  fs.writeFileSync(path.join(ws, '.gitignore'), '/secrets\nsrc/build\n*.log\n');
+  const reglas = indice.reglasIgnoradas(ws);
+  ok(indice.ignoradoPorRegla('secrets/key.env', reglas), 'la carpeta anclada sí se ignora en la raíz');
+  ok(!indice.ignoradoPorRegla('sub/secrets/key.env', reglas), 'pero no en una subcarpeta: ' + reglas.join(','));
+  ok(indice.ignoradoPorRegla('src/build/out.js', reglas), 'una ruta con carpeta se ata a la raíz');
+  ok(!indice.ignoradoPorRegla('lib/src/build/out.js', reglas), 'y no casa a mitad de camino');
+  const sinAncla = indice.reglasIgnoradas(path.join(ws, 'no-existe'));
+  eq(sinAncla.length, 0, 'sin .gitignore no hay reglas');
+});
+
+test('adjuntos: un texto corto no se confunde con binario', () => {
+  const attach = require('../main/attachments');
+  eq(attach.textOf(Buffer.from('hola mundo', 'utf8'), 'a.txt'), 'hola mundo', 'un adjunto de 10 caracteres tiene que llegar al modelo');
+  eq(attach.textOf(Buffer.from('notas\n', 'utf8'), 'a.md'), 'notas');
+  eq(attach.textOf(Buffer.alloc(400, 0x01), 'a.txt'), null, 'los textos largos siguen exigiendo mayoría imprimible');
+  eq(attach.textOf(Buffer.from('\x01\x01\x01\x01\x01\x01\x01\x01\x01\x01', 'utf8'), 'a.txt'), null, 'y un binario corto sigue siendo binario');
+});
+
+test('mcp: el stderr del servidor viaja enmascarado hacia la vista', () => {
+  const j = MAIN_SRC.indexOf('function mcpState()');
+  ok(j > -1, 'main tiene que exponer el estado de los servidores');
+  const bloque = MAIN_SRC.slice(j, MAIN_SRC.indexOf('function mcpExport', j));
+  const linea = bloque.split('\n').find((l) => /logTail:/.test(l)) || '';
+  ok(/redactText\(v\.logTail/.test(linea), 'el stderr crudo no puede llegar al renderer: ' + linea.trim());
+  const runlog = require('../agent/runlog');
+  ok(!runlog.redactText('Authorization: Bearer sk-abc123456').includes('sk-abc123456'), 'y usa la misma máscara que el log');
+});
+
+test('traza: un turno con más texto del que cabe se marca como cortado', () => {
+  const traza = require('../main/traza');
+  const conv = 'traza-cortada-' + Date.now().toString(36);
+  traza.trazaNueva(conv);
+  traza.trazaApunta(conv, { type: 'delta', text: 'x'.repeat(traza.MAX_TEXTO_PARTE + 1) });
+  const t = traza.trazaActual(conv);
+  eq(t.cortado, true, 'el rastro no puede fingir que `parts` está completo');
+  eq(JSON.parse(JSON.stringify(t)).cortado, true, 'la marca tiene que viajar al historial guardado');
+  traza.trazaCerrar(conv);
+
+  const corto = 'traza-corta-' + Date.now().toString(36);
+  traza.trazaNueva(corto);
+  traza.trazaApunta(corto, { type: 'delta', text: 'x'.repeat(100) });
+  eq(traza.trazaActual(corto).cortado, undefined, 'un turno que cabe entero no lleva la marca');
+  traza.trazaCerrar(corto);
+});
+
+/* ---------- cierre de la auditoría: estrellas, miniatura y SSE de MCP ---------- */
+
+test('mercado: un contador de estrellas que no es número no llega como HTML', async () => {
+  /* `stargazers_count` venía tal cual de la API y se pintaba en Ajustes ▸ Skills con
+     innerHTML: una respuesta corrupta o un proxy podían colar una etiqueta. */
+  const market = require('../agent/marketplace');
+  const fetchPrevio = global.fetch;
+  global.fetch = async () => ({
+    ok: true,
+    json: async () => ({
+      items: [
+        { full_name: 'a/b', name: 'b', description: 'x', stargazers_count: '<img src=x onerror=alert(1)>', html_url: 'https://ejemplo' },
+      ],
+    }),
+  });
+  try {
+    const [r] = await market.searchGitHub('x');
+    eq(r.stars, 0, 'se normaliza a número: ' + JSON.stringify(r.stars));
+  } finally {
+    global.fetch = fetchPrevio;
+  }
+});
+
+test('chat: la miniatura se mide por el lado mayor y por los bytes, no solo por el ancho', () => {
+  /* Una captura de 320×20000 px pasaba el atajo «ya es pequeña» y se guardaba entera en
+     conversations.json (que se reescribe en cada turno y se relee al arrancar). */
+  const { tamanoMiniatura } = require('../main/ipc-chat');
+  eq(tamanoMiniatura({ width: 320, height: 200 }, 50 * 1024), null, 'una imagen que ya cabe no se toca');
+  eq(JSON.stringify(tamanoMiniatura({ width: 1000, height: 500 }, 10)), JSON.stringify({ width: 320, height: 160 }), 'se reduce por la proporción');
+  eq(JSON.stringify(tamanoMiniatura({ width: 320, height: 20000 }, 6 * 1024 * 1024)), JSON.stringify({ width: 8, height: 480 }), 'una captura larguísima se reduce por el alto');
+  ok(tamanoMiniatura({ width: 320, height: 200 }, 5 * 1024 * 1024), 'aunque quepa en píxeles, si pesa se reduce');
+  eq(tamanoMiniatura({ width: 0, height: 0 }, 10), null, 'sin tamaño no hay nada que calcular');
+});
+
+test('mcp: un stream SSE que no se cierra no deja la petición esperando al timeout', async () => {
+  /* La spec permite que el servidor conteste y deje el stream abierto. Antes se leía hasta
+     el cierre, así que una respuesta correcta acababa en «timeout: tools/call no respondió». */
+  const { createHttpTransport } = require('../agent/mcp-transport');
+  const enc = new TextEncoder();
+  const body = new ReadableStream({
+    start(c) {
+      c.enqueue(enc.encode('event: message\ndata: {"jsonrpc":"2.0","id":1,"result":{"ok":true}}\n\n'));
+      // y NO se cierra
+    },
+  });
+  const t = createHttpTransport({
+    url: 'https://ejemplo.invalid/mcp',
+    fetchFn: async () => new Response(body, { headers: { 'content-type': 'text/event-stream' } }),
+    defaultTimeoutMs: 4000,
+  });
+  try {
+    const r = await Promise.race([
+      t.rpc.request('tools/call', {}),
+      new Promise((_, rej) => setTimeout(() => rej(new Error('el stream abierto dejó la petición esperando')), 1500)),
+    ]);
+    eq(r && r.ok, true, 'la respuesta llega aunque el servidor no cierre el stream');
+  } finally {
+    t.kill();
+  }
+});

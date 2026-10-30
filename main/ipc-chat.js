@@ -21,6 +21,22 @@
  * en main): este router no devuelve nada.
  */
 
+/* Tamaño al que reducir una imagen para guardarla como miniatura, o `null` si ya cabe.
+   Se mide el LADO MAYOR y los bytes: una captura de 320×20000 px pasa el ancho pero no es
+   «pequeña», y guardarla entera metía la imagen completa en conversations.json (que se
+   reescribe en cada turno y se relee al arrancar). */
+const MAX_MINIATURA_ANCHO = 320;
+const MAX_MINIATURA_ALTO = 480;
+const MAX_MINIATURA_BYTES = 120 * 1024;
+function tamanoMiniatura(size, bytes) {
+  const w = Number(size && size.width) || 0;
+  const h = Number(size && size.height) || 0;
+  if (!w || !h) return null;
+  if (w <= MAX_MINIATURA_ANCHO && h <= MAX_MINIATURA_ALTO && Number(bytes) <= MAX_MINIATURA_BYTES) return null;
+  const escala = Math.min(MAX_MINIATURA_ANCHO / w, MAX_MINIATURA_ALTO / h, 1);
+  return { width: Math.max(1, Math.round(w * escala)), height: Math.max(1, Math.round(h * escala)) };
+}
+
 function registerChatIpc(ipcMain, ctx) {
   // config es un getter (() => config de main): el objeto es único y vivo,
   // se lee fresco en cada handler para no capturar una foto vieja.
@@ -177,10 +193,9 @@ function registerChatIpc(ipcMain, ctx) {
       const { nativeImage } = require('electron');
       const img = nativeImage.createFromDataURL(String(dataUrl || ''));
       if (!img || img.isEmpty()) return undefined;
-      const size = img.getSize();
-      if (!size || !size.width || !size.height) return undefined;
-      if (size.width <= 320) return String(dataUrl); // ya es pequeña: no se re-comprime
-      return img.resize({ width: 320 }).toDataURL();
+      const destino = tamanoMiniatura(img.getSize(), String(dataUrl).length);
+      if (!destino) return String(dataUrl); // ya es pequeña: no se re-comprime
+      return img.resize(destino).toDataURL();
     } catch {
       return undefined;
     }
@@ -380,4 +395,4 @@ function registerChatIpc(ipcMain, ctx) {
   /* `chat:clear` se ha eliminado: no lo llamaba nadie (ni el renderer ni el puente). */
 }
 
-module.exports = { registerChatIpc };
+module.exports = { registerChatIpc, tamanoMiniatura };

@@ -3372,3 +3372,94 @@ test('ajustes: cada pestaña tiene su panel, y la búsqueda tiene filas que filt
   const rows = (html.match(/class="[^"]*\bsrow\b/g) || []).length;
   ok(rows >= 25, 'filas buscables (.srow): ' + rows);
 });
+
+test('contexto: el recorte no suelta la pregunta del turno cuando la puerta añade usuario al final', () => {
+  const contexto = require('../agent/contexto');
+  const A = (id) => ({ role: 'assistant', content: 'a'.repeat(200), tool_calls: [{ id, type: 'function', function: { name: 'read_file', arguments: '{"p":1}' } }] });
+  const T = (id) => ({ role: 'tool', tool_call_id: id, name: 'read_file', content: 'R'.repeat(3000) });
+  const m = [
+    { role: 'system', content: 'SISTEMA' },
+    { role: 'user', content: 'PREGUNTA-REAL: corrige el bug' },
+  ];
+  for (let s = 0; s < 10; s++) {
+    m.push(A('k' + s));
+    m.push(T('k' + s));
+  }
+  m.push({ role: 'assistant', content: 'hecho' }, { role: 'user', content: 'ANTES DE CERRAR comprueba' });
+
+  /* Sin marca, la frontera es el ÚLTIMO usuario, que aquí es la puerta: la pregunta
+     viajaba como turno viejo y se soltaba. La marca es un Symbol del propio mensaje. */
+  contexto.marcarTurno(m[1]);
+  eq(Object.keys(m[1]).join(','), 'role,content', 'la marca no se enumera (no es un campo del mensaje)');
+  ok(!JSON.stringify(m).includes('turno'), 'ni aparece en el JSON que se guarda o se manda');
+
+  const rec = contexto.recortarMensajes(m, [], { model: 'x', contextWindow: 16000, maxTokens: 4096 });
+  ok(rec.quitados > 0, 'con el contexto lleno se suelta algo: ' + rec.quitados);
+  const usuarios = rec.messages.filter((x) => x.role === 'user').map((x) => String(x.content));
+  ok(usuarios.some((t) => t.includes('PREGUNTA-REAL')), 'la pregunta del turno sigue en el envío');
+  ok(usuarios.some((t) => t.includes('ANTES DE CERRAR')), 'y el bloque de la puerta también');
+  // lo soltado es lo MÁS ANTIGUO: el primer bloque de herramienta ya no viaja
+  ok(!rec.messages.some((x) => x.role === 'tool' && x.tool_call_id === 'k0'), 'se suelta el bloque más antiguo');
+  const sueltos = rec.messages.filter(
+    (x) =>
+      x.role === 'tool' && !rec.messages.some((y) => y.role === 'assistant' && (y.tool_calls || []).some((c) => c.id === x.tool_call_id)),
+  );
+  eq(sueltos.length, 0, 'y sin resultados de herramienta huérfanos');
+
+  /* Sin marca (historiales viejos, compactaciones) se mantiene el comportamiento de
+     siempre: la frontera es el último usuario y los turnos viejos se van soltando. */
+  const sinMarca = [{ role: 'system', content: 'SISTEMA' }];
+  for (let s = 0; s < 10; s++) {
+    sinMarca.push({ role: 'user', content: 'viejo ' + s }, A('x' + s), T('x' + s));
+  }
+  sinMarca.push({ role: 'user', content: 'ULTIMA-PREGUNTA' });
+  const rec2 = contexto.recortarMensajes(sinMarca, [], { model: 'x', contextWindow: 16000, maxTokens: 4096 });
+  ok(rec2.quitados > 0, 'sin marca también se recorta: ' + rec2.quitados);
+  ok(rec2.messages.some((x) => x.role === 'user' && x.content === 'ULTIMA-PREGUNTA'), 'conservando el último usuario');
+  ok(!rec2.messages.some((x) => x.role === 'user' && x.content === 'viejo 0'), 'y soltando los turnos viejos');
+});
+
+test('contexto: el turno real marca su pregunta y la puerta no la desplaza (agent)', async () => {
+  const { Agent } = require('../agent/agent');
+  const contexto = require('../agent/contexto');
+  const vistas = [];
+  const agent = new Agent({ emit: () => {}, screenshotFn: async () => ({}) });
+  // el modelo no se llama: se captura lo que se iba a mandar en cada paso
+  agent._streamWithFallback = async (chain, messages) => {
+    vistas.push(messages);
+    return { text: 'hecho' };
+  };
+  // la puerta de verificación es el camino que empuja instrucciones de usuario al final
+  agent._needsVerification = function () {
+    if (this._gateUsed) return false;
+    this._gateUsed = true;
+    return true;
+  };
+  agent._needsReview = () => false;
+  // la cadena del bucle es la que mide el contexto: sin ventana propia se asume 128k
+  const cadena = agent._chainFor.bind(agent);
+  agent._chainFor = (cfg, texto, opts) => {
+    const r = cadena(cfg, texto, opts);
+    return { ...r, chain: r.chain.map((c) => ({ ...c, contextWindow: 12000 })) };
+  };
+  for (let s = 0; s < 12; s++) {
+    agent.history.push({ role: 'user', content: 'viejo ' + s });
+    agent.history.push({ role: 'assistant', content: 'a'.repeat(200), tool_calls: [{ id: 'v' + s, type: 'function', function: { name: 'read_file', arguments: '{}' } }] });
+    agent.history.push({ role: 'tool', tool_call_id: 'v' + s, name: 'read_file', content: 'R'.repeat(3000) });
+  }
+  const settings = {
+    active: { name: 'x', baseUrl: 'https://api.openai.com/v1', apiKey: 'k', model: 'gpt-4o', contextWindow: 12000 },
+    settings: { mode: 'act', modelRouting: false, verifyGate: true, reviewGate: false },
+  };
+  await agent.chat('PREGUNTA-REAL: corrige el bug', settings);
+  eq(vistas.length, 2, 'la puerta pide una ronda extra antes de cerrar');
+  const ultimo = vistas[vistas.length - 1];
+  const usuarios = ultimo.filter((x) => x.role === 'user').map((x) => String(x.content));
+  ok(usuarios.some((t) => t.includes('PREGUNTA-REAL')), 'la pregunta del turno sigue en el envío');
+  ok(usuarios.some((t) => t.includes('ANTES DE CERRAR')), 'y el bloque de la puerta');
+  const marcado = ultimo.find((x) => x.role === 'user' && contexto.esTurno(x));
+  ok(marcado, 'la marca viaja con el mensaje');
+  ok(String(marcado.content).includes('PREGUNTA-REAL'), 'y marca LA PREGUNTA, no las instrucciones de la puerta');
+  eq(Object.keys(marcado).join(','), 'role,content', 'y no se enumera: no va en el JSON del envío');
+  ok(!ultimo.some((x) => x.role === 'tool' && x.tool_call_id === 'v0'), 'lo soltado es lo más antiguo');
+});

@@ -122,15 +122,30 @@ const SHOT_DIFFS = `(function () {
 /* Conversación de demostración, dibujada con las propias funciones del renderer
    (bubble, scroll) para que la captura enseñe el markdown, el código y el
    espaciado reales, no un HTML imitado. */
+/* La conversación de demostración recorre el MISMO camino que un turno real: abre la
+   columna de bloques, escribe un tramo, lo congela al llegar una herramienta, la cierra
+   con su resultado, vuelve a escribir y cierra el turno. Nada de HTML imitado: si el
+   turno cambia de forma, la captura lo sigue. */
 const DEMO_CHAT = `(function () {
   var log = document.getElementById('messages');
   if (!log) return 'NO_CONTAINER';
-  if (typeof bubble !== 'function') return 'NO_BUBBLE_FN';
+  if (typeof bubble !== 'function' || typeof ensureAssistantBubble !== 'function') return 'NO_BUBBLE_FN';
   log.innerHTML = '';
-  var say = function (role, html) { bubble(role).innerHTML = html; };
-  say('user', 'Ayúdame a organizar mi carpeta de Descargas: quiero separar instaladores, documentos e imágenes.');
-  say('ai', 'He revisado <b>Descargas</b>: 214 archivos. Mi plan:<br><br>1. Crear <b>Instaladores</b>, <b>Documentos</b> e <b>Imágenes</b>.<br>2. Clasificar por extensión: <code>.exe/.msi</code> → Instaladores · <code>.pdf/.docx</code> → Documentos · <code>.png/.jpg</code> → Imágenes.<br>3. Ejecutar y darte un resumen.<br><br>¿Confirmas?');
-  say('ai', 'Hecho. <b>214 archivos</b> clasificados sin perder ninguno:<br><br>• <b>Instaladores</b> → 38&nbsp;&nbsp;• <b>Documentos</b> → 121&nbsp;&nbsp;• <b>Imágenes</b> → 55<br><br>Tiempo total: <b>42 s</b>. ¿Quieres que mueva los instaladores de más de 1 GB a la Papelera?');
+  bubble('user').textContent = 'Analiza mi PC y dime qué ocupa el disco.';
+  ensureAssistantBubble();
+  var d = ensureThinkBlock();
+  d._texto = 'Conviene empezar por el uso de disco y luego mirar los programas de inicio.';
+  d._terminado = true;
+  d._ms = 2400;
+  pintarCuerpoRazonamiento(d);
+  cerrarRazonamiento();
+  pendingAssistant._openText = 'Empiezo por el inventario general y el uso de disco.';
+  freezeStream();
+  toolCard({ name: 'run_command', args: { command: 'Get-PSDrive C | Select-Object Used,Free' } });
+  completeToolCard({ name: 'run_command', ok: true, durationMs: 820, result: 'Used 930 GB   Free 173 GB' });
+  toolCard({ name: 'list_dir', args: { path: 'C:/Program Files/Steam/steamapps' } });
+  completeToolCard({ name: 'list_dir', ok: true, durationMs: 210, result: 'common/ (38 carpetas)\\nappmanifest_*.acf (38)' });
+  finishAssistant('El disco **C: está al 81 %** (930 GB de 1.103). El culpable es Steam: 327 GB.\\n\\nMoviendo la biblioteca a D: recuperas unos 187 GB de golpe.');
   return 'OK';
 })()`;
 
@@ -170,9 +185,26 @@ const DEMO_EQUIPO = `(function () {
 })()`;
 
 /* --demo es una opción, no una posición: si se trata como tal cae en el ancho y
-   Emulation.setDeviceMetricsOverride recibe NaN («Invalid parameters»). */
+   Emulation.setDeviceMetricsOverride recibe NaN («Invalid parameters»).
+   --skin=holo|console|canvas pinta con ese aspecto, por el MISMO camino que Ajustes
+   (CFG.settings.uiSkin + applyTheme), no poniendo el atributo a mano.
+
+   El aspecto se VALIDA aquí: un nombre que applyTheme no reconozca (p. ej. «lienzo», su
+   nombre en castellano) caía en Holo sin avisar y devolvía tres juegos de capturas
+   idénticos con distinto nombre de carpeta. */
 const DEMO = process.argv.includes('--demo');
-const args = process.argv.slice(2).filter((a) => a !== '--demo');
+const ALIAS_SKIN = { lienzo: 'canvas', consola: 'console' };
+const SKIN_ARG = process.argv.find((a) => a.startsWith('--skin='));
+const SKIN = (() => {
+  const crudo = SKIN_ARG ? SKIN_ARG.slice('--skin='.length).trim() : 'holo';
+  const k = ALIAS_SKIN[crudo] || crudo;
+  if (!['holo', 'console', 'canvas'].includes(k)) {
+    console.error('  aspecto desconocido: ' + crudo + ' (usa holo, console o canvas)');
+    process.exit(1);
+  }
+  return k;
+})();
+const args = process.argv.slice(2).filter((a) => a !== '--demo' && !a.startsWith('--skin='));
 
 const OUT_DIR = path.resolve(args[0] || path.join(APP_DIR, 'shots'));
 const VIEWS = (args[1] || 'chat')
@@ -354,12 +386,28 @@ async function esperarCdp(port, intentos = 60) {
        semitransparentes: en el visor de imágenes se ve bien (fondo oscuro), pero en el
        README de GitHub —que pinta sobre blanco— las capturas se desvanecían. Aquí se
        pinta la base de la app (--bg0) en la propia página, con `important` para ganar
-       a la hoja de estilos, y se le pide a Chrome el mismo fondo opaco. */
-    await send('Emulation.setDefaultBackgroundColorOverride', { color: { r: 6, g: 4, b: 15, a: 1 } });
-    await send('Runtime.evaluate', {
-      expression:
-        "for (const el of [document.documentElement, document.body]) if (el) el.style.setProperty('background-color', '#06040f', 'important');",
-    });
+       a la hoja de estilos, y se le pide a Chrome el mismo fondo opaco.
+
+       Y se pinta la base QUE TOCA: el fondo lo dicta el aspecto (Holo lo deriva de la
+       paleta, Consola y Lienzo lo fijan en skins.css), así que se lee ya resuelto en vez
+       de escribir el violeta de Holo a mano, que teñía de violeta las otras capturas. */
+    const pintarBase = async () => {
+      const r = await send('Runtime.evaluate', {
+        expression:
+          "(function(){ var v=getComputedStyle(document.documentElement).getPropertyValue('--bg0-rgb').trim(); return v || '6, 4, 15'; })()",
+        returnByValue: true,
+      });
+      const rgb = String((r.result && r.result.value) || '6, 4, 15')
+        .split(',')
+        .map((n) => Math.min(255, Math.max(0, Number(n.trim()) || 0)));
+      const [cr, cg, cb] = [rgb[0] || 0, rgb[1] || 0, rgb[2] || 0];
+      await send('Emulation.setDefaultBackgroundColorOverride', { color: { r: cr, g: cg, b: cb, a: 1 } });
+      await send('Runtime.evaluate', {
+        expression: `for (const el of [document.documentElement, document.body]) if (el) el.style.setProperty('background-color', 'rgb(${cr}, ${cg}, ${cb})', 'important');`,
+      });
+      return `${cr}, ${cg}, ${cb}`;
+    };
+    await pintarBase();
     console.error('  [cdp] métricas ' + WIDTH + 'x' + HEIGHT + ' ok');
 
     // Esperar a que el renderer haya pintado de verdad.
@@ -374,6 +422,17 @@ async function esperarCdp(port, intentos = 60) {
     quedan = lista.length;
     for (const vista of lista) {
       console.error('  [cdp] vista ' + vista);
+      /* El aspecto entra por donde entra el usuario: el ajuste y applyTheme. Así la
+         captura prueba también el cableado (atributo en <html>, glow a cero), y no solo
+         la hoja de estilos. */
+      if (SKIN !== 'holo') {
+        await send('Runtime.evaluate', {
+          expression: `(function(){ try { CFG.settings.uiSkin = ${JSON.stringify(SKIN)}; applyTheme(); return 'OK'; } catch (e) { return 'NO_THEME:' + e.message; } })()`,
+          returnByValue: true,
+        });
+        // el fondo de la ventana es del aspecto: se repinta con el suyo, no con el de Holo
+        await pintarBase();
+      }
       /* Las dos capturas de estado se montan sobre el chat con el renderer de verdad y
          no tienen `.navitem` propio: se resuelven aquí y no en el pulso de navegación. */
       if (vista === 'slash' || vista === 'diffs') {
@@ -410,6 +469,8 @@ async function esperarCdp(port, intentos = 60) {
         // imitado: así la captura enseña la burbuja, el markdown y el código reales.
         const r = await send('Runtime.evaluate', { expression: DEMO_CHAT, returnByValue: true });
         const v = r.result && r.result.value;
+        const fallo = r.exceptionDetails || r.exception;
+        if (fallo) console.error('  demo lanzó una excepción:', JSON.stringify(fallo).slice(0, 400));
         if (v && v.indexOf('OK') !== 0) console.error('  demo no sembrada:', v);
         await sleep(700);
       }

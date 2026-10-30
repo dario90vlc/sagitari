@@ -95,6 +95,24 @@
   --panel2: rgba(var(--panel2-rgb), 0.45);
   --line: rgba(var(--acc-rgb), 0.22);
   --line2: rgba(var(--acc-rgb), 0.12);
+  /* ===== superficies: tres alturas y una sola luz =====
+     lienzo    sin caja: la separación la hace el espacio
+     panel     relleno con velo de luz + hairline neutra: estructura
+     flotante  vidrio, blur y sombra larga: composer, burbujas, menús, rail
+     El acento deja de pintar la estructura: queda para estado y acción (nav
+     activo, modo, foco, enviar). Antes cada tarjeta llevaba su filo violeta y
+     por eso siete paneles del mismo nivel parecían siete cosas distintas.
+
+     LA ALTURA EN OSCURO NO LA HACE LA SOMBRA. Una sombra negra sobre un fondo
+     casi negro no existe: medido en la app, el panel de Ajustes y la página
+     estaban a 1-2 niveles de 255, y la hairline era lo único que los separaba.
+     La altura la da el RELLENO —un velo blanco que cae de arriba abajo— y el
+     filo. La sombra larga se queda solo para lo que de verdad flota. */
+  --s-line: rgba(255, 255, 255, 0.1);
+  --s-panel:
+    linear-gradient(180deg, rgba(255, 255, 255, 0.055), rgba(255, 255, 255, 0.014)),
+    linear-gradient(170deg, rgba(var(--face-rgb), 0.4), rgba(var(--deep-rgb), 0.5));
+  --s-shadow: inset 0 1px 0 rgba(255, 255, 255, 0.07), 0 10px 26px rgba(0, 0, 0, 0.28);
   /* Ancho útil de las vistas de CONTENIDO (Ajustes, Tareas, Herramientas, Memoria,
      Historial, Espacio de trabajo). Estaba repartido en 760/860/900 sueltos: en una
      ventana de 1440 esas columnas dejaban ~315 px muertos a la derecha mientras la
@@ -112,7 +130,8 @@
      Si un texto no encaja en un papel, se usa el más cercano; no se inventa un
      tamaño nuevo (así convivían antes 11, 11'5, 12, 12'5, 13, 13'5, 15 y 15'5). */
   --fs-hero: 32px; /* arranque: «¿Por dónde empezamos?» (Sora 600) */
-  --fs-title: 26px; /* título de vista (Sora 600) */
+  --fs-title: 30px; /* título de vista (Sora 600): el salto con el cuerpo es lo que
+                       hace que una vista se abra, no que empiece */
   --fs-section: 18px; /* título de sección (Sora 600) */
   --fs-read: 16px; /* lectura del chat (Space Grotesk 400) */
   --fs-body: 14px; /* cuerpo de interfaz, formularios y listas */
@@ -554,8 +573,8 @@ body.nofocus .shell .tcard::after {
      ya lo hacía relativo por su cuenta, pero la luz no debe depender de otra hoja. */
   position: relative;
   background: rgba(var(--field-rgb), calc(0.58 * var(--glass)));
-  backdrop-filter: blur(18px) saturate(1.3);
-  -webkit-backdrop-filter: blur(18px) saturate(1.3);
+  backdrop-filter: blur(var(--blur, 18px)) saturate(1.3);
+  -webkit-backdrop-filter: blur(var(--blur, 18px)) saturate(1.3);
   box-shadow:
     0 14px 38px rgba(0, 0, 0, 0.4),
     inset 2px 3px 8px rgba(255, 255, 255, 0.13),
@@ -760,8 +779,8 @@ body.nofocus .shell .tcard::after {
   box-shadow:
     inset 0 1px 0 rgba(255, 255, 255, 0.22),
     0 0 18px rgba(var(--acc2-rgb), 0.3);
-  backdrop-filter: blur(12px);
-  -webkit-backdrop-filter: blur(12px);
+  backdrop-filter: blur(var(--blur, 12px));
+  -webkit-backdrop-filter: blur(var(--blur, 12px));
 }
 .ni {
   font-size: 15px;
@@ -955,8 +974,8 @@ body.nofocus .shell .tcard::after {
   box-shadow:
     0 14px 44px rgba(0, 0, 0, 0.55),
     inset 0 1px 0 rgba(255, 255, 255, 0.1);
-  backdrop-filter: blur(24px) saturate(1.5);
-  -webkit-backdrop-filter: blur(24px) saturate(1.5);
+  backdrop-filter: blur(var(--blur, 24px)) saturate(1.5);
+  -webkit-backdrop-filter: blur(var(--blur, 24px)) saturate(1.5);
   max-height: 46vh;
   overflow-y: auto;
   z-index: 130;
@@ -1290,8 +1309,8 @@ body.nofocus .shell .tcard::after {
     inset -3px -5px 12px rgba(0, 0, 0, 0.38),
     inset 0 0 24px rgba(var(--acc2-rgb), 0.14),
     0 12px 34px rgba(0, 0, 0, 0.4);
-  backdrop-filter: blur(20px) saturate(1.4);
-  -webkit-backdrop-filter: blur(20px) saturate(1.4);
+  backdrop-filter: blur(var(--blur, 20px)) saturate(1.4);
+  -webkit-backdrop-filter: blur(var(--blur, 20px)) saturate(1.4);
   transition:
     box-shadow 0.2s,
     border-color 0.2s;
@@ -1525,6 +1544,42 @@ body.nofocus .shell .tcard::after {
 }
 .msg.ai .bubble {
   box-shadow: inset 0 1px 0 rgba(255, 255, 255, 0.08);
+}
+/* ---- el turno como TRAZA: una columna de bloques ----
+   Cada tramo de narración (.seg), cada tanda de herramientas (.tgroup), el razonamiento y
+   la lista de tareas son piezas con su propia piel, en el orden en que ocurrieron. La
+   burbuja deja de ser un campo único y pasa a ser el contenedor: sin relleno, sin fondo y
+   sin borde, para que se lea el paso y no el envoltorio. Con todo dentro de una sola
+   burbuja, un turno de veinte partes se leía como un muro de prosa. */
+.msg.ai .bubble.blocks {
+  display: flex;
+  flex-direction: column;
+  gap: 9px;
+  padding: 0;
+  background: none;
+  border: 0;
+  box-shadow: none;
+  white-space: normal;
+}
+.msg.ai .bubble.blocks > .seg {
+  padding: 12px 16px;
+  border-radius: 20px;
+  font-size: var(--fs-read);
+  line-height: var(--lh-read);
+  white-space: pre-wrap;
+  word-break: break-word;
+  background: linear-gradient(180deg, rgba(255, 255, 255, 0.09), rgba(255, 255, 255, 0.02) 50%), rgba(var(--face2-rgb), 0.8);
+  border: 1px solid rgba(255, 255, 255, 0.14);
+  box-shadow: inset 0 1px 0 rgba(255, 255, 255, 0.08);
+}
+/* Las piezas ya traen su propio margen: aquí manda el hueco de la columna. */
+.msg.ai .bubble.blocks > .tgroup,
+.msg.ai .bubble.blocks > .tcard,
+.msg.ai .bubble.blocks > .thinkblock,
+.msg.ai .bubble.blocks > .plancard,
+.msg.ai .bubble.blocks > .todocard,
+.msg.ai .bubble.blocks > img.shot {
+  margin: 0;
 }
 /* Turnos seguidos del agente (plan + resultado del mismo minuto): una sola voz. La
    segunda entrega no repite cara, nombre ni hora, y se pega a la anterior: el ojo
@@ -1889,8 +1944,8 @@ body.nofocus .shell .tcard::after {
   box-shadow:
     0 14px 44px rgba(0, 0, 0, 0.55),
     inset 0 1px 0 rgba(255, 255, 255, 0.1);
-  backdrop-filter: blur(24px) saturate(1.5);
-  -webkit-backdrop-filter: blur(24px) saturate(1.5);
+  backdrop-filter: blur(var(--blur, 24px)) saturate(1.5);
+  -webkit-backdrop-filter: blur(var(--blur, 24px)) saturate(1.5);
   max-height: 250px;
   overflow-y: auto;
   z-index: 120;
@@ -1989,12 +2044,14 @@ body.nofocus .shell .tcard::after {
   color: #f59e42;
   box-shadow: inset 0 0 0 1px rgba(245, 158, 66, 0.4);
 }
+/* 12px y no 11: es el atajo y el nombre del modelo, lo que uno mira para saber
+   dónde está escribiendo. */
 .hintbar {
   display: flex;
   justify-content: space-between;
   margin-top: 6px;
   padding: 0 8px;
-  font-size: 11px;
+  font-size: 12px;
   color: var(--dim);
 }
 /* Los tres rótulos del pie no caben cuando el medidor de contexto está visible, y el que
@@ -2078,7 +2135,7 @@ body.nofocus .shell .tcard::after {
   padding: 15px 16px;
   position: relative;
   background: linear-gradient(165deg, rgba(var(--face-rgb), 0.55), rgba(var(--panel-rgb), 0.65));
-  border: 1px solid var(--line2);
+  border: 1px solid var(--s-line);
   border-radius: 20px;
 }
 .aic {
@@ -2402,9 +2459,11 @@ body.nofocus .shell .tcard::after {
 }
 .tooltray {
   margin-top: 20px;
-  border: 1px solid var(--line2);
+  border: 1px solid var(--s-line);
   border-radius: 20px;
   padding: 14px 16px;
+  background: var(--s-panel);
+  box-shadow: var(--s-shadow);
   /* el mismo ancho que las listas de al lado: antes la tarjeta se estiraba a todo
      el lienzo y la lista de tareas se quedaba en 860, así que no casaba el borde. */
   max-width: var(--content-max);
@@ -2415,6 +2474,23 @@ body.nofocus .shell .tcard::after {
   letter-spacing: 0.1em;
   color: var(--dim);
   margin-bottom: 10px;
+}
+/* Un panel vacío no es un panel. Los tres diagnósticos de Agentes (actividad,
+   salud y hábitos) enseñaban tres marcos con una frase dentro; sin datos pierden
+   la caja y quedan como notas con su rótulo. En cuanto hay algo, vuelven a ser
+   panel: la caja significa «aquí hay datos que mirar». */
+.tooltray.vacio {
+  border-color: transparent;
+  padding: 0 2px;
+  margin-top: 16px;
+  /* sin caja también en la sombra: el inset de arriba dibujaba un marco fantasma */
+  box-shadow: none;
+}
+.tooltray.vacio .tt-head {
+  margin-bottom: 4px;
+}
+.tooltray.vacio .tt-list .subnote {
+  margin-top: 0;
 }
 .tt-list {
   display: flex;
@@ -2560,8 +2636,8 @@ input[type='time']:focus {
   box-shadow:
     0 14px 44px rgba(0, 0, 0, 0.55),
     inset 0 1px 0 rgba(255, 255, 255, 0.1);
-  backdrop-filter: blur(24px) saturate(1.5);
-  -webkit-backdrop-filter: blur(24px) saturate(1.5);
+  backdrop-filter: blur(var(--blur, 24px)) saturate(1.5);
+  -webkit-backdrop-filter: blur(var(--blur, 24px)) saturate(1.5);
   max-height: 300px;
   overflow-y: auto;
 }
@@ -2733,12 +2809,15 @@ textarea::placeholder {
   margin-bottom: 8px;
   font-family: var(--font-display);
 }
+/* 68ch daba ~88 caracteres por línea a 14px: fuera del rango 45-75 que el propio
+   chat respeta. A 58ch la nota queda en ~76 y se lee igual en todas las vistas,
+   porque este es el ancho único de las notas de sección. */
 .subnote {
   color: var(--dim);
   font-size: var(--fs-body);
   margin-top: 10px;
   line-height: var(--lh-body);
-  max-width: 68ch;
+  max-width: 58ch;
 }
 .provitem {
   display: flex;
@@ -2953,10 +3032,11 @@ textarea::placeholder {
   }
 }
 .setcard {
-  border: 1px solid var(--line2);
+  border: 1px solid var(--s-line);
   border-radius: 22px;
   padding: 16px 18px;
-  background: linear-gradient(170deg, rgba(var(--face-rgb), 0.42), rgba(var(--deep-rgb), 0.52));
+  background: var(--s-panel);
+  box-shadow: var(--s-shadow);
 }
 /* MCP vive en su propia vista, sin el `.setpanel` que separaba las tarjetas (gap 16px) */
 #view-mcp {
@@ -3110,10 +3190,14 @@ textarea::placeholder {
   font-size: 15px;
   font-weight: 500;
 }
+/* Las filas de Ajustes (los seis paneles) explican qué hace cada control en una
+   línea de ~110 caracteres a 12px. 13px y 60ch: se lee sin convertirse en párrafo. */
 .swrow .st small {
+  display: block;
   color: var(--dim);
-  font-size: 12px;
+  font-size: 13px;
   line-height: 1.45;
+  max-width: 60ch;
 }
 .kbdrow {
   display: inline-flex;
@@ -3267,9 +3351,9 @@ textarea::placeholder {
   align-items: center;
   gap: 10px;
   padding: 11px 14px;
-  border: 1px solid var(--line2);
+  border: 1px solid var(--s-line);
   border-radius: 18px;
-  background: rgba(var(--panel-rgb), 0.5);
+  background: var(--s-panel);
 }
 .memitem .mt {
   flex: 1;
@@ -3353,11 +3437,12 @@ textarea::placeholder {
 }
 .mcpempty {
   color: var(--dim);
-  font-size: 12px;
+  font-size: var(--fs-body);
+  max-width: 58ch;
   padding: 8px 0;
 }
 .mcprow {
-  border: 1px solid var(--line);
+  border: 1px solid var(--s-line);
   border-radius: 18px;
   padding: 10px 12px;
 }
@@ -3491,6 +3576,18 @@ textarea::placeholder {
   width: 1px;
   background: linear-gradient(180deg, rgba(var(--acc-rgb), 0.5), rgba(var(--acc-rgb), 0.16) 50%, rgba(var(--acc-rgb), 0) 96%);
 }
+/* Sin eventos no hay línea de tiempo: la espina se apaga y en su lugar va una
+   frase que dice para qué sirve el panel. Antes el rail abría con «Sagitari
+   iniciado» y «Esperando peticiones», dos formas de repetir «En reposo». */
+#activityFeed:empty::before {
+  display: none;
+}
+#activityFeed:empty::after {
+  content: 'Aquí aparecerá cada paso mientras Sagitari trabaje.';
+  color: var(--dim);
+  font-size: var(--fs-small);
+  line-height: 1.5;
+}
 #activityFeed .fitem {
   position: relative;
   display: flex;
@@ -3538,8 +3635,8 @@ textarea::placeholder {
   box-shadow:
     inset 2px 3px 8px rgba(255, 255, 255, 0.13),
     inset -3px -4px 10px rgba(0, 0, 0, 0.32);
-  backdrop-filter: blur(16px) saturate(1.25);
-  -webkit-backdrop-filter: blur(16px) saturate(1.25);
+  backdrop-filter: blur(var(--blur, 16px)) saturate(1.25);
+  -webkit-backdrop-filter: blur(var(--blur, 16px)) saturate(1.25);
 }
 .rc-top {
   display: flex;
@@ -3934,8 +4031,8 @@ i[data-i] {
   box-shadow:
     0 10px 40px rgba(0, 0, 0, 0.55),
     inset 0 1px 0 rgba(255, 255, 255, 0.1);
-  backdrop-filter: blur(20px) saturate(1.4);
-  -webkit-backdrop-filter: blur(20px) saturate(1.4);
+  backdrop-filter: blur(var(--blur, 20px)) saturate(1.4);
+  -webkit-backdrop-filter: blur(var(--blur, 20px)) saturate(1.4);
 }
 .toast .dot {
   margin: 0;
@@ -4670,9 +4767,9 @@ depender del color de acento elegido. */
   margin: 26px auto 10px;
   padding: 40px 26px;
   text-align: center;
-  border: 1px solid var(--line2);
+  border: 1px solid var(--s-line);
   border-radius: 24px;
-  background: linear-gradient(170deg, rgba(var(--face-rgb), 0.35), rgba(var(--deep-rgb), 0.45));
+  background: var(--s-panel);
 }
 .listempty .le-mark {
   width: 54px;
@@ -4737,8 +4834,11 @@ depender del color de acento elegido. */
 .msg.me .msg-head {
   justify-content: flex-end;
 }
+/* La hora es meta, pero a 11px quedaba por debajo del suelo de lectura que el
+   propio producto se puso (12px en el pie de la interfaz). Mismo tono tenue, un
+   punto más de cuerpo: se lee sin competir con el nombre. */
 .msg-ts {
-  font-size: var(--fs-label);
+  font-size: var(--fs-small);
   color: var(--dim);
 }
 .msg-body {
@@ -5397,8 +5497,8 @@ depender del color de acento elegido. */
   box-shadow:
     0 8px 26px rgba(0, 0, 0, 0.45),
     inset 0 1px 0 rgba(255, 255, 255, 0.12);
-  backdrop-filter: blur(14px);
-  -webkit-backdrop-filter: blur(14px);
+  backdrop-filter: blur(var(--blur, 14px));
+  -webkit-backdrop-filter: blur(var(--blur, 14px));
   animation: fadein 0.2s ease;
 }
 .jumpdown:hover {
@@ -5847,6 +5947,12 @@ input.glowslider.compact::-webkit-slider-thumb {
    de necesitar recortes (el campo de texto recupera ~300px) y ninguna vista se
    queda apretada. La actividad en vivo sigue en Agentes. */
 @media (max-width: 1040px) {
+  /* Aquí el rail ya no está y la fila recupera sus ~300px: las etiquetas de modo
+     vuelven a caber. La regla de iconos de 1120px se pensó para el ancho CON
+     rail; sin él dejaba tres botones mudos en el compositor. */
+  .compline .modeseg button span {
+    display: inline;
+  }
   .app {
     grid-template-columns: 232px 1fr;
   }
@@ -5907,14 +6013,14 @@ kbd {
   font-size: var(--fs-body);
   line-height: 1.55;
   margin: 0 0 12px;
-  max-width: 620px;
+  max-width: 58ch;
 }
 .memsec-nota {
   color: var(--dim);
   font-size: var(--fs-body);
   line-height: 1.55;
   margin: 0 0 12px;
-  max-width: 620px;
+  max-width: 58ch;
   border-left: 2px solid var(--line2);
   padding-left: 10px;
 }
@@ -6261,8 +6367,10 @@ kbd {
 #view-settings .setcard {
   padding: 18px 20px;
   border-radius: 18px;
-  border-color: rgba(255, 255, 255, 0.055);
-  background: rgba(var(--panel-rgb), 0.42);
+  /* aquí vivía el relleno plano más apagado de toda la app (0.42 sobre la página,
+     un nivel de diferencia) con un filo al 5,5%: era la razón de que Ajustes
+     siguiera leyéndose como una lista de filas sobre negro. */
+  background: var(--s-panel);
 }
 #view-settings .sc-head {
   margin-bottom: 4px;
@@ -6596,6 +6704,9 @@ kbd {
   flex-shrink: 0;
   margin-left: auto;
 }
+/* La descripción NO se limita a la medida de lectura: la ficha de una skill es una
+   fila para escanear, y con 65ch el texto dejaba un hueco de 375px dentro de la
+   tarjeta (medido) con los controles al otro extremo. La línea de meta sí sube a 12px. */
 .skillitem .sdesc {
   display: block;
   margin-top: 3px;
@@ -6606,7 +6717,7 @@ kbd {
 .skillitem .smeta {
   display: block;
   margin-top: 5px;
-  font-size: 11.5px;
+  font-size: 12px;
   color: var(--dim);
 }
 
@@ -6675,6 +6786,29 @@ kbd {
 }
 .projwrap .subnote {
   margin-top: 12px;
+}
+
+/* La lista de skills es UNA superficie con filas separadas por una hairline:
+   ocho tarjetas con su borde, su relleno y su radio eran ocho veces la misma
+   caja, y el ojo tenía que contar bordes para saber cuántas skills hay. Las
+   filas conservan altura y controles; lo que desaparece es la caja de cada una. */
+#skillsList {
+  gap: 0;
+  padding: 2px 16px;
+  border: 1px solid var(--s-line);
+  border-radius: 20px;
+  background: var(--s-panel);
+  box-shadow: var(--s-shadow);
+}
+#skillsList .memitem {
+  border: 0;
+  border-bottom: 1px solid var(--s-line);
+  border-radius: 0;
+  background: none;
+  padding: 12px 2px;
+}
+#skillsList .memitem:last-child {
+  border-bottom: 0;
 }
 
 /* --- skills: las bandejas comparten ancho con la lista --- */

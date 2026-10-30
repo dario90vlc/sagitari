@@ -1190,6 +1190,12 @@ function ensureAssistantBubble() {
     dayStamp();
     currentRunMode = currentRunMode || mode;
     pendingAssistant = bubble('ai');
+    /* El turno es una COLUMNA de bloques, no un campo de texto: cada tramo de narración,
+       cada tanda de herramientas y el razonamiento son piezas con su propia piel, en el
+       orden en que ocurrieron. Antes todo caía dentro de una sola burbuja y una respuesta
+       de veinte pasos se leía como un muro de prosa (queja literal del usuario: «aglutina
+       toda la información»). */
+    pendingAssistant.classList.add('blocks');
     pendingTurn = {
       mode: currentRunMode,
       group: null,
@@ -1253,7 +1259,11 @@ function buildToolGroup() {
 
 function ensureToolGroup() {
   const b = ensureAssistantBubble();
-  if (!pendingTurn.group) {
+  /* Una tanda de herramientas por BLOQUE: si después del grupo se escribió narración, la
+     herramienta siguiente abre un grupo nuevo debajo de ese texto —así cada tanda queda
+     donde ocurrió y no todo agrupado al final del turno—. Sin esto, el grupo era único y
+     el hilo no se podía leer en orden. */
+  if (!pendingTurn.group || !pendingTurn.group.el.isConnected || b.lastElementChild !== pendingTurn.group.el) {
     const grp = buildToolGroup();
     b.appendChild(grp.el);
     pendingTurn.group = grp;
@@ -1280,14 +1290,6 @@ function refreshToolGroup() {
   g.el.classList.toggle('has-fails', !!fallos);
 }
 
-/** Pliega el grupo de herramientas al llegar la respuesta, si el usuario no lo abrió. */
-function cerrarHerramientas() {
-  const g = pendingTurn && pendingTurn.group;
-  if (!g || g.el._tocado) return;
-  g.el.classList.remove('open');
-  g.el.classList.add('closed');
-  g.head.setAttribute('aria-expanded', 'false');
-}
 
 /* ---- v2.3: razonamiento del modelo (opcional, Ajustes ▸ Agente) ----
    Los modelos que razonan (Claude con razonamiento ampliado, la serie o/ GPT-5,
@@ -1413,10 +1415,14 @@ function buildThinkBlock() {
 
 function ensureThinkBlock() {
   const b = ensureAssistantBubble();
-  if (!pendingTurn.think || !pendingTurn.think.isConnected) {
+  /* Un bloque por RÁFAGA de razonamiento, en su sitio: un modelo con razonamiento piensa
+     antes de cada paso, y meter todo en un bloque al principio del turno pondría el
+     razonamiento del paso 6 encima de las herramientas del paso 1. El primero abre el
+     turno (se piensa antes de actuar); los siguientes van donde ocurrieron. */
+  const actual = pendingTurn.think;
+  if (!actual || !actual.isConnected || actual._terminado) {
     const d = buildThinkBlock();
-    // el razonamiento va el PRIMERO: se piensa antes de usar herramientas y de responder
-    b.insertBefore(d, b.firstChild);
+    b.appendChild(d);
     pendingTurn.think = d;
     relojRazonamiento(d);
   }
@@ -1693,21 +1699,127 @@ function delegationCard(ev) {
    queja literal: «las herramientas que usó ya no se muestran»). El motor guarda un rastro
    compacto por turno y aquí se reconstruye el MISMO bloque plegable del turno vivo, ya
    terminado y sin relojes: los relojes de un turno cerrado serían mentira. */
+/* Un tramo de texto del turno: su propio bloque, con la piel de la burbuja. */
+function segTexto(texto) {
+  const d = document.createElement('div');
+  d.className = 'seg';
+  d.innerHTML = fmt(texto);
+  return d;
+}
+
+/** Bloque de razonamiento ya terminado (el de un turno guardado): misma pieza que en vivo. */
+function bloqueRazonamiento(think) {
+  const d = buildThinkBlock();
+  d._texto = String(think.text || '');
+  d._ms = Number(think.ms) || 0;
+  d._terminado = true;
+  pintarCuerpoRazonamiento(d);
+  d.classList.remove('open');
+  d.classList.add('closed');
+  d.querySelector('.think-head').setAttribute('aria-expanded', 'false');
+  metaRazonamiento(d);
+  return d;
+}
+
+/** Tarjeta de una herramienta del rastro guardado: EXACTAMENTE la del turno en vivo. */
+function cardDeTraza(t) {
+  const card = buildToolCard({ name: t.name, args: t.args || {}, subagent: t.subagent, member: t.member });
+  /* Sin `ok` la herramienta empezó y el turno se cortó antes de su resultado: se dice tal
+     cual, en vez de pintarle un check verde que nunca ocurrió. */
+  const r =
+    t.ok === undefined
+      ? pintarResultadoTarjeta(card, {
+          name: t.name,
+          ok: false,
+          durationMs: t.ms,
+          result: 'Esta herramienta no llegó a devolver su resultado: el turno se cortó antes.',
+        })
+      : pintarResultadoTarjeta(card, { name: t.name, ok: t.ok, result: t.result, durationMs: t.ms });
+  return { card, ok: r.ok, took: r.took };
+}
+
+/** Pinta un grupo de herramientas completo (cabecera con el resumen + sus tarjetas). */
+function cerrarGrupoTraza(grp, cuantas, fallos, total) {
+  grp.title.textContent = K.toolCount(cuantas);
+  grp.meta.textContent = total ? K.fmtDuration(total) : '';
+  grp.fails.hidden = !fallos;
+  grp.fails.textContent = fallos === 1 ? '1 fallo' : fallos + ' fallos';
+  grp.el.classList.toggle('has-fails', !!fallos);
+  /* Las filas se QUEDAN a la vista: el turno es una traza y esconder lo que hizo es
+     justo lo que el usuario pedía dejar de hacer. La cabecera sigue plegándolas. */
+  grp.el.classList.add('open');
+  grp.el.classList.remove('closed');
+  grp.head.setAttribute('aria-expanded', 'true');
+}
+
+/* El turno guardado se repinta EN ORDEN: los mismos bloques que se vieron en vivo, con las
+   herramientas donde ocurrieron. `parts` lo escribe main/traza.js mientras el turno corre. */
+function restaurarPartes(bubbleEl, parts) {
+  let grupo = null;
+  let enGrupo = 0;
+  let fallos = 0;
+  let total = 0;
+  let huboTexto = false;
+  const cierra = () => {
+    if (!grupo) return;
+    cerrarGrupoTraza(grupo, enGrupo, fallos, total);
+    grupo = null;
+    enGrupo = 0;
+    fallos = 0;
+    total = 0;
+  };
+  for (const p of parts) {
+    if (!p || !p.k) continue;
+    if (p.k === 'tool' || p.k === 'delegate') {
+      if (!grupo) {
+        grupo = buildToolGroup();
+        bubbleEl.appendChild(grupo.el);
+      }
+      enGrupo++;
+      if (p.k === 'delegate') {
+        grupo.body.appendChild(buildDelegationCard({ subagent: p.subagent, status: p.status, result: p.result, durationMs: p.ms }));
+        if (String(p.status || '').toUpperCase() === 'FAILED') fallos++;
+        total += Number(p.ms) || 0;
+      } else {
+        const { card, ok, took } = cardDeTraza(p);
+        if (!ok) fallos++;
+        total += took;
+        grupo.body.appendChild(card);
+      }
+      continue;
+    }
+    cierra();
+    if (p.k === 'text') {
+      if (!String(p.text || '').trim()) continue;
+      huboTexto = true;
+      bubbleEl.appendChild(segTexto(p.text));
+    } else if (p.k === 'think') {
+      if (!String(p.text || '').trim()) continue;
+      bubbleEl.appendChild(bloqueRazonamiento(p));
+    } else if (p.k === 'todos') {
+      if (p.todos && p.todos.length) bubbleEl.appendChild(buildTodoCard(p.todos));
+    }
+  }
+  cierra();
+  return huboTexto;
+}
+
 function restaurarTraza(bubbleEl, trace, html) {
+  bubbleEl.classList.add('blocks');
+  const parts = trace && Array.isArray(trace.parts) && trace.parts.length ? trace.parts : null;
+  /* Un turno cuyo texto no cupo en `parts` se repinta por la rama completa: las partes
+     enseñarían la respuesta a medias y «Copiar» copiaría el corte. */
+  if (parts && !(trace && trace.cortado)) {
+    /* Si el motor no llegó a cerrar ni un tramo de texto (turno cortado, o guardado por una
+       versión anterior), manda el texto del mensaje: antes que una traza sin respuesta. */
+    if (!restaurarPartes(bubbleEl, parts) && html) bubbleEl.appendChild(segTexto(html));
+    return;
+  }
+  /* Mensajes guardados ANTES de las partes: se repinta el rastro compacto de siempre, con
+     la misma piel nueva (razonamiento, lista de tareas y una tanda de herramientas). */
   const tools = trace && Array.isArray(trace.tools) ? trace.tools : [];
   const think = trace && trace.think && trace.think.text ? trace.think : null;
-  if (think) {
-    const d = buildThinkBlock();
-    d._texto = String(think.text);
-    d._ms = Number(think.ms) || 0;
-    d._terminado = true;
-    pintarCuerpoRazonamiento(d);
-    d.classList.remove('open');
-    d.classList.add('closed');
-    d.querySelector('.think-head').setAttribute('aria-expanded', 'false');
-    metaRazonamiento(d);
-    bubbleEl.appendChild(d);
-  }
+  if (think) bubbleEl.appendChild(bloqueRazonamiento(think));
   /* v2.6: la última lista de tareas del turno, en su sitio (tras el razonamiento y
      antes de las herramientas): al reabrir la conversación se ve en qué quedó el plan. */
   if (trace.todos && trace.todos.length) bubbleEl.appendChild(buildTodoCard(trace.todos));
@@ -1719,40 +1831,18 @@ function restaurarTraza(bubbleEl, trace, html) {
       if (t.delegate) {
         grp.body.appendChild(buildDelegationCard({ subagent: t.delegate, status: t.status, result: t.result, durationMs: t.ms }));
         if (String(t.status || '').toUpperCase() === 'FAILED') fallos++;
+        total += Number(t.ms) || 0;
         continue;
       }
-      const card = buildToolCard({ name: t.name, args: t.args || {}, subagent: t.subagent });
-      /* Sin `ok` la herramienta empezó y el turno se cortó antes de su resultado: se dice
-         tal cual, en vez de pintarle un check verde que nunca ocurrió. */
-      const r =
-        t.ok === undefined
-          ? pintarResultadoTarjeta(card, {
-              name: t.name,
-              ok: false,
-              durationMs: t.ms,
-              result: 'Esta herramienta no llegó a devolver su resultado: el turno se cortó antes.',
-            })
-          : pintarResultadoTarjeta(card, { name: t.name, ok: t.ok, result: t.result, durationMs: t.ms });
-      if (!r.ok) fallos++;
-      total += r.took;
+      const { card, ok, took } = cardDeTraza(t);
+      if (!ok) fallos++;
+      total += took;
       grp.body.appendChild(card);
     }
-    grp.title.textContent = K.toolCount(tools.length);
-    grp.meta.textContent = total ? K.fmtDuration(total) : '';
-    grp.fails.hidden = !fallos;
-    grp.fails.textContent = fallos === 1 ? '1 fallo' : fallos + ' fallos';
-    grp.el.classList.toggle('has-fails', !!fallos);
-    // como al cerrar un turno: los detalles plegados y la respuesta a la vista
-    grp.el.classList.remove('open');
-    grp.el.classList.add('closed');
-    grp.head.setAttribute('aria-expanded', 'false');
+    cerrarGrupoTraza(grp, grp.body.children.length, fallos, total);
     bubbleEl.appendChild(grp.el);
   }
-  if (html) {
-    const div = document.createElement('div');
-    div.innerHTML = fmt(html);
-    bubbleEl.appendChild(div);
-  }
+  if (html) bubbleEl.appendChild(segTexto(html));
 }
 
 /* ---------- v2.2: tablero del equipo (delegaciones EN VIVO) ----------
@@ -2356,7 +2446,9 @@ function finishAssistant(finalText, opts) {
     // oculta), el bloque se quedaba vacío hasta el siguiente repintado
     pintarRazonamiento(pendingTurn && pendingTurn.think);
     cerrarRazonamiento();
-    cerrarHerramientas();
+    /* Las herramientas NO se pliegan al terminar: el turno es una traza y lo que hizo el
+       agente es parte de la respuesta. Antes se cerraban solas y el hilo se leía como un
+       párrafo sin origen. La cabecera del grupo sigue plegándolas si el usuario quiere. */
   }
   const stream = holder._openEl && holder._openEl.isConnected ? holder._openEl : holder.querySelector('.stream');
   // texto ya streameado: al Detener (o si la ejecución falla) NO se tira, se conserva
@@ -2370,7 +2462,7 @@ function finishAssistant(finalText, opts) {
     // el tramo abierto se queda donde nació (intercalado con las herramientas);
     // solo se retira si llegó vacío (congelado antes del primer frame)
     if (holder._openText) {
-      stream.className = 'stream-done';
+      stream.className = 'stream-done seg';
       /* …y se asegura el texto COMPLETO en pantalla. El tramo abierto se acumula en CADA
          evento (`_openText`), pero se PINTA por frames: si el último frame no llega —la
          ventana no tiene el foco y Chromium no repinta— el elemento se queda con lo del
@@ -2392,7 +2484,7 @@ function finishAssistant(finalText, opts) {
     const abierto = (holder._openText || '').trim();
     if (fin && abierto && fin.startsWith(abierto) && fin.length > abierto.length) holder._openText = fin;
     const s = document.createElement('div');
-    s.className = 'stream-done';
+    s.className = 'stream-done seg';
     s.innerHTML = fmt(holder._openText);
     holder.appendChild(s);
   }
@@ -2429,9 +2521,7 @@ function finishAssistant(finalText, opts) {
       // ACT/THINK el prompt también pide planes, y ahí desaparecían de la respuesta.
       const text = runMode === 'plan' && parsed.steps.length ? parsed.body || '' : finalText;
       if (text) {
-        const div = document.createElement('div');
-        div.innerHTML = fmt(text);
-        holder.appendChild(div);
+        holder.appendChild(segTexto(text));
       }
     }
   } else if (finalText) {
@@ -2439,15 +2529,13 @@ function finishAssistant(finalText, opts) {
     // se añade el cierre si aporta algo nuevo. Antes se borraba todo y se
     // pintaba solo este párrafo, y la respuesta larga "se volvía corta".
     if (fin && !(shown && shown.endsWith(fin))) {
-      const div = document.createElement('div');
-      div.innerHTML = fmt(finalText);
-      holder.appendChild(div);
+      holder.appendChild(segTexto(finalText));
     }
   } else if (keptText) {
     // turno cortado a medias con texto acumulado: se repinta igual que el stream
     // pero SIN la clase .stream (su caret parpadeante diría «sigue escribiendo»)
     const div = document.createElement('div');
-    div.className = 'interrupted';
+    div.className = 'interrupted seg';
     div.innerHTML = fmt(keptText);
     holder.appendChild(div);
     const tag = document.createElement('div');

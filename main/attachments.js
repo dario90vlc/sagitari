@@ -135,7 +135,10 @@ function textOf(buf, name) {
   if (ext === '.srt' || ext === '.vtt') text = text.replace(/^\d+\s*$/gm, '').replace(/-->\s*/g, ' → ');
   // eslint-disable-next-line no-control-regex
   const printable = text.replace(/[^\x09\x0A\x0D\x20-\x7E\u00A0-\uFFFF]/g, '');
-  if (printable.length < Math.max(40, text.length * 0.55)) return null;
+  // el suelo de 40 solo tiene sentido en textos largos: un «hola mundo» (10) quedaba
+  // por debajo y se degradaba a binario sin llegar nunca al modelo
+  const umbral = text.length < 80 ? text.length * 0.55 : Math.max(40, text.length * 0.55);
+  if (printable.length < umbral) return null;
   return text;
 }
 

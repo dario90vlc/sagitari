@@ -39,7 +39,7 @@ async function searchGitHub(query, { limit = 8 } = {}) {
     repo: r.full_name,
     name: r.name,
     description: (r.description || '').slice(0, 160),
-    stars: r.stargazers_count,
+    stars: Number(r.stargazers_count) || 0, // número: el renderer lo pinta sin escapar de más
     url: r.html_url,
   }));
 }

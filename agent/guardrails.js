@@ -68,7 +68,7 @@ function summarizeArgs(name, args = {}) {
   const a = args || {};
   switch (name) {
     case 'run_command':
-      return String(a.command || '').slice(0, 200);
+      return String(a.command || '').slice(0, 200) + (a.cwd ? ` (en ${a.cwd})` : '');
     case 'write_file':
       return String(a.path || '');
     case 'browser_control':
@@ -82,7 +82,14 @@ function summarizeArgs(name, args = {}) {
     case 'window_manage':
       return String(a.action || '');
     default: {
-      if (String(name).startsWith('mcp__') && a._mcp) return `${a._mcp.serverName} → ${a._mcp.toolName}`;
+      if (String(name).startsWith('mcp__') && a._mcp) {
+        /* Sin los argumentos, una escritura MCP no decía QUÉ archivo tocaba: el usuario
+           aprobaba a ciegas. `_mcp` es interno y no se enseña. */
+        const resto = { ...a };
+        delete resto._mcp;
+        const detalle = Object.keys(resto).length ? ' ' + JSON.stringify(resto).slice(0, 160) : '';
+        return `${a._mcp.serverName} → ${a._mcp.toolName}${detalle}`;
+      }
       return Object.keys(a).length ? JSON.stringify(a).slice(0, 160) : '';
     }
   }
@@ -369,6 +376,7 @@ class Guardrails {
     this.delegations = 0;
     this._stall = 0;
     this._lastToolName = null; // si no, la señal de progreso quedaba contaminada entre ejecuciones
+    this._lastFirma = null; // y la firma de la llamada, que es la señal fina de progreso
     this._budgetOver = null; // v5.0.1
   }
 
@@ -558,11 +566,20 @@ class Guardrails {
    * Detecta el bucle por firma de herramientas incluso si los args varían poco:
    * aquí interesa el ritmo, el bucle exacto lo cubre isLoop().
    */
-  checkStall({ toolName = null, assistantText = '' } = {}) {
+  checkStall({ toolName = null, toolArgs = null, assistantText = '' } = {}) {
     const g = this.policy.guardrails;
     if (g.stallThreshold > 0) {
-      const progressed = Boolean(assistantText && assistantText.trim()) || (toolName && toolName !== this._lastToolName);
-      if (toolName) this._lastToolName = toolName;
+      /* Señales de progreso: texto nuevo, o una llamada DISTINTA de la anterior. Se
+         compara la FIRMA (herramienta + argumentos): seis lecturas de archivos distintos
+         avanzan aunque la herramienta se repita. Sin argumentos se conserva el nombre,
+         que es como llaman los turnos antiguos. */
+      const firma = toolName && toolArgs != null ? this.signature(toolName, toolArgs) : null;
+      const avanzo = toolName && (firma ? firma !== this._lastFirma : toolName !== this._lastToolName);
+      const progressed = Boolean(assistantText && assistantText.trim()) || Boolean(avanzo);
+      if (toolName) {
+        this._lastToolName = toolName;
+        if (firma) this._lastFirma = firma;
+      }
       this._stall = progressed ? 0 : this._stall + 1;
       if (this._stall >= g.stallThreshold) {
         this._stall = 0;

@@ -815,6 +815,12 @@ test('apariencia: el tinte de vidrio repinta sin encender el glow', () => {
   handlers['settings:set'](null, { uiColor: 'ice' });
   ok(pulsos.filter((m) => m === 'pulse').length === 2, 'cambiar el color de interfaz también acusa');
   ok(cfgObj.settings.glassTint === 1.1, 'el tinte se guarda igual (solo cambia el acuse)');
+  /* El aspecto (Holo / Consola / Lienzo) se guarda por el mismo canal: si no estuviera en
+     la lista blanca, elegir Consola no sobreviviría a cerrar la app. */
+  handlers['settings:set'](null, { uiSkin: 'console' });
+  ok(cfgObj.settings.uiSkin === 'console', 'el aspecto elegido se guarda (clave permitida)');
+  handlers['settings:set'](null, { uiSkin: 'no-existe' });
+  ok(cfgObj.settings.uiSkin === 'console', 'y un valor inventado no pisa el guardado');
 });
 
 /* ---------- adjuntos del chat: archivos, documentos e imágenes ---------- */
@@ -1302,3 +1308,174 @@ test('apariencia: la fila del glow no repite los 7 nombres del tema', () => {
   ok(/if \(!b\.dataset\.pal\) return;/.test(app), 'el chip «Otro color…» no escribe en el select');
 });
 
+
+/* ---------- memoria v2: prefijos, valores con detalle y fallos de disco ---------- */
+
+/* El hecho llega con ruido de conversación («Recuerda que…»). Comparar el texto tal cual
+   dejaba vivos el hecho y su contrario, y los dos viajaban al prompt. */
+test('memoria: el prefijo conversacional no esconde el hecho ni su contradicción', () => {
+  const v2 = require('../agent/memoria-v2');
+  const clave = v2.claveHecho('Recuerda que no me gusta el té');
+  ok(clave, 'el prefijo es ruido, no parte del hecho');
+  eq(clave.pred, 'gusto', 'es un gusto');
+  eq(clave.negado, true, 'y está negado');
+  eq(
+    v2.relacionHechos('me gusta el té', 'Recuerda que no me gusta el té'),
+    'contradice',
+    'son el mismo objeto con la polaridad invertida: no pueden convivir',
+  );
+  ok(v2.mismoHecho('me gusta el té', 'Recuerda que me gusta el té'), 'con la misma polaridad es el mismo dato');
+});
+
+/* «café con leche» aporta un detalle que el valor corto no tiene: fundirlos borraba
+   «con leche» sin pasar por la papelera. Las stopwords de más sí son ruido. */
+test('memoria: un valor con detalle no se funde con su versión recortada', () => {
+  const v2 = require('../agent/memoria-v2');
+  eq(
+    v2.relacionHechos('me gusta el café con leche', 'me gusta el café'),
+    'cambia',
+    'lo que sobra no es relleno: son dos datos distintos',
+  );
+  ok(v2.mismoValor('los informes en PDF', 'informes en PDF'), '«los» es ruido y se ignora');
+  ok(!v2.mismoValor('el café con leche', 'el café'), '«con leche» no es ruido');
+});
+
+/* save() devuelve false cuando el disco no acepta la escritura; las operaciones lo
+   ignoraban y respondían OK igual (y el router borraba encima el perfil de hábitos). */
+test('memoria: un guardado fallido no se canta como hecho ni como borrado', () => {
+  const memory = require('../agent/memory');
+  const { MEM_DIR } = require('./comun');
+  const dir = tmpDir('sagi-mem-fallo-');
+  memory.__test._resetForTests(path.join(dir, 'memory.json'));
+  memory.__test._resetTray(path.join(dir, 'memory-tray.json'));
+  try {
+    const hecho = memory.add({ text: 'Me gusta el café' });
+    ok(hecho && hecho.id, 'con el disco sano el hecho se guarda');
+    const id = hecho.id;
+    memory.remove(id);
+    const renameSync = fs.renameSync;
+    fs.renameSync = () => {
+      const e = new Error('fichero bloqueado');
+      e.code = 'EPERM';
+      throw e;
+    };
+    try {
+      eq(memory.add({ text: 'Prefiero el té' }), null, 'add no puede devolver un hecho que no está en disco');
+      ok(
+        !memory.list().some((m) => m.text === 'Prefiero el té'),
+        'y el hecho rechazado no puede quedarse en la memoria de la sesión: ' + JSON.stringify(memory.list().map((m) => m.text)),
+      );
+      eq(memory.remove(id).ok, false, 'remove no puede decir que borró');
+      eq(memory.update(id, { importance: 0.9 }).ok, false, 'update tampoco');
+      eq(memory.restore(id).ok, false, 'ni restore');
+      eq(memory.trashEmpty().ok, false, 'ni vaciar la papelera');
+      const r = memory.wipe();
+      eq(r.ok, false, '«Olvídalo todo» no puede responder OK si el disco no lo guardó');
+      ok(r.error, 'y explica el motivo');
+      ok(
+        memory.list().concat(memory.listTrash()).some((m) => m.id === id),
+        'y la memoria EN RAM vuelve a lo que hay en el fichero (no se queda vacía): ' +
+          JSON.stringify(memory.list().concat(memory.listTrash()).map((m) => m.text)),
+      );
+    } finally {
+      fs.renameSync = renameSync;
+    }
+  } finally {
+    memory.__test._resetForTests(path.join(MEM_DIR, 'memory.json'));
+    memory.__test._resetTray(path.join(MEM_DIR, 'memory-tray.json'));
+  }
+});
+
+/* «Olvídalo todo» promete hechos Y hábitos: si el guardado del borrado falla, el router
+   no puede borrar el perfil (media promesa es peor que ninguna). */
+test('memoria: si «olvídalo todo» no se guardó, el router no borra los hábitos', () => {
+  const memory = require('../agent/memory');
+  const { registerMemoryIpc } = require('../main/ipc-memory');
+  const { MEM_DIR } = require('./comun');
+  const dir = tmpDir('sagi-mem-router-');
+  memory.__test._resetForTests(path.join(dir, 'memory.json'));
+  memory.__test._resetTray(path.join(dir, 'memory-tray.json'));
+  try {
+    memory.add({ text: 'Me gusta el café' });
+    let resets = 0;
+    const handlers = {};
+    registerMemoryIpc(
+      { handle: (canal, fn) => (handlers[canal] = fn) },
+      {
+        memory,
+        habits: { reset: () => resets++, stats: () => ({}), olvidar: () => ({ ok: true }) },
+        models: { summary: () => ({}) },
+      },
+    );
+    const renameSync = fs.renameSync;
+    fs.renameSync = () => {
+      const e = new Error('fichero bloqueado');
+      e.code = 'EPERM';
+      throw e;
+    };
+    try {
+      const r = handlers['memory:wipe']();
+      eq(r.ok, false, 'el router devuelve el fallo del almacén');
+      eq(resets, 0, 'y NO borra los hábitos: media promesa es peor que ninguna');
+    } finally {
+      fs.renameSync = renameSync;
+    }
+  } finally {
+    memory.__test._resetForTests(path.join(MEM_DIR, 'memory.json'));
+    memory.__test._resetTray(path.join(MEM_DIR, 'memory-tray.json'));
+  }
+});
+
+/* La bandeja memoizaba un [] ante CUALQUIER error de lectura y el siguiente guardado
+   escribía esa lista vacía: las propuestas pendientes desaparecían del fichero. */
+test('memoria: una bandeja ilegible se pone en cuarentena y se reintenta', () => {
+  const memory = require('../agent/memory');
+  const { MEM_DIR } = require('./comun');
+  const dir = tmpDir('sagi-mem-tray-');
+  const tray = path.join(dir, 'memory-tray.json');
+  memory.__test._resetTray(tray);
+  try {
+    fs.mkdirSync(dir, { recursive: true });
+    fs.writeFileSync(tray, '{ esto no es json', 'utf8');
+    eq(memory.trayList().length, 0, 'lo ilegible no se puede contar como propuestas');
+    const cuarentena = fs.readdirSync(dir).filter((f) => /^memory-tray\.corrupt-\d+\.json$/.test(f));
+    eq(cuarentena.length, 1, 'el original se conserva aparte (como en habits), no se pierde');
+    fs.writeFileSync(tray, JSON.stringify({ version: 2, propuestas: [{ id: 'p1', texto: 'Me llamo Darío', hash: 'h1' }] }), 'utf8');
+    eq(memory.trayList().length, 1, 'la lectura se reintenta: el fallo no se memoiza como bandeja vacía');
+  } finally {
+    memory.__test._resetTray(path.join(MEM_DIR, 'memory-tray.json'));
+  }
+});
+
+test('memoria: con la bandeja ilegible, una propuesta nueva no pisa el fichero', () => {
+  const memory = require('../agent/memory');
+  const { MEM_DIR } = require('./comun');
+  const dir = tmpDir('sagi-mem-tray2-');
+  const tray = path.join(dir, 'memory-tray.json');
+  memory.__test._resetTray(tray);
+  try {
+    fs.mkdirSync(dir, { recursive: true });
+    const vieja = { version: 2, propuestas: [{ id: 'p0', texto: 'Prefiero el té', hash: 'h0' }] };
+    fs.writeFileSync(tray, JSON.stringify(vieja), 'utf8');
+    const readFileSync = fs.readFileSync;
+    fs.readFileSync = (f, ...rest) => {
+      if (String(f) === tray) {
+        const e = new Error('ocupado');
+        e.code = 'EBUSY';
+        throw e;
+      }
+      return readFileSync(f, ...rest);
+    };
+    try {
+      memory.trayProponer([{ texto: 'Me llamo Darío' }]);
+    } finally {
+      fs.readFileSync = readFileSync;
+    }
+    const enDisco = JSON.parse(fs.readFileSync(tray, 'utf8'));
+    eq(enDisco.propuestas.length, 1, 'la propuesta que ya estaba sigue en el fichero');
+    eq(enDisco.propuestas[0].id, 'p0', 'y es la de antes, no la nueva');
+    eq(memory.trayList().length, 1, 'al recuperarse la lectura, la bandeja se relee');
+  } finally {
+    memory.__test._resetTray(path.join(MEM_DIR, 'memory-tray.json'));
+  }
+});

@@ -1082,6 +1082,12 @@ class Agent {
     this._todosBloque = ''; // se inyecta de cero el bloque de la lista viva en este turno
     this._sincronizarTodos(messages);
     this._sincronizarBuzon(messages); // v4.4: el buzón del equipo, por el mismo camino
+    /* La pregunta de ESTE turno es la última del historial recién enviado. Se marca para
+       que el recorte no la confunda con un turno viejo: la puerta de cierre y el aviso de
+       formato añaden después más mensajes de usuario, y sin marca la frontera pasaba a
+       ser el último de ellos (la pregunta se soltaba). La marca es un Symbol. */
+    const pedido = messages.reduce((acc, m, idx) => (m.role === 'user' ? idx : acc), -1);
+    if (pedido >= 0) contexto.marcarTurno(messages[pedido]);
 
     // ---- v2.5: presupuesto de contexto ----
     /* Se mide lo que va a viajar (mensajes + las definiciones de herramientas, que en un
@@ -1360,7 +1366,22 @@ class Agent {
       // ---- guardrail v1.2: detección de ausencia de progreso ----
       // (v2.2: también dentro de un subagente: un bucle de lectura que no avanza quemaba
       // su presupuesto entero hasta el límite de pasos, sin que nadie lo notara)
-      const stall = this.guardrails.checkStall({ toolName: res.toolCalls?.[0]?.function?.name || null, assistantText: res.text });
+      /* El progreso se mide por la FIRMA de la llamada (herramienta + argumentos): seis
+         lecturas de archivos distintos avanzan aunque la herramienta se repita. */
+      const primeraLlamada = res.toolCalls?.[0];
+      let argsPrimera;
+      if (primeraLlamada) {
+        try {
+          argsPrimera = JSON.parse(primeraLlamada.function?.arguments || '{}');
+        } catch {
+          argsPrimera = primeraLlamada.function?.arguments || {};
+        }
+      }
+      const stall = this.guardrails.checkStall({
+        toolName: primeraLlamada?.function?.name || null,
+        toolArgs: argsPrimera,
+        assistantText: res.text,
+      });
       if (!stall.ok) {
         if (onStatus) onStatus('Sin progreso — detenido');
         this.emit({ type: 'guardrail', reason: stall.reason });
@@ -3086,7 +3107,8 @@ class Agent {
     this._skillsLoaded = new Set();
     const messages = [
       { role: 'system', content: sys },
-      { role: 'user', content: userText },
+      // la petición del subagente se marca igual que en `_run` (ver contexto.marcarTurno)
+      contexto.marcarTurno({ role: 'user', content: userText }),
     ];
     // v2.2: cadena de modelos TAMBIÉN aquí. Antes el subagente iba directo al modelo
     // activo: un 500 o un timeout del proveedor tiraba la delegación entera (30 pasos de

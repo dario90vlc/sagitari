@@ -168,6 +168,10 @@ module.exports = [
         finishAssistant: 'readonly',
         bubble: 'readonly',
         applyTheme: 'readonly',
+        /* los ASPECTOS viven en 40-vistas.js junto a applyTheme, y Ajustes (30-ajustes.js)
+           lee la lista y la normalización del mismo sitio: una sola fuente de verdad. */
+        SKINS: 'readonly',
+        skinActual: 'readonly',
         setBadge: 'readonly',
         MODE_ORDER: 'readonly',
         applyModeTheme: 'readonly',

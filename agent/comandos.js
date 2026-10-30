@@ -33,7 +33,8 @@
  *  negarlo ahí convertiría la barrera en un estorbo y el usuario la apagaría.
  * --------------------------------------------------------------------------- */
 const PROHIBIDOS = [
-  { rx: /^format\s+[a-z]:/i, motivo: 'formatear una unidad de disco' },
+  // la bandera puede ir delante del volumen: `format /q c:` formatea igual que `format c: /q`
+  { rx: /^format\s+(?:\/[^\s]+\s+)*[a-z]:/i, motivo: 'formatear una unidad de disco' },
   { rx: /^diskpart\b/i, motivo: 'diskpart: gestiona las particiones del disco' },
   { rx: /^mkfs(\.[a-z0-9]+)?\b/i, motivo: 'crear un sistema de archivos sobre un dispositivo' },
   { rx: /^dd\s+[^\n]*\bof=\s*(\/dev\/|[a-z]:)/i, motivo: 'escribir directamente sobre un dispositivo o unidad' },
@@ -41,8 +42,8 @@ const PROHIBIDOS = [
   { rx: /^(vssadmin|wbadmin)\s+delete\b/i, motivo: 'borrar las copias de seguridad o los puntos de restauración' },
   { rx: /^cipher\s+\/w/i, motivo: 'sobrescribir el espacio libre de la unidad (irreversible)' },
   // borrar la RAÍZ de una unidad (del /s /q C:\ · rd /s /q C:\ · rm -rf /)
-  { rx: /^(del|erase|rd|rmdir)\b[^\n]*\s[a-z]:[\\/]?\s*$/i, motivo: 'borrar la raíz de una unidad' },
-  { rx: /^(del|erase|rd|rmdir)\b[^\n]*\s[a-z]:[\\/](?=\s|$)/i, motivo: 'borrar la raíz de una unidad' },
+  { rx: /^(del|erase|rd|rmdir)\b[^\n]*\s[a-z]:[\\/]?\*?\s*$/i, motivo: 'borrar la raíz de una unidad' },
+  { rx: /^(del|erase|rd|rmdir)\b[^\n]*\s[a-z]:[\\/]\*?(?=\s|$)/i, motivo: 'borrar la raíz de una unidad' },
   { rx: /^rm\s+-[a-z]*[rf][a-z]*\s+\/(?:\s|$)/i, motivo: 'borrar la raíz del sistema de archivos' },
   {
     rx: /^Remove-Item\b[^\n]*-[^\n]*Recurse[^\n]*\b(?:[a-z]:[\\/]\s*$|[a-z]:[\\/](?=\s|")|C:\\Windows|C:\\Program Files)/i,
@@ -194,6 +195,12 @@ function trocear(linea) {
       hayToken = true;
       continue;
     }
+    /* cmd.exe ejecuta cada línea como una orden aparte: partir también por ahí evita que
+       `echo hola` + salto + `format c:` pase como una sola orden que empieza por «echo». */
+    if (!enComillas && (ch === '\n' || ch === '\r')) {
+      cerrarSubcomando();
+      continue;
+    }
     if (!enComillas && SEPARADORES_ORDEN.has(ch)) {
       cerrarSubcomando();
       continue;
@@ -207,6 +214,30 @@ function trocear(linea) {
   }
   cerrarSubcomando();
   return subcomandos;
+}
+
+/* cmd.exe se come los `^` fuera de comillas: `^f^o^r^m^a^t` es `format`. Sin esta
+   normalización, escribir la orden «con acentos» esquivaba toda la lista. Un `^` justo
+   antes del salto de línea solo continúa la orden, así que se lleva el salto con él. */
+function sinEscapesCmd(texto) {
+  const s = String(texto);
+  let salida = '';
+  let enComillas = false;
+  for (let i = 0; i < s.length; i++) {
+    const ch = s[i];
+    if (ch === '"') {
+      enComillas = !enComillas;
+      salida += ch;
+      continue;
+    }
+    if (!enComillas && ch === '^') {
+      if (s[i + 1] === '\r') i++;
+      if (s[i + 1] === '\n') i++;
+      continue;
+    }
+    salida += ch;
+  }
+  return salida;
 }
 
 /** Nombre del ejecutable sin ruta ni extensión: `C:\...\format.com` → `format`. */
@@ -394,16 +425,20 @@ function subcomandosDe(linea, profundidad = 0) {
  * prueba y el diagnóstico puedan citarlo.
  */
 function clasificar(cmd) {
-  const t = String(cmd == null ? '' : cmd)
-    .replace(/\s+/g, ' ')
-    .trim();
-  if (!t) return { nivel: 'normal', motivo: '', regla: '' };
+  /* `t` conserva los saltos de línea (las reglas usan `[^\n]*`); cada línea se prueba
+     aparte porque cmd.exe ejecuta cada una como una orden independiente. */
+  const lineas = sinEscapesCmd(cmd == null ? '' : cmd)
+    .split(/\r?\n/)
+    .map((l) => l.replace(/\s+/g, ' ').trim())
+    .filter(Boolean);
+  if (!lineas.length) return { nivel: 'normal', motivo: '', regla: '' };
 
+  const t = lineas.join(' \n ');
   /* Las reglas van ancladas al principio del subcomando, así que se prueban
      contra cada subcomando normalizado; la línea entera se prueba también para
      no depender de cómo se trocee (una bomba de procesos vive en los propios
      separadores). */
-  const subcomandos = subcomandosDe(t);
+  const subcomandos = lineas.reduce((acc, l) => acc.concat(subcomandosDe(l)), []);
   const dispara = (rx) => rx.test(t) || subcomandos.some((s) => rx.test(s.texto));
 
   for (let i = 0; i < PROHIBIDOS.length; i++) {
@@ -412,8 +447,8 @@ function clasificar(cmd) {
     }
   }
 
-  // una orden sencilla y de solo lectura no se toca: ni aviso ni escalón
-  if (!compuesta(t) && PERMITIDOS.test(t)) return { nivel: 'normal', motivo: '', regla: '' };
+  // una orden sencilla y de solo lectura no se toca: ni aviso ni escalón (varias líneas no son «una orden»)
+  if (lineas.length === 1 && !compuesta(t) && PERMITIDOS.test(t)) return { nivel: 'normal', motivo: '', regla: '' };
 
   for (let i = 0; i < SENSIBLES.length; i++) {
     if (dispara(SENSIBLES[i].rx)) {
@@ -429,7 +464,8 @@ function esSeguro(cmd) {
   const t = String(cmd == null ? '' : cmd)
     .replace(/\s+/g, ' ')
     .trim();
-  if (!t || compuesta(t)) return false;
+  // varias líneas son varias órdenes: la lista blanca solo vale para una
+  if (!t || compuesta(t) || /[\r\n]/.test(String(cmd))) return false;
   return PERMITIDOS.test(t);
 }
 

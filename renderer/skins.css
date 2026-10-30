@@ -1,0 +1,414 @@
+/* ============================================================================
+   skins.css — los ASPECTOS de SAGITARI
+
+   Holo (el de siempre) no pasa por este fichero: es la hoja base. Aquí viven los dos
+   aspectos PLANOS, que comparten la misma base —vistas, componentes, medidas— y cambian
+   la materia:
+
+     Consola  negro neutro, sin vidrio ni glow, esquinas casi rectas, títulos y rótulos
+              en monoespaciada, acento reservado al cursor, al foco y al estado.
+     Lienzo   gris plano, tarjetas sin cristal, mucho aire, títulos grandes y lectura
+              más holgada; el acento solo aparece en lo activo.
+
+   Todo entra por el atributo `data-skin` de <html> (lo pone applyTheme), así que la
+   identidad de la casa no necesita saber que existen otros aspectos.
+
+   REGLA: aquí no se reescribe la app. Se tocan TRES cosas y nada más:
+   · los tokens (fondos, línea, panel, radios, tipografía),
+   · las superficies que la base pinta con degradados de vidrio,
+   · y las señales de luz (filo, aura), que en un aspecto plano no existen.
+   ============================================================================ */
+
+/* ---------- capa común a los dos aspectos planos ---------- */
+html[data-skin] {
+  /* el desenfoque se apaga de una vez: styles.css lee --blur en sus 18 declaraciones */
+  --blur: 0px;
+  /* y el material de Holo se apaga desde SUS tokens: el aro cromático (--lg-rim) y la
+     refracción (--lg-blur) son lo único que hace que una cara parezca vidrio. Sin ellos
+     el cristal se queda en una superficie lisa sin tocar una regla más. */
+  --lg-rim: none;
+  --lg-rim-sm: none;
+  --lg-blur: 0px;
+  --lg-sat: 1;
+  /* y el filo / la atmósfera del marco, a cero (applyTheme ya pone --glow-str a 0) */
+  --ambient: 0;
+  --skin-line: rgba(255, 255, 255, 0.09);
+  --skin-line-soft: rgba(255, 255, 255, 0.06);
+  --skin-r-hero: 12px;
+  --skin-r-card: 10px;
+  --skin-r-sm: 6px;
+  /* Los paneles son OPACOS: sin vidrio no hay nada que refractar, y una tarjeta
+     translúcida sobre un fondo plano se lee como un error de pintado. */
+  --s-line: var(--skin-line);
+  --s-shadow: none;
+}
+
+/* La refracción no es sólo un desenfoque: el vidrio de Holo lleva un filtro SVG sobre
+   lo que hay DETRÁS. En un aspecto plano no hay nada detrás que deformar. */
+html[data-skin] .side,
+html[data-skin] .rcard,
+html[data-skin] .composer,
+html[data-skin] .modelmenu,
+html[data-skin] .skillmenu,
+html[data-skin] .csel-menu {
+  backdrop-filter: none;
+  -webkit-backdrop-filter: none;
+}
+
+html[data-skin] .shell {
+  background: rgb(var(--bg0-rgb));
+  box-shadow: none;
+}
+html[data-skin] .shell::before {
+  border-color: rgba(255, 255, 255, 0.075);
+}
+/* Sin filo vivo: en un aspecto plano la luz del marco es una contradicción. */
+html[data-skin] .filo,
+html[data-skin] .shell > .filo,
+html[data-skin] .side > .filo,
+html[data-skin] .composer > .filo {
+  display: none;
+}
+
+/* ---- panel lateral ---- */
+html[data-skin] .side {
+  border-radius: var(--skin-r-hero);
+  background: rgb(var(--panel-rgb));
+  border: 1px solid var(--skin-line);
+  box-shadow: none;
+  backdrop-filter: none;
+  -webkit-backdrop-filter: none;
+}
+html[data-skin] .navitem {
+  border-radius: var(--skin-r-sm);
+}
+html[data-skin] .side-status,
+html[data-skin] .side-mode {
+  border-radius: var(--skin-r-sm);
+  background: rgb(var(--panel2-rgb));
+  border-color: var(--skin-line-soft);
+}
+
+/* ---- compositor ---- */
+html[data-skin] .composer {
+  border-radius: var(--skin-r-hero);
+  background: rgb(var(--face-rgb));
+  border: 1px solid var(--skin-line);
+  box-shadow: none;
+}
+html[data-skin] .composer.slim {
+  border-radius: var(--skin-r-card);
+}
+/* El compositor del chat lleva el color del modo en el BORDE, no en un halo: `#view-chat
+   .composer` tiene más especificidad (un id), así que se repite el id aquí. En un aspecto
+   plano la señal es una línea, nunca luz. */
+html[data-skin] #view-chat .composer,
+html[data-skin] #view-chat .composer:focus-within {
+  box-shadow: none;
+  border-color: rgba(var(--mode-rgb), 0.5);
+}
+html[data-skin] #view-chat .composer:focus-within {
+  border-color: rgba(var(--mode-rgb), 0.85);
+}
+html[data-skin] .ce-mode,
+html[data-skin] .modeseg {
+  border-radius: var(--skin-r-sm);
+}
+
+/* ---- burbujas del hilo ----
+   La burbuja del agente fija su propio filo interior en styles.css (`.msg.ai .bubble`,
+   tres clases), que gana a `html[data-skin] .bubble`: se nombra igual de concreto para
+   quitarlo. En un aspecto plano la superficie no tiene canto que iluminar. */
+html[data-skin] .bubble,
+html[data-skin] .msg.ai .bubble,
+html[data-skin] .msg.ai .bubble.blocks > .seg {
+  border-radius: var(--skin-r-card);
+  background: rgb(var(--face2-rgb));
+  border: 1px solid var(--skin-line);
+  box-shadow: none;
+}
+html[data-skin] .msg.me .bubble {
+  background: rgb(var(--panel2-rgb));
+  border-color: rgba(var(--acc-rgb), 0.3);
+}
+html[data-skin] .msg.cont .bubble {
+  border-top-left-radius: var(--skin-r-card);
+}
+
+/* ---- tarjetas, bandejas y trazas ---- */
+html[data-skin] .setcard,
+html[data-skin] .tooltray,
+html[data-skin] .acard,
+html[data-skin] .memitem,
+html[data-skin] .listempty,
+html[data-skin] .mcprow,
+html[data-skin] #skillsList {
+  border-radius: var(--skin-r-card);
+  background: rgb(var(--panel-rgb));
+  border: 1px solid var(--skin-line);
+  box-shadow: none;
+}
+/* ---- cabecera del chat, tira de pestañas y monitor ---- */
+html[data-skin] .chathead {
+  border-radius: var(--skin-r-hero);
+  background: rgb(var(--panel-rgb));
+  border: 1px solid var(--skin-line);
+  box-shadow: none;
+}
+html[data-skin] .ctab {
+  border-radius: var(--skin-r-sm);
+}
+html[data-skin] .rcard {
+  border-radius: var(--skin-r-card);
+  background: rgb(var(--panel-rgb));
+  border: 1px solid var(--skin-line);
+  box-shadow: none;
+  backdrop-filter: none;
+  -webkit-backdrop-filter: none;
+}
+
+html[data-skin] .tgroup,
+html[data-skin] .tcard,
+html[data-skin] .thinkblock,
+html[data-skin] .plancard,
+html[data-skin] .todocard {
+  border-radius: var(--skin-r-card);
+  border-color: var(--skin-line);
+  background: rgb(var(--deep-rgb));
+  box-shadow: none;
+}
+html[data-skin] .thinkblock {
+  border-style: solid;
+}
+html[data-skin] .btn {
+  border-radius: var(--skin-r-sm);
+  background: rgb(var(--panel2-rgb));
+  border-color: var(--skin-line);
+}
+/* El botón de enviar deja de ser irisado y deja de brillar: en un aspecto plano la
+   acción es un color LLENO. Conserva el color del MODO, que es la señal de qué va a
+   hacer la app, y el glifo oscuro que ya trae la hoja base. */
+html[data-skin] .cbtn.send,
+html[data-skin] #view-chat .cbtn.send {
+  background: var(--mode-c);
+  box-shadow: none;
+}
+html[data-skin] #view-chat .cbtn.send.stop {
+  background: var(--danger);
+  color: #fff;
+}
+html[data-skin] .cbtn:hover,
+html[data-skin] .btn:hover {
+  box-shadow: none;
+}
+html[data-skin] .btn.primary {
+  background: rgb(var(--acc2-rgb));
+  border-color: transparent;
+  color: #0b0b0f;
+}
+html[data-skin] .pal,
+html[data-skin] .settab,
+html[data-skin] .ctab,
+html[data-skin] .toolchip,
+html[data-skin] .ce-hint {
+  border-radius: var(--skin-r-sm);
+}
+html[data-skin] input,
+html[data-skin] textarea,
+html[data-skin] select {
+  border-radius: var(--skin-r-sm);
+}
+html[data-skin] #toastStack .toast {
+  border-radius: var(--skin-r-card);
+  background: rgb(var(--panel2-rgb));
+  box-shadow: 0 10px 30px rgba(0, 0, 0, 0.45);
+}
+
+/* ============================================================================
+   CONSOLA — el aire de un CLI de agente
+   ============================================================================ */
+html[data-skin='console'] {
+  --bg0-rgb: 8, 9, 10;
+  --bg1-rgb: 10, 11, 13;
+  --bg2-rgb: 14, 15, 18;
+  --deep-rgb: 11, 12, 14;
+  --field-rgb: 10, 11, 13;
+  --panel-rgb: 14, 15, 18;
+  --panel2-rgb: 18, 20, 23;
+  --face-rgb: 20, 22, 26;
+  --face2-rgb: 24, 26, 30;
+  --skin-r-hero: 8px;
+  --skin-r-card: 6px;
+  --skin-r-sm: 4px;
+  /* Texto neutro: el blanco de Holo viene lavado de violeta (--txt #e8e4ff). En una
+     interfaz que se llama Consola el texto es gris, y el color queda para el acento. */
+  --txt: #e6e7ea;
+  --dim: #8d9096;
+  /* La letra es MATERIA, no un detalle aparte: Consola va ENTERA en monoespaciada
+     —títulos, rótulos, controles y la lectura del hilo—. Es lo que la hace sonar a
+     terminal y no a «tema oscuro con títulos raros». El cuerpo de lectura baja a 15px
+     porque la mono ocupa más por carácter, y el interlineado sube para compensar. */
+  --font-ui: 'Cascadia Mono', Consolas, monospace;
+  --font-display: 'Cascadia Mono', Consolas, monospace;
+  --fs-read: 15px;
+  --fs-title: 26px;
+  --fs-section: 16px;
+  --lh-read: 1.68;
+  --s-panel: rgb(14, 15, 18);
+}
+html[data-skin='console'] .shell {
+  background:
+    linear-gradient(180deg, rgb(var(--bg1-rgb)) 0, rgb(var(--bg0-rgb)) 180px);
+}
+/* El acento no pinta superficies: marca la pestaña abierta con una regla de 2 px. */
+html[data-skin='console'] .navitem.on {
+  background: rgba(255, 255, 255, 0.045);
+  border-color: transparent;
+  box-shadow: inset 2px 0 0 rgb(var(--acc-rgb));
+  color: #fff;
+}
+html[data-skin='console'] .navitem.on .ni,
+html[data-skin='console'] .navitem.on .ic {
+  color: rgb(var(--acc-rgb));
+}
+/* La mono es más ancha por carácter: a los 15px de la base, «Espacio de trabajo» se cortaba
+   con puntos suspensivos. A 12,5px entra entera y sigue leyéndose. */
+html[data-skin='console'] .navitem {
+  font-size: 12.5px;
+  letter-spacing: -0.01em;
+}
+html[data-skin='console'] .msg-head .msg-who {
+  font: 600 10.5px var(--font-mono);
+  letter-spacing: 0.1em;
+  text-transform: uppercase;
+}
+html[data-skin='console'] .msg-ts,
+html[data-skin='console'] .hintbar,
+html[data-skin='console'] .smeta {
+  font-family: var(--font-mono);
+}
+html[data-skin='console'] .bubble b,
+html[data-skin='console'] .bubble strong,
+html[data-skin='console'] .bubble h1,
+html[data-skin='console'] .bubble h2,
+html[data-skin='console'] .bubble h3,
+html[data-skin='console'] .bubble h4 {
+  color: rgb(var(--acc-rgb));
+  font-family: var(--font-display);
+}
+html[data-skin='console'] .sc-head b,
+html[data-skin='console'] #view-chat h2,
+html[data-skin='console'] .view-head h2 {
+  font-family: var(--font-display);
+  letter-spacing: -0.01em;
+}
+html[data-skin='console'] .tcard-name {
+  font-family: var(--font-mono);
+  font-size: 11.5px;
+  letter-spacing: 0.02em;
+}
+html[data-skin='console'] .composer {
+  border-color: rgba(255, 255, 255, 0.16);
+}
+/* Lo que la mono no hace bien es distinguir jerarquía: en un párrafo todo pesa igual. El
+   énfasis se marca con color y una caja fina, no con negrita (que en la mono casi no se
+   ve). */
+html[data-skin='console'] .bubble b,
+html[data-skin='console'] .bubble strong {
+  font-weight: 500;
+}
+html[data-skin='console'] .seg strong,
+html[data-skin='console'] .bubble strong {
+  box-shadow: inset 0 -1px 0 rgba(var(--acc-rgb), 0.45);
+}
+
+/* ============================================================================
+   LIENZO — gris plano, aire y lectura
+   ============================================================================ */
+html[data-skin='canvas'] {
+  --bg0-rgb: 12, 14, 17;
+  --bg1-rgb: 15, 17, 21;
+  --bg2-rgb: 19, 22, 27;
+  --deep-rgb: 14, 16, 20;
+  --field-rgb: 13, 15, 19;
+  --panel-rgb: 19, 22, 27;
+  --panel2-rgb: 24, 27, 33;
+  --face-rgb: 23, 26, 32;
+  --face2-rgb: 27, 31, 38;
+  --skin-line: rgba(255, 255, 255, 0.07);
+  --skin-r-hero: 20px;
+  --skin-r-card: 14px;
+  --skin-r-sm: 9px;
+  --txt: #eaecef;
+  --dim: #969aa2;
+  /* Lienzo habla con UNA sola voz: la geométrica de la interfaz también titula, más
+     grande y con el tracking más cerrado. Nada de monoespaciada: aquí se lee un texto,
+     no se consulta un registro. */
+  --font-display: 'Space Grotesk', 'Segoe UI Variable Display', 'Segoe UI', system-ui, sans-serif;
+  --fs-title: 34px;
+  --fs-read: 17px;
+  --lh-read: 1.68;
+  --lh-body: 1.6;
+  --s-panel: rgb(19, 22, 27);
+}
+html[data-skin='canvas'] .shell {
+  background:
+    radial-gradient(60% 40% at 50% 0%, rgba(255, 255, 255, 0.035) 0%, transparent 70%),
+    rgb(var(--bg0-rgb));
+}
+/* más aire donde se lee: el hilo y las tarjetas de Ajustes */
+html[data-skin='canvas'] .msg {
+  gap: 14px;
+}
+html[data-skin='canvas'] .bubble,
+html[data-skin='canvas'] .msg.ai .bubble.blocks > .seg {
+  padding: 16px 20px;
+}
+html[data-skin='canvas'] .msg.ai .bubble.blocks {
+  gap: 12px;
+}
+html[data-skin='canvas'] #view-settings .setcard {
+  padding: 22px 24px;
+}
+html[data-skin='canvas'] .navitem {
+  padding: 10px 13px;
+}
+/* el acento aparece solo en lo activo: fondo suave y una línea de 2 px */
+html[data-skin='canvas'] .navitem.on {
+  background: rgba(255, 255, 255, 0.055);
+  border-color: transparent;
+  box-shadow: inset 0 -2px 0 rgba(var(--acc-rgb), 0.85);
+  color: #fff;
+}
+html[data-skin='canvas'] .composer {
+  border-color: var(--skin-line);
+}
+html[data-skin='canvas'] .composer:focus-within {
+  border-color: rgba(var(--acc-rgb), 0.65);
+}
+/* El título de la conversación sube con la medida de lectura. Con tope de ancho: la
+   cápsula es de una sola línea (`nowrap`) y en ventana estrecha la base ya lo baja a 19px. */
+@media (min-width: 1100px) {
+  html[data-skin='canvas'] #chatTitle {
+    font-size: 26px;
+    letter-spacing: -0.02em;
+  }
+}
+/* Con una sola familia, la jerarquía la hace el TAMAÑO y el tracking, no el cambio de
+   letra: los títulos de vista se cierran más que el texto. */
+html[data-skin='canvas'] .viewhead h2 {
+  letter-spacing: -0.035em;
+}
+
+/* ---- muestras del selector de aspecto (Ajustes ▸ Apariencia) ---- */
+.pal-dot.skin-holo {
+  background: radial-gradient(circle at 30% 25%, #8d9fff, #6b46d8 55%, #1b1430 100%);
+  box-shadow: 0 0 10px rgba(141, 159, 255, 0.5);
+}
+.pal-dot.skin-console {
+  background: linear-gradient(150deg, #0a0b0c 0 46%, #d8f5c8 46% 54%, #101113 54% 100%);
+}
+.pal-dot.skin-canvas {
+  background: linear-gradient(180deg, #1b1f26 0 40%, #23272f 40% 100%);
+  border: 1px solid rgba(255, 255, 255, 0.16);
+}

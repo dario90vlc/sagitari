@@ -63,6 +63,9 @@ function reglasIgnoradas(workspace) {
       for (const linea of txt.split(/\r?\n/)) {
         const l = linea.trim();
         if (!l || l.startsWith('#') || l.startsWith('!')) continue;
+        /* La barra INICIAL se conserva: es el ancla de git («/secrets» cuelga de la raíz,
+           «secrets» casa a cualquier profundidad). Quitarla hacía que el patrón anclado no
+           casara nunca y el secreto entrara al índice. */
         out.push(l.replace(/\/$/, ''));
       }
     } catch {}
@@ -72,15 +75,22 @@ function reglasIgnoradas(workspace) {
 function ignoradoPorRegla(rel, reglas) {
   for (const r of reglas) {
     if (!r) continue;
-    if (r.startsWith('*.')) {
-      if (rel.endsWith(r.slice(1))) return true;
+    /* Como en git: la barra inicial (o una barra en medio) ata el patrón a la RAÍZ del
+       espacio de trabajo; un nombre suelto casa a cualquier profundidad. Sin esta
+       distinción, «/secrets» tapaba también «sub/secrets», que git sí lee. */
+    const ancla = r.startsWith('/');
+    const p = ancla ? r.replace(/^\/+/, '') : r;
+    if (!p) continue;
+    if (p.startsWith('*.')) {
+      if (rel.endsWith(p.slice(1))) return true;
       continue;
     }
-    if (r.includes('/')) {
-      if (rel === r || rel.startsWith(r + '/')) return true;
+    if (ancla || p.includes('/')) {
+      if (rel === p || rel.startsWith(p + '/')) return true;
       continue;
     }
-    if (rel === r || path.basename(rel) === r) return true;
+    // nombre suelto: el archivo, o una carpeta del camino y lo que haya dentro
+    if (rel.split('/').includes(p)) return true;
   }
   return false;
 }

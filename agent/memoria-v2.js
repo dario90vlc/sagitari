@@ -179,19 +179,21 @@ function valorPalabras(valor) {
 }
 
 /** ¿Los dos valores dicen lo mismo? Uno puede ser más detallado que el otro («informes en
-    PDF» ⊂ «los informes en PDF»), pero ninguno puede aportar una palabra que el otro no
-    tenga: eso ya es otro dato. */
+    PDF» ⊂ «los informes en PDF»), pero lo que sobra solo puede ser ruido (stopword o palabra
+    de menos de 3 letras): «café con leche» aporta un detalle y ya es otro dato. */
 function mismoValor(a, b) {
   const A = valorPalabras(a);
   const B = valorPalabras(b);
   if (!A.length || !B.length) return sinAcentos(String(a || '')).trim() === sinAcentos(String(b || '')).trim();
-  return A.every((t) => B.includes(t)) || B.every((t) => A.includes(t));
+  const [corto, largo] = A.length <= B.length ? [A, B] : [B, A];
+  if (!corto.every((t) => largo.includes(t))) return false;
+  return largo.filter((t) => !corto.includes(t)).every((t) => t.length < 3 || STOP.has(t));
 }
 
 /** La clave de un hecho: `{ pred, unico, negado, valor }`, o `null` si la frase no
     declara ningún dato reconocible (ahí no hay nada que comparar). */
 function claveHecho(texto) {
-  const t = normalizarTexto(texto);
+  const t = sinPrefijos(texto);
   if (!t) return null;
   for (const c of CLAVES) {
     const m = t.match(c.re);
@@ -223,13 +225,14 @@ function relacionHechos(a, b) {
  * datos distintos. Se fusionan si la huella coincide (el mismo dato escrito con otras
  * mayúsculas/acentos) o si las dos claves hablan del mismo valor con la misma polaridad.
  * Si solo un lado declara el dato —el otro lo escribe de una forma que `claveHecho` no
- * reconoce, como «Recuerda que me llamo Dario»— se fusionan solo si las palabras del
+ * reconoce, como «Mi nombre: Darío»— se fusionan solo si las palabras del
  * valor están todas en el texto suelto. Sin clave en ninguno de los dos no hay valor que
  * comparar: se quedan aparte (fusionarlos por parecido perdía el que no se miraba).
+ * El prefijo conversacional se quita antes de comparar: «Recuerda que…» no cambia el dato.
  */
 function mismoHecho(a, b) {
-  const ta = normalizarTexto(a);
-  const tb = normalizarTexto(b);
+  const ta = sinPrefijos(a);
+  const tb = sinPrefijos(b);
   if (!ta || !tb) return false;
   if (hashTexto(ta) === hashTexto(tb)) return true;
   const A = claveHecho(ta);
@@ -338,6 +341,12 @@ function migrarV1(lista) {
 /* «Oye, recuerda que…», «ten en cuenta que…»: es ruido de conversación, no el hecho. */
 const RE_PREFIJOS =
   /^(?:(?:por cierto|oye|mira|recuerda(?:te)?|apúntate|anota|guarda(?:te)?|nota)(?:\s+que)?[,:\s]+|ten en cuenta que\s+|importante[,:\s]+)+/i;
+
+/** El texto sin el ruido de conversación con el que llega el hecho. Se usa para COMPARAR
+    (clave y fusión), nunca para guardar: lo que se muestra sigue siendo lo que se dijo. */
+function sinPrefijos(s) {
+  return normalizarTexto(s).replace(RE_PREFIJOS, '').trim();
+}
 /* Un marcador de corrección suelto se pega a la frase siguiente, que es donde está el
    hecho: «Mejor dicho, prefiero el té» es una sola frase. */
 const RE_MARCADOR_CORRECCION = /^(?:no[,:]?\s*)?(?:en realidad|mejor dicho|más bien|corrijo|me corrijo)[,:]?$/i;
@@ -615,7 +624,9 @@ module.exports = {
   hashTexto,
   tokenizar,
   tokenizarRaiz,
+  sinPrefijos,
   similitud,
+  mismoValor,
   claveHecho,
   relacionHechos,
   mismoHecho,

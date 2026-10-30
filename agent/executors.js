@@ -50,6 +50,13 @@ function dentroDe(file, dir) {
   const r = path.win32.relative(dir, file);
   return r === '' || (!r.startsWith('..') && !path.win32.isAbsolute(r));
 }
+/* NTFS no distingue mayúsculas: `Readme.md` y `readme.md` son el MISMO archivo, así que
+   dos entradas de un parche que solo cambian de caja no pueden tratarse como dos. */
+const claveRuta = (p) => path.win32.normalize(String(p || '')).toLowerCase();
+/* Las skills traen sus propias referencias (references/*.md) y `use_skill` anuncia su
+   carpeta: sin esta excepción el agente no podía leer ni la documentación que la propia
+   skill le manda leer. Es SOLO lectura y SOLO dentro de skills; escribir sigue cerrado. */
+const SKILLS_DATOS_DIR = DATOS_DIR ? path.win32.join(DATOS_DIR, 'skills') : null;
 /* Camino real de una ruta, con caché: realpath es una llamada al sistema y esto corre
    en cada lectura/escritura del agente. Se paga UNA vez por ruta distinta. Si el
    archivo aún no existe (write_file a algo nuevo) se resuelve el ancestro que SÍ
@@ -80,6 +87,12 @@ function caminoReal(norm) {
   REALES.set(clave, real);
   return real;
 }
+/* La caché solo vale mientras nadie mueva los enlaces: un `mklink /J` creado después de
+   cachear esa ruta la deja diciendo «fuera» cuando el camino REAL ya apunta dentro. Se
+   vacía tras cada escritura y tras cada comando (los dos sitios donde se crean enlaces). */
+function olvidarCaminosReales() {
+  REALES.clear();
+}
 /** 'si' | 'no' | 'duda': si la ruta (normalizada o REAL) cae en los datos de la app. */
 function enDatosApp(p) {
   if (!DATOS_DIR) return 'no';
@@ -93,14 +106,36 @@ const MSG_DATOS_LECTURA = 'Error: no puedo leer el directorio de datos de la app
 const MSG_DATOS_ESCRITURA = 'Error: no puedo escribir en el directorio de datos de la app (ahí viven tus claves y conversaciones).';
 const MSG_DATOS_DUDA =
   'Error: no pude comprobar dónde acaba esa ruta (no se puede resolver); una ruta que no se puede verificar no se toca.';
+const MSG_FLUJO =
+  'Error: esa ruta es un flujo alternativo de NTFS (archivo:flujo): su contenido no se ve en el Explorador, en git ni en el diff, así que no lo toco.';
 const SYS_WRITE_RX = /^[a-z]:\\(windows|program files|program files \(x86\)|programdata)([\\/]|$)/i;
+/* `README.md:oculto` es un flujo alternativo de NTFS: la ruta «parece» dentro del espacio de
+   trabajo y el contenido queda invisible para el Explorador, git, list_dir y el diff, así
+   que escribir ahí era una escritura sin tarjeta que nadie ve. La letra de unidad (`C:\`)
+   no cuenta: solo se mira el último tramo de la ruta. */
+function esFlujoAlternativo(p) {
+  const norm = rutaResuelta(p);
+  const ultimo = norm.split(/[\\/]/).pop() || '';
+  return ultimo.includes(':');
+}
+/* Lectura legítima de una skill: dentro de <datos>/skills TAMBIÉN por su camino REAL,
+    así un junction metido ahí no sirve para leer config.json. */
+function esLecturaDeSkill(p) {
+  if (!SKILLS_DATOS_DIR) return false;
+  const norm = rutaResuelta(p);
+  if (!dentroDe(norm.toLowerCase(), SKILLS_DATOS_DIR)) return false;
+  const real = caminoReal(norm);
+  return real !== null && dentroDe(real.toLowerCase(), SKILLS_DATOS_DIR);
+}
 function bloqueoLectura(p) {
+  if (esFlujoAlternativo(p)) return MSG_FLUJO;
   const v = enDatosApp(p);
-  if (v === 'si') return MSG_DATOS_LECTURA;
   if (v === 'duda') return MSG_DATOS_DUDA;
+  if (v === 'si' && !esLecturaDeSkill(p)) return MSG_DATOS_LECTURA;
   return null;
 }
 function bloqueoEscritura(p) {
+  if (esFlujoAlternativo(p)) return MSG_FLUJO;
   const v = enDatosApp(p);
   if (v === 'si') return MSG_DATOS_ESCRITURA;
   if (v === 'duda') return MSG_DATOS_DUDA;
@@ -128,6 +163,8 @@ function run(cmd, opts = {}) {
       if (done) return;
       done = true;
       clearTimeout(timer);
+      // lo que se acaba de ejecutar pudo crear un enlace: el caché de caminos reales ya no vale
+      olvidarCaminosReales();
       resolve({ code, stdout: decodeOut(Buffer.concat(outChunks)), stderr: decodeOut(Buffer.concat(errChunks)) });
     };
     // sin `timeout` de exec: lo gestionamos nosotros para poder matar el árbol completo
@@ -177,6 +214,7 @@ function runProg(file, argv, opts = {}) {
       if (done) return;
       done = true;
       clearTimeout(timer);
+      olvidarCaminosReales(); // igual que `run`: el programa pudo crear enlaces
       resolve({ code, stdout: decodeOut(Buffer.concat(out)), stderr: decodeOut(Buffer.concat(err)) });
     };
     let child;
@@ -665,6 +703,10 @@ async function escribirAtomico(p, texto) {
   } catch (e) {
     await fsp.rm(tmp, { force: true }).catch(() => {});
     throw e;
+  } finally {
+    /* El archivo ya es otro (o el intento creó algo en su sitio): lo cacheado sobre esa
+       ruta puede haber quedado viejo y decidir mal la siguiente escritura. */
+    olvidarCaminosReales();
   }
 }
 
@@ -700,6 +742,68 @@ async function walk(root, depth, maxDepth, out, budget) {
       out.push('  '.repeat(depth) + e.name + size);
     }
   }
+}
+
+/* Topes de `search_files`: el patrón lo escribe el modelo y corre en el hilo principal.
+   Uno enorme tarda en compilar; uno con cuantificadores anidados congela la app. El
+   patrón se acota y se rechaza el que puede explotar ANTES de compilarlo; la línea se
+   busca ENTERA (recortarla escondía coincidencias pasada la columna 1000 sin avisar). */
+const MAX_PATRON = 200;
+
+/** ¿Lo que hay en `i` repite sin tope? (`*`, `+`, `{n,}`) */
+function esCuantificadorSinTope(p, i) {
+  const c = p[i];
+  if (c === '*' || c === '+') return true;
+  if (c !== '{') return false;
+  const m = /^\{(\d+)(,(\d*))?\}/.exec(p.slice(i));
+  return Boolean(m && m[2] && m[3] === '');
+}
+
+/* `(a+)+`, `(\w+\s)*`, `(.*)*`: un grupo que ya repite sin tope y que a su vez se repite
+   sin tope. Ahí el retroceso crece de forma explosiva con la longitud de la línea y una
+   sola línea de un minificado cuelga la app.
+   shortcut: es una heurística, no un verificador; una forma rara —una alternancia
+   ambigua tipo `(a|aa)+`— todavía podría ser costosa. Por eso el patrón va además acotado
+   a MAX_PATRON. */
+function patronCostoso(patron) {
+  const p = String(patron || '');
+  const pila = []; // un nivel por grupo abierto: { sinTope: true si dentro repite sin tope }
+  let escape = false;
+  for (let i = 0; i < p.length; i++) {
+    const ch = p[i];
+    if (escape) {
+      escape = false;
+      continue;
+    }
+    if (ch === '\\') {
+      escape = true;
+      continue;
+    }
+    if (ch === '[') {
+      // dentro de una clase los cuantificadores son del carácter, no del grupo
+      i++;
+      while (i < p.length && p[i] !== ']') {
+        if (p[i] === '\\') i++;
+        i++;
+      }
+      continue;
+    }
+    if (ch === '(') {
+      pila.push({ sinTope: false });
+      continue;
+    }
+    if (ch === ')') {
+      const g = pila.pop();
+      if (!g) continue;
+      if (g.sinTope && esCuantificadorSinTope(p, i + 1)) return true;
+      if (pila.length && g.sinTope) pila[pila.length - 1].sinTope = true;
+      continue;
+    }
+    if ((ch === '*' || ch === '+' || ch === '{') && pila.length && esCuantificadorSinTope(p, i)) {
+      pila[pila.length - 1].sinTope = true;
+    }
+  }
+  return false;
 }
 
 async function searchIn(dir, regex, searchContent, out, budget, depth = 0, maxDepth = 12) {
@@ -1046,7 +1150,7 @@ async function executeTool(name, args, ctx) {
           errores.push(detalleEdicion(c.path, texto, r));
           continue;
         }
-        if (planes.some((x) => x.p === p)) {
+        if (planes.some((x) => claveRuta(x.p) === claveRuta(p))) {
           errores.push(`${c.path}: dos cambios sobre el mismo archivo en una llamada (junta el texto en uno)`);
           continue;
         }
@@ -1122,9 +1226,16 @@ async function executeTool(name, args, ctx) {
       const root = inWs(args.path);
       const bloqS = bloqueoLectura(root);
       if (bloqS) return bloqS;
+      const patron = String(args.pattern ?? '');
+      if (patron.length > MAX_PATRON) {
+        return `Error: el patrón es demasiado largo (${patron.length} caracteres; el máximo es ${MAX_PATRON}). Busca una cadena literal más corta o divide la búsqueda.`;
+      }
+      if (patronCostoso(patron)) {
+        return 'Error: el patrón repite sin tope un grupo que ya repite sin tope (`(a+)+`, `(\\w+\\s)*`): el retroceso se dispara con la longitud de la línea y la búsqueda podría colgar la app. Simplifícalo: una cadena literal, o una sola clase de caracteres (`\\w+`, `[a-z]+`).';
+      }
       let regex;
       try {
-        regex = new RegExp(args.pattern, 'i');
+        regex = new RegExp(patron, 'i');
       } catch {
         return 'Error: patrón de búsqueda inválido (no es una expresión regular válida). Simplifícalo: "informe", "config.*json", "function\\s+nombre"…';
       }

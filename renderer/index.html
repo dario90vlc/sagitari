@@ -8,6 +8,10 @@
     />
     <link rel="stylesheet" href="styles.css" />
     <link rel="stylesheet" href="liquid-glass.css" />
+    <!-- aspectos: Consola y Lienzo (planos). Holo es esta hoja, sin capa encima.
+         Una capa con atributo en <html> para que ningún elemento de la base tenga que
+         saber qué aspecto está puesto. -->
+    <link rel="stylesheet" href="skins.css" />
     <title>SAGITARI</title>
   </head>
   <body>
@@ -913,12 +917,32 @@
 
                 <div class="setcard">
                   <div class="sc-head"><b>Apariencia</b><span class="sc-hint">Color y luz de la interfaz; se aplica al momento</span></div>
-                  <div class="swrow srow" data-keys="glow resplandor bordes luz ambiental">
+                  <div class="swrow srow" data-keys="glow resplandor bordes luz ambiental" data-solo-holo>
                     <span class="st"
                       ><b>Glow ambiental en los bordes</b
                       ><small>El marco se ilumina cuando el agente piensa, trabaja o te habla.</small></span
                     >
                     <div class="sw on" id="swGlow" role="switch" tabindex="0" aria-checked="true" aria-label="Glow ambiental en los bordes"></div>
+                  </div>
+                  <div class="themerow block" data-keys="aspecto skin apariencia estilo consola lienzo holo materia">
+                    <span class="st"
+                      ><b>Aspecto</b
+                      ><small id="skinHint">Holo es el vidrio de la casa. Consola y Lienzo son planos: sin desenfoque y sin luz en el marco.</small></span
+                    >
+                    <div class="pals" id="uiSkinTiles" role="group" aria-label="Aspecto de la interfaz">
+                      <button type="button" class="pal" data-pal="holo">
+                        <span class="pal-dot skin-holo" aria-hidden="true"></span><b>Holo</b></button
+                      ><button type="button" class="pal" data-pal="console">
+                        <span class="pal-dot skin-console" aria-hidden="true"></span><b>Consola</b></button
+                      ><button type="button" class="pal" data-pal="canvas">
+                        <span class="pal-dot skin-canvas" aria-hidden="true"></span><b>Lienzo</b>
+                      </button>
+                    </div>
+                    <select id="uiSkin" aria-label="Aspecto de la interfaz" hidden>
+                      <option value="holo">Holo</option>
+                      <option value="console">Consola</option>
+                      <option value="canvas">Lienzo</option>
+                    </select>
                   </div>
                   <div class="themerow block" data-keys="color tema apariencia acento interfaz">
                     <span class="st"><b>Color de la interfaz</b><small>Tiñe bordes, menús, botones y detalles de toda la app.</small></span>
@@ -936,7 +960,7 @@
                       <option value="aurora">Aurora</option>
                     </select>
                   </div>
-                  <div class="themerow block" data-keys="color glow resplandor luz">
+                  <div class="themerow block" data-keys="color glow resplandor luz" data-solo-holo>
                     <span class="st"><b>Color del glow</b><small id="glowColorHint">Sigue el color de la interfaz.</small></span>
                     <div class="pals" id="glowColorTiles" role="group" aria-label="Color del glow">
                       <button type="button" class="pal" data-pal="match"><span class="pal-dot mix"></span><b>Como la interfaz</b></button><button type="button" class="pal" id="glowOtherBtn"><span class="pal-dot plus" aria-hidden="true"></span><b>Otro color…</b></button><button type="button" class="pal" data-pal="violet"><span class="pal-dot" style="--pc: 128, 110, 214"></span><b>Violeta</b></button><button type="button" class="pal" data-pal="magenta"><span class="pal-dot" style="--pc: 184, 92, 196"></span><b>Magenta</b></button><button type="button" class="pal" data-pal="cyan"><span class="pal-dot" style="--pc: 40, 146, 170"></span><b>Cian</b></button><button type="button" class="pal" data-pal="emerald"><span class="pal-dot" style="--pc: 44, 156, 116"></span><b>Esmeralda</b></button><button type="button" class="pal" data-pal="amber"><span class="pal-dot" style="--pc: 196, 128, 40"></span><b>Ámbar</b></button><button type="button" class="pal" data-pal="ice"><span class="pal-dot" style="--pc: 84, 134, 214"></span><b>Hielo</b></button><button type="button" class="pal" data-pal="aurora"><span class="pal-dot" style="--pc: 106, 128, 184"></span><b>Aurora</b></button>
@@ -953,7 +977,7 @@
                       <option value="aurora">Aurora</option>
                     </select>
                   </div>
-                  <div class="themerow" data-keys="intensidad glow resplandor fuerza brillo">
+                  <div class="themerow" data-keys="intensidad glow resplandor fuerza brillo" data-solo-holo>
                     <span class="st"><b>Intensidad del glow</b><small id="glowStrengthLabel">Equilibrado</small></span>
                     <div style="text-align: right">
                       <input
@@ -970,7 +994,7 @@
                       </div>
                     </div>
                   </div>
-                  <div class="themerow" data-keys="vidrio glass transparencia tintado claro opaco">
+                  <div class="themerow" data-keys="vidrio glass transparencia tintado claro opaco" data-solo-holo>
                     <span class="st"><b>Vidrio: de ultra claro a tintado</b><small id="glassTintLabel">Equilibrado</small></span>
                     <div style="text-align: right">
                       <input

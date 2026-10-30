@@ -1129,9 +1129,13 @@ const AFTER = {
       ' const todo = { guardadas: guardadas, tarjetas: tarjetas, titulo: titulo, razon: !!razon,' +
       '   marca: cuerpo.indexOf(' +
       JSON.stringify(MARCA_RAZON) +
-      ') >= 0, plegado: !!grupo && !grupo.classList.contains("open"),' +
+      ') >= 0, abierto: !!grupo && grupo.classList.contains("open"),' +
+      '   filas: grupo ? grupo.querySelectorAll(".tcard").length : 0,' +
       '   resp: salida.indexOf("no había tal archivo") >= 0, reloj: !!el.querySelector(".tcard-time").textContent.trim() };' +
-      ' return (todo.tarjetas === guardadas && todo.tarjetas > 0 && /herramienta/i.test(titulo) && todo.razon && todo.marca && todo.plegado && todo.resp && todo.reloj) ? true : todo;' +
+      /* El grupo se queda ABIERTO al reabrir: la traza se lee, y esconder lo que hizo el
+         agente es justo lo que había que dejar de hacer. Antes esta comprobación exigía
+         `plegado`, que era la decisión anterior. */
+      ' return (todo.tarjetas === guardadas && todo.tarjetas > 0 && todo.filas === guardadas && /herramienta/i.test(titulo) && todo.razon && todo.marca && todo.abierto && todo.resp && todo.reloj) ? true : todo;' +
       ' })()',
   );
 
