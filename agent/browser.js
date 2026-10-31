@@ -1173,7 +1173,7 @@ class Browser {
         }),
       );
     const r = await this.send('Runtime.evaluate', { expression, returnByValue: true, awaitPromise: true, userGesture: true }, sessionId);
-    if (r.exceptionDetails) throw new Error(r.exceptionDetails.exception?.description || 'JS error');
+    if (r.exceptionDetails) throw new Error(r.exceptionDetails.exception?.description || i18n.t('nav.res.js.error'));
     return r.result?.value;
   }
 

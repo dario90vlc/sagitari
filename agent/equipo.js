@@ -155,7 +155,7 @@ function crearEquipo({ lider = null, limite = LIMITE_MIEMBROS, presupuestoUsd = 
           name: m.spec.name,
           emoji: m.spec.emoji,
           estado: estadoDe(m),
-          atencion: m.pideAtencion ? m.motivoAtencion || 'pide algo' : null,
+          atencion: m.pideAtencion ? m.motivoAtencion || i18n.t('equipo.atencion.pide') : null,
           tarea: m.tarea,
           resumen: (m.resultado && m.resultado.resumen) || '',
           evidencia: (m.resultado && m.resultado.evidencia) || '',
@@ -188,7 +188,7 @@ function crearEquipo({ lider = null, limite = LIMITE_MIEMBROS, presupuestoUsd = 
     if (!pres || corte || terminado) return false;
     const g = gasto();
     if (g.costUsd < pres) return false;
-    corte = `presupuesto del equipo agotado: ${g.costUsd.toFixed(4)} $ de ${pres} $ (ajuste «Presupuesto de equipo»)`;
+    corte = i18n.t('equipo.presupuesto.agotado', { gasto: g.costUsd.toFixed(4), tope: pres });
     const parados = [];
     for (const m of miembros.values()) {
       if (m.corriendo) {

@@ -4,7 +4,6 @@
    cuerpos de skills y los logs no se traducen (son diagnóstico o van al modelo). */
 module.exports = {
   'comun.error': 'Error',
-  'comun.cancelado': 'Cancelado por el usuario',
   'comun.detenido': 'Ejecución detenida',
   'comun.detenido.motivo': 'Ejecución detenida: {motivo}',
 
@@ -36,6 +35,7 @@ module.exports = {
   'error.interno.detalle': '{mensaje}\n\nDetalle completo en logs\\crash.log',
   'skills.previa': '«{repo}» trae {n} skill(s): {nombres}{mas}. Son instrucciones que el agente obedecerá: pulsa Importar otra vez para confirmar.',
   'skills.previa.mas': '… (y más)',
+  'skills.desc.personalizada': 'Skill personalizada',
   'skills.err.id': 'id de skill inválido',
   'skills.err.sin.origen': 'La skill no tiene origen registrado (no es importada).',
   'skills.err.no.encontrada': 'No se encontró la skill en el repo de origen.',
@@ -190,6 +190,7 @@ module.exports = {
   'memoria.err.sin.copia': 'no hay ninguna copia que restaurar',
   'memoria.err.escribir.copia': 'la copia se leyó, pero no se pudo escribir el almacén',
   'memoria.err.propuesta': 'propuesta no encontrada',
+  'memoria.motivo.agente': 'lo propuso el agente',
   'memoria.motivo.nombre': 'parece tu nombre',
   'memoria.motivo.eres': 'parece algo que eres',
   'memoria.motivo.preferencia': 'parece una preferencia tuya',
@@ -628,6 +629,7 @@ module.exports = {
     'estás en modo PLAN (solo lectura) y «{nombre}» modifica el sistema, así que no se ejecuta. Explora y comprueba con las herramientas de lectura, describe el cambio concreto que propones y pide al usuario que cambie a ACT para que lo ejecute.',
   'turno.proveedor': 'proveedor',
   'turno.rebobinar.ocupado': 'Espera a que termine la ejecución actual (o pulsa Detener) para rebobinar la conversación.',
+  'turno.sin.config': 'Configura un proveedor y modelo en Ajustes antes de hablar con Sagitari.',
   'turno.sin.progreso': 'Sin progreso — detenido',
   'turno.sin.proveedor': 'sin proveedor/modelo activo',
   'turno.tope.delegaciones': 'Tope de delegaciones alcanzado',
@@ -870,6 +872,7 @@ module.exports = {
   'nav.res.espera.ya': 'ya está',
   'nav.res.espera.no': 'ya no está',
   'nav.res.estado.ilegible': '(no pude leer el estado de la página)',
+  'nav.res.js.error': 'error de JS',
   'nav.res.logs.vacio': 'Sin mensajes de consola ni errores de red desde que se abrió la pestaña.',
   'nav.res.logs.descargas': '\nDescargas: {lista}',
   'nav.res.logs.descarga.ruta': '{archivo} ({estado}) en {ruta}',
@@ -920,14 +923,17 @@ module.exports = {
   'nav.log.guardada': '{archivo} guardada en {ruta}',
 
   /* ---- motor del equipo (motivos que el líder ve en el resultado) ---- */
+  'equipo.atencion.accion': 'una acción',
+  'equipo.atencion.pide': 'pide algo',
+  'equipo.atencion.permiso': 'permiso pendiente: {herramienta}',
   'equipo.corte': 'El equipo se para: {motivo}. El tablero se queda como está.',
+  'equipo.delegado.arbol': '🌳 {nombre} ({id}): en un árbol aislado (sus cambios vuelven verificados)',
   'equipo.delegado.fallo': 'delegación fallida: {motivo}',
   'equipo.delegado.fallo.resultado': 'delegación fallida ({motivo})',
-  'equipo.delegado.arbol': '🌳 {nombre} ({id}): en un árbol aislado (sus cambios vuelven verificados)',
-  'equipo.miembro.sin.correr': 'el motor no tiene `correr` inyectado',
   'equipo.miembro.fallo': 'el compañero falló: {motivo}',
-  'equipo.atencion.permiso': 'permiso pendiente: {herramienta}',
-  'equipo.atencion.accion': 'una acción',
+  'equipo.miembro.sin.correr': 'el motor no tiene `correr` inyectado',
+  'equipo.presupuesto.agotado':
+    'el presupuesto del equipo se agotó: {gasto} $ de {tope} $ (ajuste «Presupuesto de equipo»)',
   'equipo.motivo.cerrado': 'el equipo de este turno ya está cerrado; no se levantan más compañeros.',
   'equipo.motivo.parado': 'el equipo está parado ({motivo}); no se levantan más compañeros en este turno.',
   'equipo.motivo.sin.especialista': 'falta el especialista: pasa el id del registro (research, coding, review…).',

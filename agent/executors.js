@@ -894,7 +894,7 @@ async function executeTool(name, args, ctx) {
          avisa sola a la interfaz) y el usuario decide. */
       if (!ctx.settings || !ctx.settings.settings || ctx.settings.settings.memoryAutoSave !== true) {
         const nuevas = memory.trayProponer([
-          { texto: textoGuardar, origen: 'agent', motivo: 'lo propuso el agente', confianza: confidence },
+          { texto: textoGuardar, origen: 'agent', motivo: i18n.t('memoria.motivo.agente'), confianza: confidence },
         ]);
         if (!nuevas.length) return i18n.t('herramienta.recuerdo.ya');
         return i18n.t('herramienta.recuerdo.propuesta');

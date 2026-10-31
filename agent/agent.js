@@ -851,7 +851,7 @@ class Agent {
   async _run(userText, settings, imageDataUrl, signal, opts = {}) {
     const cfg = this.activeConfig(settings);
     if (!cfg || !cfg.baseUrl || !cfg.model) {
-      this.emit({ type: 'error', message: 'Configura un proveedor y modelo en Ajustes antes de hablar con Sagitari.' });
+      this.emit({ type: 'error', message: i18n.t('turno.sin.config') });
       return;
     }
     const mode = this._mode || MODE_PROFILES[settings.settings?.mode] || MODE_PROFILES.act;

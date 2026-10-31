@@ -498,7 +498,7 @@ async function main() {
     assertEqual(b.eq.estado('m2'), 'fallo');
     assertEqual(b.creados[0].parado, true, 'se para al compañero:');
     assertEqual(b.creados[1].parado, true);
-    assertIncludes(b.eq.motivoCorte(), 'presupuesto del equipo agotado');
+    assertIncludes(b.eq.motivoCorte(), 'presupuesto del equipo se agotó');
     const aviso = b.deTipo('team_message').find((e) => e.de === 'lider' && e.para === 'todos');
     assertOk(aviso, 'el corte se dice en el chat');
     assertIncludes(aviso.texto, 'presupuesto');

@@ -646,7 +646,7 @@ async function createSkill({ name, description, body }) {
     if (e && e.code === 'ENOENT') await fsp.mkdir(dest, { recursive: true });
     else throw e;
   }
-  const md = `---\nname: ${slug}\ndescription: ${description || 'Skill personalizada'}\n---\n\n${body || ''}\n`;
+  const md = `---\nname: ${slug}\ndescription: ${description || i18n.t('skills.desc.personalizada')}\n---\n\n${body || ''}\n`;
   await writeFileAtomic(path.join(dest, 'SKILL.md'), md);
   invalidarIndice();
   return { id: slug, name: slug };
