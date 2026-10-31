@@ -60,6 +60,15 @@ Most desktop AI assistants stop at the chat box. SAGITARI is built to **finish t
 
 It is local-first by design. You choose the model and provider — cloud or local — while configuration, API keys, conversations, logs, memory, and browser profiles stay on your machine.
 
+## What's new in this release
+
+- **The app speaks English and Spanish.** It follows the Windows language — every Spanish variant counts — and Settings ▸ Appearance ▸ Language overrides it (Automatic / Español / English). Menus, settings, tool cards, errors, permission prompts, native dialogs, the tray and notifications are translated; the agent's answers already followed the language you write in.
+- **The turn, in the order it happened.** Reopening a conversation repaints each text, each reasoning block and each tool card where it belongs, instead of a wall of prose with the tools folded away — and long answers are shown whole, never cut.
+- **Three looks.** Holo, Console and Canvas, each with its own intensity and tint, from Settings ▸ Appearance.
+- **The permission card tells the truth.** A command shows the folder it will run in; an MCP tool shows its arguments. Undo no longer claims success when a file could not be restored, and it cannot write outside the workspace.
+- **Harder to fool.** The prohibited-command list can't be dodged by spelling the same command another way, `search_files` can no longer freeze the app, memory stops keeping contradictory facts, and short text attachments are no longer labelled binary.
+- **Smaller, safer plumbing.** `undici` 7.30.1, MCP error output masked like every other secret, and a space that no longer carries Spanish in places you would not expect (dates, lists, the task board).
+
 ## What it does
 
 ### It executes.
@@ -90,6 +99,7 @@ Reason deeply, plan before acting, or go direct — with the model of your choic
 <details>
 <summary><b>Full breakdown</b></summary>
 
+- **In your language** — the whole app speaks Spanish or English: it follows the Windows language (any Spanish variant is Spanish) and Settings ▸ Appearance ▸ Language overrides it, applied on restart. Everything SAGITARI says to you is in that language — panels, tool cards, errors, permission prompts, native dialogs, the tray — while the agent's answers already followed the language you write in.
 - **Bring your own model** — OpenCode Go, OpenRouter, OpenAI, Anthropic, Groq, Google Gemini, DeepSeek, xAI (Grok), Mistral, Moonshot (Kimi), Cerebras, NVIDIA NIM, SambaNova, or any compatible endpoint — plus local runtimes: Ollama, LM Studio, llama.cpp, vLLM, Jan, KoboldCpp, text-generation-webui and LocalAI. Every preset carries the endpoint its vendor documents, and the provider you save can force its API protocol (OpenAI-compatible, Anthropic-compatible or the Responses API) so third-party gateways work too.
 - **Your own specialists** — the seven built-in subagents live in the product, but you can define your own by dropping an `AGENT.md` into `<data dir>/agents/<id>/` (name, description, allowed tools, model, step budget and its brief). A definition can never grant itself more than the built-in ceiling: its tool list is intersected with the real catalogue. The Agents view shows the registry the app actually uses, marked so you can see which agents came from disk, with a **Recargar** button that re-reads them without restarting.
 - **Think / Plan / Act** — reason deeply, prepare a plan before acting, or execute directly. **PLAN is genuinely read-only**: the tool set offered to the model is cut to inspection tools and any write is refused at execution time too, so the planning mode cannot touch your machine.
@@ -109,6 +119,8 @@ Every step, tool, and second on screen.
 <summary><b>Full breakdown</b></summary>
 
 - Holographic interface built with vanilla HTML, CSS, and JavaScript.
+- **The turn, in order** — a finished turn is repainted the way it happened: each text, each reasoning block and each tool card in its place, not a wall of prose with the tools folded away. Long answers are always shown whole.
+- **Three looks** — Holo, Console and Canvas, each with its own intensity and tint, chosen in Settings ▸ Appearance.
 - **The light is the interface** — instead of a band around the window, the glow is the 1px edge of the surfaces that matter: the sidebar when it thinks, the composer when it works, the card that is actually running. State changes send one highlight along that edge and it settles; nothing spins and nothing pulses on its own. Colour and intensity are still yours.
 - **The turn's changes, per file** — before you accept a turn as done, the review panel shows exactly what changed: one card per file with its `+adds / −dels`, the hunks with line numbers, and a button to put back **that one file** without touching the rest. Files that can't be restored on their own say so instead of pretending.
 - **How much room is left** — the composer carries a live context meter (normal / tight / critical) fed by the same measurement the agent uses, so you can see a long session filling up before it starts trimming.
