@@ -64,7 +64,7 @@ Es local-first por diseño. Tú eliges el modelo y el proveedor —en la nube o 
 
 - **La app habla español e inglés.** Sigue el idioma de Windows —cualquier variante del español cuenta— y Ajustes ▸ Apariencia ▸ Idioma lo puede forzar (Automático / Español / English). Se traducen menús, ajustes, tarjetas de herramientas, errores, tarjetas de permiso, diálogos nativos, bandeja y notificaciones; las respuestas del agente ya seguían el idioma en el que escribes.
 - **El turno, en el orden en que ocurrió.** Al reabrir una conversación se repinta cada texto, cada bloque de razonamiento y cada tarjeta de herramienta en su sitio, no un muro de prosa con las herramientas aparte — y las respuestas largas se ven enteras, nunca cortadas.
-- **Tres aspectos.** Holo, Consola y Lienzo, con su intensidad y su tinte, desde Ajustes ▸ Apariencia.
+- **Dos aspectos más.** Holo era el único; ahora le acompañan Consola y Lienzo, cada uno con su intensidad y su tinte, desde Ajustes ▸ Apariencia.
 - **La tarjeta de permiso dice la verdad.** Un comando enseña la carpeta en la que se ejecuta; una herramienta MCP, sus argumentos. Deshacer ya no canta éxito cuando un archivo no se pudo restaurar, y no puede escribir fuera del espacio de trabajo.
 - **Más difícil de engañar.** La lista de comandos prohibidos no se esquiva escribiéndolos de otra forma, `search_files` ya no puede congelar la app, la memoria deja de guardar hechos contradictorios y los adjuntos de texto cortos ya no se marcan como binarios.
 - **Fontanería más pequeña y más segura.** `undici` 7.30.1, la salida de error de MCP enmascarada como el resto de secretos, y fechas, listas y el tablero ya sin restos de español donde no los esperabas.
@@ -121,7 +121,7 @@ Cada paso, herramienta y segundo en pantalla.
 
 - Interfaz holográfica creada con HTML, CSS y JavaScript vanilla.
 - **El turno, en orden** — un turno terminado se repinta tal como ocurrió: cada texto, cada bloque de razonamiento y cada tarjeta de herramienta en su sitio, no un muro de prosa con las herramientas aparte. Las respuestas largas se ven enteras.
-- **Tres aspectos** — Holo, Consola y Lienzo, cada uno con su intensidad y su tinte, desde Ajustes ▸ Apariencia.
+- **Tres aspectos** — Holo (el de siempre) más Consola y Lienzo, cada uno con su intensidad y su tinte, desde Ajustes ▸ Apariencia.
 - **La luz es la interfaz** — en vez de una banda alrededor de la ventana, el glow es el filo de 1px de las superficies que importan: el panel lateral cuando piensa, el compositor cuando trabaja, la tarjeta que está corriendo de verdad. Al cambiar de estado un reflejo recorre ese filo una vez y se posa; nada gira y nada late solo. El color y la intensidad siguen siendo tuyos.
 - **Los cambios del turno, archivo a archivo** — antes de dar un turno por bueno, el panel de revisión enseña exactamente qué cambió: una tarjeta por archivo con sus `+añadidos / −borrados`, los hunks con sus números de línea y un botón para devolver **ese archivo solo** sin tocar el resto. Los que no se pueden restaurar por separado lo dicen en vez de aparentarlo.
 - **Cuánto sitio queda** — el compositor lleva un medidor de contexto en vivo (holgado / ajustado / apretado) alimentado por la misma medición que usa el agente, así que ves llenarse una sesión larga antes de que empiece a recortar.

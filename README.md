@@ -64,7 +64,7 @@ It is local-first by design. You choose the model and provider — cloud or loca
 
 - **The app speaks English and Spanish.** It follows the Windows language — every Spanish variant counts — and Settings ▸ Appearance ▸ Language overrides it (Automatic / Español / English). Menus, settings, tool cards, errors, permission prompts, native dialogs, the tray and notifications are translated; the agent's answers already followed the language you write in.
 - **The turn, in the order it happened.** Reopening a conversation repaints each text, each reasoning block and each tool card where it belongs, instead of a wall of prose with the tools folded away — and long answers are shown whole, never cut.
-- **Three looks.** Holo, Console and Canvas, each with its own intensity and tint, from Settings ▸ Appearance.
+- **Two more looks.** Holo was the only one; now Console and Canvas sit next to it, each with its own intensity and tint, from Settings ▸ Appearance.
 - **The permission card tells the truth.** A command shows the folder it will run in; an MCP tool shows its arguments. Undo no longer claims success when a file could not be restored, and it cannot write outside the workspace.
 - **Harder to fool.** The prohibited-command list can't be dodged by spelling the same command another way, `search_files` can no longer freeze the app, memory stops keeping contradictory facts, and short text attachments are no longer labelled binary.
 - **Smaller, safer plumbing.** `undici` 7.30.1, MCP error output masked like every other secret, and a space that no longer carries Spanish in places you would not expect (dates, lists, the task board).
@@ -120,7 +120,7 @@ Every step, tool, and second on screen.
 
 - Holographic interface built with vanilla HTML, CSS, and JavaScript.
 - **The turn, in order** — a finished turn is repainted the way it happened: each text, each reasoning block and each tool card in its place, not a wall of prose with the tools folded away. Long answers are always shown whole.
-- **Three looks** — Holo, Console and Canvas, each with its own intensity and tint, chosen in Settings ▸ Appearance.
+- **Three looks** — Holo (the original) plus Console and Canvas, each with its own intensity and tint, chosen in Settings ▸ Appearance.
 - **The light is the interface** — instead of a band around the window, the glow is the 1px edge of the surfaces that matter: the sidebar when it thinks, the composer when it works, the card that is actually running. State changes send one highlight along that edge and it settles; nothing spins and nothing pulses on its own. Colour and intensity are still yours.
 - **The turn's changes, per file** — before you accept a turn as done, the review panel shows exactly what changed: one card per file with its `+adds / −dels`, the hunks with line numbers, and a button to put back **that one file** without touching the rest. Files that can't be restored on their own say so instead of pretending.
 - **How much room is left** — the composer carries a live context meter (normal / tight / critical) fed by the same measurement the agent uses, so you can see a long session filling up before it starts trimming.
