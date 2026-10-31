@@ -71,5 +71,8 @@ test('idioma: el resumen de /compact se pide en el idioma del usuario, no en esp
   const path = require('path');
   const src = fs.readFileSync(path.join(__dirname, '..', 'agent', 'agent.js'), 'utf8');
   ok(!/Responde ÚNICAMENTE con el resumen, en español/.test(src), 'no puede fijar el español');
-  ok(/en el idioma del usuario/.test(src), 'tiene que seguir el idioma del usuario');
+  ok(
+    /Responde ÚNICAMENTE con el resumen, en el idioma del usuario/.test(src),
+    'la línea del prompt tiene que pedir el resumen en el idioma del usuario',
+  );
 });

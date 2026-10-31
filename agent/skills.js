@@ -24,6 +24,7 @@ const fs = require('fs');
 const fsp = require('fs/promises');
 const path = require('path');
 const crypto = require('crypto');
+const i18n = require('./i18n');
 
 let SKILLS_DIR = path.join(require('./datadir').dataDir(), 'skills');
 
@@ -242,16 +243,16 @@ function leerSkillsSync(dir) {
  * que no quede DENTRO de skillsDir(). Lanza 'id de skill inválido'.
  */
 function safeSkillDir(id) {
-  if (typeof id !== 'string' || !id || id !== id.trim()) throw new Error('id de skill inválido');
+  if (typeof id !== 'string' || !id || id !== id.trim()) throw new Error(i18n.t('skills.err.id'));
   // "." , ".." y cualquier id formado solo por puntos: en Windows un componente
   // con puntos finales se normaliza (C:\skills\... → C:\skills), así que borrar
   // «...» podía llevarse por delante el almacén entero
-  if (/^\.+$/.test(id)) throw new Error('id de skill inválido');
-  if (/[/\\\0]/.test(id)) throw new Error('id de skill inválido');
-  if (!/^[\w.-]+$/.test(id)) throw new Error('id de skill inválido');
+  if (/^\.+$/.test(id)) throw new Error(i18n.t('skills.err.id'));
+  if (/[/\\\0]/.test(id)) throw new Error(i18n.t('skills.err.id'));
+  if (!/^[\w.-]+$/.test(id)) throw new Error(i18n.t('skills.err.id'));
   const base = skillsDir();
   const dest = path.resolve(base, id);
-  if (!dest.startsWith(base + path.sep)) throw new Error('id de skill inválido');
+  if (!dest.startsWith(base + path.sep)) throw new Error(i18n.t('skills.err.id'));
   return dest;
 }
 
@@ -390,11 +391,11 @@ async function writeSource(id, source) {
 async function updateSkill(id) {
   const dir = safeSkillDir(id);
   const s = await getSkill(id);
-  if (!s || !s.source || !s.source.repo) throw new Error('La skill no tiene origen registrado (no es importada).');
+  if (!s || !s.source || !s.source.repo) throw new Error(i18n.t('skills.err.sin.origen'));
   const { repo, path: repoPath } = s.source;
   const { files } = await resolveRepoSkills(repo + (repoPath ? '/' + repoPath.split('/SKILL.md')[0] : ''));
   const f = files.find((x) => (repoPath && x.path === repoPath) || (!repoPath && x.path.includes('/' + id + '/')));
-  if (!f) throw new Error('No se encontró la skill en el repo de origen.');
+  if (!f) throw new Error(i18n.t('skills.err.no.encontrada'));
   const raw = await fetchSkillMarkdown(f.url);
   const fm = parseFrontMatter(raw);
   const changed = !fm || fm.meta.version !== s.version || fm.body !== s.body;
@@ -437,7 +438,7 @@ const MAX_SKILL_BYTES = 512 * 1024;
     después dejaba el tope sin aplicar durante la descarga. */
 async function readCapped(res, max) {
   const declared = Number(res.headers.get('content-length') || 0);
-  if (declared && declared > max) throw new Error('SKILL.md demasiado grande (máx. 512 KB).');
+  if (declared && declared > max) throw new Error(i18n.t('skills.err.grande'));
   const reader = res.body.getReader();
   const chunks = [];
   let total = 0;
@@ -449,7 +450,7 @@ async function readCapped(res, max) {
       try {
         reader.cancel().catch(() => {});
       } catch {}
-      throw new Error('SKILL.md demasiado grande (máx. 512 KB).');
+      throw new Error(i18n.t('skills.err.grande'));
     }
     chunks.push(value);
   }
@@ -494,7 +495,8 @@ async function resolveRepoSkills(repo) {
       sha: f.sha,
       url: `https://raw.githubusercontent.com/${owner}/${name}/${branch}/${f.path.split('/').map(encodeURIComponent).join('/')}`,
     }));
-  if (!files.length) throw new Error('No se encontró ningún SKILL.md en ese repo' + (prefix ? ` (bajo ${prefix})` : '') + '.');
+  if (!files.length)
+    throw new Error(i18n.t('skills.err.sin.skill', { prefijo: prefix ? i18n.t('skills.err.bajo', { prefijo: prefix }) : '' }));
   return { files, repo: `${owner}/${name}` };
 }
 
@@ -619,7 +621,7 @@ async function importFromGitHub(repo) {
     installed.push({ id, name: fm.meta.name, from: repoName });
   }
   invalidarIndice(); // aunque alguna fallara: lo instalado tiene que aparecer ya
-  if (!installed.length && !skipped.length) throw new Error('Los SKILL.md encontrados no tienen front-matter válido (name/description).');
+  if (!installed.length && !skipped.length) throw new Error(i18n.t('skills.err.sin.frontmatter'));
   return installed.concat(skipped);
 }
 
@@ -639,7 +641,7 @@ async function createSkill({ name, description, body }) {
   try {
     await fsp.mkdir(dest);
   } catch (e) {
-    if (e && e.code === 'EEXIST') throw new Error(`Ya existe una skill con el id «${slug}»: elige otro nombre o bórrala antes de crearla.`);
+    if (e && e.code === 'EEXIST') throw new Error(i18n.t('skills.err.existe', { id: slug }));
     // el almacén pudo desaparecer a mitad de sesión (el usuario borró la carpeta): se recrea
     if (e && e.code === 'ENOENT') await fsp.mkdir(dest, { recursive: true });
     else throw e;

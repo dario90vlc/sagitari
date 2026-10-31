@@ -14,6 +14,7 @@
    ============================================================================ */
 
 const fs = require('fs');
+const i18n = require('./i18n');
 
 const MAX_ARCHIVOS = 12; // archivos que entran en el diff
 const MAX_LINEAS_POR_ARCHIVO = 160; // líneas de cambio por archivo (con contexto)
@@ -438,7 +439,7 @@ function diffEstructurado(workspace, opts = {}, owner = '') {
 function archivoRevertir(workspace, archivo, owner = '') {
   const k = claveDueno(workspace, owner);
   const mapa = guardados.get(k);
-  if (!mapa || !mapa.size) return { ok: false, error: 'no hay ningún cambio de este turno que revertir' };
+  if (!mapa || !mapa.size) return { ok: false, error: i18n.t('cambios.err.nada') };
   const clave = normalRuta(archivo);
   let abs = null;
   for (const [a] of mapa) {
@@ -447,13 +448,13 @@ function archivoRevertir(workspace, archivo, owner = '') {
       break;
     }
   }
-  if (!abs) return { ok: false, error: `«${String(archivo)}» no forma parte de los cambios de este turno` };
+  if (!abs) return { ok: false, error: i18n.t('cambios.err.fuera.turno', { archivo: String(archivo) }) };
 
   const no = noRestaurables.get(k);
   if (no && no.has(abs)) {
     return {
       ok: false,
-      error: `no puedo revertir «${nombreRel(raizDe(k, abs, workspace), abs)}»: no se pudo leer antes (es binario o demasiado grande) y escribir la pre-imagen lo dejaría peor`,
+      error: i18n.t('cambios.err.no.leido', { archivo: nombreRel(raizDe(k, abs, workspace), abs) }),
     };
   }
   /* Solo se toca lo que está DENTRO de la raíz declarada de la ruta (el espacio de
@@ -461,7 +462,7 @@ function archivoRevertir(workspace, archivo, owner = '') {
      entrada fuera de esa raíz no se restaura ni aunque esté en el mapa. */
   const raiz = raizDe(k, abs, workspace);
   if (!dentroDelEspacio(raiz, abs))
-    return { ok: false, error: `«${nombreRel(raiz, abs)}» está fuera del espacio de trabajo: no lo toco` };
+    return { ok: false, error: i18n.t('cambios.err.fuera', { archivo: nombreRel(raiz, abs) }) };
 
   const antes = mapa.get(abs);
   const rel = nombreRel(raiz, abs);
@@ -472,7 +473,7 @@ function archivoRevertir(workspace, archivo, owner = '') {
       fs.writeFileSync(abs, antes, 'utf8');
     }
   } catch (e) {
-    return { ok: false, error: `no pude escribir «${rel}»: ${String((e && e.message) || e)}` };
+    return { ok: false, error: i18n.t('cambios.err.escribir', { archivo: rel, motivo: String((e && e.message) || e) }) };
   }
   mapa.delete(abs);
   if (no) no.delete(abs);

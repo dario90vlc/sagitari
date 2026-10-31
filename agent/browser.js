@@ -489,7 +489,7 @@ class Browser {
   async switchProfile(profile) {
     const id = profileId(profile);
     const label = String(profile || 'default');
-    if (id === this.profile && this.ws) return `OK: ya estás en el perfil «${label}».`;
+    if (id === this.profile && this.ws) return i18n.t('nav.res.perfil.ya', { perfil: label });
     const teniaSocket = !!this.ws;
     if (teniaSocket) {
       try {
@@ -498,7 +498,7 @@ class Browser {
       try {
         this.ws.close();
       } catch {}
-      this._rejectPending('Cambiando de perfil.');
+      this._rejectPending(i18n.t('nav.res.perfil.cambiando'));
     }
     // Matar el árbol ANTES de olvidar el PID: si solo se descarta, el proceso sigue vivo
     // con el perfil viejo y ya nadie lo cerrará. Con el socket vivo es seguro el nuestro
@@ -523,7 +523,7 @@ class Browser {
     this.browserPid = null;
     this.profile = id;
     this.profileDir = ensureProfileDir(profile); // el dir se deriva del nombre original, no del id ya hasheado
-    return `OK: perfil activo → «${label}». Se abrirá (con sus propias cookies y sesiones) en el próximo launch.`;
+    return i18n.t('nav.res.perfil.activo', { perfil: label });
   }
 
   // ---------- discovery / connection ----------
@@ -627,7 +627,7 @@ class Browser {
       this.child = null;
       this.browserPid = null;
       this._sessions.clear();
-      this._rejectPending('Navegador desconectado.');
+      this._rejectPending(i18n.t('nav.desconectado'));
     });
     from.on('error', () => {
       /* se cierra por `end`; no se deja una excepción no capturada */
@@ -638,7 +638,7 @@ class Browser {
       puede abrir un diálogo y entonces el renderer deja de acusar recibo). */
   send(method, params = {}, sessionId, opts = {}) {
     return new Promise((resolve, reject) => {
-      if (!this.ws) return reject(new Error('Navegador no iniciado. Usa browser_control action=launch.'));
+      if (!this.ws) return reject(new Error(i18n.t('nav.no.iniciado')));
       const id = ++this._id;
       // el temporizador se cancela al resolverse: si no, cada comando CDP dejaba
       // un timer vivo 30 s más (cientos en una sesión de automatización larga)
@@ -756,12 +756,19 @@ class Browser {
     switch (method) {
       case 'Runtime.consoleAPICalled': {
         const args = (params.args || []).map((a) => (a.value !== undefined ? a.value : a.description || a.type));
-        push(params.type === 'error' ? 'error' : params.type === 'warning' ? 'aviso' : 'consola', args.join(' '));
+        push(
+          params.type === 'error' ? 'error' : params.type === 'warning' ? i18n.t('nav.log.aviso') : i18n.t('nav.log.consola'),
+          args.join(' '),
+        );
         break;
       }
       case 'Runtime.exceptionThrown': {
         const d = params.exceptionDetails || {};
-        push('excepción', (d.exception && (d.exception.description || d.exception.value)) || d.text || 'error de la página', d.url);
+        push(
+          i18n.t('nav.log.excepcion'),
+          (d.exception && (d.exception.description || d.exception.value)) || d.text || i18n.t('nav.log.error.pagina'),
+          d.url,
+        );
         break;
       }
       case 'Log.entryAdded': {
@@ -775,7 +782,7 @@ class Browser {
         break;
       }
       case 'Network.loadingFailed':
-        push('red', params.errorText || 'petición fallida');
+        push(i18n.t('nav.log.red'), params.errorText || i18n.t('nav.log.peticion.fallida'));
         break;
       case 'Page.javascriptDialogOpening':
         this._dialog = { type: params.type || 'alert', message: params.message || '', url: params.url || '' };
@@ -795,17 +802,25 @@ class Browser {
         break;
       case 'Browser.downloadWillBegin':
       case 'Page.downloadWillBegin':
-        this._downloads.push({ archivo: params.suggestedFilename || 'archivo', estado: 'descargando', ruta: '' });
+        this._downloads.push({
+          archivo: params.suggestedFilename || i18n.t('nav.log.archivo'),
+          estado: i18n.t('nav.log.descargando'),
+          ruta: '',
+        });
         if (this._downloads.length > 20) this._downloads.shift();
         break;
       case 'Browser.downloadProgress':
       case 'Page.downloadProgress': {
         const d = this._downloads[this._downloads.length - 1];
         if (d) {
-          d.estado = params.state === 'completed' ? 'completada' : params.state || d.estado;
+          d.estado = params.state === 'completed' ? i18n.t('nav.log.completada') : params.state || d.estado;
           if (params.filePath) d.ruta = params.filePath;
         }
-        if (params.state === 'completed') push('descarga', `${d ? d.archivo : 'archivo'} guardada en ${this.downloadDir}`);
+        if (params.state === 'completed')
+          push(
+            i18n.t('nav.log.descarga'),
+            i18n.t('nav.log.guardada', { archivo: d ? d.archivo : i18n.t('nav.log.archivo'), ruta: this.downloadDir }),
+          );
         break;
       }
       default:
@@ -846,7 +861,7 @@ class Browser {
   // The tab every action operates on: the selected one, or the first alive.
   async currentSession() {
     const list = await this.pages();
-    if (!list.length) throw new Error('No hay pestañas abiertas. Usa action=launch o action=new_tab.');
+    if (!list.length) throw new Error(i18n.t('nav.res.pestanas.nada'));
     let page = list.find((p) => p.id === this.activeId);
     if (!page) {
       const stale = this.activeId;
@@ -1016,7 +1031,7 @@ class Browser {
       if (this.ws) {
         this.ws = null;
         this._sessions.clear();
-        this._rejectPending('Navegador desconectado.');
+        this._rejectPending(i18n.t('nav.desconectado'));
       }
     });
     return child;
@@ -1049,7 +1064,7 @@ class Browser {
         return this.navigate(url);
       }
       const n = (await this.pages()).length;
-      return `OK: el navegador ya está abierto (${n} pestaña${n === 1 ? '' : 's'}). Usa navigate, new_tab, select_tab…`;
+      return i18n.t(n === 1 ? 'nav.res.launch.ya.una' : 'nav.res.launch.ya.varias', { n });
     }
 
     // 2) Limpia un Chrome huérfano que siga vivo con nuestro perfil (antes se
@@ -1106,7 +1121,7 @@ class Browser {
       this.activeId = list[0].id;
       if (url) return this.navigate(url); // navigate ya espera la carga (waitReady)
     }
-    return `OK: navegador abierto (${used})${url ? ', navegando a ' + url : ''}.`;
+    return i18n.t('nav.res.launch.ok', { navegador: used, url: url ? i18n.t('nav.res.navegando', { url }) : '' });
   }
 
   kill() {
@@ -1127,7 +1142,7 @@ class Browser {
     this.activeId = null;
     this._sessions.clear();
     this._lastElements = null;
-    this._rejectPending('Navegador cerrado.');
+    this._rejectPending(i18n.t('nav.cerrado'));
   }
 
   _matarArbol(pid) {
@@ -1152,7 +1167,10 @@ class Browser {
        instante diciendo qué pasa y cómo salir. */
     if (this._dialog)
       throw new Error(
-        `la página tiene un diálogo abierto («${this._dialog.type}»: ${(this._dialog.message || '').slice(0, 80)}) y está pausada. Contéstalo con action=dialog accept:true|false.`,
+        i18n.t('nav.res.dialogo.pausa', {
+          tipo: this._dialog.type,
+          mensaje: (this._dialog.message || '').slice(0, 80),
+        }),
       );
     const r = await this.send('Runtime.evaluate', { expression, returnByValue: true, awaitPromise: true, userGesture: true }, sessionId);
     if (r.exceptionDetails) throw new Error(r.exceptionDetails.exception?.description || 'JS error');
@@ -1249,7 +1267,11 @@ class Browser {
     try {
       title = (await this.evalJs('document.title', sessionId)) || '';
     } catch {}
-    return `OK: en «${title || u}»${loaded ? '' : ' (la página sigue cargando)'}\nURL: ${u}`;
+    return i18n.t('nav.res.navegar', {
+      pagina: title || u,
+      cargando: loaded ? '' : i18n.t('nav.res.cargando'),
+      url: u,
+    });
   }
 
   // Captura en JPEG y acotada (máx. 1280 px de ancho, 2400 de alto): un PNG a
@@ -1316,10 +1338,10 @@ class Browser {
   async _resolve(want, sessionId, ownerId, opts = {}) {
     if (want.index !== undefined && want.index !== null) {
       if (this._invOwner && ownerId && this._invOwner !== ownerId) {
-        return { error: 'el inventario que tienes es de otra ejecución del agente. Ejecuta action=elements otra vez antes de clicar.' };
+        return { error: i18n.t('nav.res.inventario.otra') };
       }
       const el = (this._lastElements || [])[Number(want.index)];
-      if (!el) return { error: `índice ${want.index} inválido. Ejecuta action=elements para ver los índices actuales.` };
+      if (!el) return { error: i18n.t('nav.res.indice', { indice: want.index }) };
       const js = await this.evalJs(
         `(async () => {
         const el = window.__sagFind(${JSON.stringify(el.fp)}, ${JSON.stringify(el.name || '')}, ${JSON.stringify(el.role || '')})
@@ -1334,7 +1356,7 @@ class Browser {
     }
     const sel = want.selector ? String(want.selector) : null;
     const txt = want.text ? String(want.text) : null;
-    if (!sel && !txt) return { error: 'necesito index, selector o text para saber sobre qué actuar' };
+    if (!sel && !txt) return { error: i18n.t('nav.res.falta.objetivo') };
     const nth = Number(want.nth) > 0 ? Number(want.nth) : 1;
     const js = await this.evalJs(
       `(async () => {
@@ -1374,10 +1396,10 @@ class Browser {
   _parsePoint(raw) {
     try {
       const p = typeof raw === 'string' ? JSON.parse(raw) : raw;
-      if (!p) return { error: 'no pude localizar el elemento' };
+      if (!p) return { error: i18n.t('nav.res.no.localizado') };
       return p;
     } catch {
-      return { error: 'no pude localizar el elemento' };
+      return { error: i18n.t('nav.res.no.localizado') };
     }
   }
 
@@ -1388,10 +1410,10 @@ class Browser {
       const ok = await this.evalJs('(() => { const el = window.__sagSel; if (!el) return false; el.click(); return true; })()', sessionId);
       await this.settle(sessionId, 1200);
       this._lastElements = null;
-      return ok ? null : 'el elemento ya no está en la página';
+      return ok ? null : i18n.t('nav.res.elemento.fuera');
     }
     if (!p.hits) {
-      return `algo tapa ese elemento («${p.blockedBy || 'desconocido'}»). Ciérralo o acepta el aviso, vuelve a hacer elements y reintenta (o usa force:true para pulsar a la fuerza).`;
+      return i18n.t('nav.res.tapado', { por: p.blockedBy || i18n.t('nav.res.tapado.desconocido') });
     }
     /* El acuse de recibo de un evento de ratón se lo queda el renderer. Si el clic abre
        un `confirm()`, la página se pausa y Chrome NUNCA acusa: esperar los 30 s por
@@ -1440,9 +1462,9 @@ class Browser {
     }
     if (!data.elements || !data.elements.length) {
       return (
-        'Sin elementos interactivos visibles.' +
-        (data.frames ? ` La página tiene ${data.frames} iframe(s) de OTRO origen (no se pueden leer desde aquí).` : '') +
-        ' Prueba action=screenshot (con selector para una zona) o action=content.'
+        i18n.t('nav.res.sin.elementos') +
+        (data.frames ? i18n.t('nav.res.sin.elementos.marcos', { n: data.frames }) : '') +
+        i18n.t('nav.res.sin.elementos.prueba')
       );
     }
     this._lastElements = data.elements; // índices válidos hasta la próxima acción que cambie la página
@@ -1453,20 +1475,28 @@ class Browser {
       if (e.name) bits.push(`"${e.name}"`);
       if (e.id) bits.push(`#${e.id}`);
       if (e.testid) bits.push(`[testid=${e.testid}]`);
-      if (e.frame) bits.push(`(en marco: ${e.frame})`);
+      if (e.frame) bits.push(i18n.t('nav.res.marco', { marco: e.frame }));
       if (e.type && e.type !== 'text') bits.push(e.type);
-      if (e.disabled) bits.push('DESHABILITADO');
-      if (e.required) bits.push('obligatorio');
-      if (e.checked !== undefined && (e.role === 'checkbox' || e.role === 'radio')) bits.push(e.checked ? 'marcado' : 'sin marcar');
-      if (e.value && e.role === 'select') bits.push(`valor actual: ${e.value}`);
-      if (e.off) bits.push('[fuera de pantalla]');
+      if (e.disabled) bits.push(i18n.t('nav.res.deshabilitado'));
+      if (e.required) bits.push(i18n.t('nav.res.obligatorio'));
+      if (e.checked !== undefined && (e.role === 'checkbox' || e.role === 'radio'))
+        bits.push(e.checked ? i18n.t('nav.res.marcado') : i18n.t('nav.res.sin.marcar'));
+      if (e.value && e.role === 'select') bits.push(i18n.t('nav.res.valor.actual', { valor: e.value }));
+      if (e.off) bits.push(i18n.t('nav.res.fuera.pantalla'));
       return bits.join(' ');
     });
     const recorte =
       data.total > data.elements.length
-        ? ` (mostrando ${data.elements.length} de ${data.total}: usa content, search de la página o un selector más concreto)`
+        ? i18n.t('nav.res.recorte', { vistos: data.elements.length, total: data.total })
         : '';
-    return `Página: ${data.title}\nURL: ${data.url}\nElementos interactivos: ${data.total}${recorte}${data.frames ? `  ·  ${data.frames} iframe(s) de otro origen` : ''}\n${lines.join('\n')}\n\nUsa action=click_index con estos índices (si la página cambió, el clic vuelve a buscar el MISMO elemento por su huella, así que también vale tras un scroll), o action=click con text/selector.`;
+    return i18n.t('nav.res.inventario', {
+      titulo: data.title,
+      url: data.url,
+      total: data.total,
+      recorte,
+      marcos: data.frames ? i18n.t('nav.res.inventario.marcos', { n: data.frames }) : '',
+      lineas: lines.join('\n'),
+    });
   }
 
   /** Etiqueta del elemento que ocupa ese índice en el último inventario.
@@ -1492,7 +1522,14 @@ class Browser {
     await this.settle(sessionId, 1200); // deja reaccionar (menús, modales, navegación)
     // la página puede haber cambiado: los índices anteriores ya no son fiables
     this._lastElements = null;
-    return `OK: clic en ${p.role} «${p.name}» (${p.x},${p.y})${p.estable === false ? ' — el elemento se estaba moviendo, comprueba el resultado' : ''}${opts.force ? ' [forzado]' : ''}`;
+    return i18n.t('nav.res.clic', {
+      rol: p.role,
+      nombre: p.name,
+      x: p.x,
+      y: p.y,
+      movido: p.estable === false ? i18n.t('nav.res.clic.movido') : '',
+      forzado: opts.force ? i18n.t('nav.res.forzado') : '',
+    });
   }
 
   // ---------- interaction ----------
@@ -1510,8 +1547,15 @@ class Browser {
     const mal = await this._clickAt(p, sessionId, opts);
     if (mal) return i18n.err('nav.motivo', { motivo: mal });
     await this.settle(sessionId, 1500); // deja reaccionar a la página (menús, modales, navegación)
-    const varias = p.candidatos > 1 ? ` (había ${p.candidatos} coincidencias; he pulsado la ${p.candidato}: usa nth para otra)` : '';
-    return `OK: clic en ${p.role} «${p.name}» en (${p.x},${p.y})${varias}${opts.force ? ' [forzado]' : ''}`;
+    const varias = p.candidatos > 1 ? i18n.t('nav.res.varias', { n: p.candidatos, cual: p.candidato }) : '';
+    return i18n.t('nav.res.clic.en', {
+      rol: p.role,
+      nombre: p.name,
+      x: p.x,
+      y: p.y,
+      varias,
+      forzado: opts.force ? i18n.t('nav.res.forzado') : '',
+    });
   }
 
   /** Una tecla de texto con sus eventos reales: los sitios que validan al teclear
@@ -1595,8 +1639,12 @@ class Browser {
       this._lastElements = null; // enviar puede haber cambiado la página
     }
     return (
-      `OK: escrito en ${p.role} «${p.name}»${submit ? ' y Enter pulsado' : ''}. Valor del campo ahora: «${String(quedo || '').slice(0, 120)}»` +
-      (recorte ? '\nAviso: el campo se quedó con menos texto del enviado (maxlength, máscara o validación en vivo).' : '')
+      i18n.t('nav.res.escrito', {
+        rol: p.role,
+        nombre: p.name,
+        enter: submit ? i18n.t('nav.res.enter') : '',
+        valor: String(quedo || '').slice(0, 120),
+      }) + (recorte ? i18n.t('nav.res.escrito.recorte') : '')
     );
   }
 
@@ -1635,7 +1683,7 @@ class Browser {
     if (r.error) return i18n.err('nav.select.opciones', { motivo: r.error, opciones: (r.opciones || []).join(' | ') });
     await this.settle(sessionId, 600);
     this._lastElements = null;
-    return `OK: elegido «${r.elegido}» (valor ${r.valor}).`;
+    return i18n.t('nav.res.elegido', { opcion: r.elegido, valor: r.valor });
   }
 
   /** Marcar/desmarcar una casilla o un radio (pulsando de verdad: los frameworks
@@ -1665,8 +1713,8 @@ class Browser {
     }
     await this.settle(sessionId, 500);
     this._lastElements = null;
-    const estado = r.ahora ? 'marcado' : 'sin marcar';
-    return r.antes === r.ahora ? `OK: «${p.name}» ya estaba ${estado}.` : `OK: «${p.name}» ahora está ${estado}.`;
+    const estado = r.ahora ? i18n.t('nav.res.marcado') : i18n.t('nav.res.sin.marcar');
+    return i18n.t(r.antes === r.ahora ? 'nav.res.check.ya' : 'nav.res.check.ahora', { nombre: p.name, estado });
   }
 
   /** Pasar el ratón por encima: menús que se despliegan, tooltips, previsualizaciones. */
@@ -1675,7 +1723,7 @@ class Browser {
     if (p.error) return i18n.err('nav.motivo', { motivo: p.error });
     await this.send('Input.dispatchMouseEvent', { type: 'mouseMoved', x: p.x, y: p.y }, sessionId);
     await this.settle(sessionId, 800);
-    return `OK: ratón sobre ${p.role} «${p.name}». Si se ha desplegado un menú, haz action=elements para verlo.`;
+    return i18n.t('nav.res.hover', { rol: p.role, nombre: p.name });
   }
 
   /** Atajo de teclado: Ctrl+Shift+T, Alt+ArrowLeft, Escape… (con modificadores reales). */
@@ -1688,7 +1736,7 @@ class Browser {
     await this.send('Input.dispatchKeyEvent', { type: 'keyUp', ...def }, sessionId);
     await this.settle(sessionId, 900);
     this._lastElements = null;
-    return `OK: ${spec} pulsado.`;
+    return i18n.t('nav.res.atajo', { atajo: spec });
   }
 
   /** Subir archivos a un <input type=file> (aunque esté oculto tras un botón). */
@@ -1717,7 +1765,11 @@ class Browser {
     }
     await this.settle(sessionId, 1000);
     this._lastElements = null;
-    return `OK: ${lista.length} archivo(s) puestos en «${p.name}»: ${lista.map((f) => path.basename(f)).join(', ')}.`;
+    return i18n.t('nav.res.subido', {
+      n: lista.length,
+      nombre: p.name,
+      lista: lista.map((f) => path.basename(f)).join(', '),
+    });
   }
 
   /**
@@ -1756,7 +1808,11 @@ class Browser {
     }
     if (visto) {
       const estado = await this._pageState(sessionId);
-      return `OK: cumplido en ${Date.now() - t0} ms (${negar ? 'ya no está' : 'ya está'}). Ahora: ${estado}`;
+      return i18n.t('nav.res.cumplido', {
+        ms: Date.now() - t0,
+        estado: negar ? i18n.t('nav.res.espera.no') : i18n.t('nav.res.espera.ya'),
+        pagina: estado,
+      });
     }
     const estado = await this._pageState(sessionId);
     return i18n.err('nav.esperar.timeout', {
@@ -1776,7 +1832,7 @@ class Browser {
       const s = JSON.parse(raw);
       return `«${s.title}» — ${s.url} — ${s.texto}`;
     } catch {
-      return '(no pude leer el estado de la página)';
+      return i18n.t('nav.res.estado.ilegible');
     }
   }
 
@@ -1788,14 +1844,23 @@ class Browser {
     if (args.clear) this._logs = [];
     if (!items.length)
       return (
-        'Sin mensajes de consola ni errores de red desde que se abrió la pestaña.' +
-        (this._downloads.length ? `\nDescargas: ${this._downloads.map((d) => d.archivo + ' (' + d.estado + ')').join(', ')}` : '')
+        i18n.t('nav.res.logs.vacio') +
+        (this._downloads.length ? i18n.t('nav.res.logs.descargas', { lista: this._descargasTexto() }) : '')
       );
     const lineas = items.map((l) => `[${l.tipo}] ${l.texto}${l.url ? '  ← ' + l.url : ''}`);
-    const descargas = this._downloads.length
-      ? `\nDescargas: ${this._downloads.map((d) => `${d.archivo} (${d.estado})${d.ruta ? ' en ' + d.ruta : ''}`).join('; ')}`
-      : '';
-    return `Últimos ${items.length} mensajes:\n${lineas.join('\n')}${descargas}`;
+    const descargas = this._downloads.length ? i18n.t('nav.res.logs.descargas', { lista: this._descargasTexto() }) : '';
+    return i18n.t('nav.res.logs.ultimos', { n: items.length, lineas: lineas.join('\n'), descargas });
+  }
+
+  /** Descargas en una línea: archivo (estado) y dónde cayó. */
+  _descargasTexto() {
+    return this._downloads
+      .map((d) =>
+        d.ruta
+          ? i18n.t('nav.res.logs.descarga.ruta', { archivo: d.archivo, estado: d.estado, ruta: d.ruta })
+          : `${d.archivo} (${d.estado})`,
+      )
+      .join(', ');
   }
 
   /** Volver, avanzar o recargar usando el historial REAL de la pestaña. */
@@ -1813,13 +1878,23 @@ class Browser {
     const loaded = await this.waitReady(sessionId, 10000);
     this._lastElements = null;
     const target = (h.entries || [])[idx] || {};
-    return `OK: ${dir === 'reload' ? 'recargada' : dir === 'back' ? 'atrás' : 'adelante'}${loaded ? '' : ' (sigue cargando)'}${dir === 'reload' ? '' : ' → ' + (target.title || '') + ' ' + (target.url || '')}`;
+    const accion =
+      dir === 'reload'
+        ? i18n.t('nav.res.historial.recarga')
+        : dir === 'back'
+          ? i18n.t('nav.res.historial.atras')
+          : i18n.t('nav.res.historial.adelante');
+    return i18n.t('nav.res.historial', {
+      accion,
+      cargando: loaded ? '' : i18n.t('nav.res.historial.cargando'),
+      destino: dir === 'reload' ? '' : i18n.t('nav.res.historial.destino', { titulo: target.title || '', url: target.url || '' }),
+    });
   }
 
   /** Contesta a un diálogo de la página (alert/confirm/prompt/beforeunload). */
   async dialog(args) {
     const d = this._dialog || this._dialogReciente;
-    if (!d) return 'No hay ningún diálogo abierto ahora mismo.';
+    if (!d) return i18n.t('nav.res.sin.dialogo');
     const accept = args.accept !== false;
     if (this._dialog) {
       try {
@@ -1835,13 +1910,17 @@ class Browser {
     }
     this._dialog = null;
     this._dialogReciente = null;
-    return `OK: diálogo «${d.type}» ${accept ? 'aceptado' : 'cancelado'}${d.message ? ' («' + d.message.slice(0, 120) + '»)' : ''}.`;
+    return i18n.t('nav.res.dialogo', {
+      tipo: d.type,
+      respuesta: accept ? i18n.t('nav.res.dialogo.aceptado') : i18n.t('nav.res.dialogo.cancelado'),
+      mensaje: d.message ? i18n.t('nav.res.dialogo.mensaje', { mensaje: d.message.slice(0, 120) }) : '',
+    });
   }
 
   /** Aviso para pegar al resultado de cualquier acción si hay un diálogo bloqueando. */
   _dialogNote(d = this._dialog) {
     if (!d) return '';
-    return `\nATENCIÓN: la página tiene un diálogo abierto («${d.type}»: ${(d.message || '').slice(0, 120)}) que la bloquea. Contéstalo con action=dialog accept:true|accept:false (y text para un prompt).`;
+    return i18n.t('nav.res.aviso.dialogo', { tipo: d.type, mensaje: (d.message || '').slice(0, 120) });
   }
 
   // ---------- dispatcher ----------
@@ -1924,7 +2003,7 @@ class Browser {
           await this.send('Browser.close');
         } catch {}
         this.kill();
-        return 'OK: navegador cerrado.';
+        return i18n.t('nav.res.cerrar');
       }
       if (!this.ws) {
         // Con la tubería no se reutiliza una instancia anterior: se lanza una nueva
@@ -1943,7 +2022,7 @@ class Browser {
           this._lastElements = null;
           this._invOwner = null; // otra pestaña: otros índices
           if (args.url) await this.waitReady(await this.attach(targetId));
-          return `OK: nueva pestaña abierta${args.url ? ' en ' + args.url : ''} y seleccionada.`;
+          return i18n.t('nav.res.nueva.pestana', { url: args.url ? i18n.t('nav.res.nueva.pestana.url', { url: args.url }) : '' });
         }
 
         case 'select_tab': {
@@ -1967,7 +2046,7 @@ class Browser {
           this.activeId = page.id;
           this._lastElements = null;
           this._invOwner = null; // otra pestaña: otros índices
-          return `OK: pestaña activa → «${page.title}» (${page.url}).`;
+          return i18n.t('nav.res.pestana.activa', { titulo: page.title, url: page.url });
         }
 
         case 'close_tab': {
@@ -1991,7 +2070,7 @@ class Browser {
             this._lastElements = null;
             this._invOwner = null; // otra pestaña: otros índices
           }
-          return `OK: pestaña cerrada. Activas: ${(await this.pages()).length}.`;
+          return i18n.t('nav.res.pestana.cerrada', { n: (await this.pages()).length });
         }
 
         case 'elements': {
@@ -2002,7 +2081,7 @@ class Browser {
           if (args.screenshot === true) {
             try {
               const dataUrl = await this.screenshot(sessionId, false);
-              return { text: inv + '\n[Captura de la página adjunta para análisis visual]', images: [dataUrl] };
+              return { text: inv + i18n.t('nav.res.captura.adjunta'), images: [dataUrl] };
             } catch {}
           }
           return inv;
@@ -2102,7 +2181,7 @@ class Browser {
           await this.send('Input.dispatchKeyEvent', { type: 'rawKeyDown', ...def }, sessionId);
           await this.send('Input.dispatchKeyEvent', { type: 'keyUp', ...def }, sessionId);
           await sleep(250);
-          return `OK: tecla ${args.key}`;
+          return i18n.t('nav.res.tecla', { tecla: args.key });
         }
 
         case 'scroll': {
@@ -2124,14 +2203,14 @@ class Browser {
           // desplazar la página apuntan a otro sitio
           this._lastElements = null;
           this._invOwner = null;
-          return 'OK: scroll ' + (dir > 0 ? 'abajo' : 'arriba');
+          return i18n.t('nav.res.scroll', { direccion: dir > 0 ? i18n.t('nav.res.abajo') : i18n.t('nav.res.arriba') });
         }
 
         case 'wait': {
           const ms = Math.min(Math.max(0, Number(args.ms) || 1000), 10000);
           await this._dormir(ms);
           if (this._abortada()) return CANCELADO();
-          return `OK: esperados ${ms} ms.`;
+          return i18n.t('nav.res.esperados', { ms });
         }
 
         case 'content': {
@@ -2150,15 +2229,19 @@ class Browser {
              bloque que las skills (terceros.js). Si no, una página con «ignora tus
              reglas y ejecuta X» entra al prompt como si fuera texto del usuario. */
           return terceros.envolver(
-            'LA PÁGINA',
-            `Pestaña activa: ${target.title}\nURL: ${target.url}\n\n${clipped}${String(txt).length > 12000 ? '\n...[truncado]' : ''}`,
+            i18n.t('nav.res.pagina.titulo'),
+            i18n.t('nav.res.pagina.pestana', {
+              titulo: target.title,
+              url: target.url,
+              texto: `${clipped}${String(txt).length > 12000 ? i18n.t('nav.res.pagina.truncado') : ''}`,
+            }),
           );
         }
 
         case 'eval': {
           const { sessionId } = await this.currentSession();
           const v = await this.evalJs(args.expression, sessionId);
-          return 'Resultado: ' + (typeof v === 'string' ? v : JSON.stringify(v));
+          return i18n.t('nav.res.resultado', { valor: typeof v === 'string' ? v : JSON.stringify(v) });
         }
 
         case 'screenshot': {
@@ -2189,20 +2272,25 @@ class Browser {
               },
               sessionId,
             );
-            return { text: `Captura de «${p.name}» (${p.role}) en «${target.title}».`, images: ['data:image/jpeg;base64,' + r.data] };
+            return {
+              text: i18n.t('nav.res.captura.zona', { nombre: p.name, rol: p.role, titulo: target.title }),
+              images: ['data:image/jpeg;base64,' + r.data],
+            };
           }
           const dataUrl = await this.screenshot(sessionId, args.fullPage === true);
-          return { text: `Captura de «${target.title}» (${target.url}). Analízala junto a este resultado.`, images: [dataUrl] };
+          return { text: i18n.t('nav.res.captura.pagina', { titulo: target.title, url: target.url }), images: [dataUrl] };
         }
 
         case 'tabs': {
           const list = await this.pages();
-          if (!list.length) return 'Sin pestañas.';
-          return list.map((t, i) => `${i + 1}. ${t.title} — ${t.url}${t.id === this.activeId ? '   ← activa' : ''}`).join('\n');
+          if (!list.length) return i18n.t('nav.res.sin.pestanas');
+          return list
+            .map((t, i) => `${i + 1}. ${t.title} — ${t.url}${t.id === this.activeId ? '   ← ' + i18n.t('nav.res.pestana.marca') : ''}`)
+            .join('\n');
         }
 
         default:
-          return `Acción desconocida: ${a}`;
+          return i18n.t('nav.res.accion.desconocida', { accion: a });
       }
     } catch (e) {
       // La sesión CDP cacheada de una pestaña puede dejar de existir (el usuario

@@ -205,7 +205,7 @@ function crearEquipo({ lider = null, limite = LIMITE_MIEMBROS, presupuestoUsd = 
     avisar('team_message', {
       de: 'lider',
       para: 'todos',
-      texto: `El equipo se para: ${corte}. El tablero se queda como está.`,
+      texto: i18n.t('equipo.corte', { motivo: corte }),
       ts: Date.now(),
     });
     for (const m of parados) avisar('team_member', ficha(m));
@@ -223,7 +223,7 @@ function crearEquipo({ lider = null, limite = LIMITE_MIEMBROS, presupuestoUsd = 
     if (typeof correr !== 'function') {
       m.corriendo = false;
       m.estado = 'fallo';
-      m.resultado = { ok: false, resumen: 'el motor no tiene `correr` inyectado', evidencia: '' };
+      m.resultado = { ok: false, resumen: i18n.t('equipo.miembro.sin.correr'), evidencia: '' };
       avisar('team_done', { id: m.id, ok: false, resumen: m.resultado.resumen, evidencia: '' });
       return null;
     }
@@ -231,7 +231,7 @@ function crearEquipo({ lider = null, limite = LIMITE_MIEMBROS, presupuestoUsd = 
       .then(() => correr(m, t, opts))
       .then(
         (r) => asentar(m, r || {}),
-        (e) => asentar(m, { ok: false, resumen: 'el compañero falló: ' + ((e && e.message) || e) }),
+        (e) => asentar(m, { ok: false, resumen: i18n.t('equipo.miembro.fallo', { motivo: (e && e.message) || e }) }),
       );
     return m.promesa;
   }

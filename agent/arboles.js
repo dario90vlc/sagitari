@@ -52,6 +52,7 @@ const path = require('path');
 const { spawn } = require('child_process');
 const { killTree } = require('./proc');
 const datadir = require('./datadir');
+const i18n = require('./i18n');
 
 const VIVEN = new Map(); // id -> { ws, dir, base }  (los que siguen en pie)
 
@@ -303,7 +304,7 @@ async function crear(ws, opts = {}) {
  * que el usuario pueda deshacer la fusión como cualquier otro cambio del turno.
  */
 async function fusionar(arbol, opts = {}) {
-  if (!arbol) return { ok: false, vacio: true, archivos: [], conflicto: 'no hay árbol' };
+  if (!arbol) return { ok: false, vacio: true, archivos: [], conflicto: i18n.t('arbol.fusion.sin.arbol') };
   const { ws, dir, base } = arbol;
   /* `git apply` corre en la RAÍZ DEL REPOSITORIO, no en el espacio de trabajo: desde una
      subcarpeta, git IGNORA los caminos del parche que caen fuera de ella y sale con código
@@ -313,7 +314,8 @@ async function fusionar(arbol, opts = {}) {
      contra la raíz del árbol, que es donde los caminos significan lo mismo. */
   const raiz = arbol.topLevel || ws;
   const add = await git(['add', '-A'], dir);
-  if (add.code !== 0) return { ok: false, archivos: [], conflicto: 'no se pudo preparar el árbol: ' + (add.stderr || add.stdout).trim() };
+  if (add.code !== 0)
+    return { ok: false, archivos: [], conflicto: i18n.t('arbol.fusion.preparar', { motivo: (add.stderr || add.stdout).trim() }) };
   /* `git add -A` RESPETA el `.gitignore` del proyecto, y eso dejaba fuera del parche —y en
      silencio— todo lo que el subagente escribiera dentro de una ruta ignorada: el parche
      salía vacío, la fusión decía «no hay cambios» y el árbol se descartaba con el trabajo
@@ -328,10 +330,15 @@ async function fusionar(arbol, opts = {}) {
     .join('/'); // git quiere «/»
   const addIgnorados = await git(['add', '-A', '-f', '--', rutaRel], dir);
   if (addIgnorados.code !== 0)
-    return { ok: false, archivos: [], conflicto: 'no se pudo preparar el árbol: ' + (addIgnorados.stderr || addIgnorados.stdout).trim() };
+    return {
+      ok: false,
+      archivos: [],
+      conflicto: i18n.t('arbol.fusion.preparar', { motivo: (addIgnorados.stderr || addIgnorados.stdout).trim() }),
+    };
 
   const diff = await git(['diff', '--cached', '--binary', base], dir, { timeout: 120000 });
-  if (diff.code !== 0) return { ok: false, archivos: [], conflicto: 'no se pudo calcular el parche: ' + (diff.stderr || '').trim() };
+  if (diff.code !== 0)
+    return { ok: false, archivos: [], conflicto: i18n.t('arbol.fusion.parche', { motivo: (diff.stderr || '').trim() }) };
   const parche = String(diff.stdout);
   if (!parche.trim()) return { ok: true, vacio: true, archivos: [], parche: '' };
 
@@ -361,7 +368,7 @@ async function fusionar(arbol, opts = {}) {
       ok: false,
       archivos,
       parche: tmp,
-      conflicto: (check.stderr || check.stdout || '').trim() || 'el parche no entra limpio',
+      conflicto: (check.stderr || check.stdout || '').trim() || i18n.t('arbol.fusion.conflicto'),
     };
   }
   if (opts.preparar) {
@@ -374,7 +381,7 @@ async function fusionar(arbol, opts = {}) {
     ok: apply.code === 0,
     archivos,
     parche: tmp,
-    conflicto: apply.code === 0 ? null : (apply.stderr || apply.stdout || '').trim() || 'git apply falló',
+    conflicto: apply.code === 0 ? null : (apply.stderr || apply.stdout || '').trim() || i18n.t('arbol.fusion.apply'),
   };
 }
 

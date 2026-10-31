@@ -33,6 +33,7 @@ const fs = require('fs');
 const path = require('path');
 const { EventEmitter } = require('events');
 const v2 = require('./memoria-v2');
+const i18n = require('./i18n');
 const { redactToolArgs } = require('./runlog');
 
 const CONFIG_DIR = require('./datadir').dataDir();
@@ -113,7 +114,7 @@ function load() {
     /* Error de E/S (EBUSY/EPERM transitorios de Windows: antivirus, otro proceso): NO
        significa "no hay memoria". Sin memoizar el resultado, la lectura se reintenta en
        la siguiente llamada (y `save()` no escribe hasta que funcione). */
-    lectura = { ok: false, tipo: 'io', error: 'no se pudo leer ' + MEMORY_FILE + ': ' + e.message };
+    lectura = { ok: false, tipo: 'io', error: i18n.t('memoria.err.leer', { archivo: MEMORY_FILE, motivo: e.message }) };
     console.error('memory.load: ' + lectura.error);
     return [];
   }
@@ -154,10 +155,8 @@ function load() {
          cambio, el original ya está a salvo y el almacén puede seguir). */
       bloqueado: !conservado,
       error:
-        'el fichero no se pudo interpretar (' +
-        e.message +
-        ')' +
-        (conservado ? '; se ha conservado una copia aparte' : ' y no se pudo conservar una copia aparte'),
+        i18n.t('memoria.err.ilegible', { motivo: e.message }) +
+        (conservado ? i18n.t('memoria.err.ilegible.conservado') : i18n.t('memoria.err.ilegible.sin.copia')),
     };
   }
   if (cache && cache.length) prune(); // poda automática al cargar (una vez por proceso)
@@ -424,9 +423,9 @@ function remove(id) {
   const bloqueado = bloqueo();
   if (bloqueado) return bloqueado;
   const m = load().find((x) => x.id === id);
-  if (!m) return { ok: false, error: 'recuerdo no encontrado' };
+  if (!m) return { ok: false, error: i18n.t('memoria.err.no.encontrado') };
   m.papelera = new Date().toISOString();
-  if (!guardar()) return { ok: false, error: 'no se pudo guardar el borrado' };
+  if (!guardar()) return { ok: false, error: i18n.t('memoria.err.guardar.borrado') };
   return { ok: true };
 }
 
@@ -435,7 +434,7 @@ function update(id, patch = {}) {
   const bloqueado = bloqueo();
   if (bloqueado) return bloqueado;
   const m = load().find((x) => x.id === id);
-  if (!m) return { ok: false, error: 'recuerdo no encontrado' };
+  if (!m) return { ok: false, error: i18n.t('memoria.err.no.encontrado') };
   if (patch.importance !== undefined) m.importance = clamp01(patch.importance);
   if (patch.confidence !== undefined) m.confidence = clamp01(patch.confidence);
   if (patch.text !== undefined) {
@@ -444,7 +443,7 @@ function update(id, patch = {}) {
     m.hash = v2.hashTexto(t); // la huella es del texto: si cambia el texto, cambia la huella
   }
   if (Array.isArray(patch.etiquetas)) m.etiquetas = [...new Set(patch.etiquetas.map(String).filter(Boolean))];
-  if (!guardar()) return { ok: false, error: 'no se pudo guardar el cambio' };
+  if (!guardar()) return { ok: false, error: i18n.t('memoria.err.guardar.cambio') };
   return { ok: true, memory: { ...m } };
 }
 
@@ -490,10 +489,10 @@ function restore(id) {
   const bloqueado = bloqueo();
   if (bloqueado) return bloqueado;
   const m = load().find((x) => x.id === id);
-  if (!m) return { ok: false, error: 'recuerdo no encontrado' };
+  if (!m) return { ok: false, error: i18n.t('memoria.err.no.encontrado') };
   m.papelera = null;
   m.lastUsed = new Date().toISOString();
-  if (!guardar()) return { ok: false, error: 'no se pudo guardar la restauración' };
+  if (!guardar()) return { ok: false, error: i18n.t('memoria.err.guardar.restauracion') };
   return { ok: true, memory: { ...m } };
 }
 
@@ -504,7 +503,7 @@ function trashEmpty() {
   const l = load();
   const borradas = l.filter((m) => m.papelera).length;
   cache = l.filter((m) => !m.papelera);
-  if (!guardar()) return { ok: false, error: 'no se pudo vaciar la papelera' };
+  if (!guardar()) return { ok: false, error: i18n.t('memoria.err.vaciar') };
   return { ok: true, borradas };
 }
 
@@ -534,14 +533,14 @@ function wipe() {
   trayFallo = false;
   if (!traySave()) {
     trayCache = bandejaAntes;
-    return { ok: false, error: 'no se pudo guardar el borrado; el almacén sigue en disco' };
+    return { ok: false, error: i18n.t('memoria.err.bloqueado') };
   }
   cache = [];
   lectura = { ok: true, tipo: 'ok', error: '' };
   /* Si el disco no aceptó el borrado, decir «borrado» es mentir: `guardar` relee el
      fichero y la memoria vuelve a lo que de verdad hay. La vista y el router (que además
      borra los hábitos) tienen que poder parar. */
-  if (!guardar()) return { ok: false, error: 'no se pudo guardar el borrado; el almacén sigue en disco' };
+  if (!guardar()) return { ok: false, error: i18n.t('memoria.err.bloqueado') };
   return { ok: true, borrados };
 }
 
@@ -568,12 +567,12 @@ function restaurarCopia() {
   };
   cuarentenas.sort((a, b) => mtime(b) - mtime(a));
   const candidatas = [MEMORY_FILE + '.bak', base + '.bak-v1', ...cuarentenas].filter((f) => fs.existsSync(f));
-  if (!candidatas.length) return { ok: false, code: 'sin_copia', error: 'no hay ninguna copia que restaurar' };
+  if (!candidatas.length) return { ok: false, code: 'sin_copia', error: i18n.t('memoria.err.sin.copia') };
   /* Una copia ilegible no puede abortar la recuperación: se prueba la siguiente. Si
      ninguna sirve, se devuelve el motivo de la última que falló (dice más que un «no»). */
   let origen = null;
   let hechos = null;
-  let ultimoError = 'no hay ninguna copia que restaurar';
+  let ultimoError = i18n.t('memoria.err.sin.copia');
   for (const f of candidatas) {
     try {
       const parsed = JSON.parse(fs.readFileSync(f, 'utf8'));
@@ -604,7 +603,7 @@ function restaurarCopia() {
   lectura = { ok: true, tipo: 'ok', error: '' };
   /* Si el almacén no se puede escribir (fichero bloqueado, disco lleno), no se canta la
      restauración: la vista tiene que poder decirlo. */
-  if (!save()) return { ok: false, error: 'la copia se leyó, pero no se pudo escribir el almacén' };
+  if (!save()) return { ok: false, error: i18n.t('memoria.err.escribir.copia') };
   return { ok: true, restaurado: hechos.length, origen };
 }
 
@@ -727,7 +726,7 @@ function trayProponer(props) {
 function trayAceptar(id, patch = {}) {
   const lista = trayLoad();
   const p = lista.find((x) => x.id === id);
-  if (!p) return { ok: false, error: 'propuesta no encontrada' };
+  if (!p) return { ok: false, error: i18n.t('memoria.err.propuesta') };
   const bloqueado = bloqueo();
   if (bloqueado) return bloqueado;
   const m = add({
@@ -737,7 +736,7 @@ function trayAceptar(id, patch = {}) {
     etiquetas: patch.etiquetas || p.etiquetas,
     origenTexto: p.origenTexto,
   });
-  if (!m) return { ok: false, error: 'no se pudo guardar el hecho' };
+  if (!m) return { ok: false, error: i18n.t('memoria.err.guardar.hecho') };
   trayCache = lista.filter((x) => x.id !== id);
   traySave();
   return { ok: true, memory: m };

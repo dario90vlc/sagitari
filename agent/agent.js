@@ -2229,9 +2229,9 @@ class Agent {
       const comandoPrevio = this._comandoCierrePrevio === plan.comando;
       const tocado = piezaTocadaEsteTurno(ws, indicadores, this.ownerCambios());
       const manifiestoTocado = tocado.error
-        ? 'no se pudo comprobar si el manifiesto del proyecto lo escribió este turno'
+        ? i18n.t('herramienta.check.sin.comprobar')
         : tocado.tocada
-          ? 'lo ha escrito este turno (' + tocado.tocada + ')'
+          ? i18n.t('herramienta.check.tocado', { ruta: tocado.tocada })
           : null;
       const inocuo = !!(clasificacion && (clasificacion.nivel === 'normal' || clasificacion.nivel === 'permitido'));
       puertaCerrada = !!manifiestoTocado || !inocuo || comandoPrevio === false;
@@ -2514,7 +2514,7 @@ class Agent {
            red, agotada la cadena de modelos) y se salía por aquí sin emitirlo, el chip se
            quedaba «en marcha» para siempre en la conversación —contradiciendo la
            respuesta del líder— y el tablero del run no registraba el intento. */
-        const resumenFallo = `delegación fallida: ${e.message}`;
+        const resumenFallo = i18n.t('equipo.delegado.fallo', { motivo: e.message });
         this._delegations.push({ agent: spec.key, task: taskText, status: 'FAILED', result: resumenFallo });
         this.emit({
           type: 'delegate_done',
@@ -2525,7 +2525,7 @@ class Agent {
           evidence: '',
           durationMs: Date.now() - t0,
         });
-        return `RESULT: delegación fallida (${e.message})\nSTATUS: FAILED`;
+        return `RESULT: ${i18n.t('equipo.delegado.fallo.resultado', { motivo: e.message })}\nSTATUS: FAILED`;
       } finally {
         this.subagents.delete(sub);
         this.subagent = null;
@@ -2655,10 +2655,12 @@ class Agent {
     let notaFusion = '';
     if (arbol && fusion) {
       if (fusion.ok && !fusion.vacio)
-        notaFusion = `\nFUSIÓN: aplicados ${fusion.archivos.length} archivo(s) al proyecto del usuario desde el árbol aislado${fusion.archivos.length ? ': ' + fusion.archivos.slice(0, 10).join(', ') : ''}.`;
-      else if (fusion.ok) notaFusion = '\nFUSIÓN: el subagente terminó sin cambiar archivos.';
-      else
-        notaFusion = `\nFUSIÓN CON CONFLICTO: sus cambios NO se aplicaron al proyecto del usuario (${fusion.conflicto}). Dilo tal cual; no lo presentes como hecho. El árbol queda en ${arbol.dir} por si hay que mirarlo.`;
+        notaFusion = i18n.t('turno.fusion.delegado', {
+          n: fusion.archivos.length,
+          lista: fusion.archivos.length ? i18n.t('turno.fusion.delegado.lista', { lista: fusion.archivos.slice(0, 10).join(', ') }) : '',
+        });
+      else if (fusion.ok) notaFusion = i18n.t('turno.fusion.delegado.vacia');
+      else notaFusion = i18n.t('turno.fusion.conflicto.arbol', { motivo: fusion.conflicto, ruta: arbol.dir });
     }
     return `RESULTADO DE ${spec.name} (${parsed.status}):\n${parsed.result}${parsed.details ? '\nDETALLES: ' + parsed.details : ''}${evidence}${notaFusion}${board ? `\n\nTABLERO DE ESTE TURNO (subagentes ya usados):\n${board}` : ''}`;
   }
@@ -2718,7 +2720,7 @@ class Agent {
            cuanto la herramienta devuelve algo. */
         if (e.type === 'confirm_request') {
           try {
-            atencion(`permiso pendiente: ${e.tool || 'una acción'}`);
+            atencion(i18n.t('equipo.atencion.permiso', { herramienta: e.tool || i18n.t('equipo.atencion.accion') }));
           } catch {}
         } else if (e.type === 'tool_result') {
           try {
@@ -2917,7 +2919,7 @@ class Agent {
       }
       if (arbol) {
         miembro.arbol = arbol;
-        this._statusMiembro(miembro, `🌳 ${spec.name} (${miembro.id}): en un árbol aislado (sus cambios vuelven verificados)`);
+        this._statusMiembro(miembro, i18n.t('equipo.delegado.arbol', { nombre: spec.name, id: miembro.id }));
       }
     }
     const settingsTrabajo = arbol ? { ...settings, settings: { ...(settings.settings || {}), workspace: arbol.wsDir } } : settings;
@@ -2991,7 +2993,10 @@ class Agent {
       runlog.log({ agent: 'sagitari', event: 'arbol_fusionar', subagent: spec.key, member: miembro.id, ok: false, motivo, archivos: 0 });
       this._statusMiembro(
         miembro,
-        `Se descartó el trabajo sin terminar de ${spec.name} (${miembro.cortado ? 'el equipo se paró por presupuesto' : 'detuviste la tarea'})`,
+        i18n.t('turno.equipo.descartado.motivo', {
+          nombre: spec.name,
+          motivo: miembro.cortado ? i18n.t('turno.equipo.presupuesto') : i18n.t('turno.equipo.detuviste'),
+        }),
       );
     } else if (arbol) {
       try {
@@ -3095,7 +3100,7 @@ class Agent {
    */
   async _runWithSystem(sys, settings, userText, tools, signal, onFinalText, opts = {}) {
     const cfg = this.activeConfig(settings);
-    if (!cfg || !cfg.baseUrl || !cfg.model) throw new Error('sin proveedor/modelo activo');
+    if (!cfg || !cfg.baseUrl || !cfg.model) throw new Error(i18n.t('turno.sin.proveedor'));
     this._mode = MODE_PROFILES.act;
     /* Cada vuelta es nueva: el compañero puede volver a trabajar aunque en la anterior
        cerrara su encargo (un mensaje del buzón arranca otra). */
@@ -3201,7 +3206,7 @@ class Agent {
         this.emit({ type: 'status', text: i18n.t('turno.modelo.no.disponible', { modelo: entry.model }) });
       }
     }
-    throw lastErr || new Error('Ningún modelo disponible en la cadena de fallback.');
+    throw lastErr || new Error(i18n.t('turno.modelo.ninguno'));
   }
 
   /**

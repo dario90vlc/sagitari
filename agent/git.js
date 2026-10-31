@@ -131,32 +131,34 @@ function dentroDe(raiz, p) {
  *  git_status
  * --------------------------------------------------------------------------- */
 
-const LETRAS = { M: 'modificado', A: 'añadido', D: 'borrado', R: 'renombrado', C: 'copiado', T: 'tipo cambiado', U: 'conflicto' };
+const LETRAS = { M: 'git.est.M', A: 'git.est.A', D: 'git.est.D', R: 'git.est.R', C: 'git.est.C', T: 'git.est.T', U: 'git.est.U' };
 
 function estadoHumano(x, y) {
-  if (x === '?' && y === '?') return 'sin seguimiento (nuevo)';
-  if (x === '!' || y === '!') return 'ignorado';
-  if (x === 'U' || y === 'U' || (x === 'A' && y === 'A') || (x === 'D' && y === 'D')) return 'conflicto sin resolver';
+  if (x === '?' && y === '?') return i18n.t('git.est.nuevo');
+  if (x === '!' || y === '!') return i18n.t('git.est.ignorado');
+  if (x === 'U' || y === 'U' || (x === 'A' && y === 'A') || (x === 'D' && y === 'D')) return i18n.t('git.est.conflicto');
+  const letra = (c) => (LETRAS[c] ? i18n.t(LETRAS[c]) : c);
   const partes = [];
-  if (x !== ' ' && x !== '?' && x !== '!') partes.push('preparado: ' + (LETRAS[x] || x));
-  if (y !== ' ' && y !== '?' && y !== '!') partes.push('sin preparar: ' + (LETRAS[y] || y));
-  return partes.join(' / ') || 'sin cambios';
+  if (x !== ' ' && x !== '?' && x !== '!') partes.push(i18n.t('git.est.preparado', { estado: letra(x) }));
+  if (y !== ' ' && y !== '?' && y !== '!') partes.push(i18n.t('git.est.sin.preparar', { estado: letra(y) }));
+  return partes.join(' / ') || i18n.t('git.est.sin.cambios');
 }
 
 /** Cabecera `## …` del porcelain: rama, upstream y delante/detrás. */
 function cabeceraRama(linea) {
   const t = linea.replace(/^##\s*/, '').trim();
-  if (/^HEAD \(no branch\)/i.test(t)) return 'rama: (HEAD desacoplado, sin rama)';
-  if (/^No commits yet on /i.test(t)) return `rama: ${t.replace(/^No commits yet on /i, '')} (todavía sin commits)`;
+  if (/^HEAD \(no branch\)/i.test(t)) return i18n.t('git.res.rama', { rama: i18n.t('git.res.rama.detach') });
+  if (/^No commits yet on /i.test(t))
+    return i18n.t('git.res.rama.sin.commits', { rama: t.replace(/^No commits yet on /i, '') });
   const m = /^([^.\s]+)(?:\.\.\.(\S+))?(?:\s*\[(.+)\])?$/.exec(t);
-  if (!m) return 'rama: ' + t;
-  let s = `rama: ${m[1]}`;
+  if (!m) return i18n.t('git.res.rama', { rama: t });
+  let s = i18n.t('git.res.rama', { rama: m[1] });
   if (m[2]) s += ` → ${m[2]}`;
   if (m[3])
     s += ` (${m[3]
-      .replace(/ahead (\d+)/i, 'delante $1')
-      .replace(/behind (\d+)/i, 'detrás $1')
-      .replace(/gone/i, 'remota desaparecida')})`;
+      .replace(/ahead (\d+)/i, (_, n) => i18n.t('git.res.rama.delante', { n }))
+      .replace(/behind (\d+)/i, (_, n) => i18n.t('git.res.rama.detras', { n }))
+      .replace(/gone/i, () => i18n.t('git.res.rama.desaparecida'))})`;
   return s;
 }
 
@@ -171,19 +173,19 @@ async function status(opts = {}) {
     .filter(Boolean);
   const cabecera = lineas.find((l) => l.startsWith('## '));
   const archivos = lineas.filter((l) => !l.startsWith('## '));
-  const out = [`Repositorio: ${base.raiz}`];
-  out.push(cabecera ? cabeceraRama(cabecera) : 'rama: (git no la indicó)');
+  const out = [i18n.t('git.res.repo', { raiz: base.raiz })];
+  out.push(cabecera ? cabeceraRama(cabecera) : i18n.t('git.res.rama.sin.dato'));
   if (!archivos.length) {
-    out.push('Sin cambios: el árbol de trabajo está limpio.');
+    out.push(i18n.t('git.res.sin.cambios'));
     return out.join('\n');
   }
-  out.push(`Cambios (${archivos.length}):`);
+  out.push(i18n.t('git.res.cambios', { n: archivos.length }));
   for (const l of archivos.slice(0, MAX_ARCHIVOS)) {
     const x = l[0] || ' ',
       y = l[1] || ' ';
     out.push(`  ${x}${y} ${estadoHumano(x, y)} — ${l.slice(3)}`);
   }
-  if (archivos.length > MAX_ARCHIVOS) out.push(`  … (y ${archivos.length - MAX_ARCHIVOS} archivo(s) más)`);
+  if (archivos.length > MAX_ARCHIVOS) out.push(`  ${i18n.t('git.res.mas', { n: archivos.length - MAX_ARCHIVOS })}`);
   return out.join('\n');
 }
 
@@ -206,13 +208,18 @@ async function diff(args = {}, opts = {}) {
   const r = await git(argv, { ...opts, workspace: base.raiz });
   if (r.code !== 0) return i18n.err('git.diff.fallo', { motivo: motivo(r) });
   const texto = String(r.stdout || '').trim();
-  const ambito = `${args.path ? ` en ${args.path}` : ''}${args.staged === true ? ' (preparado)' : ' (sin preparar)'}`;
+  const ambito =
+    (args.path ? i18n.t('git.res.diff.en', { ruta: args.path }) : '') +
+    (args.staged === true ? i18n.t('git.res.diff.preparado') : i18n.t('git.res.diff.sin.preparar'));
   if (!texto) {
     return args.staged === true
-      ? `Sin diferencias preparadas${ambito}: no hay nada en el índice que no esté ya en el último commit.`
-      : `Sin diferencias${ambito}: no hay cambios en el árbol de trabajo${args.path ? ' para ese archivo' : ''}.`;
+      ? i18n.t('git.res.diff.vacio.preparado', { ambito })
+      : i18n.t('git.res.diff.vacio', {
+          ambito,
+          archivo: args.path ? i18n.t('git.res.diff.archivo') : '',
+        });
   }
-  return acotar(`diff${ambito}:\n${texto}`);
+  return acotar(i18n.t('git.res.diff.cabecera', { ambito, texto }));
 }
 
 /* --------------------------------------------------------------------------- *
@@ -229,14 +236,14 @@ async function log(args = {}, opts = {}) {
   });
   if (r.code !== 0) {
     if (/does not have any commits yet|unknown revision|ambiguous argument 'HEAD'/i.test(r.stderr || '')) {
-      return 'El repositorio todavía no tiene ningún commit (no hay historia que enseñar).';
+      return i18n.t('git.res.log.vacio');
     }
     return i18n.err('git.log.fallo', { motivo: motivo(r) });
   }
   const texto = String(r.stdout || '').trim();
-  if (!texto) return 'El repositorio todavía no tiene ningún commit.';
+  if (!texto) return i18n.t('git.res.log.sin.commit');
   const lineas = texto.split(/\r?\n/);
-  return acotar(`Últimos ${lineas.length} commit(s) (hash fecha asunto):\n${texto}`);
+  return acotar(i18n.t('git.res.log.ultimos', { n: lineas.length, texto }));
 }
 
 /* --------------------------------------------------------------------------- *
@@ -280,14 +287,14 @@ async function branch(args = {}, opts = {}) {
     if (!rama) {
       // sin HEAD no se distingue «desacoplado» de «repo sin commits»: se pregunta
       const hay = await git(['rev-parse', '--verify', '--quiet', 'HEAD'], { ...opts, workspace: base.raiz });
-      rama = hay.code === 0 ? '(HEAD desacoplado, sin rama)' : '(todavía sin commits)';
+      rama = hay.code === 0 ? i18n.t('git.res.rama.detach') : i18n.t('git.res.rama.sin.commits.sola');
     }
-    const out = [`Repositorio: ${base.raiz}`, `Rama actual: ${rama}`];
+    const out = [i18n.t('git.res.repo', { raiz: base.raiz }), i18n.t('git.res.rama.actual', { rama })];
     if (!filas.length) {
-      out.push('Todavía no hay ramas: el repositorio no tiene commits.');
+      out.push(i18n.t('git.res.ramas.vacio'));
       return out.join('\n');
     }
-    out.push(`Ramas (${filas.length}):`);
+    out.push(i18n.t('git.res.ramas', { n: filas.length }));
     for (const f of filas) {
       const [marca, nombre, upstream] = f.split('|');
       if (!nombre) continue;
@@ -303,7 +310,10 @@ async function branch(args = {}, opts = {}) {
     const r = await git(['branch', String(args.name).trim()], { ...opts, workspace: base.raiz });
     if (r.code !== 0) return i18n.err('git.rama.crear', { motivo: motivo(r) });
     const actual = await git(['rev-parse', '--abbrev-ref', 'HEAD'], { ...opts, workspace: base.raiz });
-    return `OK: rama «${String(args.name).trim()}» creada (sigues en ${actual.stdout.trim() || 'la rama actual'}, no he cambiado de rama).`;
+    return i18n.t('git.res.rama.creada', {
+      rama: String(args.name).trim(),
+      actual: actual.stdout.trim() || i18n.t('git.res.rama.actual.palabra'),
+    });
   }
 
   const r = await git(['switch', String(args.name).trim()], { ...opts, workspace: base.raiz });
@@ -313,7 +323,10 @@ async function branch(args = {}, opts = {}) {
     }
     return i18n.err('git.rama.cambiar', { motivo: motivo(r) });
   }
-  return `OK: ahora estás en la rama «${String(args.name).trim()}».${String(r.stderr || '').trim() ? `\n${String(r.stderr).trim()}` : ''}`;
+  return (
+    i18n.t('git.res.rama.cambiada', { rama: String(args.name).trim() }) +
+    (String(r.stderr || '').trim() ? `\n${String(r.stderr).trim()}` : '')
+  );
 }
 
 /* --------------------------------------------------------------------------- *
@@ -344,7 +357,7 @@ async function commit(args = {}, opts = {}) {
 
   const preparado = await git(['diff', '--cached', '--quiet'], { ...opts, workspace: base.raiz });
   if (preparado.code === 0) {
-    return 'No hay nada preparado para commitear: no he hecho `git add` de nada (no preparo archivos por mi cuenta). Prepara lo que quieras o pásame las rutas en paths.';
+    return i18n.t('git.res.commit.nada.preparado');
   }
   const r = await git(['commit', '-m', mensaje], { ...opts, workspace: base.raiz });
   return await cierreCommit(r, [], opts);
@@ -352,22 +365,24 @@ async function commit(args = {}, opts = {}) {
 
 /** Cierra un commit: éxito con hash, o un motivo claro (nada que commitear, hooks…). */
 async function cierreCommit(r, rutas, opts) {
+  const solo = rutas.length ? i18n.t('git.res.commit.solo', { rutas: rutas.join(', ') }) : '';
   if (r.code !== 0) {
     if (/nothing to commit|no changes added to commit|nothing added to commit/i.test(r.stdout + r.stderr)) {
-      return `No había cambios que commitear${rutas.length ? ' en ' + rutas.join(', ') : ''}: el índice y el árbol están iguales que el último commit.`;
+      const en = rutas.length ? i18n.t('git.res.commit.en', { rutas: rutas.join(', ') }) : '';
+      return i18n.t('git.res.commit.sin.cambios', { en });
     }
     return i18n.err('git.commit.fallo', { motivo: motivo(r) });
   }
   const ref = await git(['rev-parse', '--short', 'HEAD'], { ...opts });
   if (ref.code !== 0) {
     // el commit SÍ entró: no se puede convertir un éxito en un error por no leer el hash
-    return `OK: commit hecho${rutas.length ? ` (solo ${rutas.join(', ')})` : ''}.\n${String(r.stdout || '').trim()}`;
+    return i18n.t('git.res.commit.hecho', { solo, texto: String(r.stdout || '').trim() });
   }
   const resumen = String(r.stdout || '')
     .split(/\r?\n/)
     .map((l) => l.trim())
     .filter(Boolean)[0];
-  return `OK: commit ${ref.stdout.trim()} hecho${rutas.length ? ` (solo ${rutas.join(', ')})` : ''}.\n${resumen || ''}`.trim();
+  return i18n.t('git.res.commit.hash', { hash: ref.stdout.trim(), solo, resumen: resumen || '' }).trim();
 }
 
 /* --------------------------------------------------------------------------- *

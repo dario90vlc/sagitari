@@ -20,6 +20,7 @@
    nombres, y renombrarlos obligaba a tocar medio repositorio sin ganar nada. */
 
 const crypto = require('crypto');
+const i18n = require('./i18n');
 
 const ESQUEMA = 2;
 
@@ -399,14 +400,14 @@ const PATRONES = [
     re: /^(?:me llamo|mi nombre es)\s+(.+)$/i,
     etiqueta: 'identidad',
     confianza: 0.9,
-    motivo: 'parece tu nombre',
+    motivo: i18n.t('memoria.motivo.nombre'),
     texto: (m) => `El usuario se llama ${m[1]}`,
   },
   {
     re: /^soy\s+(.+)$/i,
     etiqueta: 'identidad',
     confianza: 0.75,
-    motivo: 'parece algo que eres',
+    motivo: i18n.t('memoria.motivo.eres'),
     predicado: true,
     texto: (m) => `El usuario es ${m[1]}`,
   },
@@ -414,56 +415,56 @@ const PATRONES = [
     re: /^no\s+me\s+gusta\s+(.+)$/i,
     etiqueta: 'preferencia',
     confianza: 0.75,
-    motivo: 'parece una preferencia tuya',
+    motivo: i18n.t('memoria.motivo.preferencia'),
     texto: (m) => `Al usuario no le gusta ${m[1]}`,
   },
   {
     re: /^(?:yo\s+)?prefiero\s+(.+)$/i,
     etiqueta: 'preferencia',
     confianza: 0.75,
-    motivo: 'parece una preferencia tuya',
+    motivo: i18n.t('memoria.motivo.preferencia'),
     texto: (m) => `El usuario prefiere ${m[1]}`,
   },
   {
     re: /^me\s+(?:gusta|encanta)\s+(.+)$/i,
     etiqueta: 'preferencia',
     confianza: 0.7,
-    motivo: 'parece una preferencia tuya',
+    motivo: i18n.t('memoria.motivo.preferencia'),
     texto: (m) => `Al usuario le gusta ${m[1]}`,
   },
   {
     re: /^siempre\s+(hago|uso|escribo|nombro|trabajo con)\s+(.+)$/i,
     etiqueta: 'preferencia',
     confianza: 0.7,
-    motivo: 'parece algo que haces siempre',
+    motivo: i18n.t('memoria.motivo.habito'),
     texto: (m) => `El usuario siempre ${TERCERA[m[1].toLowerCase()] || m[1]} ${m[2]}`,
   },
   {
     re: /^(?:siempre\s+)?trabajo\s+en\s+(.+)$/i,
     etiqueta: 'proyecto',
     confianza: 0.8,
-    motivo: 'parece un dato de tu proyecto',
+    motivo: i18n.t('memoria.motivo.proyecto'),
     texto: (m) => `El usuario trabaja en ${m[1]}`,
   },
   {
     re: /^(?:mi proyecto|el proyecto en el que trabajo)\s+es\s+(.+)$/i,
     etiqueta: 'proyecto',
     confianza: 0.8,
-    motivo: 'parece un dato de tu proyecto',
+    motivo: i18n.t('memoria.motivo.proyecto'),
     texto: (m) => `El proyecto del usuario es ${m[1]}`,
   },
   {
     re: /^(?:háblame|respóndeme|contéstame|escríbeme|comunícate)\s+en\s+(.+)$/i,
     etiqueta: 'idioma',
     confianza: 0.85,
-    motivo: 'parece tu idioma',
+    motivo: i18n.t('memoria.motivo.idioma'),
     texto: (m) => `El usuario prefiere que le hable en ${m[1]}`,
   },
   {
     re: /^quiero\s+que\s+me\s+(?:hables|respondas|escribas)\s+en\s+(.+)$/i,
     etiqueta: 'idioma',
     confianza: 0.85,
-    motivo: 'parece tu idioma',
+    motivo: i18n.t('memoria.motivo.idioma'),
     texto: (m) => `El usuario prefiere que le hable en ${m[1]}`,
   },
 ];
@@ -563,7 +564,7 @@ function extraerDeFrase(frase, mensaje) {
       texto: normalizarTexto(capitalizar(cuerpo)),
       etiquetas: ['correccion'],
       confianza: 0.7,
-      motivo: 'parece una corrección de algo anterior',
+      motivo: i18n.t('memoria.motivo.correccion'),
       origen: 'mensaje',
       origenTexto: mensaje,
     };

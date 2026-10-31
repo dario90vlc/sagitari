@@ -202,7 +202,7 @@ function marco(texto, c, opts = {}) {
     const marca = i >= c.linea && i < c.linea + (c.lineas || 1) ? '>' : ' ';
     out.push(`${marca} ${String(i).padStart(ancho)} | ${String(fl[i - 1].texto).replace(/\r$/, '')}`);
   }
-  const cab = opts.titulo || 'Lo más parecido que hay en el archivo';
+  const cab = opts.titulo || i18n.t('herramienta.edicion.parecido.titulo');
   return `${cab} (línea${(c.lineas || 1) > 1 ? 's' : ''} ${c.linea}${(c.lineas || 1) > 1 ? '-' + hasta : ''}):\n${out.join('\n')}`;
 }
 
