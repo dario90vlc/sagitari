@@ -15,7 +15,7 @@
 
 [![Descargar](https://img.shields.io/badge/%E2%AC%87%20Descargar-Windows-00E5FF?style=for-the-badge)](https://github.com/dario90vlc/sagitari/releases/latest)
 
-[Descarga](#descarga) · [Características](#qué-puede-hacer) · [Seguridad](#seguridad-primero) · [English](./README.md)
+[Novedades](#novedades-de-esta-versión) · [Capturas](#se-ve-en-marcha) · [Aspectos](#aspectos) · [Por qué SAGITARI](#por-qué-sagitari) · [Qué puede hacer](#qué-puede-hacer) · [Seguridad](#seguridad-primero) · [Inicio rápido](#inicio-rápido) · [Descarga](#descarga) · [Privacidad](#privacidad) · [English](./README.md)
 
 **Lenguaje natural dentro. Trabajo real fuera.** — SAGITARI usa tu terminal, tus archivos y tu navegador para terminar el trabajo, mientras la configuración, las claves, las conversaciones y la memoria se quedan en tu carpeta de datos. Su **memoria** es una ficha de hechos que **apruebas**, corriges y puedes vaciar.
 
@@ -68,6 +68,14 @@ Es local-first por diseño. Tú eliges el modelo y el proveedor —en la nube o 
 - **La tarjeta de permiso dice la verdad.** Un comando enseña la carpeta en la que se ejecuta; una herramienta MCP, sus argumentos. Deshacer ya no canta éxito cuando un archivo no se pudo restaurar, y no puede escribir fuera del espacio de trabajo.
 - **Más difícil de engañar.** La lista de comandos prohibidos no se esquiva escribiéndolos de otra forma, `search_files` ya no puede congelar la app, la memoria deja de guardar hechos contradictorios y los adjuntos de texto cortos ya no se marcan como binarios.
 - **Fontanería más pequeña y más segura.** `undici` 7.30.1, la salida de error de MCP enmascarada como el resto de secretos, y fechas, listas y el tablero ya sin restos de español donde no los esperabas.
+
+## Aspectos
+
+Tres aspectos: elíguelo en **Ajustes ▸ Apariencia** y la intensidad y el tinte le siguen. Holo es el de siempre; **Consola y Lienzo son nuevos en esta versión**.
+
+| Holo | Consola | Lienzo |
+| --- | --- | --- |
+| ![Aspecto Holo](docs/theme-holo.png) | ![Aspecto Consola](docs/theme-console.png) | ![Aspecto Lienzo](docs/theme-canvas.png) |
 
 ## Qué puede hacer
 

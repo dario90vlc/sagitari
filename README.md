@@ -19,6 +19,8 @@
 
 **Natural language in. Real work out.** — SAGITARI uses your terminal, your files, and your browser to finish the job, while config, keys, conversations and memory stay in your data folder. Its **memory** is a card file of facts **you approve**, correct and can empty.
 
+**Contents:** [What's new](#whats-new-in-this-release) · [Screenshots](#see-it-work) · [Themes](#themes) · [Why SAGITARI](#why-sagitari) · [What it does](#what-it-does) · [Safety](#safety-first) · [Quick start](#quick-start) · [Privacy](#privacy) · [Development](#development) · [License](#license)
+
 </div>
 
 ---
@@ -68,6 +70,14 @@ It is local-first by design. You choose the model and provider — cloud or loca
 - **The permission card tells the truth.** A command shows the folder it will run in; an MCP tool shows its arguments. Undo no longer claims success when a file could not be restored, and it cannot write outside the workspace.
 - **Harder to fool.** The prohibited-command list can't be dodged by spelling the same command another way, `search_files` can no longer freeze the app, memory stops keeping contradictory facts, and short text attachments are no longer labelled binary.
 - **Smaller, safer plumbing.** `undici` 7.30.1, MCP error output masked like every other secret, and a space that no longer carries Spanish in places you would not expect (dates, lists, the task board).
+
+## Themes
+
+Three looks — pick one in **Settings ▸ Appearance**; intensity and tint follow it. Holo is the original; **Console and Canvas are new in this release**.
+
+| Holo | Console | Canvas |
+| --- | --- | --- |
+| ![Holo theme](docs/theme-holo.png) | ![Console theme](docs/theme-console.png) | ![Canvas theme](docs/theme-canvas.png) |
 
 ## What it does
 
