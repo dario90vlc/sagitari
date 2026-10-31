@@ -73,7 +73,8 @@
       "createDesktopShortcut": true,
       "createStartMenuShortcut": true,
       "shortcutName": "SAGITARI",
-      "artifactName": "SAGITARI-Setup-${version}.${ext}"
+      "artifactName": "SAGITARI-Setup-${version}.${ext}",
+      "include": "scripts/installer.nsh"
     },
     "portable": {
       "artifactName": "SAGITARI-Portable-${version}.${ext}"
