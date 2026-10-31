@@ -1880,8 +1880,12 @@ test('agent: los cortes explican qué pasó en vez de dejar un telegrama', () =>
   ]) {
     ok(!src.includes(viejo), 'ya no queda el marcador suelto ' + viejo);
   }
-  ok(/Me he detenido porque llevaba varios pasos sin avanzar/.test(src), 'el corte por estancamiento cuenta qué pasó');
-  ok(/dime si lo retomo/.test(src), 'y qué puede hacer el usuario a partir de aquí');
+  // los textos de corte viven en el diccionario del motor (se pintan): se comprueba
+  // que siguen contando qué pasó, no que el literal esté incrustado en agent.js
+  const i18n = require('../agent/i18n');
+  const estancado = i18n.t('turno.parado.estancado');
+  ok(/llevaba varios pasos sin avanzar/.test(estancado), 'el corte por estancamiento cuenta qué pasó');
+  ok(/dime si lo retomo/i.test(estancado), 'y qué puede hacer el usuario a partir de aquí');
 });
 
 test('prompt: la respuesta final no puede ser un telegrama', () => {

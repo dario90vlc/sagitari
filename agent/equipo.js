@@ -1,5 +1,7 @@
 'use strict';
 
+const i18n = require('./i18n');
+
 /* Motor del MODO EQUIPO (v4.4): compañeros vivos, buzón y tablero compartido.
 
    Este módulo NO sabe nada del modelo, del bucle ni de las herramientas: orquesta
@@ -270,20 +272,20 @@ function crearEquipo({ lider = null, limite = LIMITE_MIEMBROS, presupuestoUsd = 
 
     /** Levanta un compañero y lo pone a trabajar. Devuelve el id ENSEGUIDA (no espera). */
     levantar(spec, { tarea, expect } = {}) {
-      if (terminado) return { ok: false, error: 'el equipo de este turno ya está cerrado; no se levantan más compañeros.' };
+      if (terminado) return { ok: false, error: i18n.t('equipo.motivo.cerrado') };
       revisar(); // antes de traer más gente, se mira el tope de gasto del equipo
-      if (corte) return { ok: false, error: `el equipo está parado (${corte}); no se levantan más compañeros en este turno.` };
+      if (corte) return { ok: false, error: i18n.t('equipo.motivo.parado', { motivo: corte }) };
       const s = specDe(spec);
-      if (!s) return { ok: false, error: 'falta el especialista: pasa el id del registro (research, coding, review…).' };
+      if (!s) return { ok: false, error: i18n.t('equipo.motivo.sin.especialista') };
       const vivos = [...miembros.values()].filter((m) => !m.cerrado).length;
       if (vivos >= lim) {
         return {
           ok: false,
-          error: `el equipo ya tiene ${vivos} compañeros vivos (el tope de ${lim}): espera a que terminen con team_wait o reparte tú el trabajo que queda.`,
+          error: i18n.t('equipo.motivo.tope.vivos', { vivos, limite: lim }),
         };
       }
       const task = textoLargo(tarea, 4000);
-      if (!task) return { ok: false, error: 'falta la subtarea: dile al compañero qué tiene que hacer (task).' };
+      if (!task) return { ok: false, error: i18n.t('equipo.motivo.sin.subtarea') };
       const id = 'm' + ++seq;
       const m = {
         id,
@@ -315,7 +317,7 @@ function crearEquipo({ lider = null, limite = LIMITE_MIEMBROS, presupuestoUsd = 
         });
       } catch (e) {
         miembros.delete(id);
-        return { ok: false, error: `no pude crear el compañero ${s.name}: ${(e && e.message) || e}` };
+        return { ok: false, error: i18n.t('equipo.motivo.no.creado', { nombre: s.name, motivo: (e && e.message) || e }) };
       }
       if (!iniciado) {
         iniciado = true;
@@ -332,22 +334,25 @@ function crearEquipo({ lider = null, limite = LIMITE_MIEMBROS, presupuestoUsd = 
       const texto3 = textoLargo(texto2, MAX_TEXTO);
       const origen = String(de || 'lider').trim();
       const destino = String(para || '').trim();
-      if (!texto3) return { ok: false, error: 'el mensaje está vacío: escribe qué quieres decir (text).' };
-      if (origen !== 'lider' && !miembros.has(origen)) return { ok: false, error: `«${origen}» no es un compañero de este equipo.` };
-      if (!destino) return { ok: false, error: 'falta el destinatario (to): un id (m1, m2…), «lider» o «todos».' };
+      if (!texto3) return { ok: false, error: i18n.t('equipo.motivo.mensaje.vacio') };
+      if (origen !== 'lider' && !miembros.has(origen)) return { ok: false, error: i18n.t('equipo.motivo.origen', { origen }) };
+      if (!destino) return { ok: false, error: i18n.t('equipo.motivo.sin.destino') };
       const destinos = destino === 'todos' ? ['lider', ...miembros.keys()].filter((id) => id !== origen) : [destino];
       const malo = destinos.find((id) => id !== 'lider' && !miembros.has(id));
       if (malo) {
         const vivos = [...miembros.keys()];
         return {
           ok: false,
-          error: `no existe ningún compañero «${malo}» en este equipo${vivos.length ? ` (vivos: ${vivos.join(', ')})` : ''}: usa un id vivo, «lider» o «todos».`,
+          error: i18n.t('equipo.motivo.destino.no.existe', {
+            destino: malo,
+            vivos: vivos.length ? ` (vivos: ${vivos.join(', ')})` : '',
+          }),
         };
       }
       if (mensajes >= MAX_MENSAJES_EQUIPO) {
         return {
           ok: false,
-          error: `tope de mensajes del equipo (${MAX_MENSAJES_EQUIPO}) alcanzado: deja de hablar y termina el trabajo con lo que tienes.`,
+          error: i18n.t('equipo.motivo.mensajes.tope', { max: MAX_MENSAJES_EQUIPO }),
         };
       }
       for (const id of destinos) {
@@ -356,7 +361,7 @@ function crearEquipo({ lider = null, limite = LIMITE_MIEMBROS, presupuestoUsd = 
         if (m.mensajesRecibidos >= MAX_MENSAJES_MIEMBRO) {
           return {
             ok: false,
-            error: `«${id}» ya recibió ${MAX_MENSAJES_MIEMBRO} mensajes (el tope): no le mandes más, escribe tú el resultado con lo que haya.`,
+            error: i18n.t('equipo.motivo.mensajes.miembro', { id, max: MAX_MENSAJES_MIEMBRO }),
           };
         }
       }
@@ -409,7 +414,7 @@ function crearEquipo({ lider = null, limite = LIMITE_MIEMBROS, presupuestoUsd = 
           ? [...miembros.keys()]
           : (Array.isArray(ids) ? ids : [ids]).map((x) => String(x || '').trim()).filter(Boolean);
       const malo = lista.find((id) => !miembros.has(id));
-      if (malo) return Promise.resolve({ ok: false, error: `no existe ningún compañero «${malo}» en este equipo.` });
+      if (malo) return Promise.resolve({ ok: false, error: i18n.t('equipo.motivo.no.existe', { id: malo }) });
       const pedido = Number(timeoutMs);
       const tope = Number.isFinite(pedido) && pedido > 0 ? Math.min(pedido, ESPERA_MAX_MS) : ESPERA_DEFECTO_MS;
       const base = avisosLider;
@@ -454,7 +459,7 @@ function crearEquipo({ lider = null, limite = LIMITE_MIEMBROS, presupuestoUsd = 
       let item = queTexto ? [...tablero].reverse().find((i) => i.quien === deQuien && i.que === queTexto) : null;
       if (!item) {
         if (tablero.length >= MAX_TABLERO) {
-          return { ok: false, error: `el tablero ya tiene ${MAX_TABLERO} ítems: actualiza uno que exista en vez de añadir más.` };
+          return { ok: false, error: i18n.t('equipo.motivo.tablero.lleno', { max: MAX_TABLERO }) };
         }
         item = {
           id: 'b' + ++seqTablero,
@@ -477,7 +482,7 @@ function crearEquipo({ lider = null, limite = LIMITE_MIEMBROS, presupuestoUsd = 
     /** Cierra el encargo de un compañero con lo que ha hecho y su evidencia. */
     cerrar(id, { resumen, evidencia } = {}) {
       const m = miembros.get(String(id || '').trim());
-      if (!m) return { ok: false, error: `no existe ningún compañero «${id}».` };
+      if (!m) return { ok: false, error: i18n.t('equipo.motivo.no.existe', { id }) };
       const res = textoLargo(resumen, 4000);
       const ev = textoLargo(evidencia, 2000);
       m.resultado = { ok: !m.cortado, resumen: res, evidencia: ev };
@@ -527,11 +532,11 @@ function crearEquipo({ lider = null, limite = LIMITE_MIEMBROS, presupuestoUsd = 
     /** Cierra el equipo del turno: el evento `team_end` con el gasto real. Para a los
         compañeros que sigan vivos (el turno del líder terminó y ya nadie espera). */
     terminar({ ok = true, resumen = '' } = {}) {
-      if (terminado) return { ok: false, error: 'el equipo ya estaba cerrado.' };
+      if (terminado) return { ok: false, error: i18n.t('equipo.motivo.ya.cerrado') };
       terminado = true;
       /* Un turno en modo EQUIPO que no llegó a levantar a nadie no tiene equipo: no hay
          `team_start` que cerrar y un `team_end` suelto abriría una tarjeta vacía. */
-      if (!iniciado) return { ok: false, error: 'el equipo no llegó a empezar.' };
+      if (!iniciado) return { ok: false, error: i18n.t('equipo.motivo.no.empezado') };
       for (const m of miembros.values()) {
         if (!m.corriendo) continue;
         /* Un compañero que está esperando al USUARIO (un permiso) no se para al cerrar el

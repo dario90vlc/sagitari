@@ -6,6 +6,7 @@
    uno real por stdio (test/fixtures/mcp-echo-server.js). */
 
 const transport = require('./mcp-transport');
+const i18n = require('./i18n');
 
 const MAX_TOOL_NAME = 64;
 const MAX_TOOLS_PER_SERVER = 500;
@@ -306,19 +307,19 @@ class McpManager {
     // se identifica por el prefijo, se conecta y se resuelve con la tabla REAL. Si se
     // resolviera por el slug, al servidor le llegaría un nombre deformado.
     const sid = info ? info.serverId : this._serverIdOf(exposedName);
-    if (!sid) return `Error: la herramienta MCP «${exposedName}» no está disponible ahora mismo.`;
+    if (!sid) return i18n.err('mcp.herr.no.disponible', { herramienta: exposedName });
     const s = this._server(sid);
     const st = this._state.get(sid);
-    if (!s || !st) return `Error: el servidor MCP «${sid}» ya no está configurado.`;
+    if (!s || !st) return i18n.err('mcp.servidor.no.configurado', { servidor: sid });
     if (st.state !== 'ready') {
       const r = await this.ensure(sid);
-      if (!r.ok) return `Error: no pude usar «${exposedName}» porque el servidor MCP «${s.name || s.id}» no está disponible (${r.error}).`;
+      if (!r.ok)
+        return i18n.err('mcp.herr.sin.servidor', { herramienta: exposedName, servidor: s.name || s.id, motivo: r.error });
       info = this.describe(exposedName);
-      if (!info)
-        return `Error: el servidor MCP «${s.name || s.id}» no expone la herramienta «${exposedName}» (¿está bloqueada o fuera de la lista permitida?).`;
+      if (!info) return i18n.err('mcp.herr.no.expuesta', { servidor: s.name || s.id, herramienta: exposedName });
     }
     if (!info) info = this.describe(exposedName);
-    if (!info) return `Error: la herramienta MCP «${exposedName}» no está disponible ahora mismo.`;
+    if (!info) return i18n.err('mcp.herr.no.disponible', { herramienta: exposedName });
     const ms = Number(timeoutMs) > 0 ? Number(timeoutMs) : Number(s.timeoutMs) > 0 ? Number(s.timeoutMs) : DEFAULT_TIMEOUT_MS;
     let reqId = null;
     // El gancho que usa el agente: mientras la petición está en vuelo, Detener puede
@@ -344,7 +345,7 @@ class McpManager {
         },
       );
       const texto = this._flatten(res);
-      return res && res.isError ? 'Error del servidor MCP: ' + texto : texto;
+      return res && res.isError ? i18n.err('mcp.servidor.error', { texto }) : texto;
     } catch (e) {
       // el transporte puede haber muerto: se marca para que la próxima llamada reconecte
       if (!st.transport || !st.transport.rpc.alive) {
@@ -353,7 +354,7 @@ class McpManager {
         st.tools = [];
         st.logTail = st.transport && st.transport.stderrTail ? st.transport.stderrTail() : '';
       }
-      return `Error: la herramienta MCP «${info.toolName}» falló (${e.message}).`;
+      return i18n.err('mcp.herr.fallo', { herramienta: info.toolName, motivo: e.message });
     }
   }
 

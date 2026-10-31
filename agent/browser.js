@@ -20,6 +20,7 @@ const fs = require('fs');
 const os = require('os');
 const path = require('path');
 const terceros = require('./terceros'); // marco único del contenido de terceros (datos, no órdenes)
+const i18n = require('./i18n');
 
 function getJSON(url, timeoutMs = 2500) {
   return new Promise((resolve, reject) => {
@@ -155,7 +156,9 @@ const sleep = (ms) => new Promise((r) => setTimeout(r, ms));
 
 /* Detener aborta la acción en vuelo (espera de carga, `settle`, `wait_for`…): este
    es el mensaje que recibe el modelo en vez de dejarlo esperando a que acabe. */
-const CANCELADO = 'Error: acción del navegador cancelada por el usuario (Detener).';
+/* Función y no constante: el mensaje va al diccionario y el idioma puede cambiar con
+   la app ya arrancada. */
+const CANCELADO = () => i18n.err('nav.cancelado');
 
 /* ============================================================================
    v2.5 — NAVEGADOR 2
@@ -1060,7 +1063,7 @@ class Browser {
       used = want === 'edge' ? 'chrome' : 'edge';
       exe = await this._exeDe(used);
     }
-    if (!exe) return 'Error: no encontré Chrome ni Edge instalado en este equipo.';
+    if (!exe) return i18n.err('nav.sin.navegador');
 
     // 4) Lanza con la tubería de depuración (sin puerto TCP: nada que escuchar).
     this.port = 0;
@@ -1090,13 +1093,12 @@ class Browser {
       target,
     ];
     const child = this._lanzarProceso(exe, args);
-    if (!child) return 'Error: no pude lanzar el navegador.';
-
+    if (!child) return i18n.err('nav.no.lanzado');
     await this.connect();
     const ok = await this._esperarPuerto(9000);
     if (!ok) {
       this.kill();
-      return 'Error: el navegador no respondió al canal de depuración.';
+      return i18n.err('nav.sin.depuracion');
     }
 
     const list = await this.pages();
@@ -1226,19 +1228,19 @@ class Browser {
 
   async navigate(url) {
     let u = String(url || '').trim();
-    if (!u) return 'Error: falta la url.';
+    if (!u) return i18n.err('nav.falta.url');
     // Solo http(s): file:// leería el disco desde el navegador (fuera del
     // confinamiento de read_file) y chrome:/about: tocan internals del navegador.
     // Antes se aceptaban explícitamente; ahora se rechazan con el motivo.
     if (/^(file|chrome|about|chrome-extension|edge|view-source):/i.test(u)) {
-      return 'Error: solo se puede navegar a direcciones http(s). Para leer un archivo local usa read_file.';
+      return i18n.err('nav.solo.http');
     }
     if (!/^https?:\/\//i.test(u)) u = 'https://' + u;
     const { sessionId } = await this.currentSession();
     try {
       await this.send('Page.navigate', { url: u }, sessionId);
     } catch (e) {
-      return 'Error al navegar: ' + e.message;
+      return i18n.err('nav.fallo', { motivo: e.message });
     }
     const loaded = await this.waitReady(sessionId);
     // el inventario de elements() ya no vale: sus coordenadas son de otra página
@@ -1434,7 +1436,7 @@ class Browser {
     try {
       data = JSON.parse(raw);
     } catch {
-      return 'Error: no pude analizar la página.';
+      return i18n.err('nav.sin.analisis');
     }
     if (!data.elements || !data.elements.length) {
       return (
@@ -1484,9 +1486,9 @@ class Browser {
    */
   async clickIndex(idx, sessionId, ownerId, opts = {}) {
     const p = await this._resolve({ index: idx }, sessionId, ownerId);
-    if (p.error) return `Error: ${p.error}`;
+    if (p.error) return i18n.err('nav.motivo', { motivo: p.error });
     const mal = await this._clickAt(p, sessionId, opts);
-    if (mal) return `Error: ${mal}`;
+    if (mal) return i18n.err('nav.motivo', { motivo: mal });
     await this.settle(sessionId, 1200); // deja reaccionar (menús, modales, navegación)
     // la página puede haber cambiado: los índices anteriores ya no son fiables
     this._lastElements = null;
@@ -1503,10 +1505,10 @@ class Browser {
   async findAndClick(selector, text, sessionId, ownerId, opts = {}) {
     const p = await this._resolve({ selector, text, nth: opts.nth }, sessionId, ownerId);
     if (p.error) {
-      return `Error: ${p.error}. Prueba action=elements (inventario con nombres accesibles), action=content para leer la página o action=screenshot para verla.`;
+      return i18n.err('nav.motivo.prueba', { motivo: p.error });
     }
     const mal = await this._clickAt(p, sessionId, opts);
-    if (mal) return `Error: ${mal}`;
+    if (mal) return i18n.err('nav.motivo', { motivo: mal });
     await this.settle(sessionId, 1500); // deja reaccionar a la página (menús, modales, navegación)
     const varias = p.candidatos > 1 ? ` (había ${p.candidatos} coincidencias; he pulsado la ${p.candidato}: usa nth para otra)` : '';
     return `OK: clic en ${p.role} «${p.name}» en (${p.x},${p.y})${varias}${opts.force ? ' [forzado]' : ''}`;
@@ -1536,7 +1538,7 @@ class Browser {
   async type(want, text, opts, sessionId, ownerId) {
     const { clear = true, submit = false, human = true } = opts || {};
     const p = await this._resolve(want, sessionId, ownerId);
-    if (p.error) return `Error: ${p.error}`;
+    if (p.error) return i18n.err('nav.motivo', { motivo: p.error });
     const preparado = await this.evalJs(
       `(() => {
       const el = window.__sagSel;
@@ -1560,9 +1562,9 @@ class Browser {
     })()`,
       sessionId,
     );
-    if (preparado === 'NO') return `Error: ese elemento ya no está en la página. Vuelve a hacer action=elements.`;
+    if (preparado === 'NO') return i18n.err('nav.elemento.fuera.elements');
     if (preparado === 'NO_EDITABLE')
-      return `Error: «${p.name}» (${p.role}) no es un campo de texto; para un <select> usa action=select y para una casilla action=check.`;
+      return i18n.err('nav.no.campo', { nombre: p.name, rol: p.role });
     await sleep(80);
     const str = String(text ?? '');
     if (str) {
@@ -1601,7 +1603,7 @@ class Browser {
   /** Elegir una opción de un <select> por valor, texto o posición. */
   async selectOption(want, value, sessionId, ownerId) {
     const p = await this._resolve(want, sessionId, ownerId);
-    if (p.error) return `Error: ${p.error}`;
+    if (p.error) return i18n.err('nav.motivo', { motivo: p.error });
     const raw = await this.evalJs(
       `(() => {
       const el = window.__sagSel; if (!el) return 'NO';
@@ -1622,16 +1624,15 @@ class Browser {
     })()`,
       sessionId,
     );
-    if (raw === 'NO') return 'Error: ese elemento ya no está en la página.';
-    if (raw === 'NO_SELECT')
-      return `Error: «${p.name}» no es un <select> nativo. Si es una lista desplegable de la web, haz clic en ella (action=click) y luego en la opción (action=elements + click_index).`;
+    if (raw === 'NO') return i18n.err('nav.elemento.fuera');
+    if (raw === 'NO_SELECT') return i18n.err('nav.select.nativo', { nombre: p.name });
     let r;
     try {
       r = JSON.parse(raw);
     } catch {
-      return 'Error: no pude elegir la opción.';
+      return i18n.err('nav.select.fallo');
     }
-    if (r.error) return `Error: ${r.error}. Opciones: ${(r.opciones || []).join(' | ')}`;
+    if (r.error) return i18n.err('nav.select.opciones', { motivo: r.error, opciones: (r.opciones || []).join(' | ') });
     await this.settle(sessionId, 600);
     this._lastElements = null;
     return `OK: elegido «${r.elegido}» (valor ${r.valor}).`;
@@ -1641,7 +1642,7 @@ class Browser {
       escuchan el clic, no el cambio de .checked). */
   async check(want, on, sessionId, ownerId) {
     const p = await this._resolve(want, sessionId, ownerId);
-    if (p.error) return `Error: ${p.error}`;
+    if (p.error) return i18n.err('nav.motivo', { motivo: p.error });
     const raw = await this.evalJs(
       `(() => {
       const el = window.__sagSel; if (!el) return 'NO';
@@ -1654,13 +1655,13 @@ class Browser {
     })()`,
       sessionId,
     );
-    if (raw === 'NO') return 'Error: ese elemento ya no está en la página.';
-    if (raw === 'NO_CHECK') return `Error: «${p.name}» (${p.role}) no es una casilla. Para pulsarlo usa action=click_index.`;
+    if (raw === 'NO') return i18n.err('nav.elemento.fuera');
+    if (raw === 'NO_CHECK') return i18n.err('nav.no.checkbox', { nombre: p.name, rol: p.role });
     let r;
     try {
       r = JSON.parse(raw);
     } catch {
-      return 'Error: no pude cambiar la casilla.';
+      return i18n.err('nav.check.fallo');
     }
     await this.settle(sessionId, 500);
     this._lastElements = null;
@@ -1671,7 +1672,7 @@ class Browser {
   /** Pasar el ratón por encima: menús que se despliegan, tooltips, previsualizaciones. */
   async hover(want, sessionId, ownerId) {
     const p = await this._resolve(want, sessionId, ownerId);
-    if (p.error) return `Error: ${p.error}`;
+    if (p.error) return i18n.err('nav.motivo', { motivo: p.error });
     await this.send('Input.dispatchMouseEvent', { type: 'mouseMoved', x: p.x, y: p.y }, sessionId);
     await this.settle(sessionId, 800);
     return `OK: ratón sobre ${p.role} «${p.name}». Si se ha desplegado un menú, haz action=elements para verlo.`;
@@ -1680,7 +1681,7 @@ class Browser {
   /** Atajo de teclado: Ctrl+Shift+T, Alt+ArrowLeft, Escape… (con modificadores reales). */
   async hotkey(spec, sessionId) {
     const k = parseHotkey(spec);
-    if (!k) return `Error: no entiendo el atajo «${spec}». Ejemplos: Ctrl+A, Ctrl+Shift+T, Alt+ArrowLeft, Escape, F5, Ctrl+Enter.`;
+    if (!k) return i18n.err('nav.atajo', { atajo: spec });
     const def = { windowsVirtualKeyCode: k.vk, code: k.code, key: k.key, modifiers: k.modifiers };
     if (k.text !== undefined) def.text = k.text;
     await this.send('Input.dispatchKeyEvent', { type: 'rawKeyDown', ...def }, sessionId);
@@ -1693,7 +1694,7 @@ class Browser {
   /** Subir archivos a un <input type=file> (aunque esté oculto tras un botón). */
   async upload(want, files, sessionId, ownerId) {
     const lista = (Array.isArray(files) ? files : [files]).filter(Boolean).map((f) => String(f));
-    if (!lista.length) return 'Error: dime qué archivo(s) subir en `files`.';
+    if (!lista.length) return i18n.err('nav.files.falta');
     const faltan = lista.filter((f) => {
       try {
         return !fs.existsSync(f);
@@ -1701,18 +1702,18 @@ class Browser {
         return true;
       }
     });
-    if (faltan.length) return `Error: no existe(n): ${faltan.join(', ')}. Usa rutas absolutas.`;
+    if (faltan.length) return i18n.err('nav.files.fuera', { lista: faltan.join(', ') });
     const p = await this._resolve(want, sessionId, ownerId);
-    if (p.error) return `Error: ${p.error}`;
-    if (!p.css) return 'Error: no pude resolver la ruta del campo de archivo.';
+    if (p.error) return i18n.err('nav.motivo', { motivo: p.error });
+    if (!p.css) return i18n.err('nav.archivo.css');
     try {
       const doc = await this.send('DOM.getDocument', { depth: -1, pierce: true }, sessionId);
       const rootId = doc && doc.root ? doc.root.nodeId : null;
       const found = await this.send('DOM.querySelector', { nodeId: rootId, selector: p.css }, sessionId);
-      if (!found || !found.nodeId) return 'Error: no alcanzé el campo de archivo por el DOM (¿está dentro de un marco de otro origen?).';
+      if (!found || !found.nodeId) return i18n.err('nav.archivo.dom');
       await this.send('DOM.setFileInputFiles', { files: lista, nodeId: found.nodeId }, sessionId);
     } catch (e) {
-      return 'Error al subir: ' + e.message;
+      return i18n.err('nav.subir.fallo', { motivo: e.message });
     }
     await this.settle(sessionId, 1000);
     this._lastElements = null;
@@ -1730,7 +1731,7 @@ class Browser {
     const url = args.url ? String(args.url) : null;
     const titulo = args.title ? String(args.title) : null;
     const negar = args.gone === true;
-    if (!texto && !selector && !url && !titulo) return 'Error: dime a qué esperar: text, selector, url o title.';
+    if (!texto && !selector && !url && !titulo) return i18n.err('nav.esperar.falta');
     const dentro = (cond) => (negar ? `!(${cond})` : `(${cond})`);
     const conds = [];
     if (texto)
@@ -1744,7 +1745,7 @@ class Browser {
     const t0 = Date.now();
     let visto = false;
     while (Date.now() - t0 < timeout) {
-      if (this._abortada()) return CANCELADO;
+      if (this._abortada()) return CANCELADO();
       try {
         if ((await this.evalJs(expr, sessionId)) === true) {
           visto = true;
@@ -1758,7 +1759,11 @@ class Browser {
       return `OK: cumplido en ${Date.now() - t0} ms (${negar ? 'ya no está' : 'ya está'}). Ahora: ${estado}`;
     }
     const estado = await this._pageState(sessionId);
-    return `Error: en ${timeout} ms no se cumplió «${negar ? 'desaparecer ' : ''}${texto || selector || url || titulo}». Sigue así: ${estado}. Comprueba con action=logs si la página falló, o con action=screenshot.`;
+    return i18n.err('nav.esperar.timeout', {
+      ms: timeout,
+      que: `${negar ? i18n.t('nav.esperar.desaparecer') : ''}${texto || selector || url || titulo}`,
+      estado,
+    });
   }
 
   /** Resumen del estado de la página (para los mensajes de espera y de error). */
@@ -1801,7 +1806,8 @@ class Browser {
     if (dir === 'reload') {
       await this.send('Page.reload', {}, sessionId);
     } else {
-      if (idx < 0 || idx >= (h.entries || []).length) return `Error: no hay nada más a donde ${dir === 'back' ? 'volver' : 'avanzar'}.`;
+      if (idx < 0 || idx >= (h.entries || []).length)
+        return i18n.err('nav.historia.tope', { direccion: dir === 'back' ? i18n.t('nav.volver') : i18n.t('nav.avanzar') });
       await this.send('Page.navigateToHistoryEntry', { entryId: h.entries[idx].id }, sessionId);
     }
     const loaded = await this.waitReady(sessionId, 10000);
@@ -1824,7 +1830,7 @@ class Browser {
         );
       } catch (e) {
         // El diálogo ya se cerró (Chrome lo aceptó solo): no es un error para el modelo.
-        if (!/No dialog is showing|no dialog/i.test(String(e.message))) return 'Error al contestar al diálogo: ' + e.message;
+        if (!/No dialog is showing|no dialog/i.test(String(e.message))) return i18n.err('nav.dialogo.fallo', { motivo: e.message });
       }
     }
     this._dialog = null;
@@ -1852,7 +1858,7 @@ class Browser {
   async handle(args, ownerId, opts = {}) {
     const signal = (opts && opts.signal) || null;
     // Detener antes de encolar: no tiene sentido arrancar una acción ya cancelada
-    if (signal && signal.aborted) return CANCELADO;
+    if (signal && signal.aborted) return CANCELADO();
     const run = () => this._handle(args, ownerId, opts);
     const next = this._queue.then(run, run);
     this._queue = next.then(
@@ -1900,12 +1906,15 @@ class Browser {
 
   async _despachar(args, ownerId, { retried = false } = {}) {
     const a = args.action;
-    if (this._abortada()) return CANCELADO;
-    if (!ACTIONS.has(a)) return `Acción desconocida: ${a}. Válidas: ${[...ACTIONS].join(', ')}.`;
+    if (this._abortada()) return CANCELADO();
+    if (!ACTIONS.has(a)) return i18n.t('nav.accion', { accion: a, validas: [...ACTIONS].join(', ') });
     /* v2.5: con un diálogo abierto casi nada funciona (la página está pausada) y antes
        cada acción se quedaba 30 s hasta el timeout. Mejor decirlo en claro y de una. */
     if (this._dialog && !['dialog', 'logs', 'tabs', 'close', 'launch', 'new_tab', 'select_tab', 'screenshot'].includes(a)) {
-      return `Error: la página tiene un diálogo abierto («${this._dialog.type}»: ${(this._dialog.message || '').slice(0, 120)}) que la tiene pausada. Contéstalo con action=dialog accept:true|false (text para un prompt) y sigue.`;
+      return i18n.err('nav.dialogo.bloquea', {
+        tipo: this._dialog.type,
+        mensaje: (this._dialog.message || '').slice(0, 120),
+      });
     }
     try {
       if (a === 'launch') return await this.launch(args.browser, args.url);
@@ -1939,7 +1948,7 @@ class Browser {
 
         case 'select_tab': {
           const list = await this.pages();
-          if (!list.length) return 'Error: no hay pestañas abiertas.';
+          if (!list.length) return i18n.err('nav.pestanas.nada');
           let page = null;
           const q = args.tab;
           if (typeof q === 'number' && list[q - 1]) page = list[q - 1];
@@ -1950,9 +1959,10 @@ class Browser {
               list.find((p) => p.url && p.url.toLowerCase().includes(n));
           }
           if (!page)
-            return (
-              'Error: no encontré esa pestaña («' + q + '»). Abiertas:\n' + list.map((t, i) => `${i + 1}. ${t.title} — ${t.url}`).join('\n')
-            );
+            return i18n.err('nav.pestana.no.encontrada', {
+              busqueda: q,
+              lista: list.map((t, i) => `${i + 1}. ${t.title} — ${t.url}`).join('\n'),
+            });
           if (this.activeId && this.activeId !== page.id) await this.detach(this.activeId);
           this.activeId = page.id;
           this._lastElements = null;
@@ -1972,7 +1982,7 @@ class Browser {
             );
             if (p) id = p.id;
           }
-          if (!id) return 'Error: no hay pestaña que cerrar.';
+          if (!id) return i18n.err('nav.pestana.nada');
           await this.detach(id); // libera la sesión CDP antes de cerrar el target
           await this.send('Target.closeTarget', { targetId: id });
           if (this.activeId === id) {
@@ -2079,7 +2089,7 @@ class Browser {
             Space: 32,
           };
           const winCode = map[args.key];
-          if (!winCode) return `Error: tecla no soportada: ${args.key}`;
+          if (!winCode) return i18n.err('nav.tecla', { tecla: args.key });
           const def = { windowsVirtualKeyCode: winCode, code: args.key, key: args.key };
           if (args.key === 'Enter') def.text = '\r';
           // sin `text` el navegador no ejecuta la acción de carácter: pulsar Space
@@ -2120,7 +2130,7 @@ class Browser {
         case 'wait': {
           const ms = Math.min(Math.max(0, Number(args.ms) || 1000), 10000);
           await this._dormir(ms);
-          if (this._abortada()) return CANCELADO;
+          if (this._abortada()) return CANCELADO();
           return `OK: esperados ${ms} ms.`;
         }
 
@@ -2134,7 +2144,7 @@ class Browser {
               ? `document.documentElement.outerHTML`
               : `document.body.innerText`;
           const txt = await this.evalJs(expr, sessionId);
-          if (txt === 'NOT_FOUND') return 'Error: selector no encontrado.';
+          if (txt === 'NOT_FOUND') return i18n.err('nav.selector');
           const clipped = String(txt).slice(0, 12000);
           /* El texto de la página son DATOS de terceros: se envuelve con el mismo
              bloque que las skills (terceros.js). Si no, una página con «ignora tus
@@ -2158,7 +2168,7 @@ class Browser {
              ilegible (y caríssima en tokens). */
           if (args.selector || args.index !== undefined) {
             const p = await this._resolve({ index: args.index, selector: args.selector, text: args.text }, sessionId, ownerId);
-            if (p.error) return `Error: ${p.error}`;
+            if (p.error) return i18n.err('nav.motivo', { motivo: p.error });
             const m = await this.send('Page.getLayoutMetrics', {}, sessionId);
             const v = m.cssVisualViewport || m.visualViewport || {};
             const maxW = 1280,
@@ -2207,7 +2217,7 @@ class Browser {
         this._sessions.clear();
         return this._despachar(args, ownerId, { retried: true });
       }
-      return 'Error: ' + e.message;
+      return i18n.err('nav.motivo', { motivo: e.message });
     }
   }
 

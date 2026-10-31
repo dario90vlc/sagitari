@@ -25,6 +25,7 @@ const { execFile } = require('child_process');
 const path = require('path');
 const { killTree } = require('./proc');
 const { decodeOut } = require('./exec-util');
+const i18n = require('./i18n');
 
 const TIMEOUT_MS = 30000;
 const MAX_BUFFER = 4 * 1024 * 1024; // tope de bytes que se bufferizan del proceso
@@ -93,33 +94,30 @@ function git(args, opts = {}) {
 /** Recorta lo que se le devuelve al modelo, diciendo que se recortó. */
 function acotar(texto, max = MAX_SALIDA) {
   const t = String(texto == null ? '' : texto);
-  return t.length > max ? t.slice(0, max) + `\n...[recortado: ${max} de ${t.length} caracteres]` : t;
+  return t.length > max ? t.slice(0, max) + i18n.t('git.recortado', { max, total: t.length }) : t;
 }
 
 /** Primera línea con algo, para resumir el error de git sin el ruido de contexto. */
 function motivo(r) {
-  if (r.code === null) return 'no encuentro git en este equipo (instálalo o comprueba que está en el PATH)';
-  if (r.matado) return `git tardó más de ${Math.round(TIMEOUT_MS / 1000)} s y lo corté`;
+  if (r.code === null) return i18n.t('git.no.encontrado');
+  if (r.matado) return i18n.t('git.tiempo', { s: Math.round(TIMEOUT_MS / 1000) });
   const txt = String(r.stderr || '').trim();
-  return txt || `git terminó con código ${r.code}`;
+  return txt || i18n.t('git.codigo', { codigo: r.code });
 }
 
 /** Comprueba que el espacio de trabajo es un repositorio y devuelve su raíz.
     Devuelve `{error}` (string, para el modelo) o `{raiz}`. */
 async function raizDelRepo(workspace, opts) {
-  if (!workspace || !String(workspace).trim())
-    return { error: 'Error: no hay espacio de trabajo abierto. Abre una carpeta para poder usar git.' };
+  if (!workspace || !String(workspace).trim()) return { error: i18n.err('git.sin.espacio') };
   const r = await git(['rev-parse', '--show-toplevel'], { ...opts, workspace });
   if (r.code !== 0) {
     if (r.code === null || /not a git repository/i.test(r.stderr)) {
-      return {
-        error: `Error: «${workspace}» no es un repositorio de git. Los comandos git_* solo funcionan dentro de un repo (si querías crearlo, pídeselo al usuario con run_command: git init).`,
-      };
+      return { error: i18n.err('git.no.repo', { ruta: workspace }) };
     }
-    return { error: 'Error: git no pudo leer el repositorio: ' + motivo(r) };
+    return { error: i18n.err('git.leer.repo', { motivo: motivo(r) }) };
   }
   const raiz = String(r.stdout || '').trim();
-  if (!raiz) return { error: 'Error: git no supo decirme la raíz del repositorio.' };
+  if (!raiz) return { error: i18n.err('git.sin.raiz') };
   return { raiz: path.resolve(raiz) };
 }
 
@@ -166,7 +164,7 @@ async function status(opts = {}) {
   const base = await raizDelRepo(opts.workspace, opts);
   if (base.error) return base.error;
   const r = await git([...COMUN, 'status', '--porcelain=v1', '--branch', '--untracked-files=all'], { ...opts, workspace: base.raiz });
-  if (r.code !== 0) return 'Error: git status falló: ' + motivo(r);
+  if (r.code !== 0) return i18n.err('git.status.fallo', { motivo: motivo(r) });
 
   const lineas = String(r.stdout || '')
     .split(/\r?\n/)
@@ -201,12 +199,12 @@ async function diff(args = {}, opts = {}) {
   if (args.stat === true) argv.push('--stat');
   if (args.path) {
     if (!dentroDe(base.raiz, args.path)) {
-      return `Error: «${args.path}» queda fuera del repositorio (${base.raiz}). Solo puedo mirar archivos de dentro.`;
+      return i18n.err('git.ruta.fuera', { ruta: args.path, raiz: base.raiz });
     }
     argv.push('--', String(args.path));
   }
   const r = await git(argv, { ...opts, workspace: base.raiz });
-  if (r.code !== 0) return 'Error: git diff falló: ' + motivo(r);
+  if (r.code !== 0) return i18n.err('git.diff.fallo', { motivo: motivo(r) });
   const texto = String(r.stdout || '').trim();
   const ambito = `${args.path ? ` en ${args.path}` : ''}${args.staged === true ? ' (preparado)' : ' (sin preparar)'}`;
   if (!texto) {
@@ -233,7 +231,7 @@ async function log(args = {}, opts = {}) {
     if (/does not have any commits yet|unknown revision|ambiguous argument 'HEAD'/i.test(r.stderr || '')) {
       return 'El repositorio todavía no tiene ningún commit (no hay historia que enseñar).';
     }
-    return 'Error: git log falló: ' + motivo(r);
+    return i18n.err('git.log.fallo', { motivo: motivo(r) });
   }
   const texto = String(r.stdout || '').trim();
   if (!texto) return 'El repositorio todavía no tiene ningún commit.';
@@ -248,15 +246,15 @@ async function log(args = {}, opts = {}) {
 /** Nombre de rama aceptable para git sin sorpresas (nada que empiece por `-`). */
 function nombreValido(n) {
   const s = String(n || '').trim();
-  if (!s) return 'falta el nombre de la rama';
-  if (s.startsWith('-')) return 'un nombre de rama no puede empezar por «-»';
+  if (!s) return i18n.t('git.rama.sin.nombre');
+  if (s.startsWith('-')) return i18n.t('git.rama.guion');
   /* Los caracteres de control (\x00-\x1f) son justo lo que git prohíbe en un ref: el
      aviso de ESLint es por el rango, no por un error — aquí es el punto de la regla. */
   // eslint-disable-next-line no-control-regex
-  if (/[\s~^:?*[\\\x00-\x1f]/.test(s)) return 'el nombre contiene caracteres que git no admite (espacios, ~ ^ : ? * [ \\ o saltos)';
+  if (/[\s~^:?*[\\\x00-\x1f]/.test(s)) return i18n.t('git.rama.caracteres');
   if (s.includes('..') || s.includes('@{') || s.endsWith('.') || s.endsWith('/') || s.endsWith('.lock'))
-    return 'ese nombre no es válido en git';
-  if (s === 'HEAD') return '«HEAD» no es un nombre de rama';
+    return i18n.t('git.rama.invalido');
+  if (s === 'HEAD') return i18n.t('git.rama.head');
   return null;
 }
 
@@ -265,7 +263,7 @@ async function branch(args = {}, opts = {}) {
   if (base.error) return base.error;
   const accion = String(args.action || 'list').toLowerCase();
   if (!['list', 'create', 'switch'].includes(accion)) {
-    return `Error: acción de rama no soportada: «${args.action}». Usa list, create o switch (borrar o forzar ramas no está soportado: pídeselo al usuario).`;
+    return i18n.err('git.rama.accion', { accion: args.action });
   }
 
   if (accion === 'list') {
@@ -273,7 +271,7 @@ async function branch(args = {}, opts = {}) {
       ...opts,
       workspace: base.raiz,
     });
-    if (lista.code !== 0) return 'Error: git no pudo listar las ramas: ' + motivo(lista);
+    if (lista.code !== 0) return i18n.err('git.rama.listar', { motivo: motivo(lista) });
     const filas = String(lista.stdout || '')
       .split(/\r?\n/)
       .filter((l) => l.trim());
@@ -299,11 +297,11 @@ async function branch(args = {}, opts = {}) {
   }
 
   const malo = nombreValido(args.name);
-  if (malo) return `Error: ${malo}.`;
+  if (malo) return i18n.err('git.rama.invalida', { motivo: malo });
 
   if (accion === 'create') {
     const r = await git(['branch', String(args.name).trim()], { ...opts, workspace: base.raiz });
-    if (r.code !== 0) return 'Error: no pude crear la rama: ' + motivo(r);
+    if (r.code !== 0) return i18n.err('git.rama.crear', { motivo: motivo(r) });
     const actual = await git(['rev-parse', '--abbrev-ref', 'HEAD'], { ...opts, workspace: base.raiz });
     return `OK: rama «${String(args.name).trim()}» creada (sigues en ${actual.stdout.trim() || 'la rama actual'}, no he cambiado de rama).`;
   }
@@ -311,12 +309,9 @@ async function branch(args = {}, opts = {}) {
   const r = await git(['switch', String(args.name).trim()], { ...opts, workspace: base.raiz });
   if (r.code !== 0) {
     if (/is not a git command/i.test(r.stderr || '')) {
-      return (
-        'Error: tu versión de git no tiene `switch` (es anterior a 2.23). Pídele al usuario que cambie de rama, o usa run_command con: git checkout ' +
-        String(args.name).trim()
-      );
+      return i18n.err('git.rama.switch.viejo', { rama: String(args.name).trim() });
     }
-    return 'Error: no pude cambiar de rama: ' + motivo(r);
+    return i18n.err('git.rama.cambiar', { motivo: motivo(r) });
   }
   return `OK: ahora estás en la rama «${String(args.name).trim()}».${String(r.stderr || '').trim() ? `\n${String(r.stderr).trim()}` : ''}`;
 }
@@ -329,12 +324,12 @@ async function commit(args = {}, opts = {}) {
   const base = await raizDelRepo(opts.workspace, opts);
   if (base.error) return base.error;
   const mensaje = String(args.message == null ? '' : args.message).trim();
-  if (!mensaje) return 'Error: falta el mensaje del commit (message).';
-  if (mensaje.length > 5000) return 'Error: el mensaje del commit es larguísimo (máximo 5000 caracteres).';
+  if (!mensaje) return i18n.err('git.commit.sin.mensaje');
+  if (mensaje.length > 5000) return i18n.err('git.commit.largo', { max: 5000 });
 
   const rutas = Array.isArray(args.paths) ? args.paths.map((p) => String(p).trim()).filter(Boolean) : [];
   for (const p of rutas) {
-    if (!dentroDe(base.raiz, p)) return `Error: «${p}» queda fuera del repositorio (${base.raiz}): no lo puedo añadir al commit.`;
+    if (!dentroDe(base.raiz, p)) return i18n.err('git.commit.fuera', { ruta: p, raiz: base.raiz });
   }
 
   /* Con rutas: se prepara SOLO lo pedido y se commitea SOLO eso (git lo permite con
@@ -342,7 +337,7 @@ async function commit(args = {}, opts = {}) {
      exactamente lo que ya estaba preparado, sin tocar el índice. Nunca se hace `add -A`. */
   if (rutas.length) {
     const add = await git(['add', '--', ...rutas], { ...opts, workspace: base.raiz });
-    if (add.code !== 0) return 'Error: no pude preparar los archivos: ' + motivo(add);
+    if (add.code !== 0) return i18n.err('git.commit.preparar', { motivo: motivo(add) });
     const r = await git(['commit', '-m', mensaje, '--', ...rutas], { ...opts, workspace: base.raiz });
     return await cierreCommit(r, rutas, opts);
   }
@@ -361,7 +356,7 @@ async function cierreCommit(r, rutas, opts) {
     if (/nothing to commit|no changes added to commit|nothing added to commit/i.test(r.stdout + r.stderr)) {
       return `No había cambios que commitear${rutas.length ? ' en ' + rutas.join(', ') : ''}: el índice y el árbol están iguales que el último commit.`;
     }
-    return 'Error: git commit falló: ' + motivo(r);
+    return i18n.err('git.commit.fallo', { motivo: motivo(r) });
   }
   const ref = await git(['rev-parse', '--short', 'HEAD'], { ...opts });
   if (ref.code !== 0) {

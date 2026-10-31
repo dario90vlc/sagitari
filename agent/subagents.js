@@ -29,6 +29,7 @@
 
 const fs = require('fs');
 const path = require('path');
+const i18n = require('./i18n');
 
 const SUBAGENTS = {
   research: {
@@ -395,8 +396,8 @@ function campo(meta, nombre) {
 /** Id de carpeta aceptable: sin `..`, sin barras y sin caracteres raros. */
 function idValido(id) {
   const s = String(id || '').trim();
-  if (!s || s === '.' || s === '..' || s.includes('..')) return 'nombre de carpeta no válido';
-  if (!/^[A-Za-z0-9][A-Za-z0-9._-]*$/.test(s)) return 'usa solo letras, números, punto, guion y guion bajo';
+  if (!s || s === '.' || s === '..' || s.includes('..')) return i18n.t('agentes.id.invalido');
+  if (!/^[A-Za-z0-9][A-Za-z0-9._-]*$/.test(s)) return i18n.t('agentes.id.caracteres');
   return null;
 }
 
@@ -424,10 +425,10 @@ function firmaDelAlmacen(dir) {
 /** Convierte un AGENT.md en la spec que ya entienden el prompt y la delegación. */
 function specDeDisco(id, raw) {
   const fm = parseFrontMatter(raw);
-  if (!fm || !fm.meta) return { ok: false, motivo: 'le falta el front-matter (--- name: … ---) al principio del archivo' };
+  if (!fm || !fm.meta) return { ok: false, motivo: i18n.t('agentes.sin.frontmatter') };
   const meta = fm.meta;
   const cuerpo = String(fm.body || '').trim();
-  if (!cuerpo) return { ok: false, motivo: 'el cuerpo está vacío: ahí van las instrucciones del agente, después del front-matter' };
+  if (!cuerpo) return { ok: false, motivo: i18n.t('agentes.sin.cuerpo') };
 
   const pedidas = listaDe(campo(meta, 'tools'));
   const { toolDefs: catalogo } = require('./tools');
@@ -493,18 +494,18 @@ function cargarDisco() {
       continue;
     }
     if (SUBAGENT_KEYS.includes(id)) {
-      avisos.push({ id, motivo: 'ese id ya lo usa un agente de serie: renombra la carpeta' });
+      avisos.push({ id, motivo: i18n.t('agentes.id.reservado') });
       continue;
     }
     if (nuevos.has(id)) {
-      avisos.push({ id, motivo: 'id repetido: se ignora' });
+      avisos.push({ id, motivo: i18n.t('agentes.id.repetido') });
       continue;
     }
     let raw;
     try {
       raw = fs.readFileSync(path.join(dir, id, 'AGENT.md'), 'utf8');
     } catch {
-      avisos.push({ id, motivo: 'no encuentro AGENT.md dentro de la carpeta' });
+      avisos.push({ id, motivo: i18n.t('agentes.sin.archivo') });
       continue;
     }
     const s = specDeDisco(id, raw);
@@ -512,7 +513,8 @@ function cargarDisco() {
       avisos.push({ id, motivo: s.motivo });
       continue;
     }
-    if (s.spec.ignoradas.length) avisos.push({ id, motivo: `herramientas ignoradas: ${s.spec.ignoradas.join(', ')}` });
+    if (s.spec.ignoradas.length)
+      avisos.push({ id, motivo: i18n.t('agentes.herramientas.ignoradas', { lista: s.spec.ignoradas.join(', ') }) });
     nuevos.set(id, s.spec);
   }
   for (const id of DISCO.keys()) delete SUBAGENTS[id]; // los que ya no están salen del registro
@@ -550,7 +552,7 @@ function listar() {
   try {
     asegurarCarga();
   } catch {
-    AVISOS = [{ id: '(carpeta de agentes)', motivo: 'no se pudo leer la carpeta de agentes del usuario' }];
+    AVISOS = [{ id: '(carpeta de agentes)', motivo: i18n.t('agentes.carpeta.ilegible') }];
   }
   const out = [];
   for (const k of SUBAGENT_KEYS) out.push(fichaDe(SUBAGENTS[k], 'integrante'));

@@ -17,6 +17,7 @@
 
 const checkpoints = require('./checkpoints');
 const runlog = require('./runlog');
+const i18n = require('./i18n');
 
 const TICK_MS = 20 * 1000; // revisión de tareas programadas y de la cola
 const MODOS_TAREA = ['act', 'plan', 'think', 'equipo']; // los mismos que el compositor (chatkit.MODE_ORDER)
@@ -97,18 +98,18 @@ class TaskManager {
    */
   enqueue({ goal, mode, scheduledAt = null, origin = 'background' }) {
     const text = String(goal || '').trim();
-    if (!text) return { ok: false, error: 'Falta el objetivo de la tarea.' };
+    if (!text) return { ok: false, error: i18n.t('tareas.sin.objetivo') };
     let status = 'pending';
     if (scheduledAt) {
       const t = Date.parse(scheduledAt);
-      if (Number.isNaN(t)) return { ok: false, error: 'Fecha de programación inválida.' };
+      if (Number.isNaN(t)) return { ok: false, error: i18n.t('tareas.fecha.invalida') };
       if (t > Date.now() + 5000) status = 'scheduled';
     }
     const run = checkpoints.newRun({ goal: text, mode: MODOS_TAREA.includes(String(mode)) ? String(mode) : 'act', status, scheduledAt, origin });
     this._stopped = false; // hay trabajo nuevo: la cola vuelve a arrancar
     this._notified.delete(run.runId);
     checkpoints.save(run);
-    this._update(run, 'Tarea ' + (status === 'scheduled' ? 'programada' : 'en cola'));
+    this._update(run, status === 'scheduled' ? i18n.t('tareas.nota.programada') : i18n.t('tareas.nota.en.cola'));
     this._pump();
     return { ok: true, runId: run.runId };
   }
@@ -116,7 +117,7 @@ class TaskManager {
   /** Pausa una tarea: en ejecución aborta con checkpoint; pendiente/programada pasa a pausada. */
   pause(runId) {
     const run = checkpoints.read(runId);
-    if (!run) return { ok: false, error: 'Tarea no encontrada.' };
+    if (!run) return { ok: false, error: i18n.t('tareas.no.encontrada') };
     if (run.status === 'paused') return { ok: true }; // ya está pausada: no-op
     if (run.status === 'running') {
       const a = this.agents.get(runId);
@@ -125,33 +126,33 @@ class TaskManager {
         return { ok: true };
       } // el agente emite 'paused' con checkpoint
       checkpoints.pause(run);
-      this._update(run, 'Tarea pausada');
+      this._update(run, i18n.t('tareas.nota.pausada'));
       return { ok: true };
     }
     if (run.status === 'pending' || run.status === 'scheduled') {
       checkpoints.pause(run);
-      this._update(run, 'Tarea pausada (estaba en cola)');
+      this._update(run, i18n.t('tareas.nota.pausada.cola'));
       return { ok: true };
     }
-    return { ok: false, error: 'La tarea no se puede pausar en estado ' + run.status };
+    return { ok: false, error: i18n.t('tareas.no.pausable', { estado: run.status }) };
   }
 
   /** Reanuda una tarea pausada/interrupta/pendiente: la (re)arranca ahora mismo. */
   resume(runId) {
     const run = checkpoints.read(runId);
-    if (!run) return { ok: false, error: 'Tarea no encontrada.' };
+    if (!run) return { ok: false, error: i18n.t('tareas.no.encontrada') };
     if (this.isRunBusy(runId)) {
-      return { ok: false, error: 'Esa tarea la está ejecutando el chat ahora mismo. Detén el chat antes de reanudarla aquí.' };
+      return { ok: false, error: i18n.t('tareas.chat.ocupado') };
     }
     if (!['paused', 'interrupted', 'pending', 'failed'].includes(run.status)) {
-      return { ok: false, error: 'La tarea está ' + run.status + ' y no se puede reanudar.' };
+      return { ok: false, error: i18n.t('tareas.no.reanudable', { estado: run.status }) };
     }
     this._stopped = false; // el usuario pide trabajo: la cola vuelve a arrancar
     this._notified.delete(runId); // su desenlace se puede volver a avisar
     run.attempts = 0; // reanudación manual: presupuesto de reintentos limpio
     run.nextAttemptAt = null;
     checkpoints.setStatus(run, 'pending');
-    this._update(run, 'Tarea reanudada — en cola');
+    this._update(run, i18n.t('tareas.nota.reanudada'));
     this._pump();
     return { ok: true };
   }
@@ -159,9 +160,9 @@ class TaskManager {
   /** Cancela una tarea en cualquier estado activo (archivada como cancelled). */
   cancel(runId, reason) {
     const run = checkpoints.read(runId);
-    if (!run) return { ok: false, error: 'Tarea no encontrada.' };
+    if (!run) return { ok: false, error: i18n.t('tareas.no.encontrada') };
     if (['completed', 'failed', 'cancelled'].includes(run.status)) {
-      return { ok: false, error: 'La tarea ya está ' + run.status + '.' };
+      return { ok: false, error: i18n.t('tareas.ya.estado', { estado: run.status }) };
     }
     const live = this._liveRuns.get(runId);
     if (live) {
@@ -177,8 +178,8 @@ class TaskManager {
       } catch {}
       this.agents.delete(runId);
     }
-    checkpoints.cancel(run, reason || 'Cancelada por el usuario');
-    this._update(run, 'Tarea cancelada');
+    checkpoints.cancel(run, reason || i18n.t('tareas.cancelada.usuario'));
+    this._update(run, i18n.t('tareas.nota.cancelada'));
     // el aviso se da AQUÍ; el .finally del chat abortado no debe repetirlo (antes
     // llegaban dos notificaciones nativas y dos toasts por una sola cancelación)
     this._notified.add(runId);
@@ -193,7 +194,7 @@ class TaskManager {
    */
   remove(runId) {
     const run = checkpoints.read(runId);
-    if (!run) return { ok: false, error: 'Tarea no encontrada.' };
+    if (!run) return { ok: false, error: i18n.t('tareas.no.encontrada') };
     const a = this.agents.get(runId);
     if (a) {
       try {
@@ -208,9 +209,9 @@ class TaskManager {
       live.cancelRequested = true;
     }
     this._liveRuns.delete(runId);
-    if (LIVE_STATUS.includes(run.status)) checkpoints.cancel(run, 'Eliminada por el usuario');
+    if (LIVE_STATUS.includes(run.status)) checkpoints.cancel(run, i18n.t('tareas.eliminada.usuario'));
     const res = checkpoints.remove(runId);
-    if (res.ok) this._update(run, 'Tarea eliminada');
+    if (res.ok) this._update(run, i18n.t('tareas.nota.eliminada'));
     return res;
   }
 
@@ -283,9 +284,9 @@ class TaskManager {
         checkpoints.fail(run, {
           step: run.step || 'EXECUTE',
           tool: null,
-          message: 'Sin reanudar: ' + attempts + ' reintentos automáticos agotados',
+          message: i18n.t('tareas.sin.reanudar', { n: attempts }),
         });
-        this._update(run, 'Tarea no reanudada: reintentos automáticos agotados');
+        this._update(run, i18n.t('tareas.nota.reintentos.agotados'));
         abandoned++;
         continue;
       }
@@ -293,7 +294,7 @@ class TaskManager {
       run.attempts = attempts + 1;
       run.nextAttemptAt = new Date(Date.now() + RETRY_BACKOFF_MS * Math.pow(2, Math.min(attempts, 6))).toISOString();
       checkpoints.setStatus(run, 'pending');
-      this._update(run, 'Tarea interrumpida recuperada — en cola');
+      this._update(run, i18n.t('tareas.nota.recuperada'));
       resumed++;
     }
     this._pump();
@@ -344,14 +345,14 @@ class TaskManager {
     const cfg = settings && settings.active;
     if (!cfg || !cfg.baseUrl || !cfg.model) {
       checkpoints.pause(run);
-      this._update(run, 'Tarea en pausa: no hay proveedor/modelo activo');
+      this._update(run, i18n.t('tareas.nota.sin.proveedor'));
       return;
     }
     const prompt = buildResumePrompt(run); // reanudar lleva el progreso ya hecho
     checkpoints.resume(run); // status → running
     if (run.status !== 'running') {
       // cancelada entre medias: no arrancar
-      this._update(run, 'Tarea no iniciada: ' + run.status);
+      this._update(run, i18n.t('tareas.nota.no.iniciada', { estado: run.status }));
       return;
     }
     const runRef = run;
@@ -389,7 +390,7 @@ class TaskManager {
 
   /** El chat de una tarea lanzó una excepción: queda registrada en disco y en el runlog. */
   _chatFailed(run, runId, e) {
-    const message = 'Error en el chat de la tarea: ' + (e && e.message ? e.message : String(e));
+    const message = i18n.err('tareas.chat.fallo', { motivo: e && e.message ? e.message : String(e) });
     console.error('TaskManager: ' + runId + ' — ' + message);
     try {
       runlog.log({ agent: 'sagitari', task: runId, event: 'task_error', message });
@@ -421,7 +422,7 @@ class TaskManager {
           if (run) {
             checkpoints.setStatus(run, 'pending');
             due = true;
-            this._update(run, 'Tarea programada: llega la hora');
+            this._update(run, i18n.t('tareas.nota.hora'));
           }
         }
       }

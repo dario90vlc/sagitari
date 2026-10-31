@@ -1,5 +1,7 @@
 'use strict';
 
+const i18n = require('./i18n');
+
 /* v3.0 — Seguridad de los comandos (hueco 6: aislamiento).
 
    Hasta ahora `run_command` tenía UN nivel de riesgo: el de la herramienta
@@ -131,6 +133,71 @@ const SENSIBLES = [
 
   // --- escribir fuera del proyecto ---
   { rx: />>?\s*"?(C:[\\/](Windows|Program Files|ProgramData)|\/etc\/|\/usr\/)/i, motivo: 'escribir dentro de las carpetas del sistema' },
+];
+
+/* Claves de traducción de cada motivo, EN EL MISMO ORDEN que las dos tablas de arriba.
+   La tarjeta de permiso y el rechazo enseñan este motivo, así que no puede quedarse en
+   español: el índice de `regla` ya identifica la fila y aquí solo se le pone nombre.
+   Mover o insertar una regla obliga a mover o insertar su clave en esta lista. */
+const MOTIVOS_PROHIBIDOS = [
+  'cmd.prohibido.formatear',
+  'cmd.prohibido.diskpart',
+  'cmd.prohibido.mkfs',
+  'cmd.prohibido.dispositivo',
+  'cmd.prohibido.arranque',
+  'cmd.prohibido.copias',
+  'cmd.prohibido.espacio_libre',
+  'cmd.prohibido.raiz_unidad',
+  'cmd.prohibido.raiz_unidad',
+  'cmd.prohibido.raiz_sistema',
+  'cmd.prohibido.recurse_raiz',
+  'cmd.prohibido.dentro_sistema',
+  'cmd.prohibido.no_soportada',
+  'cmd.prohibido.bomba',
+];
+const MOTIVOS_SENSIBLES = [
+  'cmd.sensible.tubo',
+  'cmd.sensible.iex',
+  'cmd.sensible.powershell_base64',
+  'cmd.sensible.descarga_remota',
+  'cmd.sensible.lolbin',
+  'cmd.sensible.certutil',
+  'cmd.sensible.url_terminal',
+  'cmd.sensible.borrar_recursivo',
+  'cmd.sensible.borrar_carpetas',
+  'cmd.sensible.borrar_forzado',
+  'cmd.sensible.remove_item',
+  'cmd.sensible.git_clean',
+  'cmd.sensible.git_reset',
+  'cmd.sensible.git_checkout',
+  'cmd.sensible.git_restore',
+  'cmd.sensible.git_push_force',
+  'cmd.sensible.git_push_delete',
+  'cmd.sensible.git_branch',
+  'cmd.sensible.git_filter',
+  'cmd.sensible.publicar',
+  'cmd.sensible.publicar',
+  'cmd.sensible.publicar_release',
+  'cmd.sensible.docker_borrar',
+  'cmd.sensible.npm_global',
+  'cmd.sensible.pip_install',
+  'cmd.sensible.instalar',
+  'cmd.sensible.registro',
+  'cmd.sensible.servicio',
+  'cmd.sensible.schtasks',
+  'cmd.sensible.servicio_ps',
+  'cmd.sensible.cuentas',
+  'cmd.sensible.usuarios',
+  'cmd.sensible.execution_policy',
+  'cmd.sensible.antivirus',
+  'cmd.sensible.cortafuegos',
+  'cmd.sensible.red',
+  'cmd.sensible.energia',
+  'cmd.sensible.matar',
+  'cmd.sensible.wmic',
+  'cmd.sensible.permisos',
+  'cmd.sensible.registro',
+  'cmd.sensible.escribir_sistema',
 ];
 
 /* --------------------------------------------------------------------------- *
@@ -443,7 +510,7 @@ function clasificar(cmd) {
 
   for (let i = 0; i < PROHIBIDOS.length; i++) {
     if (dispara(PROHIBIDOS[i].rx)) {
-      return { nivel: 'prohibido', motivo: PROHIBIDOS[i].motivo, regla: 'prohibido#' + i };
+      return { nivel: 'prohibido', motivo: i18n.t(MOTIVOS_PROHIBIDOS[i]), regla: 'prohibido#' + i };
     }
   }
 
@@ -452,7 +519,7 @@ function clasificar(cmd) {
 
   for (let i = 0; i < SENSIBLES.length; i++) {
     if (dispara(SENSIBLES[i].rx)) {
-      return { nivel: 'sensible', motivo: SENSIBLES[i].motivo, regla: 'sensible#' + i };
+      return { nivel: 'sensible', motivo: i18n.t(MOTIVOS_SENSIBLES[i]), regla: 'sensible#' + i };
     }
   }
 
@@ -472,7 +539,7 @@ function esSeguro(cmd) {
 /** Frase para la tarjeta de confirmación, o null si no hay nada que avisar. */
 function avisoSensible(cmd) {
   const c = clasificar(cmd);
-  if (c.nivel === 'sensible') return 'COMANDO SENSIBLE: ' + c.motivo;
+  if (c.nivel === 'sensible') return i18n.t('cmd.aviso.sensible', { motivo: c.motivo });
   return null;
 }
 
@@ -480,7 +547,7 @@ function avisoSensible(cmd) {
 function mensajeProhibido(cmd) {
   const c = clasificar(cmd);
   if (c.nivel !== 'prohibido') return '';
-  return `Error: no voy a ejecutar este comando. Motivo: ${c.motivo}. Si de verdad lo necesitas, ejecútalo tú, consciente de lo que hace.`;
+  return i18n.err('cmd.prohibido.mensaje', { motivo: c.motivo });
 }
 
 module.exports = { clasificar, esSeguro, avisoSensible, mensajeProhibido, compuesta, PROHIBIDOS, SENSIBLES, PERMITIDOS };

@@ -2906,7 +2906,7 @@ test('mcp: un isError y un error JSON-RPC se explican al modelo', async () => {
   });
   await mcp.ensure('e');
   const ok1 = await mcp.callTool('mcp__e__fallo', {});
-  ok(/^Error del servidor MCP:/.test(ok1), ok1);
+  ok(/^Error: el servidor MCP/.test(ok1), ok1);
   const ok2 = await mcp.callTool('mcp__e__roto', {});
   ok(/se rompió por dentro/.test(ok2), 'el error del servidor llega tal cual: ' + ok2);
   await mcp.shutdown();

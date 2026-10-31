@@ -24,6 +24,7 @@
  */
 
 const path = require('path');
+const i18n = require('./i18n');
 
 const MAX_POR_HOOK = 2000; // caracteres de salida que se le enseñan al modelo
 
@@ -56,7 +57,7 @@ function tieneMarcadores(plantilla) {
 function recortar(texto, max = MAX_POR_HOOK) {
   const t = String(texto == null ? '' : texto).trim();
   if (t.length <= max) return t;
-  return t.slice(0, max).trimEnd() + '\n[…salida recortada]';
+  return t.slice(0, max).trimEnd() + i18n.t('hook.recortada');
 }
 
 /** Texto que se le enseña al modelo (y al usuario) con el resultado de un hook. */
@@ -64,12 +65,14 @@ function resumen(resultado, { etiqueta = 'Hook', comando = '' } = {}) {
   if (!resultado) return '';
   const salida = recortar(resultado.texto);
   if (resultado.ok) {
-    return salida ? `${etiqueta} «${comando}» OK:\n${salida}` : `${etiqueta} «${comando}» OK (sin salida).`;
+    return salida
+      ? `${etiqueta} «${comando}» OK:\n${salida}`
+      : `${etiqueta} «${comando}» OK${i18n.t('hook.sin.salida')}`;
   }
   const motivo =
     resultado.code === null || resultado.code === undefined
-      ? `no se pudo ejecutar${resultado.texto ? ': ' + recortar(resultado.texto, 300) : ''}`
-      : `falló (código ${resultado.code})`;
+      ? i18n.t('hook.no.ejecutado') + (resultado.texto ? ': ' + recortar(resultado.texto, 300) : '')
+      : i18n.t('hook.fallo', { codigo: resultado.code });
   return `${etiqueta} «${comando}» ${motivo}${salida ? ':\n' + salida : ''}`;
 }
 

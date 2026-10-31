@@ -16,6 +16,7 @@ const hooks = require('./hooks');
 const edicion = require('./edicion'); // v3.0: anclajes tolerantes a espacios
 const terceros = require('./terceros'); // v5.0.1: marco único del contenido de terceros
 const comandos = require('./comandos'); // v3.0: qué comando es peligroso y cuál no
+const i18n = require('./i18n');
 const mcpTransport = require('./mcp-transport');
 const { killTree } = require('./proc');
 const { dataDir } = require('./datadir');
@@ -102,12 +103,11 @@ function enDatosApp(p) {
   if (real === null) return 'duda';
   return dentroDe(real.toLowerCase(), DATOS_DIR) ? 'si' : 'no';
 }
-const MSG_DATOS_LECTURA = 'Error: no puedo leer el directorio de datos de la app (ahí viven tus claves y conversaciones).';
-const MSG_DATOS_ESCRITURA = 'Error: no puedo escribir en el directorio de datos de la app (ahí viven tus claves y conversaciones).';
-const MSG_DATOS_DUDA =
-  'Error: no pude comprobar dónde acaba esa ruta (no se puede resolver); una ruta que no se puede verificar no se toca.';
-const MSG_FLUJO =
-  'Error: esa ruta es un flujo alternativo de NTFS (archivo:flujo): su contenido no se ve en el Explorador, en git ni en el diff, así que no lo toco.';
+/* Funciones y no constantes: el módulo se carga antes de que `main` fije el idioma, así
+   que un literal evaluado aquí se quedaría en el idioma de arranque para siempre. */
+const MSG_DATOS_LECTURA = () => i18n.err('herramienta.datos.lectura');
+const MSG_DATOS_DUDA = () => i18n.err('herramienta.datos.duda');
+const MSG_FLUJO = () => i18n.err('herramienta.ntfs.flujo');
 const SYS_WRITE_RX = /^[a-z]:\\(windows|program files|program files \(x86\)|programdata)([\\/]|$)/i;
 /* `README.md:oculto` es un flujo alternativo de NTFS: la ruta «parece» dentro del espacio de
    trabajo y el contenido queda invisible para el Explorador, git, list_dir y el diff, así
@@ -128,23 +128,28 @@ function esLecturaDeSkill(p) {
   return real !== null && dentroDe(real.toLowerCase(), SKILLS_DATOS_DIR);
 }
 function bloqueoLectura(p) {
-  if (esFlujoAlternativo(p)) return MSG_FLUJO;
+  if (esFlujoAlternativo(p)) return MSG_FLUJO();
   const v = enDatosApp(p);
-  if (v === 'duda') return MSG_DATOS_DUDA;
-  if (v === 'si' && !esLecturaDeSkill(p)) return MSG_DATOS_LECTURA;
+  if (v === 'duda') return MSG_DATOS_DUDA();
+  if (v === 'si' && !esLecturaDeSkill(p)) return MSG_DATOS_LECTURA();
   return null;
 }
-function bloqueoEscritura(p) {
-  if (esFlujoAlternativo(p)) return MSG_FLUJO;
+/* `ejecutar`: el mismo confinamiento sirve para el `cwd` de run_command, y ahí el verbo
+   es otro («no puedo ejecutar en»). La razón se conserva en los dos casos; cambiar el
+   verbo con un `replace` sobre el texto traducido se rompería al pasar al inglés. */
+function bloqueoEscritura(p, ejecutar = false) {
+  if (esFlujoAlternativo(p)) return MSG_FLUJO();
   const v = enDatosApp(p);
-  if (v === 'si') return MSG_DATOS_ESCRITURA;
-  if (v === 'duda') return MSG_DATOS_DUDA;
+  if (v === 'si') return i18n.err(ejecutar ? 'herramienta.datos.escritura.ejecutar' : 'herramienta.datos.escritura');
+  if (v === 'duda') return MSG_DATOS_DUDA();
   // el sistema también se comprueba sobre el camino REAL: un junction a C:\Windows
   // cuela igual que uno a los datos de la app si se mira solo la ruta escrita
   const real = caminoReal(rutaResuelta(p));
   const r = rutaResuelta(p);
-  if (SYS_WRITE_RX.test((real || r).toLowerCase())) return 'Error: no puedo escribir en carpetas del sistema.';
-  if (/^[a-z]:[\\/]?$/i.test(r)) return 'Error: no puedo escribir en la raíz de una unidad.';
+  if (SYS_WRITE_RX.test((real || r).toLowerCase()))
+    return i18n.err(ejecutar ? 'herramienta.sistema.bloqueado.ejecutar' : 'herramienta.sistema.bloqueado');
+  if (/^[a-z]:[\\/]?$/i.test(r))
+    return i18n.err(ejecutar ? 'herramienta.raiz.bloqueada.ejecutar' : 'herramienta.raiz.bloqueada');
   return null;
 }
 
@@ -250,7 +255,7 @@ function lineaDelError(txt) {
     .map((l) => l.trim())
     .filter(Boolean);
   const u = lineas.find((l) => /error|syntax|unexpected|invalid|unexpected token|not defined/i.test(l));
-  return clip(u || lineas[0] || 'no compila', 300);
+  return clip(u || lineas[0] || i18n.t('herramienta.sintaxis.no.compila'), 300);
 }
 
 /**
@@ -272,7 +277,7 @@ async function revisarSintaxis(absPath) {
       JSON.parse(await fsp.readFile(absPath, 'utf8'));
       return null;
     } catch (e) {
-      return `JSON inválido: ${clip(e.message, 200)}`;
+      return i18n.t('herramienta.json.invalido', { detalle: clip(e.message, 200) });
     }
   }
   let res;
@@ -386,8 +391,8 @@ function piezaTocadaEsteTurno(ws, piezas, dueno = '') {
  */
 function comprobadorDeConfianza(ws, piezas, dueno = '') {
   const r = piezaTocadaEsteTurno(ws, piezas, dueno);
-  if (r.error) return { ok: false, motivo: 'no se pudo comprobar si ya estaba antes de este turno' };
-  if (r.tocada) return { ok: false, motivo: 'lo ha escrito este turno (' + r.tocada + ')' };
+  if (r.error) return { ok: false, motivo: i18n.t('herramienta.check.sin.comprobar') };
+  if (r.tocada) return { ok: false, motivo: i18n.t('herramienta.check.tocado', { ruta: r.tocada }) };
   return { ok: true };
 }
 
@@ -418,7 +423,7 @@ async function lanzarCheck(ws, c, archivos, dueno = '') {
     const conf = comprobadorDeConfianza(ws, [r.file, c.entrada, ...CHECK_ENTRADAS], dueno);
     if (!conf.ok)
       return {
-        bloqueado: `No he pasado ${c.etiqueta}: ${conf.motivo}. El comprobador y la configuración que lo define salen del proyecto, y este turno los ha tocado: lanzarlo sería ejecutar lo que ha escrito el propio modelo sin que nadie lo revise. Si lo quieres pasar ahora, lánzalo con run_command (esa sí pide permiso al usuario).`,
+        bloqueado: i18n.t('herramienta.check.bloqueado', { etiqueta: c.etiqueta, motivo: conf.motivo }),
       };
     res = await runProg(r.file, r.argv, { env: r.env, verbatim: r.verbatim, timeout: c.timeoutMs || 20000, cwd: ws });
   } catch {
@@ -496,7 +501,7 @@ async function revisarEstatico(ws, archivos, dueno = '') {
 async function ejecutarHook(plantilla, { ws = '', archivos = [], timeoutMs = 60000, registerKillable = null } = {}) {
   const comando = hooks.expandir(plantilla, { ws, archivos });
   const t0 = Date.now();
-  if (!String(comando).trim()) return { ok: false, code: null, texto: 'hook vacío', comando, ms: 0 };
+  if (!String(comando).trim()) return { ok: false, code: null, texto: i18n.t('herramienta.hook.vacio'), comando, ms: 0 };
   /* La plantilla la escribe el usuario, pero `settings:set` la puede cambiar
      cualquier IPC: un hook destructivo no se ejecuta ni por esa vía. Misma
      barrera que run_command (comandos.js), adaptada a mensaje de hook. */
@@ -562,19 +567,13 @@ async function ejecutarComandoVerificacion(
   const negar = (motivo) => ({
     code: 1,
     stdout: '',
-    stderr:
-      `Error: no he ejecutado la comprobación de cierre («${texto}»): ${motivo}.` +
-      ' Esa comprobación sale de los archivos del proyecto, y esos los puede haber escrito el propio modelo' +
-      ' en este mismo turno, así que solo se lanza si ya era la comprobación del proyecto ANTES del turno y si' +
-      ' el comando es inocuo. Para lanzarla: puedes ejecutarla con run_command (esa sí pide permiso al usuario),' +
-      ' o el usuario puede declararla en el proyecto (por ejemplo en "scripts" de package.json) para que valga' +
-      ' desde el próximo turno.',
+    stderr: i18n.err('herramienta.cierre.negado', { comando: texto, motivo }),
   });
   if (!permitido) {
     return negar(
       clase.nivel === 'prohibido'
-        ? 'no voy a ejecutar un comando prohibido (' + (clase.motivo || 'destruye el sistema o los datos') + ')'
-        : 'el comando es sensible (' + (clase.motivo || 'pide confirmación') + ') y aquí no hay usuario a quien preguntar',
+        ? i18n.t('herramienta.cierre.prohibido', { motivo: clase.motivo || i18n.t('herramienta.cierre.destruye') })
+        : i18n.t('herramienta.cierre.sensible', { motivo: clase.motivo || i18n.t('herramienta.cierre.confirmacion') }),
     );
   }
   if (manifiestoTocado) {
@@ -582,7 +581,7 @@ async function ejecutarComandoVerificacion(
     return negar(manifiestoTocado);
   }
   if (comandoPrevio === false) {
-    return negar('no era la comprobación del proyecto al empezar el turno, así que la ha traído este turno');
+    return negar(i18n.t('herramienta.cierre.turno'));
   }
   return run(texto, { cwd, timeout: timeoutMs, registerKillable, maxBuffer: 8 * 1024 * 1024 });
 }
@@ -604,23 +603,28 @@ async function ejecutarComandoVerificacion(
  * --------------------------------------------------------------------------- */
 function detalleEdicion(etiqueta, texto, r) {
   const cs = (r && r.candidatos) || [];
-  if (!cs.length) return `${etiqueta}: ${r.error}. Copia el texto exacto con read_file (respeta espacios y saltos de línea).`;
+  if (!cs.length) return i18n.t('herramienta.edicion.copia', { etiqueta, motivo: r.error });
   if (cs.length > 1) {
-    return `${etiqueta}: ${r.error}; ignorando la sangría aparece en ${cs.length} sitios (líneas ${cs.map((x) => x.linea).join(', ')}). Añade más contexto para que sea único.`;
+    return i18n.t('herramienta.edicion.varios', {
+      etiqueta,
+      motivo: r.error,
+      n: cs.length,
+      lineas: cs.map((x) => x.linea).join(', '),
+    });
   }
   const c = cs[0];
   return [
-    `${etiqueta}: ${r.error}. Esto es lo MÁS PARECIDO que hay en el archivo — casi siempre es solo la sangría o el final de línea:`,
-    edicion.marco(texto, c, { titulo: '¿Querías esto?' }),
-    'TEXTO EXACTO de ese bloque (ponlo tal cual en old_string):',
+    i18n.t('herramienta.edicion.parecido', { etiqueta, motivo: r.error }),
+    edicion.marco(texto, c, { titulo: i18n.t('herramienta.edicion.quisieras') }),
+    i18n.t('herramienta.edicion.texto.exacto'),
     edicion.textoExacto(texto, c),
-    'FIN DEL TEXTO EXACTO.',
-    'Si era ESE bloque, repite la misma llamada añadiendo tolerar_espacios: true y se aplicará reajustando la sangría al archivo.',
+    i18n.t('herramienta.edicion.fin.exacto'),
+    i18n.t('herramienta.edicion.tolerar'),
   ].join('\n');
 }
 
 function errorEdicion(p, texto, r) {
-  return 'Error en ' + p + ' — ' + detalleEdicion('no se pudo editar', texto, r);
+  return i18n.err('herramienta.edicion.fallo', { ruta: p, detalle: detalleEdicion(i18n.t('herramienta.edicion.no'), texto, r) });
 }
 
 async function resultadoEscritura(absPath, okText, { checked = [], workspace = null, settings = null, ownerCambios = '' } = {}) {
@@ -632,7 +636,7 @@ async function resultadoEscritura(absPath, okText, { checked = [], workspace = n
     if (mal) fallos.push(`${path.basename(f)}: ${mal}`);
   }
   if (fallos.length) {
-    return `Error: ${okText}, pero NO compila:\n- ${fallos.join('\n- ')}\nEl archivo queda tal cual (no se deshace). Arréglalo antes de seguir con otra cosa.`;
+    return i18n.err('herramienta.escritura.no.compila', { texto: okText, fallos: fallos.join('\n- ') });
   }
   // v2.5: el hook del usuario tras escribir (formatear, lint --fix…). Se le enseña al
   // modelo, pero NO convierte el paso en un fallo: el archivo ya está escrito y el
@@ -649,7 +653,7 @@ async function resultadoEscritura(absPath, okText, { checked = [], workspace = n
     }
     if (h) {
       textoHook = hooks.resumen(h, { etiqueta: 'Hook', comando: plantillaHook });
-      if (!h.ok) textoHook = '⚠ ' + textoHook + '\n(el archivo queda escrito; si el fallo es del código recién escrito, arréglalo)';
+      if (!h.ok) textoHook = '⚠ ' + textoHook + '\n' + i18n.t('herramienta.hook.queda');
     }
   }
   const conHook = (texto) => (textoHook ? texto + '\n' + textoHook : texto);
@@ -666,7 +670,7 @@ async function resultadoEscritura(absPath, okText, { checked = [], workspace = n
   if (!est.texto) return conHook(`OK: ${okText}`);
   if (est.errores) {
     return conHook(
-      `Error: ${okText}, y la comprobación del proyecto encontró ${est.errores} error(es) en eso:\n${est.texto}\nEl archivo queda escrito: arréglalo antes de seguir con otra cosa.`,
+      i18n.err('herramienta.escritura.errores', { texto: okText, n: est.errores, hallazgos: est.texto }),
     );
   }
   return conHook(`OK: ${okText}\n${est.texto}`);
@@ -674,7 +678,7 @@ async function resultadoEscritura(absPath, okText, { checked = [], workspace = n
 
 const clip = (s, n = 8000) => {
   s = String(s ?? '');
-  return s.length > n ? s.slice(0, n) + `\n...[truncado, ${s.length} caracteres]` : s;
+  return s.length > n ? s.slice(0, n) + i18n.t('herramienta.truncado', { n: s.length }) : s;
 };
 
 const MEDIA_KEYS = { play_pause: 0xb3, next: 0xb0, previous: 0xb1, volume_up: 0xaf, volume_down: 0xae, mute: 0xad };
@@ -826,7 +830,7 @@ async function searchIn(dir, regex, searchContent, out, budget, depth = 0, maxDe
       continue;
     }
     budget.files++;
-    if (regex.test(e.name)) out.push(`NOMBRE: ${full}`);
+    if (regex.test(e.name)) out.push(i18n.t('herramienta.busqueda.nombre', { ruta: full }));
     if (!searchContent || out.length >= budget.count) continue;
     try {
       const st = await fsp.stat(full);
@@ -868,7 +872,7 @@ async function executeTool(name, args, ctx) {
   // Las herramientas MCP no están en la tabla nativa: se despachan por prefijo al
   // gestor, que ya pasó por el motor de permisos en _runToolCall.
   if (String(name).startsWith('mcp__')) {
-    if (!ctx.mcp) return 'Error: no hay servidores MCP en esta ejecución.';
+    if (!ctx.mcp) return i18n.err('herramienta.mcp.sin.servidores');
     // `_mcp` es la etiqueta interna de la tarjeta de confirmación (servidor y
     // nombre reales): NO es un argumento de la herramienta, así que no puede
     // viajar al servidor (uno estricto rechazaría el campo de más).
@@ -880,7 +884,7 @@ async function executeTool(name, args, ctx) {
     case 'remember': {
       const textoGuardar = String(args.text == null ? '' : args.text);
       // vacío se rechaza ANTES de nada: una propuesta sin texto no es nada que aprobar
-      if (!textoGuardar.trim()) return 'Error: no pude guardar el recuerdo (texto vacío).';
+      if (!textoGuardar.trim()) return i18n.err('herramienta.recuerdo.vacio');
       const importance = Number.isFinite(Number(args.importance)) ? Number(args.importance) : 0.6;
       const confidence = Number.isFinite(Number(args.confidence)) ? Number(args.confidence) : 0.8;
       /* El ajuste «Guardar sin preguntar» (`memoryAutoSave`) manda también AQUÍ. Antes
@@ -892,46 +896,43 @@ async function executeTool(name, args, ctx) {
         const nuevas = memory.trayProponer([
           { texto: textoGuardar, origen: 'agent', motivo: 'lo propuso el agente', confianza: confidence },
         ]);
-        if (!nuevas.length)
-          return 'No se encoló ninguna propuesta nueva: ese recuerdo ya está en la memoria o ya espera aprobación en «Recién aprendido». No hace falta que lo repitas.';
-        return 'OK: propuesta guardada en «Recién aprendido», pendiente de que el usuario la apruebe. No la des por guardada ni la repitas.';
+        if (!nuevas.length) return i18n.t('herramienta.recuerdo.ya');
+        return i18n.t('herramienta.recuerdo.propuesta');
       }
       const m = memory.add({ text: textoGuardar, source: 'agent', importance, confidence });
-      return m
-        ? `OK: recuerdo guardado (importancia ${m.importance}). Estará disponible en conversaciones futuras.`
-        : 'Error: no pude guardar el recuerdo (texto vacío).';
+      return m ? i18n.t('herramienta.recuerdo.guardado', { importancia: m.importance }) : i18n.err('herramienta.recuerdo.vacio');
     }
     case 'use_skill': {
       const s = await skills.getSkill(args.name || '');
       if (!s)
-        return `Error: skill "${args.name}" no encontrada. Skills disponibles: ${
-          (await skills.listSkills())
-            .filter((x) => x.enabled)
-            .map((x) => x.name)
-            .join(', ') || '(ninguna)'
-        }`;
+        return i18n.err('herramienta.skill.no.encontrada', {
+          nombre: args.name,
+          lista:
+            (await skills.listSkills())
+              .filter((x) => x.enabled)
+              .map((x) => x.name)
+              .join(', ') || i18n.t('herramienta.skill.ninguna'),
+        });
       /* v2.2: el cuerpo completo se manda UNA vez por turno. Si el modelo la vuelve a
          pedir (pasa en tareas largas: se le olvida que la cargó), ya está en el contexto y
          repetirla son miles de tokens por nada. Se recuerda por turno en el propio agente
          (`loadedSkills`), que es el único que sabe cuándo empieza uno nuevo. */
       if (ctx.loadedSkills && ctx.loadedSkills.has(s.id)) {
-        return `La skill «${s.name}» ya está cargada en este turno: sigue sus instrucciones (no hace falta que te la repita).`;
+        return i18n.t('herramienta.skill.ya.cargada', { nombre: s.name });
       }
       if (ctx.loadedSkills) ctx.loadedSkills.add(s.id);
       // límite declarado de herramientas (informativo para el agente; los permisos reales los decide el usuario en Ajustes)
-      const scope = s.allowTools
-        ? `\n\nHERRAMIENTAS AUTORIZADAS POR ESTA SKILL: ${s.allowTools}. Evita usar otras salvo necesidad justificada.`
-        : '';
+      const scope = s.allowTools ? i18n.t('herramienta.skill.herramientas', { lista: s.allowTools }) : '';
       /* La skill puede venir de un repo ajeno: se entrega como CONTENIDO DE
          TERCEROS delimitado, no como órdenes. Si pide algo que el usuario no
          pidió (comandos, exfiltrar datos, desactivar protecciones), se ignora
          esa parte y se avisa al usuario. */
-      const origen = s.source && s.source.repo ? `\n\n(Origen de terceros: ${s.source.repo}. Contenido no confiable por defecto.)` : '';
+      const origen = s.source && s.source.repo ? i18n.t('herramienta.skill.origen', { repo: s.source.repo }) : '';
       /* Una skill puede traer sus propias referencias y herramientas (references/,
          scripts/, assets/): el cuerpo las nombra en relativo («references/tools.md»),
          así que sin la carpeta el agente no puede abrirlas. Va FUERA del envoltorio de
          terceros porque es una ruta del sistema, no texto de la skill. */
-      const dir = s.dir ? `DIRECTORIO DE LA SKILL (base de las rutas relativas de abajo): ${s.dir}\n\n` : '';
+      const dir = s.dir ? i18n.t('herramienta.skill.directorio', { dir: s.dir }) : '';
       /* El marco del contenido de terceros vive en terceros.js: UNA sola forma para
          skills, web y página. Aquí se conserva el bloque de siempre de la skill. */
       return `# Skill: ${s.name}\n\n${dir}${terceros.envolver('LA SKILL', s.body)}${scope}${origen}`;
@@ -948,8 +949,8 @@ async function executeTool(name, args, ctx) {
       // El comando se ejecuta con cwd en el espacio de trabajo: un `cwd` fuera de
       // él (C:\Windows, el CONFIG_DIR con las claves…) se rechaza en vez de lanzar.
       const cwdPedido = args.cwd ? inWs(args.cwd) : workspace;
-      const bloqCwd = bloqueoEscritura(cwdPedido);
-      if (bloqCwd) return bloqCwd.replace('no puedo escribir en', 'no puedo ejecutar en');
+      const bloqCwd = bloqueoEscritura(cwdPedido, true);
+      if (bloqCwd) return bloqCwd;
       // chcp 65001 fuerza UTF-8 en cmd.exe para que los acentos no lleguen corruptos
       const r = await run(`chcp 65001>nul & ${args.command}`, { cwd: cwdPedido, timeout, registerKillable: ctx.registerKillable });
       /* v5.0.1: el resultado dice si el comando FALLÓ, no solo qué imprimió. El agente
@@ -966,13 +967,14 @@ async function executeTool(name, args, ctx) {
       try {
         st = await fsp.stat(p);
       } catch (e) {
-        return `Error: no pude leer ${p} (${e.code || e.message}).`;
+        return i18n.err('herramienta.lectura.fallo', { ruta: p, motivo: e.code || e.message });
       }
-      if (!st.isFile()) return `Error: ${p} no es un archivo.`;
+      if (!st.isFile()) return i18n.err('herramienta.no.archivo', { ruta: p });
       // rechaza archivos enormes antes de cargarlos enteros en memoria
-      if (st.size > 32 * 1024 * 1024) return `Error: archivo demasiado grande (${(st.size / 1048576).toFixed(1)} MB; el límite es 32 MB).`;
+      if (st.size > 32 * 1024 * 1024)
+        return i18n.err('herramienta.archivo.grande', { mb: (st.size / 1048576).toFixed(1), limite: 32 });
       const buf = await fsp.readFile(p);
-      if (buf.subarray(0, 8192).includes(0)) return 'Error: archivo binario (no legible como texto).';
+      if (buf.subarray(0, 8192).includes(0)) return i18n.err('herramienta.archivo.binario');
       const text = buf.toString('utf8');
       if (args.offset === undefined && args.limit === undefined) return clip(text, 60000);
       const lines = text.split(/\r?\n/);
@@ -980,8 +982,11 @@ async function executeTool(name, args, ctx) {
       const start = Math.min(Math.max(Number(args.offset) || 1, 1), total);
       const limit = Math.min(Math.max(Number(args.limit) || 2000, 1), 2000);
       const end = Math.min(start + limit - 1, total);
-      const rest = end < total ? `\n...[quedan ${total - end} líneas; continúa con offset: ${end + 1}]` : '';
-      return clip(`[líneas ${start}-${end} de ${total}]\n${lines.slice(start - 1, end).join('\n')}${rest}`, 60000);
+      const rest = end < total ? i18n.t('herramienta.lineas.restantes', { n: total - end, siguiente: end + 1 }) : '';
+      return clip(
+        i18n.t('herramienta.lineas.rango', { desde: start, hasta: end, total }) + '\n' + lines.slice(start - 1, end).join('\n') + rest,
+        60000,
+      );
     }
     /* v2.2: mirar una imagen DEL DISCO. Antes solo existía la captura de pantalla y la
        página del navegador: "mira este PNG de mi carpeta" no se podía hacer (y `read_file`
@@ -995,20 +1000,20 @@ async function executeTool(name, args, ctx) {
       try {
         st = await fsp.stat(p);
       } catch (e) {
-        return `Error: no pude abrir ${p} (${e.code || e.message}).`;
+        return i18n.err('herramienta.imagen.abrir.fallo', { ruta: p, motivo: e.code || e.message });
       }
-      if (!st.isFile()) return `Error: ${p} no es un archivo.`;
+      if (!st.isFile()) return i18n.err('herramienta.no.archivo', { ruta: p });
       // 8 MB: por encima de eso la petición al modelo se dispara (el base64 pesa ~4/3 del
       // archivo) y la mayoría de proveedores la rechaza o la recorta sin avisar
       if (st.size > 8 * 1024 * 1024) {
-        return `Error: imagen demasiado grande (${(st.size / 1048576).toFixed(1)} MB; el límite es 8 MB). Pídele al usuario una versión reducida o recortada.`;
+        return i18n.err('herramienta.imagen.grande', { mb: (st.size / 1048576).toFixed(1), limite: 8 });
       }
       const buf = await fsp.readFile(p);
       const tipo = tipoDeImagen(buf);
-      if (!tipo) return `Error: ${p} no parece una imagen de un formato que los modelos acepten (PNG, JPEG, GIF o WEBP).`;
+      if (!tipo) return i18n.err('herramienta.imagen.formato', { ruta: p });
       const kb = Math.max(1, Math.round(st.size / 1024));
       return {
-        text: `Imagen abierta: ${p} (${kb} KB, ${tipo}). La tienes delante: descríbela según lo que VES. Si por lo que sea no puedes ver imágenes, dilo tal cual en vez de inventar su contenido.`,
+        text: i18n.t('herramienta.imagen.abierta', { ruta: p, kb, tipo }),
         images: [`data:${tipo};base64,${buf.toString('base64')}`],
       };
     }
@@ -1023,7 +1028,7 @@ async function executeTool(name, args, ctx) {
       await escribirAtomico(p, content);
       repomap.invalidar(workspace);
       busqueda.invalidar(workspace); // el índice de búsqueda también se queda viejo
-      return await resultadoEscritura(p, `${content.length} bytes escritos en ${p}`, {
+      return await resultadoEscritura(p, i18n.t('herramienta.escritura.bytes', { n: content.length, ruta: p }), {
         workspace,
         settings,
         ownerCambios: ctx.ownerCambios,
@@ -1035,20 +1040,21 @@ async function executeTool(name, args, ctx) {
       if (bloqE) return bloqE;
       const oldStr = String(args.old_string ?? '');
       const newStr = String(args.new_string ?? '');
-      if (!oldStr) return 'Error: old_string es obligatorio y no puede estar vacío.';
+      if (!oldStr) return i18n.err('herramienta.edit.old.obligatorio');
       let buf;
       try {
         buf = await fsp.readFile(p);
       } catch (e) {
-        return `Error: no pude leer ${p} (${e.code === 'ENOENT' ? 'no existe; para crear el archivo usa write_file' : e.code || e.message}).`;
+        const motivo = e.code === 'ENOENT' ? i18n.t('herramienta.edit.no.existe') : e.code || e.message;
+        return i18n.err('herramienta.edit.lectura.fallo', { ruta: p, motivo });
       }
-      if (buf.subarray(0, 8192).includes(0)) return `Error: ${p} es binario (no editable como texto).`;
+      if (buf.subarray(0, 8192).includes(0)) return i18n.err('herramienta.edit.binario', { ruta: p });
       const text = buf.toString('utf8');
       // Ida y vuelta: si el fichero no está en UTF-8 (un .txt/.csv guardado en
       // ANSI/CP1252 por Notepad) la conversión ya ha metido U+FFFD en los acentos,
       // y reescribirlo los destruiría sin vuelta atrás. Mejor no tocar nada.
       if (!Buffer.from(text, 'utf8').equals(buf)) {
-        return `Error: ${p} no está en UTF-8 (probablemente ANSI/CP1252); editarlo corrompería los acentos. Conviértelo a UTF-8 antes, o usa write_file con el contenido completo.`;
+        return i18n.err('herramienta.edit.utf8', { ruta: p });
       }
       /* v3.0: anclaje tolerante a espacios. Si el texto no aparece exacto pero sí
          ignorando la sangría, el error deja de ser un callejón: se devuelve
@@ -1064,9 +1070,9 @@ async function executeTool(name, args, ctx) {
       repomap.invalidar(workspace);
       busqueda.invalidar(workspace); // el índice de búsqueda también se queda viejo
       const relato =
-        `${r.veces} reemplazo(s) en ${p}` +
+        i18n.t('herramienta.edit.reemplazos', { n: r.veces, ruta: p }) +
         (r.modo === 'tolerante'
-          ? ` — el anclaje no coincidía al carácter: aplicado sobre las líneas ${r.linea}-${r.linea + r.lineas - 1} reajustando la sangría al archivo`
+          ? i18n.t('herramienta.edit.tolerante', { desde: r.linea, hasta: r.linea + r.lineas - 1 })
           : '');
       return await resultadoEscritura(p, relato, { workspace, settings, ownerCambios: ctx.ownerCambios });
     }
@@ -1083,12 +1089,12 @@ async function executeTool(name, args, ctx) {
        proyecto grande el agente no vaya leyendo archivos a ciegas. */
     case 'search_code': {
       const q = String(args.query || args.q || args.name || '').trim();
-      if (!q) return 'Error: dime qué buscas (query).';
+      if (!q) return i18n.err('herramienta.buscar.query');
       return clip(busqueda.textoBusqueda(workspace, q, { limit: Math.min(Math.max(Number(args.limit) || 12, 1), 40) }), 12000);
     }
     case 'find_symbol': {
       const q = String(args.name || args.query || '').trim();
-      if (!q) return 'Error: dime qué buscas (name).';
+      if (!q) return i18n.err('herramienta.buscar.name');
       return clip(repomap.textoBusqueda(workspace, q, { limit: Math.min(Number(args.limit) || 30, 60) }), 12000);
     }
     /* v2.4: varios cambios en varios archivos, en una sola llamada y ATÓMICOS:
@@ -1101,32 +1107,32 @@ async function executeTool(name, args, ctx) {
       // OJO: la local NO puede llamarse `cambios` — sombrearía el módulo `cambios`
       // (el registrador de pre-imágenes) y `cambios.recordar` sería un TypeError.
       const lista = Array.isArray(args.changes) ? args.changes : [];
-      if (!lista.length) return 'Error: changes es obligatorio (lista de {path, old_string, new_string}).';
-      if (lista.length > 40) return 'Error: demasiados cambios de golpe (máximo 40). Divídelo en partes.';
+      if (!lista.length) return i18n.err('herramienta.patch.sin.cambios');
+      if (lista.length > 40) return i18n.err('herramienta.patch.demasiados', { max: 40 });
       const planes = [];
       const errores = [];
       for (const c of lista) {
         const p = inWs(c && c.path);
         const bloqP = bloqueoEscritura(p);
         if (bloqP) {
-          errores.push(`${c && c.path}: ${bloqP}`);
+          errores.push(i18n.t('herramienta.patch.item', { ruta: c && c.path, motivo: bloqP }));
           continue;
         }
         const oldStr = String((c && c.old_string) ?? '');
         const newStr = String((c && c.new_string) ?? '');
         if (!oldStr) {
-          errores.push(`${c && c.path}: old_string vacío`);
+          errores.push(i18n.t('herramienta.patch.old.vacio', { ruta: c && c.path }));
           continue;
         }
         let buf;
         try {
           buf = await fsp.readFile(p);
         } catch (e) {
-          errores.push(`${c.path}: no pude leerlo (${e.code || e.message})`);
+          errores.push(i18n.t('herramienta.patch.lectura.fallo', { ruta: c.path, motivo: e.code || e.message }));
           continue;
         }
         if (buf.subarray(0, 8192).includes(0)) {
-          errores.push(`${c.path}: es binario (no editable como texto)`);
+          errores.push(i18n.t('herramienta.patch.binario', { ruta: c.path }));
           continue;
         }
         const texto = buf.toString('utf8');
@@ -1136,9 +1142,7 @@ async function executeTool(name, args, ctx) {
            destrozo es de todo el archivo —y el deshacer también, porque su pre-imagen
            salió de la misma lectura. Mejor no tocar nada y decirlo. */
         if (!Buffer.from(texto, 'utf8').equals(buf)) {
-          errores.push(
-            `${c.path}: no está en UTF-8 (probablemente ANSI/CP1252); editarlo corrompería los acentos. Conviértelo a UTF-8 antes, o usa write_file con el contenido completo.`,
-          );
+          errores.push(i18n.t('herramienta.patch.utf8', { ruta: c.path }));
           continue;
         }
         // v3.0: el mismo anclaje tolerante que edit_file, por cambio y para todo el parche
@@ -1151,13 +1155,13 @@ async function executeTool(name, args, ctx) {
           continue;
         }
         if (planes.some((x) => claveRuta(x.p) === claveRuta(p))) {
-          errores.push(`${c.path}: dos cambios sobre el mismo archivo en una llamada (junta el texto en uno)`);
+          errores.push(i18n.t('herramienta.patch.duplicado', { ruta: c.path }));
           continue;
         }
         planes.push({ p, antes: texto, despues: r.texto, n: r.veces, modo: r.modo, linea: r.linea, lineas: r.lineas });
       }
       if (errores.length) {
-        return `Error: no se ha escrito NADA (el parche se aplica entero o no se aplica):\n- ${errores.join('\n- ')}`;
+        return i18n.err('herramienta.patch.nada', { errores: errores.join('\n- ') });
       }
       /* v3.1: atómico TAMBIÉN en el disco. Antes se validaban todos los anclajes y luego
          se escribía uno a uno: un disco lleno, un EPERM o un archivo bloqueado en el
@@ -1172,7 +1176,10 @@ async function executeTool(name, args, ctx) {
           await fsp.writeFile(tmps[i], planes[i].despues, 'utf8');
         } catch (e) {
           for (const t of tmps) await fsp.rm(t, { force: true }).catch(() => {});
-          return `Error: no se ha escrito NADA (el parche se aplica entero o no se aplica): no pude preparar ${path.basename(planes[i].p)} (${e.code || e.message}). Ningún archivo se ha tocado.`;
+          return i18n.err('herramienta.patch.preparar', {
+            archivo: path.basename(planes[i].p),
+            motivo: e.code || e.message,
+          });
         }
       }
       const puestos = [];
@@ -1191,18 +1198,28 @@ async function executeTool(name, args, ctx) {
             }
           }
           for (const t of tmps) await fsp.rm(t, { force: true }).catch(() => {});
-          const aviso = sinRestaurar.length
-            ? ` No pude restaurar ${sinRestaurar.join(', ')}: su contenido puede ser el del parche, revísalos.`
-            : '';
-          return `Error: no se ha aplicado el parche: falló al escribir en ${path.basename(planes[i].p)} (${e.code || e.message}). Se han restaurado ${puestos.length - sinRestaurar.length} de ${puestos.length} archivo(s) que ya se habían escrito.${aviso}`;
+          const aviso = sinRestaurar.length ? i18n.t('herramienta.patch.sin.restaurar', { archivos: sinRestaurar.join(', ') }) : '';
+          return i18n.err('herramienta.patch.escritura', {
+            archivo: path.basename(planes[i].p),
+            motivo: e.code || e.message,
+            restaurados: puestos.length - sinRestaurar.length,
+            total: puestos.length,
+            aviso,
+          });
         }
       }
       repomap.invalidar(workspace);
       busqueda.invalidar(workspace); // el índice de búsqueda también se queda viejo
       const resumen = planes
-        .map((pl) => `${path.basename(pl.p)} (${pl.n}${pl.modo === 'tolerante' ? ', sangría reajustada' : ''})`)
+        .map((pl) =>
+          i18n.t('herramienta.patch.item.resumen', {
+            archivo: path.basename(pl.p),
+            n: pl.n,
+            sangria: pl.modo === 'tolerante' ? i18n.t('herramienta.patch.sangria') : '',
+          }),
+        )
         .join(', ');
-      return await resultadoEscritura(planes[0].p, `${planes.length} archivo(s) actualizados: ${resumen}`, {
+      return await resultadoEscritura(planes[0].p, i18n.t('herramienta.patch.resumen', { n: planes.length, resumen }), {
         checked: planes.map((x) => x.p),
         workspace,
         settings,
@@ -1216,11 +1233,11 @@ async function executeTool(name, args, ctx) {
       // Antes un fallo de readdir se tragaba y la herramienta respondía
       // «(directorio vacío)»: el agente creía que no había nada y podía
       // sobrescribirlo. read_file sí distinguía ENOENT; esto lo iguala.
-      if (!(await isDir(root))) return `Error: no pude leer ${root} (no existe, no es una carpeta o no tengo permisos).`;
+      if (!(await isDir(root))) return i18n.err('herramienta.dir.fallo', { ruta: root });
       const out = [];
       const budget = { count: 500 };
       await walk(root, 0, Math.min(Math.max(args.depth || 2, 1), 4), out, budget);
-      return out.join('\n') || '(directorio vacío)';
+      return out.join('\n') || i18n.t('herramienta.dir.vacio');
     }
     case 'search_files': {
       const root = inWs(args.path);
@@ -1228,41 +1245,40 @@ async function executeTool(name, args, ctx) {
       if (bloqS) return bloqS;
       const patron = String(args.pattern ?? '');
       if (patron.length > MAX_PATRON) {
-        return `Error: el patrón es demasiado largo (${patron.length} caracteres; el máximo es ${MAX_PATRON}). Busca una cadena literal más corta o divide la búsqueda.`;
+        return i18n.err('herramienta.patron.largo', { n: patron.length, max: MAX_PATRON });
       }
       if (patronCostoso(patron)) {
-        return 'Error: el patrón repite sin tope un grupo que ya repite sin tope (`(a+)+`, `(\\w+\\s)*`): el retroceso se dispara con la longitud de la línea y la búsqueda podría colgar la app. Simplifícalo: una cadena literal, o una sola clase de caracteres (`\\w+`, `[a-z]+`).';
+        return i18n.err('herramienta.patron.costoso');
       }
       let regex;
       try {
         regex = new RegExp(patron, 'i');
       } catch {
-        return 'Error: patrón de búsqueda inválido (no es una expresión regular válida). Simplifícalo: "informe", "config.*json", "function\\s+nombre"…';
+        return i18n.err('herramienta.patron.invalido');
       }
-      if (!(await isDir(root))) return `Error: no pude buscar en ${root} (no existe, no es una carpeta o no tengo permisos).`;
+      if (!(await isDir(root))) return i18n.err('herramienta.buscar.fallo', { ruta: root });
       const out = [];
       const budget = { count: 60, files: 0 };
       await searchIn(root, regex, args.search_content !== false, out, budget);
-      return out.length ? out.join('\n') : 'Sin resultados.';
+      return out.length ? out.join('\n') : i18n.t('herramienta.sin.resultados');
     }
     case 'open_app': {
       // `start` se ejecuta dentro de cmd.exe: rechazamos metacaracteres para evitar inyección de shell
       const n = String(args.name ?? '');
-      if (!n.trim()) return 'Error: falta el nombre de la aplicación.';
+      if (!n.trim()) return i18n.err('herramienta.app.nombre');
       // `;` separaba un segundo comando que se ejecutaba igual (`start "" "calc"; malware`):
       // antes no estaba en la lista y colaba.
-      if (/["&|^<>%;\r\n]/.test(n))
-        return 'Error: el nombre de la aplicación no puede contener comillas ni metacaracteres de cmd (" & | ^ < > % ;) ni saltos de línea.';
+      if (/["&|^<>%;\r\n]/.test(n)) return i18n.err('herramienta.app.meta');
       const r = await run(`start "" "${n}"`, { timeout: 15000, registerKillable: ctx.registerKillable });
-      return r.code === 0 ? `OK: intentando abrir "${n}"` : `Error: ${r.stderr}`;
+      return r.code === 0 ? i18n.t('herramienta.app.abriendo', { nombre: n }) : i18n.err('herramienta.app.fallo', { motivo: r.stderr });
     }
     case 'open_url': {
       const { shell } = require('electron');
       if (!openUrlAllowed(args.url)) {
-        return 'Error: open_url solo abre direcciones http(s). Para ejecutar algo del equipo usa open_app, y para abrir una página local usa browser_control con action=navigate.';
+        return i18n.err('herramienta.open.url.solo.http');
       }
       await shell.openExternal(args.url);
-      return `OK: ${args.url} abierta en el navegador por defecto`;
+      return i18n.t('herramienta.open.url.ok', { url: args.url });
     }
     case 'browser_control':
       /* v2.5: las descargas del navegador caen en una carpeta conocida (y fuera del
@@ -1275,15 +1291,15 @@ async function executeTool(name, args, ctx) {
     case 'screenshot': {
       const shot = await screenshotFn();
       emit({ type: 'image', role: 'tool', dataUrl: shot.dataUrl });
-      return { text: `Captura de pantalla tomada (${shot.w}x${shot.h}). Analízala junto a este resultado.`, images: [shot.dataUrl] };
+      return { text: i18n.t('herramienta.captura', { w: shot.w, h: shot.h }), images: [shot.dataUrl] };
     }
     case 'clipboard': {
       const { clipboard } = require('electron');
       if (args.action === 'write') {
         clipboard.writeText(args.text || '');
-        return 'OK: portapapeles actualizado';
+        return i18n.t('herramienta.portapapeles.ok');
       }
-      return clip(clipboard.readText() || '(vacío)', 4000);
+      return clip(clipboard.readText() || i18n.t('herramienta.portapapeles.vacio'), 4000);
     }
     case 'notify': {
       const { Notification } = require('electron');
@@ -1293,7 +1309,7 @@ async function executeTool(name, args, ctx) {
     }
     case 'media_control': {
       const vk = MEDIA_KEYS[args.action];
-      if (!vk) return 'Acción desconocida';
+      if (!vk) return i18n.t('herramienta.media.accion');
       await sendVK(vk, ctx.registerKillable);
       return `OK: ${args.action}`;
     }
@@ -1301,7 +1317,7 @@ async function executeTool(name, args, ctx) {
       // el enum de la herramienta solo tiene estas dos: cualquier otra acción se
       // rechaza en vez de ejecutar MinimizeAll por defecto (silenciosamente)
       if (args.action !== 'show_desktop' && args.action !== 'minimize_all') {
-        return `Error: acción de ventanas no soportada: ${args.action}. Usa minimize_all o show_desktop.`;
+        return i18n.err('herramienta.ventana.accion', { accion: args.action });
       }
       const cmd =
         args.action === 'show_desktop'
@@ -1319,13 +1335,16 @@ async function executeTool(name, args, ctx) {
       const total = os.totalmem(),
         free = os.freemem();
       return [
-        `SO: ${os.type()} ${os.release()} (${os.arch()})`,
-        `Host: ${os.hostname()} | Usuario: ${os.userInfo().username}`,
-        `CPU: ${os.cpus()[0]?.model} x${os.cpus().length}`,
-        `RAM: ${(total / 1e9).toFixed(1)} GB total, ${(free / 1e9).toFixed(1)} GB libres`,
-        `Uptime: ${(os.uptime() / 3600).toFixed(1)} h`,
-        `IPs: ${ips.join(', ') || 'ninguna'}`,
-        `Escritorio: ${path.join(home, 'Desktop')}`,
+        i18n.t('herramienta.sistema.so', { so: os.type(), version: os.release(), arch: os.arch() }),
+        i18n.t('herramienta.sistema.host', { host: os.hostname(), usuario: os.userInfo().username }),
+        i18n.t('herramienta.sistema.cpu', { cpu: os.cpus()[0]?.model, nucleos: os.cpus().length }),
+        i18n.t('herramienta.sistema.ram', {
+          total: (total / 1e9).toFixed(1),
+          libre: (free / 1e9).toFixed(1),
+        }),
+        i18n.t('herramienta.sistema.uptime', { h: (os.uptime() / 3600).toFixed(1) }),
+        i18n.t('herramienta.sistema.ips', { ips: ips.join(', ') || i18n.t('herramienta.sistema.ninguna') }),
+        i18n.t('herramienta.sistema.escritorio', { ruta: path.join(home, 'Desktop') }),
       ].join('\n');
     }
     case 'web_fetch':
@@ -1336,7 +1355,7 @@ async function executeTool(name, args, ctx) {
     case 'git_commit':
       return ejecutarWebOGit(name, args, ctx);
     default:
-      return `Error: herramienta desconocida "${name}"`;
+      return i18n.err('herramienta.desconocida', { nombre: name });
   }
 }
 
@@ -1349,7 +1368,7 @@ async function ejecutarWebOGit(name, args, ctx) {
       const r = await require('./web').traer(args.url, { ...common, maxChars: args.max_chars });
       return r.texto;
     } catch (e) {
-      return 'Error: ' + String((e && e.message) || e);
+      return i18n.err('herramienta.web.fallo', { motivo: String((e && e.message) || e) });
     }
   }
   const git = require('./git');

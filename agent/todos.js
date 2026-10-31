@@ -1,4 +1,6 @@
 'use strict';
+
+const i18n = require('./i18n');
 /*
  * todos.js — v2.6: la lista de tareas VIVA del agente.
  *
@@ -94,10 +96,10 @@ function limpiar(s, max = MAX_TEXTO) {
  */
 function normalizar(entrada) {
   if (entrada === undefined || entrada === null) {
-    return { ok: false, error: 'Falta el campo "todos": debe ser una lista de tareas. Envía [] para borrar la lista.' };
+    return { ok: false, error: i18n.t('todos.sin.campo') };
   }
   if (!Array.isArray(entrada)) {
-    return { ok: false, error: '"todos" debe ser una LISTA de objetos {content, status}. Recibido: ' + typeof entrada + '.' };
+    return { ok: false, error: i18n.t('todos.no.lista', { tipo: typeof entrada }) };
   }
   const todos = [];
   const avisos = [];
@@ -109,17 +111,17 @@ function normalizar(entrada) {
       break;
     }
     if (!raw || typeof raw !== 'object' || Array.isArray(raw)) {
-      avisos.push('se ignoró un elemento que no es un objeto');
+      avisos.push(i18n.t('todos.aviso.no.objeto'));
       continue;
     }
     const content = limpiar(raw.content != null ? raw.content : raw.text != null ? raw.text : raw.tarea);
     if (!content) {
-      avisos.push('se ignoró una tarea sin "content"');
+      avisos.push(i18n.t('todos.aviso.sin.content'));
       continue;
     }
     const clave = content.toLowerCase();
     if (vistos.has(clave)) {
-      avisos.push('se ignoró una tarea duplicada: «' + content.slice(0, 60) + '»');
+      avisos.push(i18n.t('todos.aviso.duplicada', { texto: content.slice(0, 60) }));
       continue;
     }
     vistos.add(clave);
@@ -137,10 +139,10 @@ function normalizar(entrada) {
     enCurso++;
     if (enCurso > 1) {
       t.status = 'pending';
-      avisos.push('solo puede haber una tarea "in_progress": «' + t.content.slice(0, 50) + '» pasó a pendiente');
+      avisos.push(i18n.t('todos.aviso.una.en.curso', { texto: t.content.slice(0, 50) }));
     }
   }
-  if (truncada) avisos.push('la lista se recortó a ' + MAX_TAREAS + ' tareas');
+  if (truncada) avisos.push(i18n.t('todos.aviso.recortada', { max: MAX_TAREAS }));
   return { ok: true, todos, aviso: avisos.length ? avisos.join('; ') : '' };
 }
 
@@ -152,13 +154,16 @@ function normalizar(entrada) {
 function resumen(todos) {
   const l = Array.isArray(todos) ? todos : [];
   const e = estado(l);
-  if (!e.total) return 'Lista de tareas vacía: no hay nada pendiente.';
-  const cab = `Lista de tareas actualizada — ${e.completadas} de ${e.total} completadas, ${e.enCurso} en curso, ${e.pendientes} pendientes.`;
+  if (!e.total) return i18n.t('todos.vacia');
+  const cab = i18n.t('todos.cabecera', {
+    completadas: e.completadas,
+    total: e.total,
+    enCurso: e.enCurso,
+    pendientes: e.pendientes,
+  });
   const cuerpo = l.map((t) => `- ${marcador(t.status)} ${t.content}`).join('\n');
   const siguiente =
-    e.pendientes || e.enCurso
-      ? 'Sigue con la tarea en curso y vuelve a llamar a todo_write al terminarla.'
-      : 'Todas completadas: cierra con tu resumen.';
+    e.pendientes || e.enCurso ? i18n.t('todos.sigue') : i18n.t('todos.cierra');
   return cab + '\n' + cuerpo + '\n' + siguiente;
 }
 

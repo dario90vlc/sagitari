@@ -58,10 +58,9 @@ const CORRECCION_FORMATO =
   'Tu respuesta anterior escribió la llamada a una herramienta como TEXTO y eso no ejecuta nada. ' +
   'Llama a la herramienta con la API de herramientas (function calling) y argumentos JSON válidos; ' +
   'no escribas etiquetas, XML ni «assistant to=…» dentro del mensaje.';
-const AVISO_FORMATO =
-  'No he podido hacer el trabajo: el modelo está escribiendo las llamadas a herramientas como texto en vez de ' +
-  'usarlas, así que no se ha ejecutado nada. Cambia de modelo en Ajustes › Modelo (o reintenta con otro) y ' +
-  'vuelve a pedírmelo.';
+/* Se pinta como respuesta del asistente, así que va por el diccionario. La corrección
+   (CORRECCION_FORMATO) es una instrucción al modelo y no se traduce. */
+const avisoFormato = () => i18n.t('turno.formato.aviso');
 
 function systemPrompt() {
   const home = os.homedir();
@@ -560,7 +559,7 @@ class Agent {
       return { ok: true, note: 'sin tarea guardable: detenido' };
     }
     this.pauseRequested = true;
-    this.emit({ type: 'status', text: 'Pausando tarea — guardando checkpoint…' });
+    this.emit({ type: 'status', text: i18n.t('turno.pausando') });
     if (this.abort) this.abort.abort();
     this._killRunning();
     return { ok: true };
@@ -576,7 +575,7 @@ class Agent {
     if (this.busy && !opts.background) {
       /* El código viaja con el aviso: el renderer decide si el envío era un duplicado
          (y NO debe cerrar el turno vivo) por el código, no por el texto — que se traduce. */
-      this.emit({ type: 'error', code: 'busy', message: 'SAGITARI está ocupado terminando la tarea anterior.' });
+      this.emit({ type: 'error', code: 'busy', message: i18n.t('turno.error.ocupado') });
       return;
     }
     this.busy = true;
@@ -604,7 +603,7 @@ class Agent {
         // parada solicitada: no es un error, la UI ya muestra lo generado
         this.emit({ type: 'stopped' });
       } else {
-        this.emit({ type: 'error', message: 'Error: ' + e.message });
+        this.emit({ type: 'error', message: i18n.err('turno.error.generico', { motivo: e.message }) });
       }
     } finally {
       /* Ninguna salida del turno puede dejar el checkpoint en 'running': el bucle lo
@@ -635,7 +634,7 @@ class Agent {
    */
   async retry(settings, opts = {}) {
     if (this.busy) {
-      this.emit({ type: 'error', message: 'Espera a que termine la ejecución actual para regenerar.' });
+      this.emit({ type: 'error', message: i18n.t('turno.error.regenerar.ocupado') });
       return { ok: false };
     }
     let idx = -1;
@@ -646,7 +645,7 @@ class Agent {
       }
     }
     if (idx < 0) {
-      this.emit({ type: 'error', message: 'No hay ninguna petición que regenerar en esta conversación.' });
+      this.emit({ type: 'error', message: i18n.t('turno.error.regenerar.vacio') });
       return { ok: false };
     }
     const last = this.history[idx];
@@ -692,22 +691,22 @@ class Agent {
    * @returns {Promise<{ok: boolean, text?: string, error?: string}>}
    */
   async compact(settings = {}) {
-    if (this.busy) return { ok: false, error: 'Espera a que termine la ejecución actual para compactar la conversación.' };
+    if (this.busy) return { ok: false, error: i18n.t('turno.compacto.ocupado') };
     const antes = this.history.length;
     if (antes < Agent.MIN_COMPACT)
       return {
         ok: false,
-        error: `Todavía no hay conversación que compactar: hace falta un hilo con varias intervenciones (mínimo ${Agent.MIN_COMPACT} mensajes).`,
+        error: i18n.t('turno.compacto.corto', { min: Agent.MIN_COMPACT }),
       };
     const cfg = this.activeConfig(settings);
-    if (!cfg || !cfg.baseUrl || !cfg.model) return { ok: false, error: 'Configura un proveedor y modelo en Ajustes antes de compactar.' };
+    if (!cfg || !cfg.baseUrl || !cfg.model) return { ok: false, error: i18n.t('turno.compacto.sin.config') };
 
     // Detener corta la compactación igual que corta un turno: misma señal, mismo abort.
     const controller = new AbortController();
     this.busy = true;
     this.stopRequested = false;
     this.abort = controller;
-    this.emit({ type: 'status', text: 'Compactando la conversación…' });
+    this.emit({ type: 'status', text: i18n.t('turno.compacto.estado') });
     let resumen = '';
     try {
       const { chain } = this._chainFor(settings, 'compactar la conversación', {});
@@ -732,18 +731,18 @@ class Agent {
         }
       } catch {}
       const res = await this._streamWithFallback(chain, envio, controller.signal, defs, { thinking: false });
-      if (res.aborted) return { ok: false, error: 'Compactación cancelada.' };
+      if (res.aborted) return { ok: false, error: i18n.t('turno.compacto.cancelado') };
       resumen = String(res.text || '').trim();
       // la llamada se paga: cuenta en el uso de la conversación como cualquier otra
       if (res.usage) this._acumularUso(res.usage);
     } catch (e) {
-      return { ok: false, error: 'No se pudo compactar la conversación: ' + ((e && e.message) || e) };
+      return { ok: false, error: i18n.t('turno.compacto.fallo', { motivo: (e && e.message) || e }) };
     } finally {
       this.busy = false;
       this.abort = null;
       this.stopRequested = false;
     }
-    if (!resumen) return { ok: false, error: 'El modelo no devolvió ningún resumen; la conversación se queda como estaba.' };
+    if (!resumen) return { ok: false, error: i18n.t('turno.compacto.vacio') };
 
     /* El resumen SUSTITUYE al historial. Va como mensaje de USUARIO —los proveedores no
        aceptan un segundo system a mitad de conversación— y con el marco explícito de que
@@ -776,7 +775,7 @@ class Agent {
    */
   rebobinar(convId, messages) {
     if (this.busy)
-      return { ok: false, error: 'Espera a que termine la ejecución actual (o pulsa Detener) para rebobinar la conversación.' };
+      return { ok: false, error: i18n.t('turno.rebobinar.ocupado') };
     // Solo user/assistant: un mensaje `tool` sin su assistant con tool_calls es huérfano
     // y payloadMessages lo tiraría de todos modos (mejor no guardar lo que no se puede enviar).
     this.history = (messages || [])
@@ -1199,7 +1198,7 @@ class Agent {
       // ---- guardrail: límites de pasos / tiempo (configurables; 0 = sin límite) ----
       const stepCheck = this.guardrails.checkStep();
       if (!stepCheck.ok) {
-        if (onStatus) onStatus('Límite de seguridad alcanzado — detenido');
+        if (onStatus) onStatus(i18n.t('turno.limite.seguridad'));
         this.emit({ type: 'guardrail', reason: stepCheck.reason });
         if (p.account) {
           runlog.log({ agent: 'sagitari', task: taskId, event: 'guardrail_stop', reason: stepCheck.reason });
@@ -1211,10 +1210,7 @@ class Agent {
             assistantSaidSomething
               ? {
                   role: 'assistant',
-                  content:
-                    'Me he detenido al llegar al límite de seguridad de este turno (' +
-                    stepCheck.reason +
-                    '). Lo que alcancé a hacer está en las herramientas de arriba; dime si lo retomo o si prefieres otro enfoque.',
+                  content: i18n.t('turno.parado.seguridad', { motivo: stepCheck.reason }),
                 }
               : null,
           );
@@ -1237,9 +1233,7 @@ class Agent {
             task.closed = true;
           }
           this._pushAssistant(
-            assistantSaidSomething
-              ? { role: 'assistant', content: 'Detenido a tu petición. Lo que ya estaba hecho queda en las herramientas de arriba.' }
-              : null,
+            assistantSaidSomething ? { role: 'assistant', content: i18n.t('turno.parado.usuario') } : null,
           );
           this.emit({ type: 'stopped' });
           return;
@@ -1280,13 +1274,11 @@ class Agent {
             });
             if (onStatus && p.account)
               onStatus(
-                'Contexto al ' +
-                  Math.round(ctx.uso * 100) +
-                  '%: se sueltan ' +
-                  rec.quitados +
-                  ' bloque(s) antiguos del envío (~' +
-                  rec.tokensLiberados +
-                  ' tokens)',
+                i18n.t('turno.contexto', {
+                  pct: Math.round(ctx.uso * 100),
+                  n: rec.quitados,
+                  tokens: rec.tokensLiberados,
+                }),
               );
           }
         }
@@ -1338,10 +1330,7 @@ class Agent {
               assistantSaidSomething
                 ? {
                     role: 'assistant',
-                    content:
-                      'Me he detenido al agotar el límite de tokens del turno (' +
-                      tok.reason +
-                      '). Puedes subir el límite en Ajustes ▸ Guardarraíles, o pedirme que continúe desde aquí.',
+                    content: i18n.t('turno.parado.tokens', { motivo: tok.reason }),
                   }
                 : null,
             );
@@ -1361,7 +1350,9 @@ class Agent {
             this.meta.paused = true;
             this.emit({ type: 'paused', runId: task.runId, goal: task.goal });
           }
-          this._pushAssistant(assistantSaidSomething ? { role: 'assistant', content: res.text || '(interrumpido)' } : null);
+          this._pushAssistant(
+            assistantSaidSomething ? { role: 'assistant', content: res.text || i18n.t('turno.interrumpido') } : null,
+          );
           this.emit({ type: 'stopped' });
           return;
         }
@@ -1388,7 +1379,7 @@ class Agent {
         assistantText: res.text,
       });
       if (!stall.ok) {
-        if (onStatus) onStatus('Sin progreso — detenido');
+        if (onStatus) onStatus(i18n.t('turno.sin.progreso'));
         this.emit({ type: 'guardrail', reason: stall.reason });
         if (p.account) {
           runlog.log({ agent: 'sagitari', task: taskId, event: 'stall_detected' });
@@ -1400,8 +1391,7 @@ class Agent {
             assistantSaidSomething
               ? {
                   role: 'assistant',
-                  content:
-                    'Me he detenido porque llevaba varios pasos sin avanzar de verdad —repitiendo lo mismo sin que cambiara nada— y he preferido cortar antes de gastar el turno en el mismo bucle. Dime si lo retomo por otro camino y sigo desde aquí.',
+                  content: i18n.t('turno.parado.estancado'),
                 }
               : null,
           );
@@ -1498,7 +1488,7 @@ class Agent {
             while (conImagen.length > Agent.MAX_IMAGENES) {
               const m = conImagen.shift();
               const txt = (m.content.find((c) => c.type === 'text') || {}).text || '';
-              m.content = `${txt}\n(la imagen de este resultado ya no se adjunta: solo viajan las ${Agent.MAX_IMAGENES} últimas del turno)`;
+              m.content = `${txt}\n${i18n.t('turno.imagen.recortada', { n: Agent.MAX_IMAGENES })}`;
             }
           };
 
@@ -1507,9 +1497,9 @@ class Agent {
                Antes solo se avisaba y el modelo seguía pidiendo rondas (una ronda y un
                aviso por llamada rechazada) hasta agotar maxSteps: el cupo no cortaba
                nada. Un turno sin llamadas no puede avanzar, así que se cierra aquí. */
-            if (onStatus) onStatus('Tope de llamadas alcanzado — detenido');
+            if (onStatus) onStatus(i18n.t('turno.tope.llamadas'));
             this.emit({ type: 'guardrail', reason: r.reason });
-            closePendingCalls('(no ejecutada: límite de llamadas alcanzado)');
+            closePendingCalls(i18n.t('turno.no.ejecutada.llamadas'));
             if (p.account) {
               runlog.log({ agent: 'sagitari', task: taskId, event: 'guardrail_stop', reason: r.reason });
               if (task && !task.closed) {
@@ -1520,10 +1510,7 @@ class Agent {
                 assistantSaidSomething
                   ? {
                       role: 'assistant',
-                      content:
-                        'Me he detenido al agotar el cupo de llamadas a herramientas de este turno (' +
-                        r.reason +
-                        '). Lo hecho hasta aquí está en las herramientas de arriba; dime si lo retomo o si prefieres otro enfoque.',
+                      content: i18n.t('turno.parado.llamadas', { motivo: r.reason }),
                     }
                   : null,
               );
@@ -1541,10 +1528,10 @@ class Agent {
             break; // orquestador: el cupo cierra el turno (ver arriba)
           }
           if (r.action === 'loop') {
-            const reason = `Bucle detectado (${r.pattern}): la misma acción se repite sin avanzar. Ejecución detenida para proteger el sistema.`;
-            if (onStatus) onStatus('Bucle detectado — detenido');
+            const reason = i18n.t('turno.motivo.bucle', { patron: r.pattern });
+            if (onStatus) onStatus(i18n.t('turno.bucle'));
             this.emit({ type: 'guardrail', reason });
-            closePendingCalls('(no ejecutada: bucle detectado)');
+            closePendingCalls(i18n.t('turno.no.ejecutada.bucle'));
             if (p.account) {
               runlog.log({ agent: 'sagitari', task: taskId, event: 'loop_detected', tool: tc.function.name, pattern: r.pattern });
               if (task && !task.closed) {
@@ -1555,10 +1542,7 @@ class Agent {
                 assistantSaidSomething
                   ? {
                       role: 'assistant',
-                      content:
-                        'Me he detenido porque he detectado que repetía la misma acción en bucle (' +
-                        (r.pattern || 'acción repetida') +
-                        ') sin avanzar. Lo hecho hasta aquí queda arriba; dime si lo retomo con otro enfoque.',
+                      content: i18n.t('turno.parado.bucle', { patron: r.pattern || i18n.t('guard.bucle.identica') }),
                     }
                   : null,
               );
@@ -1567,7 +1551,7 @@ class Agent {
             break;
           }
           if (r.action === 'aborted') {
-            closePendingCalls('(no ejecutada: ejecución detenida)');
+            closePendingCalls(i18n.t('turno.no.ejecutada.detenida'));
             break;
           }
           if (r.action !== 'ok') {
@@ -1584,7 +1568,7 @@ class Agent {
               name: tc.function.name,
               ok: false,
               durationMs: Date.now() - toolT0,
-              result: r.action === 'denied' && r.reason === 'user' ? 'Denegado por el usuario' : String(r.text).slice(0, 1200),
+              result: r.action === 'denied' && r.reason === 'user' ? i18n.t('turno.denegado.usuario') : String(r.text).slice(0, 1200),
             });
             continue;
           }
@@ -1664,7 +1648,7 @@ class Agent {
           assistantSaidSomething = true;
         }
         // toda tool_call necesita su respuesta por id, aunque no se haya llegado a lanzar
-        closePendingCalls('(no ejecutada: ejecución detenida o tope alcanzado)');
+        closePendingCalls(i18n.t('turno.no.ejecutada.tope'));
         continue; // next loop: model reacts to tool results
       }
 
@@ -1675,7 +1659,7 @@ class Agent {
         runlog.log({ agent: 'sagitari', task: taskId, event: 'tool_call_as_text', repetido: avisadoFormato });
         if (!avisadoFormato) {
           avisadoFormato = true;
-          if (onStatus) onStatus('El modelo escribió la llamada como texto — pidiéndole que use la herramienta');
+          if (onStatus) onStatus(i18n.t('turno.llamada.texto'));
           if (res.text) {
             messages.push({ role: 'assistant', content: res.text });
             if (p.history) this.history.push({ role: 'assistant', content: res.text });
@@ -1687,10 +1671,10 @@ class Agent {
           models.record(this.meta.model || (this.activeConfig(settings) || {}).model, {
             ok: false,
             durationMs: Date.now() - runStart,
-            error: 'escribió las llamadas a herramientas como texto',
+            error: i18n.t('turno.error.formato.registro'),
           });
         } catch {}
-        this.emit({ type: 'guardrail', reason: 'El modelo no respetó el formato de herramientas (las escribió como texto)' });
+        this.emit({ type: 'guardrail', reason: i18n.t('turno.guardrail.formato') });
         if (p.onFinal) {
           p.onFinal('', { cortado: true, motivo: 'formato' });
           return;
@@ -1699,7 +1683,7 @@ class Agent {
           checkpoints.interrupt(task);
           task.closed = true;
         }
-        this._pushAssistant({ role: 'assistant', content: AVISO_FORMATO });
+        this._pushAssistant({ role: 'assistant', content: avisoFormato() });
         return;
       }
 
@@ -1911,14 +1895,14 @@ class Agent {
     try {
       args = JSON.parse(tc.function.arguments || '{}');
     } catch {
-      argsError = 'Error: los argumentos de la herramienta no son JSON válido. Reenvía la llamada con argumentos correctos (objeto JSON).';
+      argsError = i18n.err('turno.args.json');
     }
     // Un JSON válido que no es objeto (p. ej. "null") pasaba el parse y reventaba
     // más abajo leyendo args.path: el turno se caía con un TypeError en vez de
     // responderle al modelo que reenvíe la llamada.
     if (!argsError && (!args || typeof args !== 'object' || Array.isArray(args))) {
       args = {};
-      argsError = 'Error: los argumentos de la herramienta deben ser un objeto JSON. Reenvía la llamada con argumentos correctos.';
+      argsError = i18n.err('turno.args.objeto');
     }
     this.emit({ type: 'tool', name, args });
     // Etiqueta real de una herramienta MCP (servidor y nombre tal cual los ve el
@@ -1942,12 +1926,12 @@ class Agent {
         args,
         text:
           ctx.noDelegate && name === 'delegate'
-            ? 'Error: un subagente no puede delegar a otro.'
-            : `Error: la herramienta «${name}» no está disponible para este subagente. Solo puedes usar: ${tools.map((d) => d.function.name).join(', ')}.`,
+            ? i18n.err('turno.error.delegate.subagente')
+            : i18n.err('turno.error.no.disponible', { nombre: name, lista: tools.map((d) => d.function.name).join(', ') }),
       };
     }
     if (!tools && !allToolDefs().some((d) => d.function && d.function.name === name)) {
-      return { action: 'unknown', failed: true, args, text: `Error: herramienta desconocida «${name}».` };
+      return { action: 'unknown', failed: true, args, text: i18n.err('turno.error.desconocida', { nombre: name }) };
     }
 
     /* F3 — defensa en profundidad. En PLAN las definiciones que viajan al modelo ya son
@@ -1959,9 +1943,7 @@ class Agent {
         action: 'not-allowed',
         failed: true,
         args,
-        text:
-          `Error: estás en modo PLAN (solo lectura) y «${name}» modifica el sistema, así que no se ejecuta. ` +
-          'Explora y comprueba con las herramientas de lectura, describe el cambio concreto que propones y pide al usuario que cambie a ACT para que lo ejecute.',
+        text: i18n.err('turno.plan.bloqueado', { nombre: name }),
       };
     }
 
@@ -2010,7 +1992,7 @@ class Agent {
           reason: 'user',
           failed: true,
           args,
-          text: 'El usuario DENEGÓ esta acción. No la repitas; continúa con la tarea por otra vía o pregunta qué prefiere hacer.',
+          text: i18n.t('turno.denegado.instruccion'),
         };
       }
       confirmed = true;
@@ -2036,7 +2018,7 @@ class Agent {
         return this._executeToolCall(name, args, { settings, signal, task, onStatus, callKey });
       });
     } catch (e) {
-      result = 'Error: ' + e.message;
+      result = i18n.err('turno.error.generico', { motivo: e.message });
     }
     this.runningTools.delete(callKey);
     if (abortada) return { action: 'aborted', args };
@@ -2076,19 +2058,19 @@ class Agent {
         // subagente) y no corta el turno: se le dice al modelo que termine él la tarea.
         const cupo = spec ? this.guardrails.checkDelegation() : { ok: true };
         if (spec && !cupo.ok) {
-          if (onStatus) onStatus('Tope de delegaciones alcanzado');
+          if (onStatus) onStatus(i18n.t('turno.tope.delegaciones'));
           // el evento lleva el motivo EN HUMANO (va a un aviso de la interfaz); la
           // instrucción —«no lances más subagentes, termina tú»— es para el modelo y
           // viaja en el resultado de la herramienta, que es quien tiene que obedecerla
           this.emit({
             type: 'guardrail',
-            reason: `Tope de subagentes de este turno alcanzado: SAGITARI continúa la tarea con lo que ya tiene.`,
+            reason: i18n.t('turno.tope.subagentes'),
           });
-          result = `Error: ${cupo.reason}`;
+          result = i18n.err('turno.error.generico', { motivo: cupo.reason });
         } else {
           result = spec
             ? await this._delegate(spec, args, { settings, signal, screenshotFn: this.screenshotFn, browser: this.browser })
-            : `Error: subagente desconocido "${args.agent}". Disponibles: ${subagents.SUBAGENT_KEYS.join(', ')}.`;
+            : i18n.err('turno.error.subagente', { nombre: args.agent, lista: subagents.SUBAGENT_KEYS.join(', ') });
         }
       } else if (esHerramientaDeEquipo(name)) {
         /* v4.4 — MODO EQUIPO: las cinco herramientas del equipo bajan por el MISMO camino
@@ -2103,11 +2085,11 @@ class Agent {
            interfaz enseñen una lista incoherente. */
         const r = todos.normalizar(args && args.todos);
         if (!r.ok) {
-          result = 'Error: ' + r.error;
+          result = i18n.err('turno.error.generico', { motivo: r.error });
         } else {
           this.todos = r.todos;
           this.emit({ type: 'todos', todos: this.todos });
-          result = todos.resumen(this.todos) + (r.aviso ? '\nNota: ' + r.aviso : '');
+          result = todos.resumen(this.todos) + (r.aviso ? i18n.t('turno.nota', { aviso: r.aviso }) : '');
         }
       } else {
         result = await executeTool(name, args, {
@@ -2128,7 +2110,7 @@ class Agent {
         });
       }
     } catch (e) {
-      result = 'Error: ' + e.message;
+      result = i18n.err('turno.error.generico', { motivo: e.message });
     }
     return result;
   }
@@ -2179,7 +2161,7 @@ class Agent {
        marca cuando pasa, cuando el proyecto no tiene nada que ejecutar o cuando ya no
        quedan intentos. */
     const t0 = Date.now();
-    const etiqueta = plan ? plan.etiqueta : 'Comprobación final';
+    const etiqueta = plan ? plan.etiqueta : i18n.t('turno.cierre.etiqueta');
     /* v2.6: cada ejecución de la comprobación de cierre CUENTA como llamada de
        herramienta. Antes no gastaba cupo y el turno podía re-ejecutar la suite del
        proyecto hasta tres veces seguidas (hasta ~15 min desatendidos); el tiempo
@@ -2188,7 +2170,7 @@ class Agent {
       const cupo = this.guardrails.checkToolCall();
       if (cupo.ok) return true;
       this._cierreAuto = true;
-      this.emit({ type: 'status', text: `${etiqueta}: no ejecuto la comprobación (${cupo.reason}).` });
+      this.emit({ type: 'status', text: i18n.t('turno.cierre.cupo', { etiqueta, motivo: cupo.reason }) });
       return false;
     };
     let r = null;
@@ -2198,7 +2180,7 @@ class Agent {
     // El hook del usuario va primero: es su puerta y es la barata.
     if (plantillaHook && !pedirCupo()) return false;
     if (plantillaHook) {
-      this.emit({ type: 'status', text: etiqueta + ': ejecutando tu hook «' + plantillaHook + '»…' });
+      this.emit({ type: 'status', text: i18n.t('turno.cierre.hook', { etiqueta, hook: plantillaHook }) });
       let h = null;
       const tHook = Date.now();
       try {
@@ -2255,7 +2237,7 @@ class Agent {
       puertaCerrada = !!manifiestoTocado || !inocuo || comandoPrevio === false;
       // un rechazo no ejecuta nada: no gasta cupo de llamadas ni se anuncia como ejecución
       if (!puertaCerrada && !pedirCupo()) return false;
-      if (!puertaCerrada) this.emit({ type: 'status', text: etiqueta + ': ejecutando «' + plan.comando + '»…' });
+      if (!puertaCerrada) this.emit({ type: 'status', text: i18n.t('turno.cierre.ejecutando', { etiqueta, comando: plan.comando }) });
       const tPlan = Date.now();
       try {
         r = await ejecutarComandoVerificacion(plan.comando, {
@@ -2289,7 +2271,7 @@ class Agent {
         durationMs: Date.now() - t0,
         result: String(r.stderr || texto).slice(0, 1200),
       });
-      this.emit({ type: 'status', text: etiqueta + ': no lanzada (el comando de cierre no supera la puerta de seguridad)' });
+      this.emit({ type: 'status', text: i18n.t('turno.cierre.no.lanzada', { etiqueta }) });
       return false;
     }
     const ok = r.code === 0;
@@ -2317,7 +2299,7 @@ class Agent {
       // Sin vueltas: se cierra igual (el fallo ya está a la vista) pero queda dicho.
       this.emit({
         type: 'status',
-        text: etiqueta + ': sigue fallando tras ' + this._intentosArreglo + ' intento(s); cierro y te lo dejo a la vista',
+        text: i18n.t('turno.cierre.sigue.fallando', { etiqueta, n: this._intentosArreglo }),
       });
       return false;
     }
@@ -2328,15 +2310,12 @@ class Agent {
     const segsCierre = Math.round(this._cierreMs / 1000);
     this.emit({
       type: 'status',
-      text:
-        etiqueta +
-        ': ha fallado; se lo devuelvo al modelo para que lo arregle (' +
-        this._intentosArreglo +
-        '/' +
-        intentos +
-        ') · comprobación acumulada ' +
-        segsCierre +
-        's',
+      text: i18n.t('turno.cierre.reintento', {
+        etiqueta,
+        intento: this._intentosArreglo,
+        intentos,
+        segundos: segsCierre,
+      }),
     });
     this.history.push({ role: 'assistant', content: res.text });
     messages.push({ role: 'assistant', content: res.text });
@@ -2441,7 +2420,7 @@ class Agent {
         arbol = null;
       }
       if (arbol) {
-        this.emit({ type: 'status', text: `🌳 ${spec.name}: en un árbol aislado (sus cambios vuelven verificados)` });
+        this.emit({ type: 'status', text: `🌳 ${spec.name}: ${i18n.t('turno.equipo.arbol')}` });
         runlog.log({ agent: 'sagitari', event: 'arbol_crear', subagent: spec.key, id: arbol.id });
       }
     }
@@ -2571,7 +2550,7 @@ class Agent {
          a medias sin que lo haya pedido. Se descarta y se dice. */
         arbolDescartado = true;
         await arboles.descartar(arbol);
-        this.emit({ type: 'status', text: `Se descartó el trabajo sin terminar de ${spec.name} (detuviste la tarea)` });
+        this.emit({ type: 'status', text: i18n.t('turno.equipo.descartado', { nombre: spec.name }) });
       } else if (arbol) {
         try {
           fusion = await arboles.fusionar(arbol, {
@@ -2606,12 +2585,16 @@ class Agent {
           archivos: ((fusion && fusion.archivos) || []).length,
           conflicto: fusion && fusion.conflicto ? String(fusion.conflicto).slice(0, 200) : undefined,
         });
-        if (fusion && fusion.ok && fusion.vacio) this.emit({ type: 'status', text: `${spec.name} terminó sin dejar cambios` });
-        else if (fusion && fusion.ok) this.emit({ type: 'status', text: `Fusión al proyecto: ${fusion.archivos.length} archivo(s)` });
+        if (fusion && fusion.ok && fusion.vacio) this.emit({ type: 'status', text: i18n.t('turno.equipo.sin.cambios', { nombre: spec.name }) });
+        else if (fusion && fusion.ok) this.emit({ type: 'status', text: i18n.t('turno.equipo.fusion', { n: fusion.archivos.length }) });
         else if (fusion)
           this.emit({
             type: 'status',
-            text: `No pude fusionar el árbol de ${spec.name}: ${fusion.conflicto}${descarte && descarte.conservadoEn ? ` (puedes mirarlo en ${descarte.conservadoEn})` : ''}`,
+            text: i18n.t('turno.equipo.fusion.fallo', {
+              nombre: spec.name,
+              motivo: fusion.conflicto,
+              conservado: descarte && descarte.conservadoEn ? i18n.t('turno.equipo.conservado', { ruta: descarte.conservadoEn }) : '',
+            }),
           });
       } else {
         // sin árbol tampoco hay fusión: lo escrito ya está en el proyecto y se cuenta aquí
@@ -2786,89 +2769,93 @@ class Agent {
   async _herramientaEquipo(name, args, { settings, signal, onStatus } = {}) {
     const eq = this._equipoActual(settings, signal);
     if (!eq) {
-      return 'Error: las herramientas de equipo solo funcionan en modo EQUIPO. Cambia a EQUIPO (Alt+M) y vuelve a pedirlo.';
+      return i18n.err('equipo.error.solo.equipo');
     }
     const a = args || {};
     const de = this._miembro ? this._miembro.id : 'lider';
 
     if (name === 'team_spawn') {
       if (this._miembro) {
-        return 'Error: un compañero no levanta más gente (el tope de 4 se queda en el líder); pídeselo al líder con team_send.';
+        return i18n.err('equipo.error.companero.no.levanta');
       }
       const spec = subagents.SUBAGENTS[String(a.agent || '').trim()];
-      if (!spec) return `Error: no conozco el especialista «${a.agent}». Disponibles: ${subagents.SUBAGENT_KEYS.join(', ')}.`;
+      if (!spec) return i18n.err('equipo.error.especialista', { agente: a.agent, lista: subagents.SUBAGENT_KEYS.join(', ') });
       // v5.0.1: el cupo de subagentes por turno (maxDelegations) cuenta también aquí —
       // antes solo `delegate` lo consultaba, así que team_spawn podía rebasar el tope.
       const cupo = this.guardrails.checkDelegation();
-      if (!cupo.ok) return 'Error: ' + cupo.reason;
+      if (!cupo.ok) return i18n.err('equipo.error.motivo', { motivo: cupo.reason });
       const r = eq.levantar(spec, { tarea: a.task, expect: a.expect });
-      if (!r.ok) return 'Error: ' + r.error;
+      if (!r.ok) return i18n.err('equipo.error.motivo', { motivo: r.error });
       if (onStatus) onStatus(`${spec.emoji} ${spec.name} (${r.id}): ${String(a.task || '').slice(0, 80)}`);
-      return `Compañero ${r.id} (${spec.name}) levantado y trabajando. Sigue TÚ sin esperarlo: apúntalo en el tablero con team_board y, cuando quieras su resultado, usa team_wait.`;
+      return i18n.t('equipo.spawn.ok', { id: r.id, nombre: spec.name });
     }
 
     if (name === 'team_send') {
       const r = eq.enviar(de, a.to, a.text);
-      if (!r.ok) return 'Error: ' + r.error;
+      if (!r.ok) return i18n.err('equipo.error.motivo', { motivo: r.error });
       const otros = r.entregado.filter((x) => x.id !== 'lider');
       return (
-        `Mensaje entregado a «${r.para}».` +
-        (otros.length
-          ? ` ${otros.map((x) => `${x.id} (${x.estado})`).join(', ')}: se le entrega en su siguiente paso y, si ya había terminado, se le despierta con tu mensaje.`
-          : '') +
-        (r.entregado.some((x) => x.id === 'lider') ? ' El líder lo verá en su siguiente paso.' : '')
+        i18n.t('equipo.send.ok', { para: r.para }) +
+        (otros.length ? i18n.t('equipo.send.otros', { lista: otros.map((x) => `${x.id} (${x.estado})`).join(', ') }) : '') +
+        (r.entregado.some((x) => x.id === 'lider') ? i18n.t('equipo.send.lider') : '')
       );
     }
 
     if (name === 'team_wait') {
       // la señal del turno viaja a la espera: Detener tiene que soltarla, no esperar al tope
       const r = await eq.esperar(a.ids, a.timeoutMs, signal);
-      if (!r.ok) return 'Error: ' + r.error;
+      if (!r.ok) return i18n.err('equipo.error.motivo', { motivo: r.error });
       const cab =
         r.motivo === 'abortado'
-          ? 'Espera interrumpida: has detenido la tarea'
+          ? i18n.t('equipo.wait.cab.abortado')
           : r.motivo === 'timeout'
-            ? 'Nadie terminó dentro del tiempo de espera'
+            ? i18n.t('equipo.wait.cab.timeout')
             : r.motivo === 'atencion'
-              ? 'Un compañero pide algo (permiso o pregunta)'
-              : 'Los compañeros esperados ya terminaron';
-      const lineas = r.miembros.map(
-        (m) =>
-          `- ${m.id} ${m.emoji || ''} ${m.name}: ${m.estado}${m.atencion ? ` (${m.atencion})` : ''}` +
-          (m.resumen ? ` → ${m.resumen}` : '') +
-          (m.evidencia ? ` [evidencia: ${m.evidencia}]` : ''),
-      );
+              ? i18n.t('equipo.wait.cab.atencion')
+              : i18n.t('equipo.wait.cab.fin');
+      const across = r.miembros
+        .map(
+          (m) =>
+            `- ${m.id} ${m.emoji || ''} ${m.name}: ${m.estado}${m.atencion ? ` (${m.atencion})` : ''}` +
+            (m.resumen ? ` → ${m.resumen}` : '') +
+            (m.evidencia ? i18n.t('equipo.wait.evidencia', { evidencia: m.evidencia }) : ''),
+        )
+        .join('\n');
       return (
-        `${cab}.\n${lineas.join('\n')}` +
-        (r.pendientes.length ? `\nSiguen trabajando: ${r.pendientes.join(', ')} (no los has esperado: puedes seguir con lo tuyo).` : '') +
-        (r.mensajes.length ? `\nMensajes que te han mandado:\n${r.mensajes.map((x) => `- de ${x.de}: ${x.texto}`).join('\n')}` : '')
+        i18n.t('equipo.wait.cuerpo', { cab, lineas: across }) +
+        (r.pendientes.length ? i18n.t('equipo.wait.pendientes', { lista: r.pendientes.join(', ') }) : '') +
+        (r.mensajes.length
+          ? i18n.t('equipo.wait.mensajes', {
+              mensajes: r.mensajes.map((x) => i18n.t('equipo.wait.de', { de: x.de, texto: x.texto })).join('\n'),
+            })
+          : '')
       );
     }
 
     if (name === 'team_board') {
       const r = eq.tableroApunta({ quien: a.quien || de, que: a.que, estado: a.estado, nota: a.nota });
-      if (!r.ok) return 'Error: ' + r.error;
-      return `TABLERO DEL EQUIPO\n${this._tableroTexto(eq.tablero)}`;
+      if (!r.ok) return i18n.err('equipo.error.motivo', { motivo: r.error });
+      return i18n.t('equipo.tablero', { texto: this._tableroTexto(eq.tablero) });
     }
 
     if (name === 'team_done') {
       if (!this._miembro) {
-        return 'Error: team_done es para un compañero (cierra SU encargo). Tú cierras el turno con tu respuesta final.';
+        return i18n.err('equipo.error.done.companero');
       }
       const r = eq.cerrar(de, { resumen: a.resumen, evidencia: a.evidencia });
-      if (!r.ok) return 'Error: ' + r.error;
+      if (!r.ok) return i18n.err('equipo.error.motivo', { motivo: r.error });
       /* Cerrado el encargo, su vuelta termina (ver el bucle): el aviso del texto es para
          el modelo, pero la garantía tiene que estar en el código. */
       this._equipoCerrado = true;
-      return 'Encargo cerrado con tu resumen y tu evidencia. El líder ya puede agregar con ello: no sigas trabajando.';
+      return i18n.t('equipo.done.ok');
     }
 
-    return `Error: herramienta de equipo desconocida «${name}».`;
+    return i18n.err('equipo.error.desconocida', { nombre: name });
   }
 
   /** Tablero del equipo en texto (va al modelo; la interfaz lo pinta por eventos). */
   _tableroTexto(tablero) {
-    if (!tablero || !tablero.length) return '(el tablero está vacío)';
+    if (!tablero || !tablero.length) return i18n.t('equipo.tablero.vacio');
     return tablero.map((i) => `- [${i.estado}] ${i.quien}: ${i.que}${i.nota ? ` → ${i.nota}` : ''}`).join('\n');
   }
 
@@ -3037,13 +3024,17 @@ class Agent {
         archivos: ((fusion && fusion.archivos) || []).length,
         conflicto: fusion && fusion.conflicto ? String(fusion.conflicto).slice(0, 200) : undefined,
       });
-      if (fusion && fusion.ok && fusion.vacio) this._statusMiembro(miembro, `${spec.name} terminó sin dejar cambios`);
+      if (fusion && fusion.ok && fusion.vacio) this._statusMiembro(miembro, i18n.t('turno.equipo.sin.cambios', { nombre: spec.name }));
       else if (fusion && fusion.ok)
-        this._statusMiembro(miembro, `Fusión al proyecto: ${fusion.archivos.length} archivo(s) de ${spec.name}`);
+        this._statusMiembro(miembro, i18n.t('turno.equipo.fusion.miembro', { n: fusion.archivos.length, nombre: spec.name }));
       else if (fusion)
         this._statusMiembro(
           miembro,
-          `No pude fusionar el árbol de ${spec.name}: ${fusion.conflicto}${descarte && descarte.conservadoEn ? ` (puedes mirarlo en ${descarte.conservadoEn})` : ''}`,
+          i18n.t('turno.equipo.fusion.fallo', {
+            nombre: spec.name,
+            motivo: fusion.conflicto,
+            conservado: descarte && descarte.conservadoEn ? i18n.t('turno.equipo.conservado', { ruta: descarte.conservadoEn }) : '',
+          }),
         );
     } else {
       // sin árbol no hay fusión: su trabajo ya está en el proyecto y las puertas lo ven
@@ -3052,19 +3043,22 @@ class Agent {
     if (signal.aborted) {
       return {
         ok: false,
-        resumen: `${spec.name} se detuvo antes de terminar (${miembro.cortado ? 'el equipo se paró por presupuesto' : 'detuviste la tarea'})`,
+        resumen: i18n.t('turno.equipo.miembro.detenido', {
+          nombre: spec.name,
+          motivo: miembro.cortado ? i18n.t('turno.equipo.presupuesto') : i18n.t('turno.equipo.detuviste'),
+        }),
         evidencia: '',
       };
     }
     if (fallo) {
-      return { ok: false, resumen: `${spec.name} no pudo terminar su vuelta: ${(fallo && fallo.message) || fallo}`, evidencia: '' };
+      return { ok: false, resumen: i18n.t('turno.equipo.miembro.fallo', { nombre: spec.name, motivo: (fallo && fallo.message) || fallo }), evidencia: '' };
     }
     const parsed = subagents.parseSubagentResult(finalText, corteMiembro);
     /* La fusión hay que contarla: si no entró, el líder NO puede presentar ese trabajo
        como hecho — es justo el error que esto viene a evitar. */
     let notaFusion = '';
     if (arbol && fusion && !fusion.ok && !fusion.vacio) {
-      notaFusion = `\nFUSIÓN CON CONFLICTO: sus cambios NO se aplicaron al proyecto del usuario (${fusion.conflicto}). Dilo tal cual; no lo presentes como hecho.`;
+      notaFusion = i18n.t('turno.fusion.conflicto', { motivo: fusion.conflicto });
     }
     /* v5.0.1: un compañero cortado (tope de pasos o Detener) no cerró su informe; lo que
        entrega es el preámbulo de lo que estaba haciendo. Se dice para que el líder no lo
@@ -3072,13 +3066,13 @@ class Agent {
     const motivoCorte = !corteMiembro
       ? ''
       : corteMiembro.motivo === 'detenido'
-        ? 'lo detuviste'
+        ? i18n.t('turno.corte.detenido')
         : corteMiembro.motivo === 'formato'
-          ? 'no respetó el formato de herramientas (las escribió como texto)'
-          : 'se agotó su presupuesto de pasos';
+          ? i18n.t('turno.corte.formato')
+          : i18n.t('turno.corte.pasos');
     const notaCorte =
       corteMiembro && parsed.status !== 'FAILED'
-        ? `\nSIN TERMINAR: ${spec.name} no llegó a cerrar su informe (${motivoCorte}); su trabajo no está completo.`
+        ? i18n.t('turno.corte.nota', { nombre: spec.name, motivo: motivoCorte })
         : '';
     return {
       /* Solo cuenta como terminado si CERRÓ su vuelta: el corte (tope de pasos o
@@ -3088,7 +3082,7 @@ class Agent {
          como tal pintaba en rojo a compañeros que sí acabaron (lo cazó la puerta de la
          vista Equipo de `ui-check`). */
       ok: !corteMiembro && parsed.status !== 'FAILED',
-      resumen: `${parsed.result}${parsed.details ? '\nDETALLES: ' + parsed.details : ''}${notaFusion}${notaCorte}`.slice(0, 4000),
+      resumen: `${parsed.result}${parsed.details ? i18n.t('turno.detalles', { detalles: parsed.details }) : ''}${notaFusion}${notaCorte}`.slice(0, 4000),
       evidencia: String(parsed.evidence || '').slice(0, 2000),
     };
   }
@@ -3182,7 +3176,13 @@ class Agent {
         // el aviso nombra al PROVEEDOR que responde de verdad: la cadena de reserva puede
         // haber saltado a otro, y «el modelo de Ajustes manda» exige decir quién contesta
         if (entry.role !== 'primary')
-          this.emit({ type: 'status', text: `${entry.name || entry.providerId || 'proveedor'}: «${entry.model}» respondiendo…` });
+          this.emit({
+            type: 'status',
+            text: i18n.t('turno.modelo.respondiendo', {
+              proveedor: entry.name || entry.providerId || i18n.t('turno.proveedor'),
+              modelo: entry.model,
+            }),
+          });
         return res;
       } catch (e) {
         lastErr = e;
@@ -3198,7 +3198,7 @@ class Agent {
           role: entry.role,
           error: String(e.message).slice(0, 150),
         });
-        this.emit({ type: 'status', text: `Modelo «${entry.model}» no disponible — probando el siguiente…` });
+        this.emit({ type: 'status', text: i18n.t('turno.modelo.no.disponible', { modelo: entry.model }) });
       }
     }
     throw lastErr || new Error('Ningún modelo disponible en la cadena de fallback.');
@@ -3303,7 +3303,7 @@ const VERIFY_GATE_PROMPT = `ANTES DE CERRAR: has modificado archivos o ejecutado
    salga de aquí SUSTITUYE al historial, así que lo que no se diga se pierde. */
 const COMPACT_PROMPT = `Vas a COMPRIMIR una conversación de trabajo para que el agente que la continúe no tenga que releerla. Abajo tienes el hilo completo (peticiones del usuario, respuestas y resultados de herramientas).
 
-Responde ÚNICAMENTE con el resumen, en español y en texto plano con los apartados de abajo. No saludes, no expliques lo que vas a hacer, no comentes la tarea y NO uses ninguna herramienta: todo lo que necesitas está en el hilo.
+Responde ÚNICAMENTE con el resumen, en el idioma del usuario y en texto plano con los apartados de abajo. No saludes, no expliques lo que vas a hacer, no comentes la tarea y NO uses ninguna herramienta: todo lo que necesitas está en el hilo.
 
 Qué conservar y qué tirar:
 - Es una destilación, no una transcripción: hechos, decisiones y datos; nada de conversación ni de repetir párrafos largos.
@@ -3324,40 +3324,40 @@ const COMPACT_FRAME =
   'RESUMEN DE LA CONVERSACIÓN ANTERIOR (el usuario la ha compactado: este resumen SUSTITUYE a los mensajes originales, que ya no viajan). Es CONTEXTO: úsalo para continuar, no lo repitas ni lo cuentes como si acabara de pasar.\n\n';
 
 function statusFor(name, args) {
-  if (String(name).startsWith('mcp__')) return 'MCP · ' + (args._mcp ? args._mcp.toolName : name.slice(5));
+  if (String(name).startsWith('mcp__')) return i18n.t('turno.estado.mcp', { herramienta: args._mcp ? args._mcp.toolName : name.slice(5) });
   switch (name) {
     case 'run_command':
-      return 'Terminal — ' + (args.command || '').slice(0, 90);
+      return i18n.t('turno.estado.terminal', { texto: (args.command || '').slice(0, 90) });
     case 'read_file':
-      return 'Leyendo ' + args.path;
+      return i18n.t('turno.estado.leyendo', { ruta: args.path });
     case 'write_file':
-      return 'Escribiendo ' + args.path;
+      return i18n.t('turno.estado.escribiendo', { ruta: args.path });
     case 'edit_file':
-      return 'Editando ' + args.path;
+      return i18n.t('turno.estado.editando', { ruta: args.path });
     case 'list_dir':
-      return 'Explorando ' + args.path;
+      return i18n.t('turno.estado.explorando', { ruta: args.path });
     case 'search_files':
-      return 'Buscando «' + args.pattern + '»';
+      return i18n.t('turno.estado.buscando', { patron: args.pattern });
     case 'open_app':
-      return 'Abriendo ' + args.name;
+      return i18n.t('turno.estado.abriendo', { nombre: args.name });
     case 'open_url':
-      return 'Abriendo ' + args.url;
+      return i18n.t('turno.estado.abriendo', { nombre: args.url });
     case 'browser_control':
-      return 'Navegador · ' + (args.action || '') + (args.url ? ' → ' + args.url : '');
+      return i18n.t('turno.estado.navegador', { accion: args.action || '', url: args.url ? ' → ' + args.url : '' });
     case 'screenshot':
-      return 'Capturando pantalla';
+      return i18n.t('turno.estado.captura');
     case 'clipboard':
-      return 'Portapapeles · ' + args.action;
+      return i18n.t('turno.estado.portapapeles', { accion: args.action });
     case 'notify':
-      return 'Enviando notificación';
+      return i18n.t('turno.estado.notificacion');
     case 'media_control':
-      return 'Multimedia · ' + args.action;
+      return i18n.t('turno.estado.multimedia', { accion: args.action });
     case 'window_manage':
-      return 'Ventanas · ' + args.action;
+      return i18n.t('turno.estado.ventanas', { accion: args.action });
     case 'system_info':
-      return 'Leyendo información del sistema';
+      return i18n.t('turno.estado.sistema');
     case 'todo_write':
-      return 'Actualizando la lista de tareas';
+      return i18n.t('turno.estado.tareas');
     default:
       return name;
   }

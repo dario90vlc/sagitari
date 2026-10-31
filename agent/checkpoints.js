@@ -17,6 +17,7 @@
 const fs = require('fs');
 const path = require('path');
 const crypto = require('crypto');
+const i18n = require('./i18n');
 
 let TASKS_DIR = path.join(require('./datadir').dataDir(), 'tasks');
 const HISTORY_MAX = 60; // eventos conservados por run.json
@@ -353,11 +354,11 @@ function recoverable() {
  */
 function remove(runId) {
   const id = safeRunId(runId);
-  if (!id) return { ok: false, error: 'Identificador de tarea no válido.' };
+  if (!id) return { ok: false, error: i18n.t('tareas.id.invalido') };
   const run = read(id);
-  if (!run) return { ok: false, error: 'Tarea no encontrada.' };
+  if (!run) return { ok: false, error: i18n.t('tareas.no.encontrada') };
   if (LIVE_STATUS.includes(run.status)) {
-    return { ok: false, error: 'La tarea está ' + run.status + ': deténla o cancélala antes de borrarla.' };
+    return { ok: false, error: i18n.t('tareas.viva', { estado: run.status }) };
   }
   let fallos = 0;
   /* `fs.rmSync(..., { force: true })` NO falla si la ruta no existe, así que contar los
@@ -377,7 +378,7 @@ function remove(runId) {
     }
     if (fs.existsSync(dir)) fallos++;
   }
-  if (fallos > 0) return { ok: false, error: 'No se pudo borrar la tarea del disco.' };
+  if (fallos > 0) return { ok: false, error: i18n.t('tareas.borrar.fallo') };
   return { ok: true };
 }
 

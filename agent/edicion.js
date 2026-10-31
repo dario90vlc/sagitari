@@ -1,5 +1,7 @@
 'use strict';
 
+const i18n = require('./i18n');
+
 /* v3.0 — Edición tolerante a espacios (hueco 1, la propina).
 
    Un anclaje con la sangría mal —o con el final de línea cambiado, o con un
@@ -168,20 +170,20 @@ function aplicar(texto, busca, nuevo, opts = {}) {
   const r = buscar(t, b);
   if (r.modo === 'exacto') {
     if (r.veces > 1 && !opts.replaceAll) {
-      return { ok: false, error: `el texto aparece ${r.veces} veces`, candidatos: [] };
+      return { ok: false, error: i18n.t('edicion.varias', { n: r.veces }), candidatos: [] };
     }
     const txt = opts.replaceAll ? t.split(b).join(n) : t.replace(b, () => n);
     return { ok: true, texto: txt, veces: opts.replaceAll ? r.veces : 1, modo: 'exacto' };
   }
   if (r.modo !== 'tolerante') {
-    return { ok: false, error: 'no se encontró (ni exacto ni sin sangría)', candidatos: [] };
+    return { ok: false, error: i18n.t('edicion.no.encontrado'), candidatos: [] };
   }
   if (r.veces > 1) {
-    return { ok: false, error: `sin sangría coincide en ${r.veces} sitios`, candidatos: r.candidatos };
+    return { ok: false, error: i18n.t('edicion.sin.sangria.varios', { n: r.veces }), candidatos: r.candidatos };
   }
   const c = r.candidatos[0];
   if (!opts.tolerar) {
-    return { ok: false, error: 'solo coincide si se ignora la sangría', candidatos: r.candidatos };
+    return { ok: false, error: i18n.t('edicion.solo.sangria'), candidatos: r.candidatos };
   }
   // se reajusta la sangría al anclaje que se ha encontrado de verdad, para que el
   // bloque nuevo herede la indentación del archivo y no la del modelo
